@@ -1,0 +1,76 @@
+module banking.transfer {
+    type Account {
+        field id: AccountId;
+        field balance: Money;
+        field status: AccountStatus;
+    }
+
+    capability AccountWrite {
+        parameter id: AccountId;
+    }
+
+    capability AuditAppend;
+
+    function transfer {
+        parameters {
+            src: mutable_pointer<Account>;
+            dst: mutable_pointer<Account>;
+            amount: Money;
+            src_write: AccountWrite(src.id);
+            dst_write: AccountWrite(dst.id);
+            audit: AuditAppend;
+        }
+
+        returns TransferError!Receipt;
+
+        specification {
+            requirements {
+                amount > 0;
+                src.status == active;
+                dst.status == active;
+                src.balance >= amount;
+            }
+
+            postconditions {
+                src.balance == old(src.balance) - amount;
+                dst.balance == old(dst.balance) + amount;
+            }
+
+            preserves {
+                src.balance + dst.balance;
+            }
+
+            effects {
+                read src.status;
+                read src.balance;
+                read dst.status;
+                read dst.balance;
+                write src.balance using src_write;
+                write dst.balance using dst_write;
+                emit Audit.transfer using audit;
+            }
+
+            failure atomic;
+
+            resources {
+                time <= O(1);
+                memory <= 512B;
+            }
+        }
+
+        body {
+            guard amount > 0 else return error.InvalidAmount;
+            guard src.status == active else return error.AccountLocked;
+            guard dst.status == active else return error.AccountLocked;
+            guard src.balance >= amount else return error.InsufficientFunds;
+
+            atomic {
+                src.balance = src.balance - amount;
+                dst.balance = dst.balance + amount;
+                try audit.append(src.id, dst.id, amount);
+            }
+
+            return Receipt.init(src.id, dst.id, amount);
+        }
+    }
+}
