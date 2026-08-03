@@ -31,3 +31,7 @@ jobs:
             echo "invalid example was unexpectedly accepted" >&2
             exit 1
           fi
+      - name: Run source syntax tournament
+        run: >-
+          cargo run -p mncs-cli -- syntax-tournament
+          examples/syntax/account-transfer.tournament.json
