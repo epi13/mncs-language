@@ -174,7 +174,11 @@ impl Program {
         }
 
         if self.module.trim().is_empty() {
-            errors.push(diagnostic("MNCS002", "module", "module name must not be empty"));
+            errors.push(diagnostic(
+                "MNCS002",
+                "module",
+                "module name must not be empty",
+            ));
         }
 
         let assumption_ids = collect_unique_ids(
