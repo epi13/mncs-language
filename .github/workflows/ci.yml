@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+      - name: Validate accepted example
+        run: cargo run -p mncs-cli -- validate examples/account-transfer.mncs.json
+      - name: Reject undeclared effect example
+        shell: bash
+        run: |
+          if cargo run -p mncs-cli -- validate examples/invalid-undeclared-effect.mncs.json; then
+            echo "invalid example was unexpectedly accepted" >&2
+            exit 1
+          fi

@@ -1,0 +1,93 @@
+{
+  "schema_version": "0.1",
+  "module": "Banking.Transfer",
+  "assumptions": [
+    {
+      "id": "storage_durability",
+      "statement": "Committed writes survive process termination.",
+      "supplied_by": "StorageBackend",
+      "confidence": "external"
+    }
+  ],
+  "functions": [
+    {
+      "name": "transfer",
+      "inputs": [
+        { "name": "source", "type": "Mutable<Account>" },
+        { "name": "target", "type": "Mutable<Account>" },
+        { "name": "amount", "type": "Money" }
+      ],
+      "outputs": [
+        { "name": "receipt", "type": "Result<Receipt, TransferError>" }
+      ],
+      "contracts": [
+        {
+          "id": "positive_amount",
+          "kind": "requires",
+          "expression": "amount > 0"
+        },
+        {
+          "id": "sufficient_funds",
+          "kind": "requires",
+          "expression": "source.balance >= amount"
+        },
+        {
+          "id": "conservation",
+          "kind": "preserves",
+          "expression": "source.balance + target.balance"
+        },
+        {
+          "id": "constant_time_state_update",
+          "kind": "budget",
+          "expression": "state_update.time <= O(1)"
+        }
+      ],
+      "effects": [
+        {
+          "kind": "write",
+          "target": "source.balance",
+          "capability": "AccountMutation"
+        },
+        {
+          "kind": "write",
+          "target": "target.balance",
+          "capability": "AccountMutation"
+        },
+        {
+          "kind": "append",
+          "target": "AuditLog",
+          "capability": "AuditAppend"
+        }
+      ],
+      "capabilities": ["AccountMutation", "AuditAppend"],
+      "assumptions": ["storage_durability"],
+      "evidence": [
+        {
+          "property": "positive_amount",
+          "verifier": "RangeVerifier",
+          "status": "verified",
+          "artifact": "evidence://range/positive-amount"
+        },
+        {
+          "property": "sufficient_funds",
+          "verifier": "RangeVerifier",
+          "status": "verified",
+          "artifact": "evidence://range/sufficient-funds"
+        },
+        {
+          "property": "conservation",
+          "verifier": "SymbolicDeltaVerifier",
+          "status": "verified",
+          "artifact": "evidence://symbolic/conservation"
+        },
+        {
+          "property": "constant_time_state_update",
+          "verifier": "CostGraphVerifier",
+          "status": "analyzed",
+          "artifact": "evidence://cost/constant-state-update"
+        }
+      ],
+      "failure": "atomic"
+    }
+  ]
+}
