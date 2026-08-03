@@ -174,7 +174,11 @@ impl Program {
         }
 
         if self.module.trim().is_empty() {
-            errors.push(diagnostic("MNCS002", "module", "module name must not be empty"));
+            errors.push(diagnostic(
+                "MNCS002",
+                "module",
+                "module name must not be empty",
+            ));
         }
 
         let assumption_ids = collect_unique_ids(
@@ -454,7 +458,7 @@ mod tests {
     #[test]
     fn rejects_evidence_for_unknown_property() {
         let mut program = valid_program();
-        program.functions[0].evidence[0].property = "missing".to_owned();
+        "missing".clone_into(&mut program.functions[0].evidence[0].property);
         let report = program.validate();
         assert!(!report.valid);
         assert!(report.errors.iter().any(|error| error.code == "MNCS012"));

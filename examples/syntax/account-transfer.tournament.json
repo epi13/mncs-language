@@ -1,0 +1,50 @@
+{
+  "name": "account-transfer-equivalent-semantics",
+  "semantic_claims": [
+    "module identity is banking.transfer",
+    "Account has id, balance, and status fields",
+    "AccountWrite authority is scoped by account identity",
+    "AuditAppend authority is explicit",
+    "transfer receives mutable source account state",
+    "transfer receives mutable destination account state",
+    "amount has Money type",
+    "source write authority is bound to source identity",
+    "destination write authority is bound to destination identity",
+    "audit authority is passed as a value",
+    "result is Receipt or TransferError",
+    "amount must be positive",
+    "source account must be active",
+    "destination account must be active",
+    "source balance must cover amount",
+    "source post-balance equals old balance minus amount",
+    "destination post-balance equals old balance plus amount",
+    "combined balance is conserved",
+    "status and balance reads are declared",
+    "source balance write is authorized",
+    "destination balance write is authorized",
+    "audit emission is authorized",
+    "failure is atomic with constant-time and 512-byte bounds"
+  ],
+  "candidates": [
+    {
+      "name": "zig-like-source",
+      "role": "human-source",
+      "path": "zig-like/account-transfer.mncs"
+    },
+    {
+      "name": "fully-structured-source",
+      "role": "human-source",
+      "path": "structured/account-transfer.mncs"
+    },
+    {
+      "name": "minimal-source",
+      "role": "human-source",
+      "path": "minimal/account-transfer.mncs"
+    },
+    {
+      "name": "canonical-semantic-form",
+      "role": "agent-and-tooling-form",
+      "path": "../canonical/account-transfer.mncs-sem"
+    }
+  ]
+}

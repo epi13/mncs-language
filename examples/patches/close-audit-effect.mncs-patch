@@ -1,0 +1,29 @@
+patch banking.transfer.transfer {
+    cause effect_closure {
+        operation audit.append;
+        requires AuditAppend;
+        missing function.capabilities;
+    }
+
+    add parameter audit: AuditAppend;
+    bind emit Audit.transfer with audit;
+
+    preserve {
+        contract Conservation;
+        public result TransferError!Receipt;
+        failure atomic;
+        cost time O(1);
+    }
+
+    forbid {
+        unrelated_source_change;
+        capability_expansion beyond AuditAppend;
+        evidence_promotion;
+    }
+
+    budget {
+        candidates <= 4;
+        verifier_calls <= 12;
+        recursion_depth <= 2;
+    }
+}

@@ -1,0 +1,44 @@
+module banking.transfer;
+
+record Account(id: AccountId, balance: Money, status: AccountStatus);
+capability AccountWrite(id: AccountId);
+capability AuditAppend;
+
+pub fn transfer(
+    src: mutable Account,
+    dst: mutable Account,
+    amount: Money,
+    src_write: AccountWrite(src.id),
+    dst_write: AccountWrite(dst.id),
+    audit: AuditAppend,
+) -> TransferError!Receipt {
+    req {
+        amount > 0;
+        src.status == active;
+        dst.status == active;
+        src.balance >= amount;
+    }
+    post {
+        src.balance == old(src.balance) - amount;
+        dst.balance == old(dst.balance) + amount;
+    }
+    keep src.balance + dst.balance;
+    read src.{status, balance}, dst.{status, balance};
+    write src.balance with src_write, dst.balance with dst_write;
+    emit Audit.transfer with audit;
+    fail atomic;
+    cost time O(1), memory <= 512B;
+
+    guard amount > 0 else return InvalidAmount;
+    guard src.status == active else return AccountLocked;
+    guard dst.status == active else return AccountLocked;
+    guard src.balance >= amount else return InsufficientFunds;
+
+    atomic {
+        src.balance = src.balance - amount;
+        dst.balance = dst.balance + amount;
+        try audit.append(src.id, dst.id, amount);
+    }
+
+    return Receipt.init(src.id, dst.id, amount);
+}
