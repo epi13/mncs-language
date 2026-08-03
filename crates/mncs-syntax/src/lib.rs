@@ -160,8 +160,8 @@ fn is_identifier_continue(value: char) -> bool {
 fn operator_width(remaining: &[char]) -> usize {
     const THREE_CHARACTER_OPERATORS: [&str; 3] = ["...", "<<=", ">>="];
     const TWO_CHARACTER_OPERATORS: [&str; 21] = [
-        "->", "=>", "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "%=", "&&", "||",
-        "::", "..", "<<", ">>", "&=", "|=", "^=", "??",
+        "->", "=>", "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "%=", "&&", "||", "::", "..",
+        "<<", ">>", "&=", "|=", "^=", "??",
     ];
 
     for operator in THREE_CHARACTER_OPERATORS {
