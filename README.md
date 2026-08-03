@@ -23,10 +23,11 @@ An MNCS-oriented program should make it possible to answer:
 5. What evidence supports each property?
 6. Where does proof stop and trust begin?
 7. What must be re-verified when the component changes?
+8. How can the system diagnose and improve itself without laundering evidence or silently broadening authority?
 
 ## What is in this repository
 
-- `docs/` — vision, architecture, terminology, trust model, and explicit non-goals.
+- `docs/` — vision, architecture, recursive refinement, terminology, trust model, and explicit non-goals.
 - `spec/` — early normative semantic documents.
 - `rfcs/` — design proposals that can evolve independently of the specification.
 - `crates/mncs-model/` — an executable Rust model of the initial semantic objects and validation rules.
@@ -85,13 +86,38 @@ machine code + evidence manifest
 
 The important design boundary is between the verification-native semantic layers and a conventional optimization backend. Backend claims such as non-aliasing, no-overflow, or in-bounds access should ideally be emitted only when established by evidence rather than inserted optimistically.
 
+## Recursive debugging and self-improvement
+
+Recursive refinement is a foundational language requirement, not only an orchestration feature supplied by the Forge or RAVEL. The language should expose its semantic graph, evidence graph, diagnostics, causal slices, and transformation history in forms that can be consumed by later verification and repair cycles.
+
+The intended loop is bounded and evidence-driven:
+
+```text
+observe semantic and evidence state
+        ↓
+localize a failed or weak obligation
+        ↓
+propose a repair in an isolated candidate state
+        ↓
+declare intended improvements and protected properties
+        ↓
+run independent targeted verifiers
+        ↓
+compare semantic, authority, complexity, and evidence deltas
+        ↓
+promote or reject under explicit policy
+        ↺
+```
+
+A generator must not silently modify the trusted baseline or certify its own repair merely by repeating the cycle. Recursion depth, authority, mutation scope, candidate count, verifier calls, and resource use must be bounded. See [Recursive Debugging and Refinement](docs/recursive-refinement.md) and [RFC 0004](rfcs/0004-recursive-introspection-and-refinement.md).
+
 ## Relationship to the MNCS project family
 
 - **MNCS** defines the broader standard, contracts, complexity concepts, and verification philosophy.
 - **MNCDS** explores deterministic and structural representation where applicable.
-- **MNCS Language** investigates how those relationships can be expressed directly in a general-purpose language.
-- **MNCS Forge** can analyze, verify, debug, and produce evidence for MNCS-language components and conventional code.
-- **RAVEL** explores recursive, distributed, and evidence-oriented verification relationships.
+- **MNCS Language** investigates how those relationships can be expressed directly in a general-purpose language, including the semantic structures needed for recursive introspection and repair.
+- **MNCS Forge** can analyze, verify, localize failures, test candidate transformations, and produce evidence for MNCS-language components and conventional code.
+- **RAVEL** can coordinate recursive, distributed, multi-agent, and multi-verifier refinement across machines and trust boundaries.
 
 MNCS must remain applicable to existing languages even if this project never becomes production-ready. The standard therefore does not depend on this language project.
 
@@ -107,6 +133,7 @@ MNCS must remain applicable to existing languages even if this project never bec
 8. **Incremental verification.** A change should invalidate the smallest defensible evidence subgraph.
 9. **Human inspectability.** Machine-native structure must remain understandable without an LLM.
 10. **Backend conservatism.** Optimization promises should be generated from established facts.
+11. **Recursive refinement is bounded and reviewable.** Diagnostics and repair proposals may feed later cycles, but promotion requires explicit policy, protected-property checks, and sufficient independent evidence.
 
 ## Roadmap
 
