@@ -1,6 +1,6 @@
 [package]
 name = "mncs-cli"
-description = "Command-line validator for MNCS semantic manifests"
+description = "Command-line tools for MNCS semantic manifests and syntax experiments"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,4 +13,6 @@ path = "src/main.rs"
 
 [dependencies]
 mncs-model = { path = "../mncs-model" }
+mncs-syntax = { path = "../mncs-syntax" }
+serde.workspace = true
 serde_json.workspace = true
