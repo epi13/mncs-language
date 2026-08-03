@@ -1,8 +1,4 @@
-use std::{
-    env, fs,
-    path::Path,
-    process::ExitCode,
-};
+use std::{env, fs, path::Path, process::ExitCode};
 
 use mncs_model::Program;
 use mncs_syntax::{analyze, SourceMetrics};
@@ -71,7 +67,7 @@ fn validate(path: &str) -> ExitCode {
     };
 
     let report = program.validate();
-    if print_json(&report).is_err() {
+    if !print_json(&report) {
         return ExitCode::from(2);
     }
 
@@ -107,9 +103,10 @@ fn syntax_metrics(paths: Vec<String>) -> ExitCode {
         });
     }
 
-    match print_json(&reports) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(()) => ExitCode::from(2),
+    if print_json(&reports) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(2)
     }
 }
 
@@ -184,12 +181,11 @@ fn syntax_tournament(path: &str) -> ExitCode {
             name: candidate.name,
             role: candidate.role,
             path: candidate.path,
-            lexical_units_per_claim_milli: metrics.lexical_units.saturating_mul(1000)
-                / claim_count,
-            non_whitespace_characters_per_claim_milli: metrics
-                .non_whitespace_characters
-                .saturating_mul(1000)
-                / claim_count,
+            lexical_units_per_claim_milli: per_claim_milli(metrics.lexical_units, claim_count),
+            non_whitespace_characters_per_claim_milli: per_claim_milli(
+                metrics.non_whitespace_characters,
+                claim_count,
+            ),
             metrics,
         });
     }
@@ -200,10 +196,15 @@ fn syntax_tournament(path: &str) -> ExitCode {
         candidates,
     };
 
-    match print_json(&report) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(()) => ExitCode::from(2),
+    if print_json(&report) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(2)
     }
+}
+
+fn per_claim_milli(value: usize, claim_count: usize) -> usize {
+    value.saturating_mul(1000) / claim_count
 }
 
 fn read_source(path: &str) -> Result<String, ExitCode> {
@@ -213,15 +214,15 @@ fn read_source(path: &str) -> Result<String, ExitCode> {
     })
 }
 
-fn print_json<T: Serialize>(value: &T) -> Result<(), ()> {
+fn print_json<T: Serialize>(value: &T) -> bool {
     match serde_json::to_string_pretty(value) {
         Ok(json) => {
             println!("{json}");
-            Ok(())
+            true
         }
         Err(error) => {
             eprintln!("error: unable to serialize report: {error}");
-            Err(())
+            false
         }
     }
 }
