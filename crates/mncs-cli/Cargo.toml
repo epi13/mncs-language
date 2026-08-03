@@ -1,0 +1,16 @@
+[package]
+name = "mncs-cli"
+description = "Command-line validator for MNCS semantic manifests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "mncs"
+path = "src/main.rs"
+
+[dependencies]
+mncs-model = { path = "../mncs-model" }
+serde_json.workspace = true
