@@ -15,7 +15,8 @@ Machine-native means that important relationships are directly addressable:
 - assumptions;
 - verifier claims and evidence artifacts;
 - resource and complexity bounds;
-- invalidation relationships.
+- invalidation relationships;
+- diagnostic obligations, repair proposals, and refinement history.
 
 ## The central shift
 
@@ -31,7 +32,32 @@ The desired workflow is:
 explicit claims + implementation → local obligations → micro-verifiers → evidence graph → executable
 ```
 
-The program is not merely a sequence of operations. It is a connected set of claims whose evidence can be independently inspected and selectively invalidated.
+When a property fails or evidence weakens, the workflow continues:
+
+```text
+failed obligation
+      ↓
+minimal causal slice
+      ↓
+isolated repair proposal
+      ↓
+targeted independent verification
+      ↓
+semantic and evidence comparison
+      ↓
+explicit promotion or rejection
+      ↺
+```
+
+The program is not merely a sequence of operations. It is a connected set of claims whose evidence can be independently inspected, selectively invalidated, and recursively refined through bounded, reviewable cycles.
+
+## Recursive self-improvement
+
+The language should be capable of describing enough of its own compiler, verifier, diagnostic, and transformation behavior that those systems can eventually analyze and improve themselves through the same semantic model used for ordinary programs.
+
+This does not grant unrestricted self-modification. Candidate changes remain isolated until promotion. The generator does not automatically validate its own work. Every cycle exposes its objectives, protected properties, required capabilities, assumptions, invalidated evidence, resource limits, and promotion authority.
+
+Recursive improvement is therefore an evidence loop rather than a source-rewriting loop.
 
 ## Success conditions
 
@@ -42,11 +68,14 @@ The project succeeds as research if it demonstrates that:
 3. assumptions and trust boundaries can be reported honestly;
 4. optimization backends can consume verified facts conservatively;
 5. agents can debug against failed obligations and causal paths rather than enormous undifferentiated analyzer output;
-6. human programmers can still read, review, and intentionally modify the program.
+6. diagnostic and repair artifacts can feed later bounded refinement cycles without laundering evidence;
+7. candidate repairs can be compared across semantics, authority, complexity, assumptions, and evidence before promotion;
+8. a future self-hosted toolchain can expose its bootstrap trust rather than hiding it;
+9. human programmers can still read, review, and intentionally modify the program.
 
 ## Language character
 
-The eventual syntax should be intentionally unsurprising. The innovation belongs in semantics, evidence, and tooling—not exotic punctuation. Canonical formatting, explicit names, limited implicit conversion, predictable desugaring, and stable parse trees are preferred over character-level terseness.
+The eventual syntax should be intentionally unsurprising. The innovation belongs in semantics, evidence, recursive debugging, and tooling—not exotic punctuation. Canonical formatting, explicit names, limited implicit conversion, predictable desugaring, and stable parse trees are preferred over character-level terseness.
 
 ## Long-term artifact
 
@@ -59,6 +88,9 @@ verification/evidence manifest
 assumption and trust report
 source-to-semantic map
 backend provenance
+diagnostic obligations and causal slices
+candidate transformation and comparison records
+promotion and rollback history
 ```
 
 These outputs should remain linked by stable identities and content hashes.
