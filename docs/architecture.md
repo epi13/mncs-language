@@ -4,7 +4,7 @@ This document describes the initial conceptual layers. Their exact implementatio
 
 ## Layer 1: source representation
 
-The eventual surface language should expose contracts, effects, capabilities, assumptions, and failure behavior without requiring users to author low-level IR. No grammar has been selected.
+The eventual surface language should expose contracts, effects, capabilities, assumptions, failure behavior, and refinement boundaries without requiring users to author low-level IR. No grammar has been selected.
 
 ## Layer 2: semantic graph
 
@@ -17,13 +17,14 @@ Parsing and name resolution produce a graph of stable semantic entities:
 - effect and capability edges;
 - assumptions;
 - verifier and evidence edges;
-- dependencies and invalidation relationships.
+- dependencies and invalidation relationships;
+- diagnostics, candidate transformations, and promotion history.
 
 The graph should support canonical serialization and content-addressed identity.
 
 ## Layer 3: high-level MNCS IR
 
-The high-level IR makes state transitions, ownership, failure paths, and effect closure explicit while preserving source-level meaning. It is the preferred layer for most semantic verification and agent repair.
+The high-level IR makes state transitions, ownership, failure paths, effect closure, and candidate mutation regions explicit while preserving source-level meaning. It is the preferred layer for most semantic verification and agent repair.
 
 ## Layer 4: verified SSA
 
@@ -54,6 +55,45 @@ An evidence node should eventually identify:
 - time and environment when relevant;
 - invalidation triggers.
 
+## Recursive refinement plane
+
+Recursive debugging and improvement operate across the semantic, IR, and evidence layers rather than as an unstructured source-rewrite loop.
+
+```text
+trusted baseline
+      ↓ observe
+semantic graph + evidence graph
+      ↓ localize
+diagnostic obligation + causal slice
+      ↓ propose
+isolated candidate transformation
+      ↓ verify
+targeted verifier results
+      ↓ compare
+semantic, authority, complexity, and evidence delta
+      ↓ policy
+promote or reject
+      ↺
+```
+
+The output of one cycle can become input to a later cycle, which gives the architecture its recursive character. Every cycle must remain bounded by mutation scope, capabilities, recursion depth, resource budgets, candidate count, verifier-call limits, stopping rules, and promotion policy.
+
+### Diagnostic obligations
+
+A failed or weak property should be represented as a stable object rather than only a text message. It should identify the semantic subject, property, evidence state, assumptions, reproducer where relevant, and the smallest defensible causal slice.
+
+### Candidate transformations
+
+A repair proposal is untrusted and receives a separate candidate identity. It declares intended improvements, protected properties, required authority, predicted invalidation, and a verification plan. Generation does not modify the trusted baseline.
+
+### Comparison and promotion
+
+Candidate evaluation must report more than whether the original failure disappeared. It should reveal changed contracts, effects, capabilities, assumptions, complexity, evidence, and unresolved consequences. Promotion is explicit and policy-controlled.
+
+### Self-description
+
+Compiler passes, lowering rules, verifier contracts, diagnostics, and promotion policies should progressively become visible through the same introspection surface. A future self-hosted compiler may use this surface to diagnose and propose changes to itself without pretending that self-hosting removes bootstrap trust.
+
 ## Forge integration
 
 The MNCS Forge can host or coordinate micro-verifiers that answer bounded questions against semantic or IR nodes. Rather than repeatedly ingesting enormous whole-program reports, an agent should be able to request evidence such as:
@@ -63,8 +103,16 @@ verify effect closure for component X
 verify conservation property Y across transition Z
 explain the minimal causal path for failed obligation Q
 identify evidence invalidated by change set C
+check whether candidate R broadens authority
+compare protected properties between baseline B and candidate R
 ```
+
+The Forge may execute causal localization and candidate checks, but the language owns the semantic structures those operations consume and produce.
+
+## RAVEL integration
+
+RAVEL may coordinate recursive and distributed refinement across agents, machines, verifier implementations, and trust boundaries. It should consume interoperable diagnostic, proposal, budget, evidence, and promotion artifacts rather than relying on one privileged internal representation.
 
 ## Bootstrap implementation
 
-The current Rust crates implement only structural consistency checks against JSON manifests. They establish a runnable test bed while leaving syntax and backend selection unresolved.
+The current Rust crates implement only structural consistency checks against JSON manifests. They establish a runnable test bed while leaving syntax, recursive-artifact schemas, and backend selection unresolved.
