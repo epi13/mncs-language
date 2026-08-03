@@ -4,7 +4,7 @@
 
 Research and reference implementation for a general-purpose, verification-native programming language built on Machine-Native Complexity Standard (MNCS) principles.
 
-> **Project status:** semantic-model research and executable prototype. No surface-language syntax, compiler stability, or production suitability is claimed yet.
+> **Project status:** semantic-model and source-representation research with executable prototypes. No final grammar, compiler stability, or production suitability is claimed yet.
 
 ## Why this project exists
 
@@ -27,14 +27,15 @@ An MNCS-oriented program should make it possible to answer:
 
 ## What is in this repository
 
-- `docs/` — vision, architecture, recursive refinement, terminology, trust model, and explicit non-goals.
-- `spec/` — early normative semantic documents.
+- `docs/` — vision, architecture, syntax research, recursive refinement, terminology, trust model, and explicit non-goals.
+- `spec/` — early normative semantic and representation documents.
 - `rfcs/` — design proposals that can evolve independently of the specification.
 - `crates/mncs-model/` — an executable Rust model of the initial semantic objects and validation rules.
-- `crates/mncs-cli/` — a small validator for experimental JSON semantic manifests.
-- `examples/` — one accepted manifest and one intentionally rejected manifest.
+- `crates/mncs-syntax/` — deterministic, tokenizer-neutral source representation metrics.
+- `crates/mncs-cli/` — validation and syntax-tournament commands.
+- `examples/` — semantic manifests, competing source candidates, canonical semantic forms, and semantic patches.
 
-The JSON manifests are not proposed source syntax. They are a temporary, inspectable transport representation used to test the semantic model before committing to a parser or grammar.
+The JSON manifests and source candidates are experimental transport and research representations. They are not yet a selected production grammar.
 
 ## Current semantic objects
 
@@ -52,7 +53,7 @@ The 0.1 model contains:
 
 A key initial rule is that every effect must identify an authorizing capability, and that capability must be declared by the function. Evidence must reference a declared contract property rather than floating as unbound metadata.
 
-## Try the prototype
+## Try the semantic prototype
 
 ```bash
 cargo run -p mncs-cli -- validate examples/account-transfer.mncs.json
@@ -66,14 +67,39 @@ The following example intentionally performs a network effect without declaring 
 cargo run -p mncs-cli -- validate examples/invalid-undeclared-effect.mncs.json
 ```
 
+## Explore the source syntax laboratory
+
+The current hypothesis uses three related representations:
+
+```text
+Zig-influenced human source
+        ↕ deterministic semantic round trip
+compact canonical semantic form
+        ↓
+high-level MNCS IR and verified SSA
+```
+
+Recursive tooling also exchanges semantic patches that target stable graph identities rather than unrestricted source-text replacement.
+
+Run the account-transfer tournament:
+
+```bash
+cargo run -p mncs-cli -- syntax-tournament \
+  examples/syntax/account-transfer.tournament.json
+```
+
+The tournament compares three human-source candidates and one canonical machine form against the same 23 declared semantic claims. It reports deterministic lexical units and non-whitespace characters per claim. These are tokenizer-neutral comparison metrics, not exact token counts for a particular model.
+
+See [Source Syntax Laboratory](docs/source-syntax-lab.md), [Source Representations](spec/source-representations.md), and [RFC 0005](rfcs/0005-source-representations-and-semantic-density.md).
+
 ## Intended compilation model
 
 The current direction is:
 
 ```text
-source syntax (undecided)
-        ↓
-MNCS semantic graph
+human source syntax (experimental candidates)
+        ↕
+canonical semantic graph/form
         ↓
 high-level MNCS IR
         ↓
@@ -115,7 +141,7 @@ A generator must not silently modify the trusted baseline or certify its own rep
 
 - **MNCS** defines the broader standard, contracts, complexity concepts, and verification philosophy.
 - **MNCDS** explores deterministic and structural representation where applicable.
-- **MNCS Language** investigates how those relationships can be expressed directly in a general-purpose language, including the semantic structures needed for recursive introspection and repair.
+- **MNCS Language** investigates how those relationships can be expressed directly in a general-purpose language, including semantic structures for recursive introspection and repair.
 - **MNCS Forge** can analyze, verify, localize failures, test candidate transformations, and produce evidence for MNCS-language components and conventional code.
 - **RAVEL** can coordinate recursive, distributed, multi-agent, and multi-verifier refinement across machines and trust boundaries.
 
@@ -123,7 +149,7 @@ MNCS must remain applicable to existing languages even if this project never bec
 
 ## Design principles
 
-1. **Semantics before syntax.** The project will not optimize punctuation before establishing what must be represented.
+1. **Semantics before syntax.** Surface choices must preserve the semantic model rather than define it accidentally.
 2. **Explicit authority.** Ambient filesystem, network, process, clock, randomness, and credential access should not be assumed.
 3. **Closed effects.** Undeclared effects should be rejected or isolated at a visible trust boundary.
 4. **Named assumptions.** Verification results must state the assumptions on which they depend.
@@ -133,15 +159,17 @@ MNCS must remain applicable to existing languages even if this project never bec
 8. **Incremental verification.** A change should invalidate the smallest defensible evidence subgraph.
 9. **Human inspectability.** Machine-native structure must remain understandable without an LLM.
 10. **Backend conservatism.** Optimization promises should be generated from established facts.
-11. **Recursive refinement is bounded and reviewable.** Diagnostics and repair proposals may feed later cycles, but promotion requires explicit policy, protected-property checks, and sufficient independent evidence.
+11. **Recursive refinement is bounded and reviewable.** Promotion requires explicit policy, protected-property checks, and sufficient independent evidence.
+12. **Semantic density beats character density.** Representation efficiency is measured against complete, equivalent claims rather than raw brevity.
+13. **Role-specific representations are allowed.** Human source, canonical agent form, semantic patches, and verified IR need not use the same notation.
 
 ## Roadmap
 
-The immediate target is **Milestone 0.1 — Executable Semantic Model**. See [ROADMAP.md](ROADMAP.md) for acceptance criteria and later phases.
+The immediate target is **Milestone 0.1 — Executable Semantic Model**, with the source syntax laboratory operating as a cross-cutting research track. See [ROADMAP.md](ROADMAP.md).
 
 ## Contributing
 
-The project is early enough that a precise counterexample is often more valuable than a large implementation. Read [CONTRIBUTING.md](CONTRIBUTING.md), then use an RFC for changes that alter the semantic model.
+The project is early enough that a precise counterexample is often more valuable than a large implementation. Read [CONTRIBUTING.md](CONTRIBUTING.md), then use an RFC for changes that alter the semantic model or source representation requirements.
 
 ## License
 
