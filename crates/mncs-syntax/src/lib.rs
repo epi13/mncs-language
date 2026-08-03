@@ -180,8 +180,17 @@ fn operator_width(remaining: &[char]) -> usize {
 }
 
 fn starts_with(remaining: &[char], expected: &str) -> bool {
-    let expected: Vec<char> = expected.chars().collect();
-    remaining.len() >= expected.len() && remaining[..expected.len()] == expected
+    let mut expected = expected.chars();
+
+    for actual in remaining {
+        match expected.next() {
+            Some(value) if *actual == value => {}
+            Some(_) => return false,
+            None => return true,
+        }
+    }
+
+    expected.next().is_none()
 }
 
 #[cfg(test)]
