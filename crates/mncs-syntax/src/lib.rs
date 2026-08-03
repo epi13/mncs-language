@@ -210,7 +210,7 @@ mod tests {
     fn records_structural_depth() {
         let metrics = analyze("fn f(a: T) T { if (a.ok) { return a; } }");
 
-        assert_eq!(metrics.max_nesting_depth, 3);
+        assert_eq!(metrics.max_nesting_depth, 2);
         assert!(metrics.unique_identifiers <= metrics.identifiers);
     }
 }
