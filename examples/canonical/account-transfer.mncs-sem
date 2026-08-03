@@ -1,0 +1,17 @@
+m banking.transfer
+
+t Account=[id:AccountId,balance:Money,status:AccountStatus]
+c AccountWrite(AccountId)
+c AuditAppend
+
+f transfer
+in [src:mut Account,dst:mut Account,amount:Money]
+cap [src_write:AccountWrite(src.id),dst_write:AccountWrite(dst.id),audit:AuditAppend]
+out TransferError!Receipt
+req [amount>0,src.status=active,dst.status=active,src.balance>=amount]
+post [src.balance=old(src.balance)-amount,dst.balance=old(dst.balance)+amount]
+keep [src.balance+dst.balance]
+fx [r(src.status,src.balance,dst.status,dst.balance),w(src.balance|src_write),w(dst.balance|dst_write),emit(Audit.transfer|audit)]
+fail atomic
+cost [time=O(1),memory<=512B]
+body [guard(amount>0|InvalidAmount),guard(src.status=active|AccountLocked),guard(dst.status=active|AccountLocked),guard(src.balance>=amount|InsufficientFunds),atomic(src.balance-=amount,dst.balance+=amount,try audit.append(src.id,dst.id,amount)),return Receipt.init(src.id,dst.id,amount)]
