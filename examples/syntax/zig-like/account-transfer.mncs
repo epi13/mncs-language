@@ -1,0 +1,52 @@
+module banking.transfer;
+
+const Account = struct {
+    id: AccountId,
+    balance: Money,
+    status: AccountStatus,
+};
+
+cap AccountWrite(id: AccountId);
+cap AuditAppend;
+
+pub fn transfer(
+    src: *mut Account,
+    dst: *mut Account,
+    amount: Money,
+    src_write: AccountWrite(src.id),
+    dst_write: AccountWrite(dst.id),
+    audit: AuditAppend,
+) TransferError!Receipt
+spec {
+    req amount > 0;
+    req src.status == .active;
+    req dst.status == .active;
+    req src.balance >= amount;
+
+    post src.balance == old(src.balance) - amount;
+    post dst.balance == old(dst.balance) + amount;
+    keep src.balance + dst.balance;
+
+    read src.{status, balance};
+    read dst.{status, balance};
+    write src.balance with src_write;
+    write dst.balance with dst_write;
+    emit Audit.transfer with audit;
+
+    fail atomic;
+    cost time O(1), mem <= 512B;
+}
+{
+    guard amount > 0 else return error.InvalidAmount;
+    guard src.status == .active else return error.AccountLocked;
+    guard dst.status == .active else return error.AccountLocked;
+    guard src.balance >= amount else return error.InsufficientFunds;
+
+    atomic {
+        src.balance -= amount;
+        dst.balance += amount;
+        try audit.append(src.id, dst.id, amount);
+    }
+
+    return Receipt.init(src.id, dst.id, amount);
+}
