@@ -10,5 +10,6 @@ Normative terms such as **MUST**, **SHOULD**, and **MAY** indicate intended requ
 - [Contracts and Evidence](contracts-and-evidence.md)
 - [Effects and Capabilities](effects-and-capabilities.md)
 - [Verified Intermediate Representation](verified-ir.md)
+- [Recursive Introspection and Refinement](recursive-refinement.md)
 
 RFCs explain proposed changes and rationale. Accepted RFC content should eventually be consolidated into these specification documents.
