@@ -9,6 +9,7 @@ Normative terms such as **MUST**, **SHOULD**, and **MAY** indicate intended requ
 - [Semantic Core](semantic-core.md)
 - [Contracts and Evidence](contracts-and-evidence.md)
 - [Effects and Capabilities](effects-and-capabilities.md)
+- [Source Representations](source-representations.md)
 - [Verified Intermediate Representation](verified-ir.md)
 - [Recursive Introspection and Refinement](recursive-refinement.md)
 
