@@ -10,6 +10,7 @@ Normative terms such as **MUST**, **SHOULD**, and **MAY** indicate intended requ
 - [Contracts and Evidence](contracts-and-evidence.md)
 - [Effects and Capabilities](effects-and-capabilities.md)
 - [Source Representations](source-representations.md)
+- [Machine-Intent Expressions](machine-intent-expressions.md)
 - [Verified Intermediate Representation](verified-ir.md)
 - [Recursive Introspection and Refinement](recursive-refinement.md)
 

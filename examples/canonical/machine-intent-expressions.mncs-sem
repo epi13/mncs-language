@@ -1,0 +1,81 @@
+# Experimental canonical semantic sketch for RFC 0006.
+# This file is documentation input, not executable source in the current prototype.
+
+module machine_intent_examples v0.1
+
+op wrapping_increment
+in [current:i32]
+out i32
+expr add.wrap<i32>(current,1)
+sem [result=(current+1) mod 2^32]
+intent [sequence_number_progress]
+require [deterministic_edge_behavior]
+lower [scalar_integer_add]
+portable [all_targets_with_i32]
+
+op checked_allocation_size
+in [count:u64,item_size:u64]
+out Overflow!u64
+expr mul.checked<u64>(count,item_size)
+sem [overflow=>Overflow]
+intent [allocation_size_safety]
+require [no_silent_wrap]
+lower [checked_multiply,wide_compare]
+forbid [backend_no_unsigned_wrap_without_fact]
+
+op vector_dot_i16
+in [left:Slice<i16>,right:Slice<i16>]
+out LengthMismatch!i64
+req [left.len=right.len]
+reference dot.scalar.widen<i16,i64>(left,right)
+realize [avx512,avx2,sve,neon,scalar]
+intent [throughput]
+prefer [widest_supported_vector]
+require [result=reference.result,no_out_of_bounds,overflow=widen<i64>]
+portable [fallback=scalar]
+obligation [equal_length,bounds_all_lanes,semantic_equivalence,target_features]
+
+op closed_opcode_dispatch
+in [opcode:u8,state:mut VmState]
+cap [state_write:VmStateWrite(state.id)]
+out InvalidOpcode!StepResult
+expr dispatch.closed(opcode,handlers,invalid_opcode)
+targets [load,store,add,branch,halt]
+intent [interpreter_dispatch_throughput]
+require [target_set_closed,target_table_immutable,signature_compatible]
+obligation [selector_within_domain,target_address_not_untrusted,control_entry_declared]
+lower [jump_table,decision_tree,conditional_sequence]
+portable [fallback=decision_tree]
+
+op secret_select
+in [condition:Secret<bool>,a:Secret<Block>,b:Secret<Block>]
+out Secret<Block>
+expr select.constant_time(condition,a,b)
+intent [timing_side_channel_resistance]
+require [no_secret_control,no_secret_address,no_secret_variable_latency]
+model [target_timing_model:ct-model-v0]
+obligation [optimized_ir_constant_time,machine_artifact_constant_time]
+unknown_policy [reject_without_declared_fallback]
+
+op aligned_block_load
+in [buffer:Slice<u8>,offset:usize]
+out BoundsOrAlignment!Block64
+fact aligned:Aligned<buffer,64> from verify.aligned<64>(buffer)
+fact bounds:InBounds<buffer,offset..offset+64> from verify.bounds(buffer,offset,64)
+expr load.aligned<Block64,64>(buffer,offset,aligned,bounds)
+intent [vector_load]
+require [in_bounds,alignment=64]
+lower [native_aligned_load,portable_copy]
+portable [fallback=portable_copy]
+
+op packet_classifier_search
+in [packet:Packet]
+out Classification
+optimize throughput
+reference classify.scalar(packet)
+mutate [candidate_region:classifier]
+require [result=reference.result,no_out_of_bounds,effects_closed]
+forbid [filesystem,network_send,privilege_transition]
+prefer [target=x86_64+avx2,objective=packets_per_second]
+budget [candidates<=16,verifier_calls<=64,time<=300s]
+promote [policy=explicit,independent_evidence>=required]
