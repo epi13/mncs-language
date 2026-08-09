@@ -60,3 +60,9 @@ A future artifact format SHOULD bind:
 ## 7. Invalidation
 
 Evidence MUST be treated as stale when a change can affect the subject, property, assumptions, verifier semantics, or dependencies consumed by the claim. The language and toolchain should minimize invalidation while remaining conservative.
+
+The current executable 0.2 foundation stores subject, property, verifier, status, artifact,
+assumption, dependency, and dependency-fingerprint fields in an evidence manifest. It marks a
+saved record stale when a represented dependency is removed or its content fingerprint changes.
+Changes outside the represented dependency envelope remain explicitly unknown rather than being
+silently treated as current.

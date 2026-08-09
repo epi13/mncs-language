@@ -54,6 +54,18 @@ Acceptance criteria:
 
 ## 0.2 — Semantic graph, identity, and recursive artifacts
 
+Initial executable foundation delivered in the Rust model and CLI:
+
+- deterministic 0.2 canonical JSON and SHA-256 fingerprints;
+- structural identities for programs, functions, contracts, assumptions, effects, capabilities, and evidence claims;
+- typed semantic graph nodes and relationship edges;
+- conservative dependency-aware evidence invalidation;
+- executable evidence manifests with dependency fingerprints and stale assessment;
+- CLI commands for canonicalization, identities, graph emission, evidence manifests, diffs, and freshness checks; and
+- a narrow machine-intent pilot preserving explicit operation and obligation identities.
+
+The larger recursive-artifact schemas and independent verifier integrations remain future work.
+
 - define stable identities for components, properties, assumptions, verifiers, artifacts, diagnostics, transformations, machine-intent operations, obligations, references, and realizations;
 - model dependency and invalidation edges;
 - define canonical serialization and content hashing;

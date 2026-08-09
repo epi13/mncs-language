@@ -1,5 +1,9 @@
 # Verified Intermediate Representation 0.1 Direction
 
+The current executable pilot exposes only a small high-level IR record for integer machine-intent
+operations. It preserves operation, fact, requirement, and obligation identities but does not
+implement SSA, backend lowering, or a complete IR schema.
+
 This document states design constraints rather than a completed IR grammar.
 
 ## 1. Goals

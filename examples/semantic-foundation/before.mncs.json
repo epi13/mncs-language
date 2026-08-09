@@ -1,0 +1,31 @@
+{
+  "schema_version": "0.1",
+  "module": "Examples.SemanticFoundation",
+  "assumptions": [
+    {
+      "id": "durable-store",
+      "statement": "committed writes survive process termination",
+      "supplied_by": "Store",
+      "confidence": "external"
+    }
+  ],
+  "functions": [
+    {
+      "name": "record",
+      "inputs": [{"name": "value", "type": "u64"}],
+      "outputs": [],
+      "contracts": [
+        {"id": "nonnegative", "kind": "requires", "expression": "value >= 0"}
+      ],
+      "effects": [
+        {"kind": "write", "target": "Store.values", "capability": "StoreMutation"}
+      ],
+      "capabilities": ["StoreMutation"],
+      "assumptions": ["durable-store"],
+      "evidence": [
+        {"property": "nonnegative", "verifier": "RangeVerifier", "status": "verified", "artifact": "evidence://range/nonnegative"}
+      ],
+      "failure": "atomic"
+    }
+  ]
+}
