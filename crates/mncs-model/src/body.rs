@@ -954,7 +954,7 @@ mod tests {
     fn body_rejects_undefined_values_and_type_mismatches() {
         let mut program = executable_program();
         let body = program.functions[0].body.as_mut().expect("body");
-        body.blocks[0].operations[1].operands[0] = "missing".to_owned();
+        "missing".clone_into(&mut body.blocks[0].operations[1].operands[0]);
         body.blocks[0].operations[1].results[0].ty = BodyType::Integer(IntegerType {
             bits: 16,
             signed: true,
@@ -970,7 +970,7 @@ mod tests {
     fn body_rejects_undeclared_effect_and_bad_return() {
         let mut program = executable_program();
         let function = &mut program.functions[0];
-        function.outputs[0].value_type = "u32".to_owned();
+        "u32".clone_into(&mut function.outputs[0].value_type);
         let body = function.body.as_mut().expect("body");
         body.blocks[0].operations[0].kind = BodyOperationKind::Effect {
             effect: Effect {

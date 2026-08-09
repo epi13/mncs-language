@@ -429,7 +429,7 @@ mod tests {
             .expect("artifact validation");
         assert_eq!(imported.freshness, EvidenceFreshness::Stale);
         let mut wrong_scope = result;
-        wrong_scope.scope = "different-scope".to_owned();
+        "different-scope".clone_into(&mut wrong_scope.scope);
         assert!(matches!(
             wrong_scope.validate_against(&request, &valid_program().semantic_identities()),
             Err(VerifierArtifactError::ScopeMismatch)

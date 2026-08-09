@@ -794,8 +794,12 @@ fn lower_executable_body(
                 },
                 SemanticId("mncs:0.3:lowering:executable-body".to_owned()),
             );
-            transformation.obligations_required = operation.obligations.clone();
-            transformation.evidence_consumed = operation.evidence.clone();
+            transformation
+                .obligations_required
+                .clone_from(&operation.obligations);
+            transformation
+                .evidence_consumed
+                .clone_from(&operation.evidence);
             if let IrOperationKind::RuntimeCheck { fact, .. } = &operation.kind {
                 transformation
                     .runtime_checks_inserted
