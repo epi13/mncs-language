@@ -1,0 +1,5 @@
+{
+  "fixture": "ssa-experiment",
+  "purpose": "Forge development candidate anchor for deterministic SSA and trace checks",
+  "revision": 3
+}

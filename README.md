@@ -4,7 +4,7 @@
 
 Research and reference implementation for a general-purpose, verification-native programming language built on Machine-Native Complexity Standard (MNCS) principles.
 
-> **Project status:** the 0.1 executable semantic model now has an experimental 0.2 foundation for canonical form, stable semantic identities, graph dependencies, evidence invalidation, recursive artifacts, and authority-aware deltas. An early 0.3 high-level IR, deterministic lowering, obligation generation, and local verifier protocol are executable for the supported manifest subset. No final grammar, compiler stability, or production suitability is claimed yet.
+> **Project status:** the 0.1 executable semantic model now has an experimental 0.2 foundation for canonical form, stable semantic identities, graph dependencies, evidence invalidation, recursive artifacts, and authority-aware deltas. The supported 0.3 subset now has CFG-correct executable bodies, deterministic HIR, and a small validated 0.4 SSA artifact with body→HIR→SSA provenance and evidence-aware transformation refusal. Forge development evidence is configured locally; no final grammar, compiler stability, backend, independent evaluation, or production suitability is claimed.
 
 ## Why this project exists
 
@@ -31,9 +31,9 @@ An MNCS-oriented program should make it possible to answer:
 - `docs/` — vision, architecture, syntax research, machine-intent expressions, recursive refinement, terminology, trust model, and explicit non-goals.
 - `spec/` — early normative semantic and representation documents.
 - `rfcs/` — design proposals that can evolve independently of the specification.
-- `crates/mncs-model/` — the executable semantic model, canonical representation, identities, graph, evidence manifest, invalidation logic, recursive artifacts, high-level IR, and narrow machine-intent/verifier pilots.
+- `crates/mncs-model/` — the executable semantic model, canonical representation, identities, graph/CFG, evidence manifest, invalidation logic, recursive artifacts, high-level IR, validated SSA artifact, and narrow machine-intent/verifier pilots.
 - `crates/mncs-syntax/` — deterministic, tokenizer-neutral source representation metrics.
-- `crates/mncs-cli/` — validation, canonicalization, identity, graph, evidence, IR, obligation, verification, comparison, diagnostic, diff, and syntax-tournament commands.
+- `crates/mncs-cli/` — validation, canonicalization, identity, graph/CFG, evidence, IR, SSA, obligation, verification, comparison, diagnostic, diff, and syntax-tournament commands.
 - `examples/` — semantic manifests, competing source candidates, canonical semantic forms, machine-intent sketches, and semantic patches.
 
 The JSON manifests and source candidates are experimental transport and research representations. They are not yet a selected production grammar.
@@ -54,7 +54,7 @@ The 0.1 model contains:
 
 A key initial rule is that every effect must identify an authorizing capability, and that capability must be declared by the function. Evidence must reference a declared contract property rather than floating as unbound metadata.
 
-The experimental 0.2 layer adds deterministic SHA-256 content fingerprints, structural semantic identities, a typed semantic graph, dependency-aware evidence manifests, conservative invalidation, diagnostic obligations, backward causal slices, finite refinement budgets, typed isolated repair patches, explicit promotion records, semantic/authority/evidence deltas, and versioned verifier artifact import checks. The early 0.3 layer now accepts a small syntax-independent executable body model and lowers it into deterministic high-level IR with symbolic values, state regions, normal and failure paths, explicit effect capability uses, contract/evidence traceability, generated obligations, machine-intent links, lowering/portability envelopes, transformation provenance, and a pure local verifier. It also contains a deliberately small machine-intent pilot: explicit integer addition intents, PASS/FAIL/UNKNOWN obligations, alignment capabilities bound to subject and scope, intent-preserving IR records, and a no-overflow backend-promise decision. This is not a production compiler, verified SSA, or backend.
+The experimental 0.2 layer adds deterministic SHA-256 content fingerprints, structural semantic identities, a typed semantic graph, dependency-aware evidence manifests, conservative invalidation, diagnostic obligations, backward causal slices, finite refinement budgets, typed isolated repair patches, explicit promotion records, semantic/authority/evidence deltas, and versioned verifier artifact import checks. The 0.3 layer accepts a small syntax-independent executable body model, computes deterministic CFG reachability/dominance, and lowers symbolic values, state regions, normal and failure paths, explicit effect capability uses, contract/evidence traceability, generated obligations, machine-intent links, lowering/portability envelopes, and transformation provenance into HIR. The experimental 0.4 layer projects that subset into validated block-parameter SSA while retaining semantic/HIR/SSA identities and refusing a stronger no-overflow transformation without exact current verifier evidence. Forge is a local development/evidence harness, not a sandbox or independent evaluator. This is not a production compiler or backend.
 
 ## Try the semantic prototype
 
@@ -91,13 +91,24 @@ cargo run -p mncs-cli -- compare \
   examples/semantic-foundation/before.mncs.json \
   examples/semantic-foundation/after.mncs.json
 cargo run -p mncs-cli -- body examples/executable/checked-add.mncs.json
+cargo run -p mncs-cli -- ssa examples/executable/checked-add.mncs.json
 cargo run -p mncs-cli -- trace examples/executable/checked-add.mncs.json
 cargo run -p mncs-cli -- verifier-request examples/executable/checked-add.mncs.json
 ```
 
 The local contract-expression change changes the contract and function fingerprints and marks the dependent evidence stale. Canonicalization sorts set-like declarations while preserving ordered inputs and outputs.
 
-The IR command emits a deterministic, inspectable projection with state regions, capability uses, failure blocks, generated obligations, semantic-to-IR traceability, and transformation provenance. Executable-body manifests lower symbolic operations directly; `verifier-request` and `verify-result` exchange identity- and dependency-bound JSON artifacts. `verify` exercises the pure local verifier; `diagnose` emits a conservative backward slice when graph construction is available and a dependency-only slice for invalid input. Candidate evaluation remains isolated and does not promote or rewrite the trusted baseline.
+The IR command emits a deterministic, inspectable projection with state regions, capability uses, failure blocks, generated obligations, semantic-to-IR traceability, and transformation provenance. `body` includes a deterministic CFG projection; `ssa` emits the experimental validated block-parameter SSA artifact. Executable-body manifests lower symbolic operations directly; `verifier-request` and `verify-result` exchange identity- and dependency-bound JSON artifacts. `verify` exercises the pure local verifier; `diagnose` emits a conservative backward slice when graph construction is available and a dependency-only slice for invalid input. Candidate evaluation remains isolated and does not promote or rewrite the trusted baseline.
+
+## Forge development harness
+
+`mncs-forge.toml` configures the installed MNCS Forge Provider Protocol adapter in
+`tools/mncs_language_forge_provider.py`. Its bounded development workflows exercise Rust quality,
+semantic fixtures, HIR trace integrity, SSA integrity, and evidence freshness. Forge records are
+development evidence only: local provider execution is not sandboxed, process success alone is not
+proof, and no evaluator or promotion authority is claimed. The portable execution-bundle fixture
+under `compatibility/execution-bundle/` is checked with the sibling MNCS standard tool and is not a
+Forge bundle or an execution-assurance receipt.
 
 ## Explore the source syntax laboratory
 

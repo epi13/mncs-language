@@ -259,7 +259,9 @@ manifest subset, including executable symbolic bodies, typed values, state regio
 capability uses, generated obligations, semantic-to-IR traceability, transformation provenance,
 lowering/portability envelopes, and a pure local verifier protocol with importable result artifacts.
 The surface syntax, verified SSA, complete recursive analysis, and backend selection remain
-unresolved.
+experimental. The current bounded SSA layer now includes deterministic block-parameter SSA,
+structural validation, and semantic-body→HIR→SSA provenance for the supported executable subset;
+it is not a proof of compiler correctness or a backend.
 
 See [Machine-intent expressions](machine-intent-expressions.md),
 [Machine-Intent Expressions 0.1 Direction](../spec/machine-intent-expressions.md), and

@@ -1,0 +1,29 @@
+{
+  "schema_version": "0.1-experimental",
+  "record_type": "mncs-execution-bundle-source",
+  "bundle_id": "bundle.mncs-language-ssa-fixture-v1",
+  "entries": [
+    {"path": "artifacts/semantic.json", "source": "artifacts/semantic.json", "role": "expected", "mode": "0644"},
+    {"path": "artifacts/hir.json", "source": "artifacts/hir.json", "role": "expected", "mode": "0644"},
+    {"path": "artifacts/ssa.json", "source": "artifacts/ssa.json", "role": "expected", "mode": "0644"},
+    {"path": "checks/verify.py", "source": "checks/verify.py", "role": "harness", "mode": "0644"},
+    {"path": "policy/development-policy.json", "source": "policy/development-policy.json", "role": "policy-reference", "mode": "0644"},
+    {"path": "input/checked-add.json", "source": "input/checked-add.json", "role": "input", "mode": "0644"}
+  ],
+  "entrypoints": [{"name": "verify", "path": "checks/verify.py"}],
+  "runtime_requirements": [],
+  "policy_references": ["policy/development-policy.json"],
+  "limits": {
+    "max_file_count": 16,
+    "max_file_bytes": 65536,
+    "max_total_bytes": 262144,
+    "max_path_bytes": 512,
+    "max_expansion_ratio": 100
+  },
+  "extensions": {
+    "mncs-language:artifact-boundary": {
+      "authority": "development_measurement_only",
+      "independent_evaluation": false
+    }
+  }
+}

@@ -33,6 +33,7 @@ fn main() -> ExitCode {
         "graph" => one_manifest_command(args, graph),
         "evidence-manifest" => one_manifest_command(args, evidence_manifest),
         "ir" => one_manifest_command(args, ir),
+        "ssa" => one_manifest_command(args, ssa),
         "obligations" => one_manifest_command(args, obligations),
         "verify" => one_manifest_command(args, verify),
         "diagnose" => one_manifest_command(args, diagnose),
@@ -224,6 +225,20 @@ fn ir(path: &str) -> ExitCode {
     }
 }
 
+fn ssa(path: &str) -> ExitCode {
+    let program = match read_valid_program(path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    match program.lower_to_ssa() {
+        Ok(ssa) if print_json(&ssa) => ExitCode::SUCCESS,
+        Ok(_) | Err(_) => {
+            eprintln!("error: unable to lower manifest to validated SSA");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn obligations(path: &str) -> ExitCode {
     let program = match read_valid_program(path) {
         Ok(program) => program,
@@ -268,6 +283,7 @@ struct BodyFunctionReport {
     name: String,
     identity: SemanticId,
     fingerprint: String,
+    cfg: mncs_model::Cfg,
     body: FunctionBody,
 }
 
@@ -283,6 +299,10 @@ fn body(path: &str) -> ExitCode {
                 name: function.name.clone(),
                 identity: body.identity(&program.module, &function.name),
                 fingerprint: body.fingerprint().expect("canonical body"),
+                cfg: mncs_model::Cfg::from_body(
+                    body,
+                    body.identity(&program.module, &function.name),
+                ),
                 body: body.clone(),
             });
         }
@@ -803,6 +823,7 @@ fn print_usage() {
     eprintln!("  mncs graph <manifest.json>");
     eprintln!("  mncs evidence-manifest <manifest.json>");
     eprintln!("  mncs ir <manifest.json>");
+    eprintln!("  mncs ssa <manifest.json>");
     eprintln!("  mncs obligations <manifest.json>");
     eprintln!("  mncs verify <manifest.json>");
     eprintln!("  mncs diagnose <manifest.json>");

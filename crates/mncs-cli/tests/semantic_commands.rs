@@ -199,6 +199,16 @@ fn executable_body_trace_and_verifier_artifact_commands_are_bound() {
             .as_str()
             .is_some_and(|identity| identity.contains(":operation:"))));
 
+    let ssa = binary()
+        .args(["ssa", &manifest])
+        .output()
+        .expect("run body SSA");
+    assert!(ssa.status.success());
+    let ssa_json: Value = serde_json::from_slice(&ssa.stdout).expect("SSA JSON");
+    assert_eq!(ssa_json["schema_version"], "0.4");
+    assert_eq!(ssa_json["functions"].as_array().unwrap().len(), 1);
+    assert!(!ssa_json["trace"]["entries"].as_array().unwrap().is_empty());
+
     let effect_manifest = example("executable/effectful-record.mncs.json");
     let effect_ir = binary()
         .args(["ir", &effect_manifest])
