@@ -5,7 +5,9 @@ The current executable pilot exposes a deterministic, serializable high-level IR
 typed values, state regions, normal and failure paths, effect capability uses, contracts, evidence,
 generated obligations, semantic graph provenance, operation/fact/requirement/obligation identities,
 and transformation records. Executable `0.2` bodies lower directly to this HIR for the supported
-symbolic subset. It does not implement SSA, backend lowering, or a complete IR schema.
+symbolic subset. The repository also contains a deliberately bounded `0.4` block-parameter SSA
+artifact for this subset; it is structural/provenance infrastructure, not verified compiler
+correctness, backend lowering, or a complete IR schema.
 
 This document states design constraints rather than a completed IR grammar.
 
@@ -63,7 +65,16 @@ mncs.layout.realize logical_type_ref layout_ref
 mncs.authorization.consume authority_cap
 ```
 
-## 3. Verified SSA
+## 3. Verified SSA direction and current bounded artifact
+
+`Program::lower_to_ssa` emits `SsaModule` schema `0.4` for validated executable bodies. The artifact
+retains typed values, block parameters, integer/effect/runtime-check instructions, normal and failure
+terminators, obligation links, capability uses, and a deterministic semantic→HIR→SSA trace map.
+`SsaModule::validate` checks single definitions, use availability/dominance, branch targets and
+arguments, terminators, reachability, effect authorization links, and machine-intent/obligation
+retention. It intentionally rejects unreachable blocks in this subset.
+
+The following remains a direction for later verified SSA work:
 
 The lower IR should include:
 

@@ -11,6 +11,16 @@ use crate::{
 
 pub const VERIFIER_SCHEMA_VERSION: &str = "0.2";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceAuthorityClass {
+    Verifier,
+    DiagnosticObservation,
+    ProposalResult,
+    #[default]
+    DevelopmentMeasurement,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VerifierIndependence {
@@ -82,6 +92,8 @@ pub struct VerifierResult {
     pub scope: String,
     pub status: ObligationStatus,
     pub verifier: VerifierIdentity,
+    #[serde(default)]
+    pub authority: EvidenceAuthorityClass,
     pub method: VerifierMethod,
     pub assumptions: Vec<SemanticId>,
     pub dependencies: Vec<SemanticId>,
@@ -217,6 +229,7 @@ impl MicroVerifier for DeterministicVerifier {
             scope: request.scope.clone(),
             status,
             verifier,
+            authority: EvidenceAuthorityClass::Verifier,
             method,
             assumptions: request.assumptions.clone(),
             dependencies: request.dependencies.clone(),
@@ -338,6 +351,7 @@ impl VerifierResult {
             && self.subject == *subject
             && self.status == ObligationStatus::Pass
             && self.freshness == EvidenceFreshness::Current
+            && self.authority == EvidenceAuthorityClass::Verifier
     }
 }
 
@@ -417,6 +431,15 @@ mod tests {
         let mut stale = result.clone();
         stale.freshness = EvidenceFreshness::Stale;
         assert!(!stale.can_satisfy(&request.obligation, &request.subject));
+    }
+
+    #[test]
+    fn diagnostic_observation_cannot_satisfy_a_proof_obligation() {
+        let verifier = DeterministicVerifier::default();
+        let request = integer_request();
+        let mut result = verifier.verify(&request);
+        result.authority = EvidenceAuthorityClass::DiagnosticObservation;
+        assert!(!result.can_satisfy(&request.obligation, &request.subject));
     }
 
     #[test]

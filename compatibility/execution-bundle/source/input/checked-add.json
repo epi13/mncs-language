@@ -1,0 +1,5 @@
+{
+  "fixture": "examples/executable/checked-add.mncs.json",
+  "operation": "add.checked",
+  "intent": "checked"
+}

@@ -69,6 +69,7 @@ jobs:
           fi
           cargo run -p mncs-cli -- body examples/executable/checked-add.mncs.json
           cargo run -p mncs-cli -- ir examples/executable/checked-add.mncs.json
+          cargo run -p mncs-cli -- ssa examples/executable/checked-add.mncs.json
           cargo run -p mncs-cli -- trace examples/executable/checked-add.mncs.json
           cargo run -p mncs-cli -- obligations examples/executable/checked-add.mncs.json
           cargo run -p mncs-cli -- verifier-request examples/executable/checked-add.mncs.json > /tmp/mncs-verifier-requests.json
@@ -86,3 +87,10 @@ jobs:
             echo "candidate with regressed protected property was unexpectedly accepted" >&2
             exit 1
           fi
+      - name: Exercise Forge Provider Protocol adapter
+        shell: bash
+        run: |
+          printf '%s\n' '{"protocol_version":"0.1","type":"capabilities","request_id":"ci-capabilities"}' \
+            | python3 tools/mncs_language_forge_provider.py | jq -e '.type == "capabilities" and (.analyses | index("mncs-language-ssa-integrity")) != null'
+          printf '%s\n' '{"protocol_version":"0.1","type":"analysis_request","request_id":"ci-ssa","analysis":"mncs-language-ssa-integrity","component":{"candidate_identity":"ci","changed_paths":[]}}' \
+            | python3 tools/mncs_language_forge_provider.py | jq -e '.type == "analysis_response" and .status == "PASS" and .witnesses[0].schema_version == "0.4"'

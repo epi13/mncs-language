@@ -287,23 +287,72 @@ impl FunctionBody {
                 "body block identities must be unique",
             ));
         }
+        let cfg = crate::Cfg::from_body(self, self.identity(&program.module, &function.name));
+        for block in &cfg.unreachable {
+            errors.push(body_diagnostic(
+                "MNB038",
+                format!("{function_path}.body.blocks.{block}"),
+                "unreachable body blocks are not supported by this executable subset",
+            ));
+        }
+
         let mut operation_ids = BTreeSet::new();
-        let mut available = values;
-        let mut incoming = Vec::<(String, Vec<String>, Vec<BodyType>)>::new();
-        for (block_index, block) in self.blocks.iter().enumerate() {
-            let block_path = format!("{function_path}.body.blocks[{block_index}]");
-            let mut block_values = BTreeSet::new();
+        let mut definitions = BTreeMap::<String, (Option<String>, BodyType)>::new();
+        for parameter in &self.parameters {
+            definitions.insert(parameter.id.clone(), (None, parameter.ty.clone()));
+        }
+        for block in &self.blocks {
             for parameter in &block.parameters {
-                if !block_values.insert(parameter.id.clone())
-                    || available.contains_key(&parameter.id)
+                if definitions
+                    .insert(
+                        parameter.id.clone(),
+                        (Some(block.id.clone()), parameter.ty.clone()),
+                    )
+                    .is_some()
                 {
                     errors.push(body_diagnostic(
                         "MNB008",
-                        format!("{block_path}.parameters"),
+                        format!("{function_path}.body.blocks.{}.parameters", block.id),
                         format!("duplicate body value identity {:?}", parameter.id),
                     ));
                 }
+            }
+            for operation in &block.operations {
+                for result in &operation.results {
+                    if definitions
+                        .insert(
+                            result.id.clone(),
+                            (Some(block.id.clone()), result.ty.clone()),
+                        )
+                        .is_some()
+                    {
+                        errors.push(body_diagnostic(
+                            "MNB011",
+                            format!("{function_path}.body.blocks.{}.operations", block.id),
+                            format!("duplicate body value identity {:?}", result.id),
+                        ));
+                    }
+                }
+            }
+        }
+        let block_parameters = self
+            .blocks
+            .iter()
+            .map(|block| (block.id.clone(), block.parameters.clone()))
+            .collect::<BTreeMap<_, _>>();
+
+        for (block_index, block) in self.blocks.iter().enumerate() {
+            let block_path = format!("{function_path}.body.blocks[{block_index}]");
+            let mut available = values.clone();
+            for parameter in &block.parameters {
                 available.insert(parameter.id.clone(), parameter.ty.clone());
+            }
+            for (value, (definition_block, ty)) in &definitions {
+                if definition_block.as_deref().is_some_and(|definition| {
+                    definition != block.id && cfg.dominates(definition, &block.id)
+                }) {
+                    available.insert(value.clone(), ty.clone());
+                }
             }
             for (operation_index, operation) in block.operations.iter().enumerate() {
                 let operation_path = format!("{block_path}.operations[{operation_index}]");
@@ -335,14 +384,6 @@ impl FunctionBody {
                     errors,
                 );
                 for result in &operation.results {
-                    if available.contains_key(&result.id) || !block_values.insert(result.id.clone())
-                    {
-                        errors.push(body_diagnostic(
-                            "MNB011",
-                            format!("{operation_path}.results"),
-                            format!("duplicate body value identity {:?}", result.id),
-                        ));
-                    }
                     available.insert(result.id.clone(), result.ty.clone());
                 }
             }
@@ -351,44 +392,11 @@ impl FunctionBody {
                 &block_path,
                 &available,
                 &block_ids,
+                &block_parameters,
                 errors,
-                &mut incoming,
             );
-        }
-        for (target, arguments, argument_types) in incoming {
-            if let Some(block) = self.blocks.iter().find(|block| block.id == target) {
-                if block.parameters.len() != arguments.len() {
-                    errors.push(body_diagnostic(
-                        "MNB012",
-                        format!("{function_path}.body.blocks.{target}"),
-                        "control-flow arguments must match target block parameters",
-                    ));
-                }
-                for (index, (parameter, argument_type)) in block
-                    .parameters
-                    .iter()
-                    .zip(argument_types.iter())
-                    .enumerate()
-                {
-                    if parameter.ty != *argument_type {
-                        errors.push(body_diagnostic(
-                            "MNB037",
-                            format!("{function_path}.body.blocks.{target}.parameters[{index}]"),
-                            "control-flow argument type does not match the target parameter",
-                        ));
-                    }
-                }
-            }
-        }
-        for block in &self.blocks {
             if matches!(block.terminator, BodyTerminator::Return { .. }) {
-                validate_return_types(
-                    &block.terminator,
-                    function,
-                    &available,
-                    function_path,
-                    errors,
-                );
+                validate_return_types(&block.terminator, function, &available, &block_path, errors);
             }
         }
     }
@@ -669,8 +677,8 @@ fn validate_terminator(
     path: &str,
     available: &BTreeMap<String, BodyType>,
     block_ids: &BTreeSet<String>,
+    block_parameters: &BTreeMap<String, Vec<BodyValue>>,
     errors: &mut Vec<Diagnostic>,
-    incoming: &mut Vec<(String, Vec<String>, Vec<BodyType>)>,
 ) {
     match terminator {
         BodyTerminator::Return { values } => {
@@ -679,11 +687,7 @@ fn validate_terminator(
         BodyTerminator::Branch { target, arguments } => {
             check_target(target, path, block_ids, errors);
             check_terminator_values(arguments, path, available, errors);
-            incoming.push((
-                target.clone(),
-                arguments.clone(),
-                argument_types(arguments, available),
-            ));
+            validate_block_arguments(target, arguments, available, block_parameters, path, errors);
         }
         BodyTerminator::ConditionalBranch {
             condition,
@@ -703,25 +707,53 @@ fn validate_terminator(
             check_target(else_target, path, block_ids, errors);
             check_terminator_values(then_arguments, path, available, errors);
             check_terminator_values(else_arguments, path, available, errors);
-            incoming.push((
-                then_target.clone(),
-                then_arguments.clone(),
-                argument_types(then_arguments, available),
-            ));
-            incoming.push((
-                else_target.clone(),
-                else_arguments.clone(),
-                argument_types(else_arguments, available),
-            ));
+            validate_block_arguments(
+                then_target,
+                then_arguments,
+                available,
+                block_parameters,
+                path,
+                errors,
+            );
+            validate_block_arguments(
+                else_target,
+                else_arguments,
+                available,
+                block_parameters,
+                path,
+                errors,
+            );
         }
     }
 }
 
-fn argument_types(arguments: &[String], available: &BTreeMap<String, BodyType>) -> Vec<BodyType> {
-    arguments
-        .iter()
-        .filter_map(|argument| available.get(argument).cloned())
-        .collect()
+fn validate_block_arguments(
+    target: &str,
+    arguments: &[String],
+    available: &BTreeMap<String, BodyType>,
+    block_parameters: &BTreeMap<String, Vec<BodyValue>>,
+    path: &str,
+    errors: &mut Vec<Diagnostic>,
+) {
+    let Some(parameters) = block_parameters.get(target) else {
+        return;
+    };
+    if parameters.len() != arguments.len() {
+        errors.push(body_diagnostic(
+            "MNB012",
+            format!("{path}.terminator"),
+            "control-flow arguments must match target block parameters",
+        ));
+    }
+    for (index, (parameter, argument)) in parameters.iter().zip(arguments).enumerate() {
+        if available.get(argument) != Some(&parameter.ty) {
+            errors.push(body_diagnostic(
+                "MNB037",
+                format!("{path}.terminator.arguments[{index}]"),
+                "control-flow argument type does not match the target parameter",
+            ));
+        }
+    }
 }
 
 fn check_terminator_values(
@@ -798,11 +830,11 @@ fn body_diagnostic(code: &str, path: String, message: impl Into<String>) -> Diag
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{FailureMode, Value, SUPPORTED_SCHEMA_VERSION};
 
-    fn executable_program() -> Program {
+    pub(crate) fn executable_program() -> Program {
         let mut program = crate::validation::tests::valid_program();
         let function = &mut program.functions[0];
         function.inputs = vec![Value {
@@ -1012,5 +1044,103 @@ mod tests {
         let report = program.validate();
         assert!(!report.valid);
         assert!(report.errors.iter().any(|error| error.code == "MNB037"));
+    }
+
+    #[test]
+    fn body_rejects_value_from_non_dominating_branch() {
+        let mut program = executable_program();
+        let function = &mut program.functions[0];
+        function.inputs = vec![Value {
+            name: "condition".to_owned(),
+            value_type: "bool".to_owned(),
+        }];
+        let body = function.body.as_mut().expect("body");
+        body.parameters = vec![BodyParameter {
+            id: "condition".to_owned(),
+            name: "condition".to_owned(),
+            ty: BodyType::Named("bool".to_owned()),
+        }];
+        body.blocks = vec![
+            BodyBlock {
+                id: "entry".to_owned(),
+                parameters: Vec::new(),
+                operations: Vec::new(),
+                terminator: BodyTerminator::ConditionalBranch {
+                    condition: "condition".to_owned(),
+                    then_target: "left".to_owned(),
+                    then_arguments: Vec::new(),
+                    else_target: "right".to_owned(),
+                    else_arguments: Vec::new(),
+                },
+            },
+            BodyBlock {
+                id: "left".to_owned(),
+                parameters: Vec::new(),
+                operations: vec![BodyOperation {
+                    id: "left-value".to_owned(),
+                    kind: BodyOperationKind::Constant {
+                        value: 1,
+                        ty: BodyType::Integer(IntegerType {
+                            bits: 32,
+                            signed: true,
+                        }),
+                    },
+                    operands: Vec::new(),
+                    results: vec![BodyValue {
+                        id: "left-value".to_owned(),
+                        ty: BodyType::Integer(IntegerType {
+                            bits: 32,
+                            signed: true,
+                        }),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                }],
+                terminator: BodyTerminator::Branch {
+                    target: "join".to_owned(),
+                    arguments: Vec::new(),
+                },
+            },
+            BodyBlock {
+                id: "right".to_owned(),
+                parameters: Vec::new(),
+                operations: Vec::new(),
+                terminator: BodyTerminator::Branch {
+                    target: "join".to_owned(),
+                    arguments: Vec::new(),
+                },
+            },
+            BodyBlock {
+                id: "join".to_owned(),
+                parameters: Vec::new(),
+                operations: Vec::new(),
+                terminator: BodyTerminator::Return {
+                    values: vec!["left-value".to_owned()],
+                },
+            },
+        ];
+        let report = program.validate();
+        assert!(!report.valid);
+        assert!(report.errors.iter().any(|error| error.code == "MNB032"));
+    }
+
+    #[test]
+    fn body_rejects_unreachable_blocks_explicitly() {
+        let mut program = executable_program();
+        let body = program.functions[0].body.as_mut().expect("body");
+        body.blocks.push(BodyBlock {
+            id: "dead".to_owned(),
+            parameters: Vec::new(),
+            operations: Vec::new(),
+            terminator: BodyTerminator::Return {
+                values: vec!["a".to_owned()],
+            },
+        });
+        let report = program.validate();
+        assert!(!report.valid);
+        assert!(report.errors.iter().any(|error| error.code == "MNB038"));
     }
 }

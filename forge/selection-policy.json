@@ -1,0 +1,5 @@
+{
+  "schema_version": "0.1",
+  "required_workflows": ["mncs-language-development"],
+  "objective": "development evidence only; no automatic promotion"
+}

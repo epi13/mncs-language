@@ -1,0 +1,182 @@
+version = 1
+environment_allowlist = ["PATH", "LANG", "LC_ALL", "CARGO_HOME", "RUSTUP_HOME"]
+
+[project]
+name = "MNCS Language executable semantics"
+identity = "mncs-language-verified-ssa-v1"
+root = "."
+
+[paths]
+candidates = ["forge/candidate"]
+generated = ["forge/generated"]
+contracts = ["Cargo.toml", "Cargo.lock", "crates", "examples", "spec", "docs", "README.md", "ROADMAP.md", "tools"]
+references = [".github"]
+evaluators = []
+acceptance_policies = []
+development_evidence = ["forge/evidence"]
+protected = []
+outputs = ["forge/generated"]
+
+[limits]
+timeout_seconds = 45
+output_bytes = 1048576
+
+[verifier_limits]
+max_batch = 8
+request_bytes = 65536
+batch_timeout_seconds = 120
+witness_bytes = 32768
+stderr_bytes = 4096
+result_bytes = 131072
+max_changed_paths = 32
+max_dependency_identities = 64
+max_question_parameters = 16
+
+[authority.development]
+may_write_candidates = true
+may_write_generated = true
+may_run_providers = true
+
+[authority.evaluator]
+candidate_read_only = true
+authority_read_only = true
+require_frozen_identities = true
+withhold_repair_feedback = true
+
+[policies]
+selection = "forge/selection-policy.json"
+useful_benefit_objective = "README.md"
+
+[[providers]]
+id = "mncs-language-provider"
+name = "MNCS Language bounded development provider"
+identity = "mncs-language-provider-v1"
+version = "0.1"
+command = ["python3", "tools/mncs_language_forge_provider.py"]
+transport = "stdio-jsonl"
+required = true
+capabilities = ["mncs-language-rust-quality", "mncs-language-semantic-validation", "mncs-language-hir-trace-integrity", "mncs-language-ssa-integrity", "mncs-language-evidence-freshness"]
+supported_constructs = ["rust-workspace", "semantic-body", "high-level-ir", "verified-ssa", "evidence-freshness"]
+unsupported_constructs = ["formal-compiler-correctness", "backend-code-generation"]
+limitations = ["development provider runs as a normal local process and is not a sandbox", "structural checks do not establish independent evaluation or conformance"]
+
+[[workflows]]
+name = "mncs-language-development"
+category = "build"
+mode = "development"
+command = ["python3", "tools/mncs_language_forge_provider.py"]
+provider_protocol = true
+provider_id = "mncs-language-provider"
+disclosure = "compact"
+
+[[workflows]]
+name = "mncs-language-inspect"
+category = "inspection"
+mode = "development"
+command = ["python3", "tools/mncs_language_forge_provider.py"]
+provider_protocol = true
+provider_id = "mncs-language-provider"
+disclosure = "compact"
+
+[[workflows]]
+name = "mncs-language-structural"
+category = "bounded_structural_analysis"
+mode = "development"
+command = ["python3", "tools/mncs_language_forge_provider.py"]
+provider_protocol = true
+provider_id = "mncs-language-provider"
+disclosure = "compact"
+
+[[workflows]]
+name = "mncs-language-evidence"
+category = "evidence_derivation"
+mode = "development"
+command = ["python3", "tools/mncs_language_forge_provider.py"]
+provider_protocol = true
+provider_id = "mncs-language-provider"
+disclosure = "compact"
+
+[[workflows]]
+name = "mncs-language-development-bundle"
+category = "mncs_bundle_validation"
+mode = "development"
+command = ["python3", "tools/mncs_language_forge_provider.py"]
+provider_protocol = true
+provider_id = "mncs-language-provider"
+disclosure = "compact"
+
+[[verifiers]]
+id = "mncs-language.semantic-validation"
+version = "0.1"
+workflow = "mncs-language-structural"
+provider = "mncs-language-provider"
+method = "mncs-language-semantic-validation"
+claim = "The supported semantic-body fixtures produce the declared valid and rejected validation outcomes."
+category = "bounded_structural_analysis"
+modes = ["development"]
+artifact_types = ["source"]
+scopes = ["module"]
+input_kinds = ["candidate_identity", "changed_paths"]
+limitations = ["This checks repository fixtures, not arbitrary semantic programs."]
+assumptions = ["the checked fixtures remain representative of the supported executable-body subset"]
+timeout_seconds = 30
+cost = "medium"
+uncertainty_classes = ["semantic-validation"]
+tags = ["mncs-language", "body"]
+
+[[verifiers]]
+id = "mncs-language.hir-trace-integrity"
+version = "0.1"
+workflow = "mncs-language-structural"
+provider = "mncs-language-provider"
+method = "mncs-language-hir-trace-integrity"
+claim = "Executable-body lowering produces deterministic HIR with operation trace and transformation provenance."
+category = "bounded_structural_analysis"
+modes = ["development"]
+artifact_types = ["source"]
+scopes = ["module"]
+input_kinds = ["candidate_identity", "changed_paths"]
+limitations = ["Trace integrity is provenance validation, not a proof of lowering correctness."]
+assumptions = ["the supported checked-add fixture exercises the executable HIR path"]
+timeout_seconds = 30
+cost = "medium"
+uncertainty_classes = ["hir-trace", "lowering"]
+tags = ["mncs-language", "hir", "provenance"]
+
+[[verifiers]]
+id = "mncs-language.ssa-integrity"
+version = "0.1"
+workflow = "mncs-language-structural"
+provider = "mncs-language-provider"
+method = "mncs-language-ssa-integrity"
+claim = "The supported executable-body fixture lowers to structurally valid SSA with semantic provenance."
+category = "bounded_structural_analysis"
+modes = ["development"]
+artifact_types = ["source"]
+scopes = ["module"]
+input_kinds = ["candidate_identity", "changed_paths"]
+limitations = ["SSA structural validation does not establish formal compiler correctness or backend safety."]
+assumptions = ["the repository exposes the experimental SSA CLI artifact"]
+timeout_seconds = 30
+cost = "medium"
+uncertainty_classes = ["ssa-integrity", "provenance"]
+tags = ["mncs-language", "ssa"]
+
+[[verifiers]]
+id = "mncs-language.evidence-freshness"
+version = "0.1"
+workflow = "mncs-language-evidence"
+provider = "mncs-language-provider"
+method = "mncs-language-evidence-freshness"
+claim = "A local semantic change makes the dependent evidence fixture stale rather than current."
+category = "evidence_derivation"
+modes = ["development"]
+artifact_types = ["evidence"]
+scopes = ["module"]
+input_kinds = ["candidate_identity", "changed_paths"]
+limitations = ["This checks the repository incremental-invalidation fixture only."]
+assumptions = ["the before/after fixtures encode the intended dependency change"]
+timeout_seconds = 30
+cost = "low"
+uncertainty_classes = ["evidence-freshness", "invalidation"]
+tags = ["mncs-language", "evidence"]

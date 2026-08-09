@@ -397,16 +397,29 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                     }
                 }
                 match &block.terminator {
-                    crate::BodyTerminator::Branch { target, .. } => {
+                    crate::BodyTerminator::Branch {
+                        target, arguments, ..
+                    } => {
                         edges.push(GraphEdge {
                             from: block_identity.clone(),
                             to: crate::identity::block_id(&program.module, &function.name, target),
                             kind: EdgeKind::TransitionsTo,
                         });
+                        for argument in arguments {
+                            if let Some(value) = values.get(argument) {
+                                edges.push(GraphEdge {
+                                    from: block_identity.clone(),
+                                    to: value.clone(),
+                                    kind: EdgeKind::ConsumesValue,
+                                });
+                            }
+                        }
                     }
                     crate::BodyTerminator::ConditionalBranch {
                         then_target,
                         else_target,
+                        then_arguments,
+                        else_arguments,
                         ..
                     } => {
                         for target in [then_target, else_target] {
@@ -419,6 +432,15 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                                 ),
                                 kind: EdgeKind::TransitionsTo,
                             });
+                        }
+                        for argument in then_arguments.iter().chain(else_arguments) {
+                            if let Some(value) = values.get(argument) {
+                                edges.push(GraphEdge {
+                                    from: block_identity.clone(),
+                                    to: value.clone(),
+                                    kind: EdgeKind::ConsumesValue,
+                                });
+                            }
                         }
                     }
                     crate::BodyTerminator::Return { .. } => {}

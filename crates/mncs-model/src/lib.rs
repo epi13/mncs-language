@@ -6,6 +6,7 @@
 
 mod body;
 mod canonical;
+mod cfg;
 mod core;
 mod delta;
 mod evidence;
@@ -16,6 +17,7 @@ mod machine_intent;
 mod obligations;
 mod provenance;
 mod refinement;
+mod ssa;
 mod validation;
 mod verifier;
 
@@ -25,6 +27,7 @@ pub use body::{
     PortabilityTarget, RealizationClass, EXECUTABLE_BODY_SCHEMA_VERSION,
 };
 pub use canonical::{CanonicalError, CanonicalForm, CANONICAL_SCHEMA_VERSION};
+pub use cfg::{Cfg, CfgBlock, CFG_SCHEMA_VERSION};
 pub use core::{
     Assumption, AssumptionConfidence, ContractClause, ContractKind, Effect, EvidenceClaim,
     EvidenceStatus, FailureMode, Function, ParseError, Program, Value, SUPPORTED_SCHEMA_VERSION,
@@ -65,9 +68,14 @@ pub use refinement::{
     ProtectedPropertyResult, ProtectedPropertyStatus, RefinementBudget, RefinementError,
     RepairProposal, ResourceLimits, SemanticChange, SemanticPatch, VerificationPlan,
 };
+pub use ssa::{
+    SsaBlock, SsaDiagnostic, SsaError, SsaFunction, SsaInstruction, SsaInstructionKind, SsaModule,
+    SsaTerminator, SsaTraceEntry, SsaTraceMap, SsaTransformationDecision, SsaValidationReport,
+    SsaValue, SSA_SCHEMA_VERSION,
+};
 pub use validation::{Diagnostic, ValidationReport, ValidationSummary};
 pub use verifier::{
-    AlignmentVerifierInput, CapabilityVerifierInput, DeterministicVerifier, IntegerVerifierInput,
-    MicroVerifier, VerifierArtifactError, VerifierIdentity, VerifierIndependence, VerifierInput,
-    VerifierMethod, VerifierRequest, VerifierResult,
+    AlignmentVerifierInput, CapabilityVerifierInput, DeterministicVerifier, EvidenceAuthorityClass,
+    IntegerVerifierInput, MicroVerifier, VerifierArtifactError, VerifierIdentity,
+    VerifierIndependence, VerifierInput, VerifierMethod, VerifierRequest, VerifierResult,
 };

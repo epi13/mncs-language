@@ -107,9 +107,10 @@ Early executable foundation now present for the supported 0.1 manifest subset:
   import validation for external artifacts;
 - conservative diagnostic output connected to generated obligations.
 
-This is not verified SSA and does not claim complete lowering correctness. The remaining work is to
-expand supported body control flow and state semantics, connect independent verifier evidence to
-realization selection, and build the smallest trustworthy SSA layer.
+This remains an experimental subset and does not claim complete lowering correctness. CFG reachability,
+predecessor/successor relationships, dominance, block-argument checking, and unreachable-block
+rejection are now executable. A small block-parameter SSA artifact is available as the first 0.4
+foundation, including deterministic identities, validation, and body→HIR→SSA traceability.
 
 - define typed state, transitions, ownership relationships, and regions;
 - represent normal, error, compensation, and diagnostic paths;
@@ -123,6 +124,16 @@ realization selection, and build the smallest trustworthy SSA layer.
 - demonstrate lossless projection from human source to canonical semantic form for the supported subset.
 
 ## 0.4 — Verified SSA and micro-debugging
+
+Initial bounded foundation now present:
+
+- versioned `0.4` SSA values, instructions, block parameters, terminators, and failure targets;
+- deterministic SSA serialization/fingerprints and structural validation;
+- semantic-body → HIR → SSA trace entries and transformation provenance;
+- verifier/evidence authority classes that keep diagnostic observations from satisfying proof obligations; and
+- one evidence-gated no-overflow-elision experiment that refuses missing, stale, wrong-scope, or non-verifier PASS evidence.
+
+This is not verified compiler correctness, SSA optimization, memory SSA, or a backend.
 
 - introduce basic blocks, SSA values, phi-like joins, and explicit memory regions;
 - attach proof obligations to transformations;
