@@ -36,3 +36,11 @@ jobs:
         run: >-
           cargo run -p mncs-cli -- syntax-tournament
           examples/syntax/account-transfer.tournament.json
+      - name: Exercise semantic foundation commands
+        shell: bash
+        run: |
+          cargo run -p mncs-cli -- canonicalize examples/semantic-foundation/before.mncs.json
+          cargo run -p mncs-cli -- graph examples/semantic-foundation/before.mncs.json
+          cargo run -p mncs-cli -- diff examples/semantic-foundation/before.mncs.json examples/semantic-foundation/after.mncs.json
+          cargo run -p mncs-cli -- evidence-manifest examples/semantic-foundation/before.mncs.json > /tmp/mncs-evidence.json
+          cargo run -p mncs-cli -- evidence-check /tmp/mncs-evidence.json examples/semantic-foundation/after.mncs.json

@@ -250,7 +250,11 @@ not automatically equivalent to independent evaluation or universal portability.
 
 ## Bootstrap implementation
 
-The current Rust crates implement only structural consistency checks against JSON manifests. They establish a runnable test bed while leaving syntax, machine-intent semantic objects, recursive-artifact schemas, and backend selection unresolved.
+The current Rust crates implement structural consistency checks plus an experimental 0.2 semantic
+foundation: deterministic canonical JSON, content fingerprints, stable identities, typed graph and
+invalidation edges, evidence manifests, and a narrow integer/alignment machine-intent pilot. The
+surface syntax, complete recursive-artifact schemas, verified SSA, and backend selection remain
+unresolved.
 
 See [Machine-intent expressions](machine-intent-expressions.md),
 [Machine-Intent Expressions 0.1 Direction](../spec/machine-intent-expressions.md), and

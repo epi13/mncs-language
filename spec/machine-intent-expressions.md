@@ -1,8 +1,10 @@
 # Machine-Intent Expressions 0.1 Direction
 
 This document states experimental semantic requirements derived from
-[RFC 0006](../rfcs/0006-machine-intent-expressions.md). The current Rust model does not yet
-implement these objects, and no surface grammar is selected.
+[RFC 0006](../rfcs/0006-machine-intent-expressions.md). The Rust model implements only a narrow
+pilot: integer addition intents, distinct fact/preference/requirement/obligation records,
+PASS/FAIL/UNKNOWN handling, an identity-bound alignment capability, intent-preserving high-level
+IR records, and a conservative no-overflow promise decision. No surface grammar is selected.
 
 ## 1. Purpose
 

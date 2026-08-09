@@ -1,6 +1,6 @@
 use std::{env, fs, path::Path, process::ExitCode};
 
-use mncs_model::Program;
+use mncs_model::{EvidenceManifest, Program, SemanticDiff};
 use mncs_syntax::{analyze, SourceMetrics};
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +24,12 @@ fn main() -> ExitCode {
             }
             validate(&path)
         }
+        "canonicalize" => one_manifest_command(args, canonicalize),
+        "identity" => one_manifest_command(args, identity),
+        "graph" => one_manifest_command(args, graph),
+        "evidence-manifest" => one_manifest_command(args, evidence_manifest),
+        "diff" => two_manifest_command(args, diff),
+        "evidence-check" => two_path_command(args, evidence_check),
         "syntax-metrics" => {
             let paths: Vec<String> = args.collect();
             syntax_metrics(paths)
@@ -75,6 +81,175 @@ fn validate(path: &str) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
+    }
+}
+
+fn one_manifest_command<I>(args: I, command: fn(&str) -> ExitCode) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let Some(path) = args.next() else {
+        eprintln!("error: command requires a manifest path");
+        print_usage();
+        return ExitCode::from(2);
+    };
+    if args.next().is_some() {
+        eprintln!("error: unexpected additional arguments");
+        return ExitCode::from(2);
+    }
+    command(&path)
+}
+
+fn two_manifest_command<I>(args: I, command: fn(&str, &str) -> ExitCode) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let (Some(before), Some(after)) = (args.next(), args.next()) else {
+        eprintln!("error: command requires before and after manifest paths");
+        print_usage();
+        return ExitCode::from(2);
+    };
+    if args.next().is_some() {
+        eprintln!("error: unexpected additional arguments");
+        return ExitCode::from(2);
+    }
+    command(&before, &after)
+}
+
+fn two_path_command<I>(args: I, command: fn(&str, &str) -> ExitCode) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    two_manifest_command(args, command)
+}
+
+fn read_valid_program(path: &str) -> Result<Program, ExitCode> {
+    let input = read_source(path)?;
+    let program = Program::from_json(&input).map_err(|error| {
+        eprintln!("error: {error}");
+        ExitCode::from(2)
+    })?;
+    let report = program.validate();
+    if !report.valid {
+        if !print_json(&report) {
+            return Err(ExitCode::from(2));
+        }
+        return Err(ExitCode::FAILURE);
+    }
+    Ok(program)
+}
+
+fn canonicalize(path: &str) -> ExitCode {
+    let program = match read_valid_program(path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    match program.canonical_form() {
+        Ok(form) if print_json(&form) => ExitCode::SUCCESS,
+        Ok(_) | Err(_) => {
+            eprintln!("error: unable to create canonical representation");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn identity(path: &str) -> ExitCode {
+    let program = match read_valid_program(path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    if print_json(&program.semantic_identities()) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(2)
+    }
+}
+
+fn graph(path: &str) -> ExitCode {
+    let program = match read_valid_program(path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    match program.semantic_graph() {
+        Ok(graph) if print_json(&graph) => ExitCode::SUCCESS,
+        Ok(_) | Err(_) => {
+            eprintln!("error: unable to construct semantic graph");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn evidence_manifest(path: &str) -> ExitCode {
+    let program = match read_valid_program(path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    match program.evidence_manifest() {
+        Ok(manifest) if print_json(&manifest) => ExitCode::SUCCESS,
+        Ok(_) | Err(_) => {
+            eprintln!("error: unable to construct evidence manifest");
+            ExitCode::from(2)
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct DiffReport {
+    semantic: SemanticDiff,
+    invalidation: mncs_model::InvalidationReport,
+}
+
+fn diff(before_path: &str, after_path: &str) -> ExitCode {
+    let before = match read_valid_program(before_path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let after = match read_valid_program(after_path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let semantic = before.semantic_diff(&after);
+    let invalidation = match before.invalidation_from(&after) {
+        Ok(report) => report,
+        Err(_) => {
+            eprintln!("error: unable to compute invalidation report");
+            return ExitCode::from(2);
+        }
+    };
+    if print_json(&DiffReport {
+        semantic,
+        invalidation,
+    }) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(2)
+    }
+}
+
+fn evidence_check(manifest_path: &str, program_path: &str) -> ExitCode {
+    let manifest_input = match read_source(manifest_path) {
+        Ok(input) => input,
+        Err(code) => return code,
+    };
+    let manifest: EvidenceManifest = match serde_json::from_str(&manifest_input) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            eprintln!("error: unable to parse evidence manifest: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let program = match read_valid_program(program_path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    match manifest.assess_against(&program) {
+        Ok(report) if print_json(&report) => ExitCode::SUCCESS,
+        Ok(_) | Err(_) => {
+            eprintln!("error: unable to assess evidence freshness");
+            ExitCode::from(2)
+        }
     }
 }
 
@@ -232,6 +407,12 @@ fn print_usage() {
     eprintln!();
     eprintln!("Usage:");
     eprintln!("  mncs validate <manifest.json>");
+    eprintln!("  mncs canonicalize <manifest.json>");
+    eprintln!("  mncs identity <manifest.json>");
+    eprintln!("  mncs graph <manifest.json>");
+    eprintln!("  mncs evidence-manifest <manifest.json>");
+    eprintln!("  mncs diff <before.json> <after.json>");
+    eprintln!("  mncs evidence-check <evidence.json> <current.json>");
     eprintln!("  mncs syntax-metrics <source> [source ...]");
     eprintln!("  mncs syntax-tournament <tournament.json>");
 }

@@ -4,7 +4,7 @@
 
 Research and reference implementation for a general-purpose, verification-native programming language built on Machine-Native Complexity Standard (MNCS) principles.
 
-> **Project status:** semantic-model and source-representation research with executable prototypes. No final grammar, compiler stability, or production suitability is claimed yet.
+> **Project status:** the 0.1 executable semantic model now has an experimental 0.2 foundation for canonical form, stable semantic identities, graph dependencies, evidence invalidation, and a narrow machine-intent pilot. No final grammar, compiler stability, or production suitability is claimed yet.
 
 ## Why this project exists
 
@@ -31,9 +31,9 @@ An MNCS-oriented program should make it possible to answer:
 - `docs/` — vision, architecture, syntax research, machine-intent expressions, recursive refinement, terminology, trust model, and explicit non-goals.
 - `spec/` — early normative semantic and representation documents.
 - `rfcs/` — design proposals that can evolve independently of the specification.
-- `crates/mncs-model/` — an executable Rust model of the initial semantic objects and validation rules.
+- `crates/mncs-model/` — the executable semantic model, canonical representation, identities, graph, evidence manifest, invalidation logic, and narrow machine-intent pilot.
 - `crates/mncs-syntax/` — deterministic, tokenizer-neutral source representation metrics.
-- `crates/mncs-cli/` — validation and syntax-tournament commands.
+- `crates/mncs-cli/` — validation, canonicalization, identity, graph, evidence, diff, and syntax-tournament commands.
 - `examples/` — semantic manifests, competing source candidates, canonical semantic forms, machine-intent sketches, and semantic patches.
 
 The JSON manifests and source candidates are experimental transport and research representations. They are not yet a selected production grammar.
@@ -54,7 +54,7 @@ The 0.1 model contains:
 
 A key initial rule is that every effect must identify an authorizing capability, and that capability must be declared by the function. Evidence must reference a declared contract property rather than floating as unbound metadata.
 
-Machine-intent operations, lowering envelopes, portability envelopes, and evidence-bearing facts are proposed in [RFC 0006](rfcs/0006-machine-intent-expressions.md) but are not yet implemented by the Rust model.
+The experimental 0.2 layer adds deterministic SHA-256 content fingerprints, structural semantic identities, a typed semantic graph, dependency-aware evidence manifests, and conservative invalidation. It also contains a deliberately small machine-intent pilot: explicit integer addition intents, PASS/FAIL/UNKNOWN obligations, alignment capabilities bound to subject and scope, intent-preserving high-level IR records, and a no-overflow backend-promise decision. This is not a production compiler or backend.
 
 ## Try the semantic prototype
 
@@ -69,6 +69,21 @@ The following example intentionally performs a network effect without declaring 
 ```bash
 cargo run -p mncs-cli -- validate examples/invalid-undeclared-effect.mncs.json
 ```
+
+Explore the semantic foundation with the small before/after examples:
+
+```bash
+cargo run -p mncs-cli -- canonicalize examples/semantic-foundation/before.mncs.json
+cargo run -p mncs-cli -- graph examples/semantic-foundation/before.mncs.json
+cargo run -p mncs-cli -- diff \
+  examples/semantic-foundation/before.mncs.json \
+  examples/semantic-foundation/after.mncs.json
+cargo run -p mncs-cli -- evidence-manifest examples/semantic-foundation/before.mncs.json > /tmp/mncs-evidence.json
+cargo run -p mncs-cli -- evidence-check /tmp/mncs-evidence.json \
+  examples/semantic-foundation/after.mncs.json
+```
+
+The local contract-expression change changes the contract and function fingerprints and marks the dependent evidence stale. Canonicalization sorts set-like declarations while preserving ordered inputs and outputs.
 
 ## Explore the source syntax laboratory
 
@@ -97,7 +112,7 @@ See [Source Syntax Laboratory](docs/source-syntax-lab.md), [Source Representatio
 
 ## Machine-intent expressions
 
-The proposed machine-intent track makes useful low-level behavior explicit rather than relying on accidental source patterns or backend folklore.
+The experimental pilot makes useful low-level behavior explicit rather than relying on accidental source patterns or backend folklore. It currently models integer addition and the identity/obligation boundary; the broader expression families remain design work.
 
 For example, a future language should distinguish:
 
@@ -215,7 +230,7 @@ MNCS must remain applicable to existing languages even if this project never bec
 
 ## Roadmap
 
-The immediate target is **Milestone 0.1 — Executable Semantic Model**, with source representations and machine-intent expressions operating as cross-cutting research tracks. See [ROADMAP.md](ROADMAP.md).
+The current implementation is progressing through **Milestone 0.2 — Semantic graph, identity, and recursive artifacts** while retaining the 0.1 model and syntax laboratory. See [ROADMAP.md](ROADMAP.md).
 
 ## Contributing
 

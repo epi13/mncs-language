@@ -63,3 +63,12 @@ Validators SHOULD emit stable diagnostic codes, semantic paths, and explanatory 
 ## 7. Versioning
 
 A validator MUST reject schema versions it does not support unless an explicit compatibility mode defines safe behavior. Silent reinterpretation is forbidden.
+
+## 8. Canonical semantic representation and identity (0.2 foundation)
+
+The executable model provides a versioned `0.2` canonical JSON representation independent of
+human source syntax. Object fields are deterministic; function input and output order is retained;
+set-like declaration collections are sorted by semantic key. Structural semantic identities are
+namespaced separately from SHA-256 content fingerprints. Changing semantic content changes the
+relevant fingerprint while preserving the structural identity when the declared subject remains
+the same.
