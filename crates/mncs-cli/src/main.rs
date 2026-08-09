@@ -1,6 +1,10 @@
 use std::{env, fs, path::Path, process::ExitCode};
 
-use mncs_model::{EvidenceManifest, Program, SemanticDiff};
+use mncs_model::{
+    CausalSlice, Confidence, DeterministicVerifier, DiagnosticCategory, DiagnosticObligation,
+    EvidenceFreshness, EvidenceManifest, EvidenceState, ObligationStatus, Program, SemanticDiff,
+    SemanticId,
+};
 use mncs_syntax::{analyze, SourceMetrics};
 use serde::{Deserialize, Serialize};
 
@@ -28,7 +32,12 @@ fn main() -> ExitCode {
         "identity" => one_manifest_command(args, identity),
         "graph" => one_manifest_command(args, graph),
         "evidence-manifest" => one_manifest_command(args, evidence_manifest),
+        "ir" => one_manifest_command(args, ir),
+        "obligations" => one_manifest_command(args, obligations),
+        "verify" => one_manifest_command(args, verify),
+        "diagnose" => one_manifest_command(args, diagnose),
         "diff" => two_manifest_command(args, diff),
+        "compare" => two_manifest_command(args, compare),
         "evidence-check" => two_path_command(args, evidence_check),
         "syntax-metrics" => {
             let paths: Vec<String> = args.collect();
@@ -195,6 +204,144 @@ fn evidence_manifest(path: &str) -> ExitCode {
     }
 }
 
+fn ir(path: &str) -> ExitCode {
+    let program = match read_valid_program(path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    match program.lower_to_ir() {
+        Ok(ir) if print_json(&ir) => ExitCode::SUCCESS,
+        Ok(_) | Err(_) => {
+            eprintln!("error: unable to lower manifest to high-level IR");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn obligations(path: &str) -> ExitCode {
+    let program = match read_valid_program(path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    if print_json(&program.generate_obligations()) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(2)
+    }
+}
+
+fn verify(path: &str) -> ExitCode {
+    let program = match read_valid_program(path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let results = program.verify_obligations(&DeterministicVerifier::default());
+    let failed = results
+        .iter()
+        .any(|result| result.status == ObligationStatus::Fail);
+    let unresolved = results
+        .iter()
+        .any(|result| result.status == ObligationStatus::Unknown);
+    if !print_json(&results) {
+        ExitCode::from(2)
+    } else if failed || unresolved {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticReport {
+    obligations: Vec<DiagnosticObligation>,
+    causal_slices: Vec<CausalSlice>,
+}
+
+fn diagnose(path: &str) -> ExitCode {
+    let input = match read_source(path) {
+        Ok(input) => input,
+        Err(code) => return code,
+    };
+    let program = match Program::from_json(&input) {
+        Ok(program) => program,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let generated = program.generate_obligations();
+    let graph = program.semantic_graph().ok();
+    let mut diagnostics = Vec::new();
+    let mut slices = Vec::new();
+    for obligation in generated.obligations {
+        if obligation.status == ObligationStatus::Pass {
+            continue;
+        }
+        let mut diagnostic = DiagnosticObligation::new(
+            SemanticId(format!("mncs:0.2:diagnostic:{}", obligation.identity.0)),
+            obligation.subject.clone(),
+            if obligation.method == "language-effect-closure" {
+                DiagnosticCategory::Authority
+            } else {
+                DiagnosticCategory::Verification
+            },
+        );
+        diagnostic.obligation = Some(obligation.identity.clone());
+        diagnostic.evidence_state = match obligation.freshness {
+            EvidenceFreshness::Stale => EvidenceState::Stale,
+            EvidenceFreshness::Current | EvidenceFreshness::Unknown => EvidenceState::Unknown,
+        };
+        diagnostic.assumptions = obligation.assumptions;
+        diagnostic.dependencies = obligation.dependencies;
+        diagnostic.severity = if obligation.status == ObligationStatus::Fail {
+            3
+        } else {
+            2
+        };
+        diagnostic.confidence = if obligation.status == ObligationStatus::Fail {
+            Confidence::High
+        } else {
+            Confidence::Medium
+        };
+        diagnostic.fallback = obligation.fallback;
+        diagnostic.message = format!(
+            "{} obligation is {:?}",
+            obligation.method, obligation.status
+        );
+        if let Some(graph) = &graph {
+            slices.push(graph.causal_slice(&obligation.subject));
+        } else {
+            let mut nodes = vec![obligation.subject.clone()];
+            nodes.extend(diagnostic.dependencies.iter().cloned());
+            nodes.sort();
+            nodes.dedup();
+            slices.push(CausalSlice {
+                schema_version: "0.2".to_owned(),
+                root: obligation.subject,
+                nodes,
+                edges: Vec::new(),
+                complete: false,
+                limitations: vec![
+                    "semantic graph unavailable because the program is invalid".to_owned(),
+                    "slice contains dependency identities only".to_owned(),
+                ],
+            });
+        }
+        diagnostics.push(diagnostic);
+    }
+    let failed = !diagnostics.is_empty();
+    if !print_json(&DiagnosticReport {
+        obligations: diagnostics,
+        causal_slices: slices,
+    }) {
+        ExitCode::from(2)
+    } else if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct DiffReport {
     semantic: SemanticDiff,
@@ -225,6 +372,24 @@ fn diff(before_path: &str, after_path: &str) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(2)
+    }
+}
+
+fn compare(before_path: &str, after_path: &str) -> ExitCode {
+    let before = match read_valid_program(before_path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let after = match read_valid_program(after_path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    match before.semantic_delta(&after) {
+        Ok(delta) if print_json(&delta) => ExitCode::SUCCESS,
+        Ok(_) | Err(_) => {
+            eprintln!("error: unable to compute semantic delta");
+            ExitCode::from(2)
+        }
     }
 }
 
@@ -411,7 +576,12 @@ fn print_usage() {
     eprintln!("  mncs identity <manifest.json>");
     eprintln!("  mncs graph <manifest.json>");
     eprintln!("  mncs evidence-manifest <manifest.json>");
+    eprintln!("  mncs ir <manifest.json>");
+    eprintln!("  mncs obligations <manifest.json>");
+    eprintln!("  mncs verify <manifest.json>");
+    eprintln!("  mncs diagnose <manifest.json>");
     eprintln!("  mncs diff <before.json> <after.json>");
+    eprintln!("  mncs compare <before.json> <after.json>");
     eprintln!("  mncs evidence-check <evidence.json> <current.json>");
     eprintln!("  mncs syntax-metrics <source> [source ...]");
     eprintln!("  mncs syntax-tournament <tournament.json>");

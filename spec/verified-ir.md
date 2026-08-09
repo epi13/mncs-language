@@ -1,10 +1,17 @@
 # Verified Intermediate Representation 0.1 Direction
 
-The current executable pilot exposes only a small high-level IR record for integer machine-intent
-operations. It preserves operation, fact, requirement, and obligation identities but does not
-implement SSA, backend lowering, or a complete IR schema.
+The current executable pilot exposes a deterministic, serializable high-level IR for the supported
+0.1 semantic manifest subset, plus the existing small integer machine-intent record. It preserves
+typed values, state regions, normal and failure paths, effect capability uses, contracts, evidence,
+generated obligations, semantic graph provenance, and operation/fact/requirement/obligation
+identities. It does not implement SSA, backend lowering, or a complete IR schema.
 
 This document states design constraints rather than a completed IR grammar.
+
+The executable IR is versioned `0.3` and is produced by `Program::lower_to_ir`. Its canonical JSON
+and fingerprint are deterministic for a validated input. Lowering failures are explicit for invalid
+programs; unsupported semantic constructs are not guessed into machine operations. The trace map is
+provenance and inspectability infrastructure, not a proof of lowering correctness.
 
 ## 1. Goals
 

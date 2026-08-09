@@ -62,9 +62,16 @@ Initial executable foundation delivered in the Rust model and CLI:
 - conservative dependency-aware evidence invalidation;
 - executable evidence manifests with dependency fingerprints and stale assessment;
 - CLI commands for canonicalization, identities, graph emission, evidence manifests, diffs, and freshness checks; and
-- a narrow machine-intent pilot preserving explicit operation and obligation identities.
+- a narrow machine-intent pilot preserving explicit operation and obligation identities;
+- executable diagnostic obligations and conservative graph-based causal slices;
+- finite refinement budgets, untrusted isolated repair proposals, and explicit promotion decisions;
+- semantic, authority, and evidence delta records with explicit authority-broadening flags; and
+- distinct observation, verification, mutation, generation, and promotion capabilities.
 
-The larger recursive-artifact schemas and independent verifier integrations remain future work.
+The implemented recursive artifacts are intentionally partial: causal slices are graph-only,
+repair application supports one isolated contract-expression change, and promotion remains an
+explicit record rather than an automatic mutation. Diagnostic, transformation, realization, and
+verifier identities will need a broader versioned vocabulary over time.
 
 - define stable identities for components, properties, assumptions, verifiers, artifacts, diagnostics, transformations, machine-intent operations, obligations, references, and realizations;
 - model dependency and invalidation edges;
@@ -76,7 +83,24 @@ The larger recursive-artifact schemas and independent verifier integrations rema
 - ensure observation and mutation require distinct capabilities;
 - version the canonical semantic representation independently from human syntax.
 
+The first executable subset of these artifacts is in `mncs-model::refinement` and
+`mncs-model::delta`; the JSON shapes are versioned `0.2` research artifacts, not an accepted RFC.
+
 ## 0.3 — High-level MNCS IR
+
+Early executable foundation now present for the supported 0.1 manifest subset:
+
+- deterministic `0.3` high-level IR serialization and SHA-256 fingerprints;
+- typed values, explicit state regions, normal/error/compensation/fatal blocks, and transitions;
+- effect operations with explicit capability uses;
+- contract, assumption, evidence, and semantic graph traceability;
+- generated obligations carried by the IR;
+- a pure verifier request/result protocol with a deterministic capability-consistency verifier; and
+- conservative diagnostic output connected to generated obligations.
+
+This is not verified SSA and does not claim complete lowering correctness. The remaining work is to
+expand supported semantic constructs, add richer state/transition and machine-intent lowering, and
+connect independent verifier evidence without weakening freshness or authority checks.
 
 - define typed state, transitions, ownership relationships, and regions;
 - represent normal, error, compensation, and diagnostic paths;

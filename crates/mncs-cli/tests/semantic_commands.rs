@@ -90,3 +90,83 @@ fn invalid_semantic_input_keeps_rejection_exit_code() {
     let report: Value = serde_json::from_slice(&output.stdout).expect("validation JSON");
     assert_eq!(report["valid"], false);
 }
+
+#[test]
+fn ir_obligations_verifier_and_compare_commands_are_traceable() {
+    let manifest = example("account-transfer.mncs.json");
+    let ir = binary().args(["ir", &manifest]).output().expect("run IR");
+    assert!(ir.status.success());
+    let ir_json: Value = serde_json::from_slice(&ir.stdout).expect("IR JSON");
+    assert_eq!(ir_json["schema_version"], "0.3");
+    assert!(!ir_json["functions"][0]["blocks"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(!ir_json["trace"]["entries"].as_array().unwrap().is_empty());
+
+    let obligations = binary()
+        .args(["obligations", &manifest])
+        .output()
+        .expect("run obligations");
+    assert!(obligations.status.success());
+    let obligation_json: Value =
+        serde_json::from_slice(&obligations.stdout).expect("obligations JSON");
+    assert!(obligation_json["obligations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["status"] == "PASS"));
+
+    let verified = binary()
+        .args(["verify", &manifest])
+        .output()
+        .expect("run verifier");
+    assert!(verified.status.success());
+    let verified_json: Value = serde_json::from_slice(&verified.stdout).expect("verifier JSON");
+    assert!(verified_json
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item["status"] == "PASS"));
+
+    let before = example("semantic-foundation/before.mncs.json");
+    let after = example("semantic-foundation/after.mncs.json");
+    let compare = binary()
+        .args(["compare", &before, &after])
+        .output()
+        .expect("run compare");
+    assert!(compare.status.success());
+    let compare_json: Value = serde_json::from_slice(&compare.stdout).expect("compare JSON");
+    assert_eq!(compare_json["authority"]["authority_broadened"], false);
+    assert!(!compare_json["semantic"]["changed_contracts"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn diagnose_exposes_failed_obligation_and_preserves_invalid_exit_status() {
+    let invalid = example("invalid-undeclared-effect.mncs.json");
+    let output = binary()
+        .args(["diagnose", &invalid])
+        .output()
+        .expect("run diagnose");
+    assert_eq!(output.status.code(), Some(1));
+    let report: Value = serde_json::from_slice(&output.stdout).expect("diagnostic JSON");
+    assert_eq!(report["obligations"][0]["category"], "authority");
+    assert!(report["obligations"][0]["obligation"].is_string());
+    assert_eq!(report["causal_slices"].as_array().unwrap().len(), 1);
+    assert_eq!(report["causal_slices"][0]["complete"], false);
+}
+
+#[test]
+fn verify_does_not_treat_unknown_evidence_as_success() {
+    let manifest = example("ir/unknown-contract-evidence.mncs.json");
+    let output = binary()
+        .args(["verify", &manifest])
+        .output()
+        .expect("run unresolved verify");
+    assert_eq!(output.status.code(), Some(1));
+    let report: Value = serde_json::from_slice(&output.stdout).expect("verifier JSON");
+    assert_eq!(report[0]["status"], "UNKNOWN");
+}

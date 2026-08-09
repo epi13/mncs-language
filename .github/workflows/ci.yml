@@ -42,5 +42,18 @@ jobs:
           cargo run -p mncs-cli -- canonicalize examples/semantic-foundation/before.mncs.json
           cargo run -p mncs-cli -- graph examples/semantic-foundation/before.mncs.json
           cargo run -p mncs-cli -- diff examples/semantic-foundation/before.mncs.json examples/semantic-foundation/after.mncs.json
+          cargo run -p mncs-cli -- compare examples/semantic-foundation/before.mncs.json examples/semantic-foundation/after.mncs.json
+          cargo run -p mncs-cli -- ir examples/account-transfer.mncs.json
+          cargo run -p mncs-cli -- obligations examples/account-transfer.mncs.json
+          cargo run -p mncs-cli -- verify examples/account-transfer.mncs.json
+          cargo run -p mncs-cli -- obligations examples/ir/unknown-contract-evidence.mncs.json
+          if cargo run -p mncs-cli -- verify examples/ir/unknown-contract-evidence.mncs.json; then
+            echo "UNKNOWN obligation was unexpectedly accepted as verified" >&2
+            exit 1
+          fi
+          if cargo run -p mncs-cli -- diagnose examples/invalid-undeclared-effect.mncs.json; then
+            echo "invalid diagnostic example was unexpectedly accepted" >&2
+            exit 1
+          fi
           cargo run -p mncs-cli -- evidence-manifest examples/semantic-foundation/before.mncs.json > /tmp/mncs-evidence.json
           cargo run -p mncs-cli -- evidence-check /tmp/mncs-evidence.json examples/semantic-foundation/after.mncs.json

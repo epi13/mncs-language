@@ -298,7 +298,7 @@ mod tests {
     fn local_contract_change_changes_contract_and_function_fingerprints() {
         let before = valid_program();
         let mut after = before.clone();
-        after.functions[0].contracts[0].expression = "amount >= 0".to_owned();
+        "amount >= 0".clone_into(&mut after.functions[0].contracts[0].expression);
         let diff = before.semantic_diff(&after);
         assert!(diff
             .changed
