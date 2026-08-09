@@ -1,0 +1,46 @@
+{
+  "schema_version": "0.1",
+  "module": "Examples.Executable",
+  "functions": [
+    {
+      "name": "unauthorized",
+      "inputs": [],
+      "outputs": [],
+      "contracts": [],
+      "effects": [
+        {"kind": "write", "target": "Store.value", "capability": "StoreMutation"}
+      ],
+      "capabilities": [],
+      "assumptions": [],
+      "evidence": [],
+      "failure": "atomic",
+      "body": {
+        "schema_version": "0.2",
+        "entry": "entry",
+        "parameters": [],
+        "blocks": [
+          {
+            "id": "entry",
+            "parameters": [],
+            "operations": [
+              {
+                "id": "write",
+                "kind": {
+                  "effect": {
+                    "effect": {"kind": "write", "target": "Store.value", "capability": "StoreMutation"},
+                    "capability": "StoreMutation"
+                  }
+                },
+                "operands": [],
+                "results": [],
+                "contracts": [],
+                "assumptions": []
+              }
+            ],
+            "terminator": {"return": {"values": []}}
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -3,15 +3,18 @@
 The current executable pilot exposes a deterministic, serializable high-level IR for the supported
 0.1 semantic manifest subset, plus the existing small integer machine-intent record. It preserves
 typed values, state regions, normal and failure paths, effect capability uses, contracts, evidence,
-generated obligations, semantic graph provenance, and operation/fact/requirement/obligation
-identities. It does not implement SSA, backend lowering, or a complete IR schema.
+generated obligations, semantic graph provenance, operation/fact/requirement/obligation identities,
+and transformation records. Executable `0.2` bodies lower directly to this HIR for the supported
+symbolic subset. It does not implement SSA, backend lowering, or a complete IR schema.
 
 This document states design constraints rather than a completed IR grammar.
 
 The executable IR is versioned `0.3` and is produced by `Program::lower_to_ir`. Its canonical JSON
 and fingerprint are deterministic for a validated input. Lowering failures are explicit for invalid
-programs; unsupported semantic constructs are not guessed into machine operations. The trace map is
-provenance and inspectability infrastructure, not a proof of lowering correctness.
+programs; unsupported semantic constructs are not guessed into machine operations. Body operations
+retain their semantic operation, value, machine-intent, envelope, obligation, evidence, and
+failure-path relationships. The trace map and transformation records are provenance and
+inspectability infrastructure, not a proof of lowering correctness.
 
 ## 1. Goals
 

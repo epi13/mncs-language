@@ -1,0 +1,48 @@
+{
+  "schema_version": "0.1",
+  "module": "Examples.Executable",
+  "functions": [
+    {
+      "name": "record",
+      "inputs": [{"name": "value", "type": "i32"}],
+      "outputs": [],
+      "contracts": [],
+      "effects": [
+        {"kind": "write", "target": "Store.value", "capability": "StoreMutation"}
+      ],
+      "capabilities": ["StoreMutation"],
+      "assumptions": [],
+      "evidence": [],
+      "failure": "atomic",
+      "body": {
+        "schema_version": "0.2",
+        "entry": "entry",
+        "parameters": [
+          {"id": "value", "name": "value", "type": {"integer": {"bits": 32, "signed": true}}}
+        ],
+        "blocks": [
+          {
+            "id": "entry",
+            "parameters": [],
+            "operations": [
+              {
+                "id": "write",
+                "kind": {
+                  "effect": {
+                    "effect": {"kind": "write", "target": "Store.value", "capability": "StoreMutation"},
+                    "capability": "StoreMutation"
+                  }
+                },
+                "operands": [],
+                "results": [],
+                "contracts": [],
+                "assumptions": []
+              }
+            ],
+            "terminator": {"return": {"values": []}}
+          }
+        ]
+      }
+    }
+  ]
+}

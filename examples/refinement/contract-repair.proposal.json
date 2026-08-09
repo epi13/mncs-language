@@ -1,0 +1,69 @@
+{
+  "schema_version": "0.2",
+  "identity": "mncs:0.2:proposal:contract-repair",
+  "generator": "mncs:0.2:generator:diagnostic-agent",
+  "baseline_identity": "mncs:0.2:program:Examples.SemanticFoundation",
+  "baseline_fingerprint": "b6c85a02c2c4a311ab3e9b5f030072942f19bd84c58723fc16104e39ddede015",
+  "objective": "tighten the nonnegative record precondition",
+  "protected_properties": [
+    "mncs:0.2:contract:Examples.SemanticFoundation::record::nonnegative"
+  ],
+  "permitted_mutation_region": [
+    "mncs:0.2:contract:Examples.SemanticFoundation::record::nonnegative"
+  ],
+  "required_capabilities": [
+    {
+      "identity": "mncs:0.2:authority:mutate-contract",
+      "kind": "mutate",
+      "scope": {
+        "scope_kind": "exact",
+        "subject": "mncs:0.2:contract:Examples.SemanticFoundation::record::nonnegative"
+      }
+    }
+  ],
+  "changes": [],
+  "predicted_invalidation": [],
+  "verification_plan": {
+    "verifier_classes": ["deterministic"],
+    "required_obligations": [],
+    "independent_authority_required": true
+  },
+  "budget": {
+    "max_iterations": 1,
+    "max_candidates": 1,
+    "max_verifier_calls": 1,
+    "mutation_scope": [
+      "mncs:0.2:contract:Examples.SemanticFoundation::record::nonnegative"
+    ],
+    "allowed_capabilities": [],
+    "resources": {
+      "max_steps": 10000,
+      "max_bytes": 16777216,
+      "max_wall_time_ms": 30000
+    }
+  },
+  "trusted": false,
+  "patches": [
+    {
+      "schema_version": "0.2",
+      "identity": "mncs:0.2:patch:contract-tightening",
+      "subject": "mncs:0.2:contract:Examples.SemanticFoundation::record::nonnegative",
+      "precondition": "value >= 0",
+      "operation": {
+        "replace_contract_expression": {
+          "before": "value >= 0",
+          "after": "value > 0"
+        }
+      },
+      "required_authority": {
+        "identity": "mncs:0.2:authority:mutate-contract",
+        "kind": "mutate",
+        "scope": {
+          "scope_kind": "exact",
+          "subject": "mncs:0.2:contract:Examples.SemanticFoundation::record::nonnegative"
+        }
+      },
+      "expected_invalidation": []
+    }
+  ]
+}

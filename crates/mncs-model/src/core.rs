@@ -31,6 +31,10 @@ pub struct Function {
     pub evidence: Vec<EvidenceClaim>,
     #[serde(default)]
     pub failure: FailureMode,
+    /// Optional syntax-independent executable semantics. Omitted bodies use
+    /// the declaration-only 0.1 compatibility path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<crate::FunctionBody>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

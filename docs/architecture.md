@@ -255,9 +255,11 @@ foundation: deterministic canonical JSON, content fingerprints, stable identitie
 invalidation edges, evidence manifests, diagnostic obligations, conservative causal slices, finite
 refinement budgets, isolated untrusted repair proposals, explicit promotion records, and separate
 semantic/authority/evidence deltas. An early 0.3 high-level IR is executable for the supported
-manifest subset, including typed values, state regions, failure paths, capability uses, generated
-obligations, semantic-to-IR traceability, and a pure local verifier protocol. The surface syntax,
-verified SSA, complete recursive analysis, and backend selection remain unresolved.
+manifest subset, including executable symbolic bodies, typed values, state regions, failure paths,
+capability uses, generated obligations, semantic-to-IR traceability, transformation provenance,
+lowering/portability envelopes, and a pure local verifier protocol with importable result artifacts.
+The surface syntax, verified SSA, complete recursive analysis, and backend selection remain
+unresolved.
 
 See [Machine-intent expressions](machine-intent-expressions.md),
 [Machine-Intent Expressions 0.1 Direction](../spec/machine-intent-expressions.md), and

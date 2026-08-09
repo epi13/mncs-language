@@ -34,6 +34,17 @@ pub enum IdentityKind {
     Effect,
     Capability,
     Evidence,
+    Body,
+    Block,
+    Operation,
+    Value,
+    RuntimeCheck,
+    MachineIntent,
+    Fact,
+    Requirement,
+    Obligation,
+    Realization,
+    Transformation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,6 +98,179 @@ impl Program {
                 kind: IdentityKind::Function,
                 fingerprint: fingerprint_json(&canonical_function(function).to_string()),
             });
+            if let Some(body) = &function.body {
+                let body_identity = body_id(&self.module, &function.name);
+                objects.push(IdentityRecord {
+                    identity: body_identity,
+                    kind: IdentityKind::Body,
+                    fingerprint: fingerprint_json(
+                        &body.canonical_json().expect("canonical executable body"),
+                    ),
+                });
+                for parameter in &body.parameters {
+                    objects.push(IdentityRecord {
+                        identity: parameter_id(&self.module, &function.name, &parameter.id),
+                        kind: IdentityKind::Value,
+                        fingerprint: fingerprint_json(
+                            &serde_json::to_string(parameter).expect("body parameter"),
+                        ),
+                    });
+                }
+                for block in &body.blocks {
+                    let block_identity = block_id(&self.module, &function.name, &block.id);
+                    objects.push(IdentityRecord {
+                        identity: block_identity,
+                        kind: IdentityKind::Block,
+                        fingerprint: fingerprint_json(
+                            &serde_json::to_string(block).expect("body block"),
+                        ),
+                    });
+                    for parameter in &block.parameters {
+                        objects.push(IdentityRecord {
+                            identity: value_id(
+                                &self.module,
+                                &function.name,
+                                &block.id,
+                                "parameter",
+                                &parameter.id,
+                            ),
+                            kind: IdentityKind::Value,
+                            fingerprint: fingerprint_json(
+                                &serde_json::to_string(parameter).expect("block parameter"),
+                            ),
+                        });
+                    }
+                    for operation in &block.operations {
+                        let operation_identity =
+                            operation_id(&self.module, &function.name, &block.id, &operation.id);
+                        objects.push(IdentityRecord {
+                            identity: operation_identity.clone(),
+                            kind: IdentityKind::Operation,
+                            fingerprint: fingerprint_json(
+                                &serde_json::to_string(operation).expect("body operation"),
+                            ),
+                        });
+                        for result in &operation.results {
+                            objects.push(IdentityRecord {
+                                identity: value_id(
+                                    &self.module,
+                                    &function.name,
+                                    &block.id,
+                                    &operation.id,
+                                    &result.id,
+                                ),
+                                kind: IdentityKind::Value,
+                                fingerprint: fingerprint_json(
+                                    &serde_json::to_string(result).expect("body value"),
+                                ),
+                            });
+                        }
+                        let generated_obligation = match &operation.kind {
+                            crate::BodyOperationKind::Integer { .. } => {
+                                Some(crate::obligations::body_obligation_id(
+                                    "integer-overflow",
+                                    &operation_identity,
+                                ))
+                            }
+                            crate::BodyOperationKind::Effect { .. } => {
+                                Some(crate::obligations::body_obligation_id(
+                                    "effect-authorized",
+                                    &operation_identity,
+                                ))
+                            }
+                            crate::BodyOperationKind::RuntimeCheck { .. } => {
+                                Some(crate::obligations::body_obligation_id(
+                                    "runtime-check",
+                                    &operation_identity,
+                                ))
+                            }
+                            crate::BodyOperationKind::Constant { .. } => None,
+                        };
+                        if let Some(identity) = generated_obligation {
+                            objects.push(IdentityRecord {
+                                identity,
+                                kind: IdentityKind::Obligation,
+                                fingerprint: fingerprint_json(
+                                    &serde_json::to_string(operation)
+                                        .expect("generated obligation"),
+                                ),
+                            });
+                        }
+                        if let crate::BodyOperationKind::RuntimeCheck { obligation, .. } =
+                            &operation.kind
+                        {
+                            objects.push(IdentityRecord {
+                                identity: obligation.clone(),
+                                kind: IdentityKind::Obligation,
+                                fingerprint: fingerprint_json(obligation.as_str()),
+                            });
+                        }
+                        if operation.machine_intent.is_some() {
+                            objects.push(IdentityRecord {
+                                identity: machine_intent_id(
+                                    &self.module,
+                                    &function.name,
+                                    &block.id,
+                                    &operation.id,
+                                ),
+                                kind: IdentityKind::MachineIntent,
+                                fingerprint: fingerprint_json(
+                                    &serde_json::to_string(&operation.machine_intent)
+                                        .expect("machine intent"),
+                                ),
+                            });
+                            if let Some(machine_intent) = &operation.machine_intent {
+                                for fact in &machine_intent.facts {
+                                    objects.push(IdentityRecord {
+                                        identity: fact.identity.clone(),
+                                        kind: IdentityKind::Fact,
+                                        fingerprint: fingerprint_json(
+                                            &serde_json::to_string(fact).expect("machine fact"),
+                                        ),
+                                    });
+                                }
+                                for requirement in &machine_intent.requirements {
+                                    objects.push(IdentityRecord {
+                                        identity: requirement.identity.clone(),
+                                        kind: IdentityKind::Requirement,
+                                        fingerprint: fingerprint_json(
+                                            &serde_json::to_string(requirement)
+                                                .expect("machine requirement"),
+                                        ),
+                                    });
+                                }
+                                for obligation in &machine_intent.obligations {
+                                    objects.push(IdentityRecord {
+                                        identity: obligation.identity.clone(),
+                                        kind: IdentityKind::Obligation,
+                                        fingerprint: fingerprint_json(
+                                            &serde_json::to_string(obligation)
+                                                .expect("machine obligation"),
+                                        ),
+                                    });
+                                }
+                            }
+                        }
+                        if matches!(
+                            operation.kind,
+                            crate::BodyOperationKind::RuntimeCheck { .. }
+                        ) {
+                            objects.push(IdentityRecord {
+                                identity: runtime_check_id(
+                                    &self.module,
+                                    &function.name,
+                                    &block.id,
+                                    &operation.id,
+                                ),
+                                kind: IdentityKind::RuntimeCheck,
+                                fingerprint: fingerprint_json(
+                                    &serde_json::to_string(operation).expect("runtime check"),
+                                ),
+                            });
+                        }
+                    }
+                }
+            }
             for contract in &function.contracts {
                 objects.push(IdentityRecord {
                     identity: contract_id(&self.module, &function.name, &contract.id),
@@ -251,6 +435,17 @@ fn make_id(kind: IdentityKind, components: &[&str]) -> SemanticId {
         IdentityKind::Effect => "effect",
         IdentityKind::Capability => "capability",
         IdentityKind::Evidence => "evidence",
+        IdentityKind::Body => "body",
+        IdentityKind::Block => "block",
+        IdentityKind::Operation => "operation",
+        IdentityKind::Value => "value",
+        IdentityKind::RuntimeCheck => "runtime-check",
+        IdentityKind::MachineIntent => "machine-intent",
+        IdentityKind::Fact => "fact",
+        IdentityKind::Requirement => "requirement",
+        IdentityKind::Obligation => "obligation",
+        IdentityKind::Realization => "realization",
+        IdentityKind::Transformation => "transformation",
     };
     SemanticId(format!(
         "mncs:0.2:{prefix}:{}",
@@ -260,6 +455,67 @@ fn make_id(kind: IdentityKind, components: &[&str]) -> SemanticId {
             .collect::<Vec<_>>()
             .join("::")
     ))
+}
+
+pub(crate) fn body_id(module: &str, function: &str) -> SemanticId {
+    make_id(IdentityKind::Body, &[module, function])
+}
+
+pub(crate) fn block_id(module: &str, function: &str, block: &str) -> SemanticId {
+    make_id(IdentityKind::Block, &[module, function, block])
+}
+
+pub(crate) fn operation_id(
+    module: &str,
+    function: &str,
+    block: &str,
+    operation: &str,
+) -> SemanticId {
+    make_id(
+        IdentityKind::Operation,
+        &[module, function, block, operation],
+    )
+}
+
+pub(crate) fn parameter_id(module: &str, function: &str, value: &str) -> SemanticId {
+    make_id(IdentityKind::Value, &[module, function, "parameter", value])
+}
+
+pub(crate) fn value_id(
+    module: &str,
+    function: &str,
+    block: &str,
+    operation: &str,
+    value: &str,
+) -> SemanticId {
+    make_id(
+        IdentityKind::Value,
+        &[module, function, block, operation, value],
+    )
+}
+
+pub(crate) fn runtime_check_id(
+    module: &str,
+    function: &str,
+    block: &str,
+    operation: &str,
+) -> SemanticId {
+    make_id(
+        IdentityKind::RuntimeCheck,
+        &[module, function, block, operation],
+    )
+}
+
+pub(crate) fn machine_intent_id(
+    module: &str,
+    function: &str,
+    block: &str,
+    operation: &str,
+) -> SemanticId {
+    make_id(
+        IdentityKind::MachineIntent,
+        &[module, function, block, operation],
+    )
 }
 
 fn encode_component(value: &str) -> String {

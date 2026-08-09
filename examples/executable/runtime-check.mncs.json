@@ -1,0 +1,50 @@
+{
+  "schema_version": "0.1",
+  "module": "Examples.Executable",
+  "functions": [
+    {
+      "name": "checked_path",
+      "inputs": [],
+      "outputs": [],
+      "contracts": [],
+      "effects": [],
+      "capabilities": [],
+      "assumptions": [],
+      "evidence": [],
+      "failure": "atomic",
+      "body": {
+        "schema_version": "0.2",
+        "entry": "entry",
+        "parameters": [],
+        "blocks": [
+          {
+            "id": "entry",
+            "parameters": [],
+            "operations": [
+              {
+                "id": "overflow_check",
+                "kind": {
+                  "runtime_check": {
+                    "obligation": "obligation:no-overflow",
+                    "fact": {
+                      "identity": "fact:no-overflow",
+                      "subject": "operation:checked-add",
+                      "scope": "entry",
+                      "statement": "the checked operation did not overflow"
+                    },
+                    "failure": "atomic"
+                  }
+                },
+                "operands": [],
+                "results": [],
+                "contracts": [],
+                "assumptions": []
+              }
+            ],
+            "terminator": {"return": {"values": []}}
+          }
+        ]
+      }
+    }
+  ]
+}

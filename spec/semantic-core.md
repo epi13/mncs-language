@@ -72,3 +72,8 @@ set-like declaration collections are sorted by semantic key. Structural semantic
 namespaced separately from SHA-256 content fingerprints. Changing semantic content changes the
 relevant fingerprint while preserving the structural identity when the declared subject remains
 the same.
+
+The executable model accepts an optional versioned `0.2` function-body extension. It is
+syntax-independent and currently supports symbolic parameters, constants, integer operations,
+effect operations, runtime checks, and explicit return/branch terminators. Legacy declaration-only
+`0.1` functions remain valid when the body is omitted; this artifact is not a final source grammar.

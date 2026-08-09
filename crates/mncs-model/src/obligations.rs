@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::body::BodyOperationKind;
 use crate::canonical::sha256_hex;
 use crate::identity::{assumption_id, capability_id, contract_id, effect_id, function_id};
 use crate::ir::effect_obligation_identity;
@@ -105,6 +106,116 @@ impl Program {
                     fallback: Some("retain explicit contract without backend promise".to_owned()),
                 });
             }
+            if let Some(body) = &function.body {
+                for block in &body.blocks {
+                    for operation in &block.operations {
+                        let subject = operation.identity(&self.module, &function.name, &block.id);
+                        match &operation.kind {
+                            BodyOperationKind::Integer { intent, .. } => {
+                                let requirement = requirement_id("integer-overflow", &subject);
+                                obligations.push(ObligationRecord {
+                                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                    identity: body_obligation_id("integer-overflow", &subject),
+                                    subject: subject.clone(),
+                                    requirement,
+                                    status: ObligationStatus::Unknown,
+                                    method: format!("symbolic-{intent:?}"),
+                                    assumptions: function
+                                        .assumptions
+                                        .iter()
+                                        .map(|assumption| {
+                                            assumption_id(&self.module, assumption)
+                                        })
+                                        .collect(),
+                                    dependencies: vec![function_identity.clone(), subject],
+                                    freshness: EvidenceFreshness::Unknown,
+                                    fallback: Some(
+                                        "retain explicit arithmetic behavior or insert a runtime check"
+                                            .to_owned(),
+                                    ),
+                                });
+                            }
+                            BodyOperationKind::Effect { effect, .. } => {
+                                let effect_identity = effect_id(
+                                    &self.module,
+                                    &function.name,
+                                    &serde_json::to_string(&crate::canonical::canonical_effect(
+                                        effect,
+                                    ))
+                                    .expect("body effect"),
+                                    function
+                                        .effects
+                                        .iter()
+                                        .position(|declared| declared == effect)
+                                        .unwrap_or(0),
+                                );
+                                obligations.push(ObligationRecord {
+                                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                    identity: body_obligation_id("effect-authorized", &subject),
+                                    subject: subject.clone(),
+                                    requirement: requirement_id("effect-authorized", &subject),
+                                    status: if function.capabilities.contains(&effect.capability) {
+                                        ObligationStatus::Pass
+                                    } else {
+                                        ObligationStatus::Fail
+                                    },
+                                    method: "body-effect-closure".to_owned(),
+                                    assumptions: Vec::new(),
+                                    dependencies: vec![subject, effect_identity],
+                                    freshness: EvidenceFreshness::Current,
+                                    fallback: None,
+                                });
+                            }
+                            BodyOperationKind::RuntimeCheck { obligation, .. } => {
+                                obligations.push(ObligationRecord {
+                                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                    identity: body_obligation_id("runtime-check", &subject),
+                                    subject,
+                                    requirement: obligation.clone(),
+                                    status: ObligationStatus::Unknown,
+                                    method: "runtime-check-establishment".to_owned(),
+                                    assumptions: Vec::new(),
+                                    dependencies: vec![obligation.clone()],
+                                    freshness: EvidenceFreshness::Unknown,
+                                    fallback: Some(
+                                        "the fact is available only on the successful runtime path"
+                                            .to_owned(),
+                                    ),
+                                });
+                            }
+                            BodyOperationKind::Constant { .. } => {}
+                        }
+                        if let Some(machine_intent) = &operation.machine_intent {
+                            for requirement in &machine_intent.requirements {
+                                obligations.push(ObligationRecord {
+                                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                    identity: body_obligation_id(
+                                        "machine-intent",
+                                        &requirement.identity,
+                                    ),
+                                    subject: operation.identity(
+                                        &self.module,
+                                        &function.name,
+                                        &block.id,
+                                    ),
+                                    requirement: requirement.identity.clone(),
+                                    status: ObligationStatus::Unknown,
+                                    method: "body-machine-intent".to_owned(),
+                                    assumptions: Vec::new(),
+                                    dependencies: vec![
+                                        operation.identity(&self.module, &function.name, &block.id),
+                                        requirement.identity.clone(),
+                                    ],
+                                    freshness: EvidenceFreshness::Unknown,
+                                    fallback: Some(
+                                        "use the declared conservative realization".to_owned(),
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
         }
         obligations.sort_by(|left, right| left.identity.cmp(&right.identity));
         ObligationGeneration {
@@ -143,6 +254,13 @@ pub fn generate_machine_intent_obligations(
 pub(crate) fn requirement_id(kind: &str, subject: &SemanticId) -> SemanticId {
     SemanticId(format!(
         "mncs:0.2:requirement:{kind}:{}",
+        sha256_hex(subject.0.as_bytes())
+    ))
+}
+
+pub(crate) fn body_obligation_id(kind: &str, subject: &SemanticId) -> SemanticId {
+    SemanticId(format!(
+        "mncs:0.2:obligation:body:{kind}:{}",
         sha256_hex(subject.0.as_bytes())
     ))
 }
