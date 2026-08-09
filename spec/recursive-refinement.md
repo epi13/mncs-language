@@ -1,6 +1,10 @@
 # Recursive Introspection and Refinement 0.1 Direction
 
-This document defines architectural requirements for recursive debugging and improvement. It does not yet define a complete executable schema.
+This document defines architectural requirements for recursive debugging and improvement. The Rust
+reference model now provides an intentionally partial versioned `0.2` artifact set for diagnostic
+obligations, graph-based causal slices, finite refinement budgets, isolated repair proposals,
+semantic/authority/evidence deltas, and promotion decisions. These types are an executable pilot,
+not a complete refinement protocol or accepted surface schema.
 
 ## 1. Principle
 
@@ -118,3 +122,14 @@ An MNCS compiler or verifier MAY be implemented in the language and MAY particip
 ## 11. Interoperability
 
 The semantic artifacts defined here SHOULD be usable by MNCS Forge, RAVEL, and independent tools without requiring one privileged orchestrator implementation.
+
+## 12. Current executable subset
+
+The current model serializes the artifacts above with stable semantic identities and deterministic
+ordering. A causal slice contains the connected semantic-graph neighborhood currently defensible;
+it is marked incomplete because control-flow, data-flow, verifier, and artifact causality are not
+yet represented. A repair proposal can apply only one explicitly permitted contract-expression
+change to an isolated clone, subject to finite budgets and explicit mutation authority. The result
+includes a semantic delta and does not promote the candidate. Promotion is represented separately
+and requires an explicit promotion authority. Invalid manifests retain dependency-only diagnostic
+slices rather than being presented as complete localization.

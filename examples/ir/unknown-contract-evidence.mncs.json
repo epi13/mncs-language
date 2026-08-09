@@ -1,0 +1,19 @@
+{
+  "schema_version": "0.1",
+  "module": "Examples.IR.Unknown",
+  "functions": [
+    {
+      "name": "check",
+      "inputs": [{"name": "value", "type": "i32"}],
+      "outputs": [],
+      "contracts": [
+        {"id": "positive", "kind": "requires", "expression": "value > 0"}
+      ],
+      "effects": [],
+      "capabilities": [],
+      "assumptions": [],
+      "evidence": [],
+      "failure": "isolated"
+    }
+  ]
+}

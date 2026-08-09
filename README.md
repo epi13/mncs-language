@@ -4,7 +4,7 @@
 
 Research and reference implementation for a general-purpose, verification-native programming language built on Machine-Native Complexity Standard (MNCS) principles.
 
-> **Project status:** the 0.1 executable semantic model now has an experimental 0.2 foundation for canonical form, stable semantic identities, graph dependencies, evidence invalidation, and a narrow machine-intent pilot. No final grammar, compiler stability, or production suitability is claimed yet.
+> **Project status:** the 0.1 executable semantic model now has an experimental 0.2 foundation for canonical form, stable semantic identities, graph dependencies, evidence invalidation, recursive artifacts, and authority-aware deltas. An early 0.3 high-level IR, deterministic lowering, obligation generation, and local verifier protocol are executable for the supported manifest subset. No final grammar, compiler stability, or production suitability is claimed yet.
 
 ## Why this project exists
 
@@ -31,9 +31,9 @@ An MNCS-oriented program should make it possible to answer:
 - `docs/` — vision, architecture, syntax research, machine-intent expressions, recursive refinement, terminology, trust model, and explicit non-goals.
 - `spec/` — early normative semantic and representation documents.
 - `rfcs/` — design proposals that can evolve independently of the specification.
-- `crates/mncs-model/` — the executable semantic model, canonical representation, identities, graph, evidence manifest, invalidation logic, and narrow machine-intent pilot.
+- `crates/mncs-model/` — the executable semantic model, canonical representation, identities, graph, evidence manifest, invalidation logic, recursive artifacts, high-level IR, and narrow machine-intent/verifier pilots.
 - `crates/mncs-syntax/` — deterministic, tokenizer-neutral source representation metrics.
-- `crates/mncs-cli/` — validation, canonicalization, identity, graph, evidence, diff, and syntax-tournament commands.
+- `crates/mncs-cli/` — validation, canonicalization, identity, graph, evidence, IR, obligation, verification, comparison, diagnostic, diff, and syntax-tournament commands.
 - `examples/` — semantic manifests, competing source candidates, canonical semantic forms, machine-intent sketches, and semantic patches.
 
 The JSON manifests and source candidates are experimental transport and research representations. They are not yet a selected production grammar.
@@ -54,7 +54,7 @@ The 0.1 model contains:
 
 A key initial rule is that every effect must identify an authorizing capability, and that capability must be declared by the function. Evidence must reference a declared contract property rather than floating as unbound metadata.
 
-The experimental 0.2 layer adds deterministic SHA-256 content fingerprints, structural semantic identities, a typed semantic graph, dependency-aware evidence manifests, and conservative invalidation. It also contains a deliberately small machine-intent pilot: explicit integer addition intents, PASS/FAIL/UNKNOWN obligations, alignment capabilities bound to subject and scope, intent-preserving high-level IR records, and a no-overflow backend-promise decision. This is not a production compiler or backend.
+The experimental 0.2 layer adds deterministic SHA-256 content fingerprints, structural semantic identities, a typed semantic graph, dependency-aware evidence manifests, conservative invalidation, diagnostic obligations, graph-based causal slices, finite refinement budgets, untrusted isolated repair proposals, explicit promotion records, and semantic/authority/evidence deltas. The early 0.3 layer lowers the supported manifest subset into deterministic high-level IR with typed values, state regions, normal and failure paths, explicit effect capability uses, contract/evidence traceability, generated obligations, a verifier request/result protocol, and a deterministic local verifier. It also contains a deliberately small machine-intent pilot: explicit integer addition intents, PASS/FAIL/UNKNOWN obligations, alignment capabilities bound to subject and scope, intent-preserving IR records, and a no-overflow backend-promise decision. This is not a production compiler or backend.
 
 ## Try the semantic prototype
 
@@ -81,9 +81,20 @@ cargo run -p mncs-cli -- diff \
 cargo run -p mncs-cli -- evidence-manifest examples/semantic-foundation/before.mncs.json > /tmp/mncs-evidence.json
 cargo run -p mncs-cli -- evidence-check /tmp/mncs-evidence.json \
   examples/semantic-foundation/after.mncs.json
+cargo run -p mncs-cli -- ir examples/account-transfer.mncs.json
+cargo run -p mncs-cli -- obligations examples/account-transfer.mncs.json
+cargo run -p mncs-cli -- verify examples/account-transfer.mncs.json
+cargo run -p mncs-cli -- obligations examples/ir/unknown-contract-evidence.mncs.json
+cargo run -p mncs-cli -- verify examples/ir/unknown-contract-evidence.mncs.json  # exits 1: UNKNOWN is unresolved
+cargo run -p mncs-cli -- diagnose examples/invalid-undeclared-effect.mncs.json
+cargo run -p mncs-cli -- compare \
+  examples/semantic-foundation/before.mncs.json \
+  examples/semantic-foundation/after.mncs.json
 ```
 
 The local contract-expression change changes the contract and function fingerprints and marks the dependent evidence stale. Canonicalization sorts set-like declarations while preserving ordered inputs and outputs.
+
+The IR command emits a deterministic, inspectable projection with state regions, capability uses, failure blocks, generated obligations, and a semantic-to-IR trace map. `verify` exercises the pure local capability/effect verifier; `diagnose` retains a conservative dependency-only slice when an invalid manifest prevents graph construction. The isolated repair proposal and promotion types are currently library-level artifacts, not an automatic source-rewrite command.
 
 ## Explore the source syntax laboratory
 
@@ -230,7 +241,7 @@ MNCS must remain applicable to existing languages even if this project never bec
 
 ## Roadmap
 
-The current implementation is progressing through **Milestone 0.2 — Semantic graph, identity, and recursive artifacts** while retaining the 0.1 model and syntax laboratory. See [ROADMAP.md](ROADMAP.md).
+The current implementation is progressing through **Milestone 0.2 — Semantic graph, identity, and recursive artifacts** and the first part of **Milestone 0.3 — High-level MNCS IR** while retaining the 0.1 model and syntax laboratory. See [ROADMAP.md](ROADMAP.md).
 
 ## Contributing
 

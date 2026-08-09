@@ -295,7 +295,7 @@ mod tests {
     fn contract_change_invalidates_supporting_evidence() {
         let before = valid_program();
         let mut after = before.clone();
-        after.functions[0].contracts[0].expression = "amount >= 0".to_owned();
+        "amount >= 0".clone_into(&mut after.functions[0].contracts[0].expression);
         let report = before.invalidation_from(&after).expect("invalidation");
         assert_eq!(report.invalidated_evidence.len(), 1);
     }

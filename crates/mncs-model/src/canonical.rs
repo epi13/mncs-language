@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fmt::Write;
 
 use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
@@ -51,7 +52,11 @@ impl Program {
 
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        write!(&mut hex, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    hex
 }
 
 pub(crate) fn canonical_json_value<T: serde::Serialize>(
@@ -399,7 +404,7 @@ mod tests {
     fn semantic_change_changes_canonical_fingerprint() {
         let before = program();
         let mut after = before.clone();
-        after.functions[0].contracts[0].expression = "false".to_owned();
+        "false".clone_into(&mut after.functions[0].contracts[0].expression);
         assert_ne!(
             before.content_fingerprint().unwrap(),
             after.content_fingerprint().unwrap()

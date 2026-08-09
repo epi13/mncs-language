@@ -221,7 +221,7 @@ mod tests {
         let before = valid_program();
         let saved = before.evidence_manifest().expect("manifest");
         let mut after = before;
-        after.functions[0].contracts[0].expression = "amount >= 0".to_owned();
+        "amount >= 0".clone_into(&mut after.functions[0].contracts[0].expression);
         let report = saved.assess_against(&after).expect("assessment");
         assert_eq!(report[0].state, EvidenceState::Stale);
         assert!(!report[0].invalidated_by.is_empty());
