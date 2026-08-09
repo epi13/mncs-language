@@ -5,6 +5,12 @@ use crate::{FailureMode, GraphError, Program};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SemanticChangeSet {
+    pub added_bodies: Vec<IdentityRecord>,
+    pub removed_bodies: Vec<IdentityRecord>,
+    pub changed_bodies: Vec<IdentityChange>,
+    pub added_operations: Vec<IdentityRecord>,
+    pub removed_operations: Vec<IdentityRecord>,
+    pub changed_operations: Vec<IdentityChange>,
     pub added_contracts: Vec<IdentityRecord>,
     pub removed_contracts: Vec<IdentityRecord>,
     pub changed_contracts: Vec<IdentityChange>,
@@ -17,6 +23,7 @@ pub struct SemanticChangeSet {
     pub changed_failure_modes: Vec<FailureChange>,
     pub changed_machine_intents: Vec<IdentityChange>,
     pub changed_obligations: Vec<IdentityChange>,
+    pub backend_promise_consequences: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,6 +68,22 @@ impl Program {
         let identities = self.semantic_diff(after);
         let invalidation = self.invalidation_from(after)?;
         let semantic = SemanticChangeSet {
+            added_bodies: by_kind(&identities.added, IdentityKind::Body),
+            removed_bodies: by_kind(&identities.removed, IdentityKind::Body),
+            changed_bodies: changed_by_kind(
+                &identities.changed,
+                &before_identities,
+                &after_identities,
+                IdentityKind::Body,
+            ),
+            added_operations: by_kind(&identities.added, IdentityKind::Operation),
+            removed_operations: by_kind(&identities.removed, IdentityKind::Operation),
+            changed_operations: changed_by_kind(
+                &identities.changed,
+                &before_identities,
+                &after_identities,
+                IdentityKind::Operation,
+            ),
             added_contracts: by_kind(&identities.added, IdentityKind::Contract),
             removed_contracts: by_kind(&identities.removed, IdentityKind::Contract),
             changed_contracts: changed_by_kind(
@@ -86,8 +109,19 @@ impl Program {
                 IdentityKind::Assumption,
             ),
             changed_failure_modes: failure_changes(self, after),
-            changed_machine_intents: Vec::new(),
-            changed_obligations: Vec::new(),
+            changed_machine_intents: changed_by_kind(
+                &identities.changed,
+                &before_identities,
+                &after_identities,
+                IdentityKind::MachineIntent,
+            ),
+            changed_obligations: changed_by_kind(
+                &identities.changed,
+                &before_identities,
+                &after_identities,
+                IdentityKind::Obligation,
+            ),
+            backend_promise_consequences: backend_promise_consequences(&identities),
         };
         let authority = AuthorityDelta {
             added_capabilities: semantic
@@ -189,6 +223,21 @@ fn authority_reasons(semantic: &SemanticChangeSet) -> Vec<String> {
         reasons.push("new effect declaration broadens the observable effect boundary".to_owned());
     }
     reasons
+}
+
+fn backend_promise_consequences(identities: &SemanticDiff) -> Vec<String> {
+    let mut consequences = Vec::new();
+    if !identities.added.is_empty()
+        || !identities.removed.is_empty()
+        || !identities.changed.is_empty()
+    {
+        consequences
+            .push("backend promises must be re-evaluated for changed semantic subjects".to_owned());
+    }
+    if !identities.removed.is_empty() {
+        consequences.push("removed semantic subjects cannot retain backend promises".to_owned());
+    }
+    consequences
 }
 
 #[cfg(test)]

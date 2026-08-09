@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 use crate::canonical::sha256_hex;
 use crate::identity::{contract_id, program_id};
 use crate::{
-    EdgeKind, EvidenceState, GraphError, MicroVerifier, ObligationGeneration, Program,
-    SemanticDelta, SemanticGraph, SemanticId, VerifierResult,
+    ArithmeticIntent, BodyOperation, BodyOperationKind, EdgeKind, EvidenceState, GraphError,
+    MicroVerifier, ObligationGeneration, Program, SemanticDelta, SemanticGraph, SemanticId,
+    VerifierResult,
 };
 
 pub const REFINEMENT_SCHEMA_VERSION: &str = "0.2";
@@ -84,11 +85,13 @@ pub struct CausalSliceEdge {
 }
 
 impl SemanticGraph {
-    /// Return the currently defensible connected semantic neighborhood.
+    /// Return the currently defensible backward semantic neighborhood.
     ///
-    /// This is intentionally conservative and graph-only: the 0.2 graph has
-    /// no control/data-flow or verifier causality, so the result is marked
-    /// incomplete rather than presented as a minimal proof slice.
+    /// Edges are followed from their target to their source, so a slice rooted
+    /// at an obligation or operation contains the values, effects, contracts,
+    /// and authority declarations that can contribute to it. This is still
+    /// conservative: the graph does not yet encode complete path-sensitive
+    /// control/data-flow or verifier-artifact causality.
     pub fn causal_slice(&self, root: &SemanticId) -> CausalSlice {
         let known: BTreeSet<_> = self
             .nodes
@@ -101,17 +104,8 @@ impl SemanticGraph {
         queue.push_back(root.clone());
         while let Some(current) = queue.pop_front() {
             for edge in &self.edges {
-                let neighbor = if edge.from == current {
-                    Some(edge.to.clone())
-                } else if edge.to == current {
-                    Some(edge.from.clone())
-                } else {
-                    None
-                };
-                if let Some(neighbor) = neighbor {
-                    if nodes.insert(neighbor.clone()) {
-                        queue.push_back(neighbor);
-                    }
+                if edge.to == current && nodes.insert(edge.from.clone()) {
+                    queue.push_back(edge.from.clone());
                 }
             }
         }
@@ -132,8 +126,8 @@ impl SemanticGraph {
                 .then(left.kind.cmp(&right.kind))
         });
         let mut limitations = vec![
-            "slice is derived from semantic graph connectivity only".to_owned(),
-            "control-flow, data-flow, verifier, and artifact causality are not represented"
+            "slice follows conservative backward semantic dependencies".to_owned(),
+            "path-sensitive control-flow and complete verifier/artifact causality are not represented"
                 .to_owned(),
         ];
         if !known.contains(root) {
@@ -250,6 +244,67 @@ pub struct SemanticChange {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticPatch {
+    pub schema_version: String,
+    pub identity: SemanticId,
+    pub subject: SemanticId,
+    pub precondition: Option<String>,
+    pub operation: PatchOperation,
+    pub required_authority: AuthorityCapability,
+    pub expected_invalidation: Vec<SemanticId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PatchOperation {
+    ReplaceContractExpression {
+        before: String,
+        after: String,
+    },
+    AddAssumptionReference {
+        function: String,
+        assumption: String,
+    },
+    RemoveAssumptionReference {
+        function: String,
+        assumption: String,
+    },
+    ChangeIntegerIntent {
+        before: ArithmeticIntent,
+        after: ArithmeticIntent,
+    },
+    AddRuntimeCheck {
+        block: String,
+        operation: Box<BodyOperation>,
+    },
+    SelectRealization {
+        realization: SemanticId,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtectedPropertyStatus {
+    Preserved,
+    Regressed,
+    Unknown,
+    NotEvaluated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtectedPropertyResult {
+    pub property: SemanticId,
+    pub status: ProtectedPropertyStatus,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtectedPropertyEvaluation {
+    pub schema_version: String,
+    pub results: Vec<ProtectedPropertyResult>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerificationPlan {
     pub verifier_classes: Vec<String>,
     pub required_obligations: Vec<SemanticId>,
@@ -272,6 +327,8 @@ pub struct RepairProposal {
     pub verification_plan: VerificationPlan,
     pub budget: RefinementBudget,
     pub trusted: bool,
+    #[serde(default)]
+    pub patches: Vec<SemanticPatch>,
 }
 
 impl RepairProposal {
@@ -352,8 +409,27 @@ impl RepairProposal {
         if self.budget.max_iterations == 0
             || self.budget.max_candidates == 0
             || self.budget.max_verifier_calls == 0
-            || self.changes.len() != 1
+            || (self.patches.len() != 1 && self.changes.len() != 1)
+            || (!self.patches.is_empty() && !self.changes.is_empty())
+            || (self.patches.is_empty() && self.changes.len() != 1)
         {
+            return Err(RefinementError::MutationNotPermitted);
+        }
+        if self.patches.len() > 1 || (!self.patches.is_empty() && !self.changes.is_empty()) {
+            return Err(RefinementError::MutationNotPermitted);
+        }
+        if let Some(patch) = self.patches.first() {
+            if !self.permitted_mutation_region.contains(&patch.subject)
+                || !self
+                    .required_capabilities
+                    .iter()
+                    .any(|capability| capability.permits(AuthorityKind::Mutate, &patch.subject))
+            {
+                return Err(RefinementError::MutationNotPermitted);
+            }
+            return patch.apply_isolated(baseline);
+        }
+        if self.changes.len() != 1 {
             return Err(RefinementError::MutationNotPermitted);
         }
         let change = &self.changes[0];
@@ -420,6 +496,173 @@ impl RepairProposal {
     }
 }
 
+impl SemanticPatch {
+    pub fn apply_isolated(&self, baseline: &Program) -> Result<CandidateState, RefinementError> {
+        if !self
+            .required_authority
+            .permits(AuthorityKind::Mutate, &self.subject)
+        {
+            return Err(RefinementError::MutationAuthorityMissing(
+                self.subject.clone(),
+            ));
+        }
+        let mut candidate = baseline.clone();
+        match &self.operation {
+            PatchOperation::ReplaceContractExpression { before, after } => {
+                let mut applied = false;
+                for function in &mut candidate.functions {
+                    for contract in &mut function.contracts {
+                        let identity = contract_id(&candidate.module, &function.name, &contract.id);
+                        if identity != self.subject {
+                            continue;
+                        }
+                        if &contract.expression != before {
+                            return Err(RefinementError::PreconditionMismatch);
+                        }
+                        after.clone_into(&mut contract.expression);
+                        applied = true;
+                    }
+                }
+                if !applied {
+                    return Err(RefinementError::UnsupportedChange(
+                        "unknown contract subject".to_owned(),
+                    ));
+                }
+            }
+            PatchOperation::AddAssumptionReference {
+                function,
+                assumption,
+            } => {
+                let function_identity = crate::identity::function_id(&candidate.module, function);
+                if self.subject != function_identity {
+                    return Err(RefinementError::MutationNotPermitted);
+                }
+                if !candidate
+                    .assumptions
+                    .iter()
+                    .any(|item| item.id == *assumption)
+                {
+                    return Err(RefinementError::PreconditionMismatch);
+                }
+                let Some(target) = candidate
+                    .functions
+                    .iter_mut()
+                    .find(|item| item.name == *function)
+                else {
+                    return Err(RefinementError::UnsupportedChange(
+                        "unknown function subject".to_owned(),
+                    ));
+                };
+                if !target.assumptions.contains(assumption) {
+                    target.assumptions.push(assumption.clone());
+                }
+            }
+            PatchOperation::RemoveAssumptionReference {
+                function,
+                assumption,
+            } => {
+                let function_identity = crate::identity::function_id(&candidate.module, function);
+                if self.subject != function_identity {
+                    return Err(RefinementError::MutationNotPermitted);
+                }
+                let Some(target) = candidate
+                    .functions
+                    .iter_mut()
+                    .find(|item| item.name == *function)
+                else {
+                    return Err(RefinementError::UnsupportedChange(
+                        "unknown function subject".to_owned(),
+                    ));
+                };
+                if !target.assumptions.contains(assumption) {
+                    return Err(RefinementError::PreconditionMismatch);
+                }
+                target.assumptions.retain(|item| item != assumption);
+            }
+            PatchOperation::ChangeIntegerIntent { before, after } => {
+                let mut applied = false;
+                for function in &mut candidate.functions {
+                    if let Some(body) = &mut function.body {
+                        for block in &mut body.blocks {
+                            for operation in &mut block.operations {
+                                if operation.identity(&candidate.module, &function.name, &block.id)
+                                    != self.subject
+                                {
+                                    continue;
+                                }
+                                let BodyOperationKind::Integer { intent, .. } = &mut operation.kind
+                                else {
+                                    return Err(RefinementError::UnsupportedChange(
+                                        "subject is not an integer operation".to_owned(),
+                                    ));
+                                };
+                                if intent != before {
+                                    return Err(RefinementError::PreconditionMismatch);
+                                }
+                                *intent = *after;
+                                applied = true;
+                            }
+                        }
+                    }
+                }
+                if !applied {
+                    return Err(RefinementError::UnsupportedChange(
+                        "unknown integer operation subject".to_owned(),
+                    ));
+                }
+            }
+            PatchOperation::AddRuntimeCheck { block, operation } => {
+                let mut applied = false;
+                for function in &mut candidate.functions {
+                    if let Some(body) = &mut function.body {
+                        for body_block in &mut body.blocks {
+                            let identity =
+                                crate::identity::block_id(&candidate.module, &function.name, block);
+                            if identity
+                                != crate::identity::block_id(
+                                    &candidate.module,
+                                    &function.name,
+                                    &body_block.id,
+                                )
+                            {
+                                continue;
+                            }
+                            body_block.operations.push(operation.as_ref().clone());
+                            applied = true;
+                        }
+                    }
+                }
+                if !applied {
+                    return Err(RefinementError::UnsupportedChange(
+                        "unknown block subject".to_owned(),
+                    ));
+                }
+            }
+            PatchOperation::SelectRealization { .. } => {
+                return Err(RefinementError::UnsupportedChange(
+                    "realization selection is represented but not mutable in this subset"
+                        .to_owned(),
+                ));
+            }
+        }
+        let delta = baseline.semantic_delta(&candidate)?;
+        let candidate_fingerprint = candidate
+            .content_fingerprint()
+            .map_err(|_| RefinementError::BaselineMismatch)?;
+        let candidate_identity = SemanticId(format!(
+            "mncs:0.2:candidate:{}",
+            sha256_hex(format!("{}:{}", self.identity, candidate_fingerprint).as_bytes())
+        ));
+        Ok(CandidateState {
+            schema_version: REFINEMENT_SCHEMA_VERSION.to_owned(),
+            identity: candidate_identity,
+            baseline_identity: program_id(&baseline.module),
+            program: candidate,
+            delta,
+        })
+    }
+}
+
 impl CandidateState {
     pub fn evaluate<V: MicroVerifier>(&self, verifier: &V) -> CandidateEvaluation {
         CandidateEvaluation {
@@ -427,6 +670,74 @@ impl CandidateState {
             delta: self.delta.clone(),
             obligations: self.program.generate_obligations(),
             verifier_results: self.program.verify_obligations(verifier),
+        }
+    }
+
+    pub fn evaluate_protected_properties(
+        &self,
+        properties: &[SemanticId],
+    ) -> ProtectedPropertyEvaluation {
+        let evidence = self.program.evidence_manifest().ok();
+        let results = properties
+            .iter()
+            .map(|property| {
+                let changed = self
+                    .delta
+                    .identities
+                    .changed
+                    .iter()
+                    .any(|change| change.identity == *property)
+                    || self
+                        .delta
+                        .identities
+                        .removed
+                        .iter()
+                        .any(|record| record.identity == *property);
+                if changed {
+                    return ProtectedPropertyResult {
+                        property: property.clone(),
+                        status: ProtectedPropertyStatus::Regressed,
+                        reason: "candidate changed or removed the protected identity".to_owned(),
+                    };
+                }
+                let stale = self.delta.invalidated_evidence.iter().any(|evidence_id| {
+                    evidence.as_ref().is_some_and(|manifest| {
+                        manifest.evidence.iter().any(|record| {
+                            &record.identity == evidence_id && record.property == *property
+                        })
+                    })
+                });
+                if stale {
+                    return ProtectedPropertyResult {
+                        property: property.clone(),
+                        status: ProtectedPropertyStatus::Unknown,
+                        reason: "supporting evidence was invalidated".to_owned(),
+                    };
+                }
+                if evidence.as_ref().is_some_and(|manifest| {
+                    manifest.evidence.iter().any(|record| {
+                        record.property == *property
+                            && record.freshness == crate::EvidenceFreshness::Current
+                    })
+                }) {
+                    ProtectedPropertyResult {
+                        property: property.clone(),
+                        status: ProtectedPropertyStatus::Preserved,
+                        reason: "current evidence remains bound to the protected property"
+                            .to_owned(),
+                    }
+                } else {
+                    ProtectedPropertyResult {
+                        property: property.clone(),
+                        status: ProtectedPropertyStatus::NotEvaluated,
+                        reason: "no current evidence established preservation".to_owned(),
+                    }
+                }
+            })
+            .collect();
+        ProtectedPropertyEvaluation {
+            schema_version: REFINEMENT_SCHEMA_VERSION.to_owned(),
+            results,
         }
     }
 }
@@ -508,6 +819,7 @@ mod tests {
             },
             budget,
             trusted: false,
+            patches: Vec::new(),
         };
         assert!(proposal.is_untrusted());
     }
@@ -544,6 +856,7 @@ mod tests {
             },
             budget: RefinementBudget::default(),
             trusted: false,
+            patches: Vec::new(),
         };
         let baseline_fingerprint = baseline.content_fingerprint().expect("fingerprint");
         let candidate = proposal.apply_isolated(&baseline).expect("candidate");
@@ -610,11 +923,49 @@ mod tests {
             },
             budget: RefinementBudget::default(),
             trusted: false,
+            patches: Vec::new(),
         };
         proposal.budget.max_candidates = 1;
         assert!(matches!(
             proposal.apply_isolated(&baseline),
             Err(RefinementError::MutationAuthorityMissing(_))
         ));
+    }
+
+    #[test]
+    fn typed_patch_isolated_application_and_protected_property_evaluation_are_conservative() {
+        let baseline = valid_program();
+        let subject = contract_id(&baseline.module, "transfer", "positive_amount");
+        let patch = SemanticPatch {
+            schema_version: REFINEMENT_SCHEMA_VERSION.to_owned(),
+            identity: SemanticId("patch:tighten-contract".to_owned()),
+            subject: subject.clone(),
+            precondition: Some("amount > 0".to_owned()),
+            operation: PatchOperation::ReplaceContractExpression {
+                before: "amount > 0".to_owned(),
+                after: "amount >= 1".to_owned(),
+            },
+            required_authority: AuthorityCapability {
+                identity: SemanticId("authority:contract-mutation".to_owned()),
+                kind: AuthorityKind::Mutate,
+                scope: AuthorityScope::Exact(subject.clone()),
+            },
+            expected_invalidation: Vec::new(),
+        };
+        let candidate = patch.apply_isolated(&baseline).expect("candidate");
+        assert_ne!(
+            candidate
+                .program
+                .content_fingerprint()
+                .expect("candidate fingerprint"),
+            baseline
+                .content_fingerprint()
+                .expect("baseline fingerprint")
+        );
+        let evaluation = candidate.evaluate_protected_properties(&[subject]);
+        assert_eq!(
+            evaluation.results[0].status,
+            ProtectedPropertyStatus::Regressed
+        );
     }
 }

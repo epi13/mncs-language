@@ -13,6 +13,10 @@ use crate::{Program, SemanticDiff, SemanticIdentities, ValidationReport};
 #[serde(rename_all = "snake_case")]
 pub enum EdgeKind {
     ContainsFunction,
+    ContainsBody,
+    ContainsBlock,
+    ContainsOperation,
+    ContainsValue,
     OwnsContract,
     DeclaresEffect,
     DeclaresCapability,
@@ -21,6 +25,14 @@ pub enum EdgeKind {
     SupportsProperty,
     HasSubject,
     DependsOn,
+    ConsumesValue,
+    ProducesValue,
+    PerformsEffect,
+    UsesCapability,
+    RequiresObligation,
+    EstablishesFact,
+    ReferencesContract,
+    TransitionsTo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -216,6 +228,202 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                 kind: EdgeKind::SupportsProperty,
             });
             *occurrence += 1;
+        }
+        if let Some(body) = &function.body {
+            let body_identity = crate::identity::body_id(&program.module, &function.name);
+            edges.push(GraphEdge {
+                from: function_identity.clone(),
+                to: body_identity.clone(),
+                kind: EdgeKind::ContainsBody,
+            });
+            let mut values = BTreeMap::new();
+            for parameter in &body.parameters {
+                let identity =
+                    crate::identity::parameter_id(&program.module, &function.name, &parameter.id);
+                values.insert(parameter.id.clone(), identity.clone());
+                edges.push(GraphEdge {
+                    from: body_identity.clone(),
+                    to: identity,
+                    kind: EdgeKind::ContainsValue,
+                });
+            }
+            for block in &body.blocks {
+                let block_identity =
+                    crate::identity::block_id(&program.module, &function.name, &block.id);
+                edges.push(GraphEdge {
+                    from: body_identity.clone(),
+                    to: block_identity.clone(),
+                    kind: EdgeKind::ContainsBlock,
+                });
+                for parameter in &block.parameters {
+                    let identity = crate::identity::value_id(
+                        &program.module,
+                        &function.name,
+                        &block.id,
+                        "parameter",
+                        &parameter.id,
+                    );
+                    values.insert(parameter.id.clone(), identity.clone());
+                    edges.push(GraphEdge {
+                        from: block_identity.clone(),
+                        to: identity,
+                        kind: EdgeKind::ContainsValue,
+                    });
+                }
+                for operation in &block.operations {
+                    let operation_identity =
+                        operation.identity(&program.module, &function.name, &block.id);
+                    edges.push(GraphEdge {
+                        from: block_identity.clone(),
+                        to: operation_identity.clone(),
+                        kind: EdgeKind::ContainsOperation,
+                    });
+                    for operand in &operation.operands {
+                        if let Some(value) = values.get(operand) {
+                            edges.push(GraphEdge {
+                                from: operation_identity.clone(),
+                                to: value.clone(),
+                                kind: EdgeKind::ConsumesValue,
+                            });
+                        }
+                    }
+                    for result in &operation.results {
+                        let value = operation.result_identity(
+                            &program.module,
+                            &function.name,
+                            &block.id,
+                            &result.id,
+                        );
+                        values.insert(result.id.clone(), value.clone());
+                        edges.push(GraphEdge {
+                            from: operation_identity.clone(),
+                            to: value,
+                            kind: EdgeKind::ProducesValue,
+                        });
+                    }
+                    if let crate::BodyOperationKind::Effect { effect, .. } = &operation.kind {
+                        let canonical =
+                            serde_json::to_string(&crate::canonical::canonical_effect(effect))
+                                .expect("body effect");
+                        let effect_identity = effect_id(
+                            &program.module,
+                            &function.name,
+                            &canonical,
+                            function
+                                .effects
+                                .iter()
+                                .position(|declared| declared == effect)
+                                .unwrap_or(0),
+                        );
+                        edges.push(GraphEdge {
+                            from: operation_identity.clone(),
+                            to: effect_identity,
+                            kind: EdgeKind::PerformsEffect,
+                        });
+                        edges.push(GraphEdge {
+                            from: operation_identity.clone(),
+                            to: capability_id(&program.module, &function.name, &effect.capability),
+                            kind: EdgeKind::UsesCapability,
+                        });
+                    }
+                    for contract in &operation.contracts {
+                        edges.push(GraphEdge {
+                            from: operation_identity.clone(),
+                            to: contract_id(&program.module, &function.name, contract),
+                            kind: EdgeKind::ReferencesContract,
+                        });
+                    }
+                    if let Some(machine_intent) = &operation.machine_intent {
+                        for requirement in &machine_intent.requirements {
+                            edges.push(GraphEdge {
+                                from: operation_identity.clone(),
+                                to: crate::obligations::body_obligation_id(
+                                    "machine-intent",
+                                    &requirement.identity,
+                                ),
+                                kind: EdgeKind::RequiresObligation,
+                            });
+                        }
+                        for obligation in &machine_intent.obligations {
+                            edges.push(GraphEdge {
+                                from: operation_identity.clone(),
+                                to: obligation.identity.clone(),
+                                kind: EdgeKind::RequiresObligation,
+                            });
+                        }
+                    }
+                    let generated_obligation = match &operation.kind {
+                        crate::BodyOperationKind::Integer { .. } => {
+                            Some(crate::obligations::body_obligation_id(
+                                "integer-overflow",
+                                &operation_identity,
+                            ))
+                        }
+                        crate::BodyOperationKind::Effect { .. } => {
+                            Some(crate::obligations::body_obligation_id(
+                                "effect-authorized",
+                                &operation_identity,
+                            ))
+                        }
+                        crate::BodyOperationKind::RuntimeCheck { .. } => {
+                            Some(crate::obligations::body_obligation_id(
+                                "runtime-check",
+                                &operation_identity,
+                            ))
+                        }
+                        crate::BodyOperationKind::Constant { .. } => None,
+                    };
+                    if let Some(obligation) = generated_obligation {
+                        edges.push(GraphEdge {
+                            from: operation_identity.clone(),
+                            to: obligation,
+                            kind: EdgeKind::RequiresObligation,
+                        });
+                    }
+                    if let crate::BodyOperationKind::RuntimeCheck {
+                        fact, obligation, ..
+                    } = &operation.kind
+                    {
+                        edges.push(GraphEdge {
+                            from: operation_identity.clone(),
+                            to: fact.identity.clone(),
+                            kind: EdgeKind::EstablishesFact,
+                        });
+                        edges.push(GraphEdge {
+                            from: operation_identity.clone(),
+                            to: obligation.clone(),
+                            kind: EdgeKind::RequiresObligation,
+                        });
+                    }
+                }
+                match &block.terminator {
+                    crate::BodyTerminator::Branch { target, .. } => {
+                        edges.push(GraphEdge {
+                            from: block_identity.clone(),
+                            to: crate::identity::block_id(&program.module, &function.name, target),
+                            kind: EdgeKind::TransitionsTo,
+                        });
+                    }
+                    crate::BodyTerminator::ConditionalBranch {
+                        then_target,
+                        else_target,
+                        ..
+                    } => {
+                        for target in [then_target, else_target] {
+                            edges.push(GraphEdge {
+                                from: block_identity.clone(),
+                                to: crate::identity::block_id(
+                                    &program.module,
+                                    &function.name,
+                                    target,
+                                ),
+                                kind: EdgeKind::TransitionsTo,
+                            });
+                        }
+                    }
+                    crate::BodyTerminator::Return { .. } => {}
+                }
+            }
         }
     }
     edges.sort_by(|left, right| {

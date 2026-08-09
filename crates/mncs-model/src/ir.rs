@@ -1,15 +1,17 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::canonical::sha256_hex;
 use crate::identity::{
-    assumption_id, capability_id, contract_id, effect_id, function_id, program_id,
+    assumption_id, capability_id, contract_id, effect_id, function_id, machine_intent_id,
+    parameter_id, program_id,
 };
 use crate::{
-    AlignmentCapability, ContractKind, FailureMode, Function, GraphError, HighLevelIrNode,
-    MachineIntentExpression, ObligationRecord, Program, SemanticId, ValidationReport,
+    AlignmentCapability, BodyOperation, BodyOperationKind, BodyTerminator, BodyType, ContractKind,
+    FailureMode, Function, GraphError, HighLevelIrNode, MachineIntentExpression, ObligationRecord,
+    Program, SemanticId, TargetIdentity, TransformationRecord, ValidationReport,
 };
 
 pub const HIGH_LEVEL_IR_SCHEMA_VERSION: &str = "0.3";
@@ -71,10 +73,24 @@ pub struct CapabilityUse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IrOperationKind {
     FunctionEntry,
+    Constant {
+        value: i128,
+        ty: IrType,
+    },
+    Integer {
+        operator: String,
+        operand_type: crate::IntegerType,
+        intent: crate::ArithmeticIntent,
+    },
     ContractCheck {
         kind: ContractKind,
     },
     Effect,
+    RuntimeCheck {
+        obligation: SemanticId,
+        fact: SemanticId,
+        failure: FailureMode,
+    },
     MachineIntent,
     Return,
     Failure {
@@ -98,6 +114,8 @@ pub struct IrOperation {
     pub evidence: Vec<SemanticId>,
     pub machine_intent: Option<MachineIntentLinks>,
     pub obligations: Vec<SemanticId>,
+    pub lowering: Option<crate::LoweringEnvelope>,
+    pub portability: Option<crate::PortabilityEnvelope>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,6 +180,7 @@ pub struct HighLevelIr {
     pub state_regions: Vec<IrStateRegion>,
     pub obligations: Vec<ObligationRecord>,
     pub trace: TraceMap,
+    pub transformations: Vec<TransformationRecord>,
 }
 
 #[derive(Debug, Error)]
@@ -200,6 +219,7 @@ impl Program {
         let obligations = self.generate_obligations().obligations;
         let mut functions = Vec::new();
         let mut state_regions = Vec::new();
+        let mut transformations = Vec::new();
         let mut trace = BTreeMap::<SemanticId, TraceEntry>::new();
 
         let program_identity = program_id(&self.module);
@@ -211,7 +231,24 @@ impl Program {
             Vec::new(),
         );
 
-        for function in &self.functions {
+        let mut semantic_functions = self.functions.iter().collect::<Vec<_>>();
+        semantic_functions.sort_by(|left, right| left.name.cmp(&right.name));
+        for function in semantic_functions {
+            if let Some(body) = &function.body {
+                let (lowered, regions, body_transformations) = lower_executable_body(
+                    self,
+                    function,
+                    body,
+                    &graph,
+                    &evidence,
+                    &obligations,
+                    &mut trace,
+                );
+                functions.push(lowered);
+                state_regions.extend(regions);
+                transformations.extend(body_transformations);
+                continue;
+            }
             let semantic_function = function_id(&self.module, &function.name);
             let ir_function = ir_identity("function", &semantic_function, 0);
             trace_entry(
@@ -303,6 +340,8 @@ impl Program {
                 evidence: Vec::new(),
                 machine_intent: None,
                 obligations: Vec::new(),
+                lowering: None,
+                portability: None,
             });
             for (index, contract) in function.contracts.iter().enumerate() {
                 let contract_identity = contract_id(&self.module, &function.name, &contract.id);
@@ -338,6 +377,8 @@ impl Program {
                     evidence: evidence_refs,
                     machine_intent: None,
                     obligations: Vec::new(),
+                    lowering: None,
+                    portability: None,
                 });
                 trace_entry(
                     &mut trace,
@@ -382,6 +423,8 @@ impl Program {
                     evidence: Vec::new(),
                     machine_intent: None,
                     obligations: vec![effect_obligation_identity(&effect_identity)],
+                    lowering: None,
+                    portability: None,
                 });
                 trace_entry(
                     &mut trace,
@@ -407,6 +450,8 @@ impl Program {
                 evidence: Vec::new(),
                 machine_intent: None,
                 obligations: Vec::new(),
+                lowering: None,
+                portability: None,
             });
             let normal_block = IrBlock {
                 identity: ir_identity("block", &semantic_function, 0),
@@ -455,7 +500,9 @@ impl Program {
                 failure: function.failure.clone(),
             });
         }
+        functions.sort_by(|left, right| left.identity.cmp(&right.identity));
         state_regions.sort_by(|left, right| left.identity.cmp(&right.identity));
+        transformations.sort_by(|left, right| left.identity.cmp(&right.identity));
         let trace = TraceMap {
             entries: trace
                 .into_values()
@@ -476,8 +523,407 @@ impl Program {
             state_regions,
             obligations,
             trace,
+            transformations,
         })
     }
+}
+
+fn lower_executable_body(
+    program: &Program,
+    function: &Function,
+    body: &crate::FunctionBody,
+    graph: &crate::SemanticGraph,
+    evidence: &crate::EvidenceManifest,
+    obligations: &[ObligationRecord],
+    trace: &mut BTreeMap<SemanticId, TraceEntry>,
+) -> (IrFunction, Vec<IrStateRegion>, Vec<TransformationRecord>) {
+    let semantic_function = function_id(&program.module, &function.name);
+    let body_identity = body.identity(&program.module, &function.name);
+    trace_entry(
+        trace,
+        &body_identity,
+        graph,
+        ir_identity("body", &body_identity, 0),
+        Vec::new(),
+    );
+    let mut values = BTreeMap::<String, IrValue>::new();
+    let inputs = body
+        .parameters
+        .iter()
+        .map(|parameter| {
+            let identity = parameter_id(&program.module, &function.name, &parameter.id);
+            let value = IrValue {
+                identity: identity.clone(),
+                semantic_identity: Some(identity),
+                ty: ir_type(&parameter.ty),
+                producer: None,
+            };
+            values.insert(parameter.id.clone(), value.clone());
+            trace_entry(
+                trace,
+                value
+                    .semantic_identity
+                    .as_ref()
+                    .expect("parameter identity"),
+                graph,
+                value.identity.clone(),
+                Vec::new(),
+            );
+            value
+        })
+        .collect::<Vec<_>>();
+    let outputs = function
+        .outputs
+        .iter()
+        .enumerate()
+        .map(|(index, value)| IrValue {
+            identity: ir_value_identity(&semantic_function, "output", index, &value.name),
+            semantic_identity: None,
+            ty: IrType::Named(value.value_type.clone()),
+            producer: None,
+        })
+        .collect::<Vec<_>>();
+    let contracts = function
+        .contracts
+        .iter()
+        .map(|contract| contract_id(&program.module, &function.name, &contract.id))
+        .collect::<Vec<_>>();
+    let assumptions = function
+        .assumptions
+        .iter()
+        .map(|assumption| assumption_id(&program.module, assumption))
+        .collect::<Vec<_>>();
+    let capabilities = function
+        .capabilities
+        .iter()
+        .map(|capability| capability_id(&program.module, &function.name, capability))
+        .collect::<Vec<_>>();
+    let mut blocks = Vec::new();
+    let mut transitions = Vec::new();
+    let mut regions = Vec::new();
+    let mut transformations = Vec::new();
+    for block in &body.blocks {
+        let block_identity = body.block_identity(&program.module, &function.name, &block.id);
+        trace_entry(
+            trace,
+            &block_identity,
+            graph,
+            ir_identity("body-block", &block_identity, 0),
+            vec![body_identity.clone()],
+        );
+        for parameter in &block.parameters {
+            let identity = crate::identity::value_id(
+                &program.module,
+                &function.name,
+                &block.id,
+                "parameter",
+                &parameter.id,
+            );
+            values.insert(
+                parameter.id.clone(),
+                IrValue {
+                    identity: identity.clone(),
+                    semantic_identity: Some(identity.clone()),
+                    ty: ir_type(&parameter.ty),
+                    producer: None,
+                },
+            );
+            trace_entry(
+                trace,
+                &identity,
+                graph,
+                ir_identity("body-value", &identity, 0),
+                vec![block_identity.clone()],
+            );
+        }
+        let mut operations = Vec::new();
+        for operation in &block.operations {
+            let semantic_operation = operation.identity(&program.module, &function.name, &block.id);
+            let ir_operation_identity = ir_identity("body-operation", &semantic_operation, 0);
+            trace_entry(
+                trace,
+                &semantic_operation,
+                graph,
+                ir_operation_identity.clone(),
+                vec![block_identity.clone()],
+            );
+            let inputs = operation
+                .operands
+                .iter()
+                .filter_map(|operand| values.get(operand).cloned())
+                .collect::<Vec<_>>();
+            let outputs_for_operation = operation
+                .results
+                .iter()
+                .map(|result| {
+                    let identity = operation.result_identity(
+                        &program.module,
+                        &function.name,
+                        &block.id,
+                        &result.id,
+                    );
+                    let value = IrValue {
+                        identity: identity.clone(),
+                        semantic_identity: Some(identity.clone()),
+                        ty: ir_type(&result.ty),
+                        producer: Some(ir_operation_identity.clone()),
+                    };
+                    trace_entry(
+                        trace,
+                        &identity,
+                        graph,
+                        value.identity.clone(),
+                        vec![semantic_operation.clone()],
+                    );
+                    (result.id.clone(), value)
+                })
+                .collect::<Vec<_>>();
+            for (local, value) in &outputs_for_operation {
+                values.insert(local.clone(), value.clone());
+            }
+            let operation_obligations = obligations
+                .iter()
+                .filter(|obligation| obligation.subject == semantic_operation)
+                .map(|obligation| obligation.identity.clone())
+                .collect::<Vec<_>>();
+            let (kind, effects, capability_uses, machine_intent, state_region) =
+                match &operation.kind {
+                    BodyOperationKind::Constant { value, ty } => (
+                        IrOperationKind::Constant {
+                            value: *value,
+                            ty: ir_type(ty),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::Integer {
+                        operator,
+                        operand_type,
+                        intent,
+                    } => (
+                        IrOperationKind::Integer {
+                            operator: operator.clone(),
+                            operand_type: *operand_type,
+                            intent: *intent,
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        Some(machine_intent_links(program, function, block, operation)),
+                        None,
+                    ),
+                    BodyOperationKind::Effect { effect, .. } => {
+                        let effect_identity = declared_effect_identity(program, function, effect);
+                        let capability =
+                            capability_id(&program.module, &function.name, &effect.capability);
+                        let state_identity = ir_identity("state", &effect_identity, 0);
+                        regions.push(IrStateRegion {
+                            identity: state_identity.clone(),
+                            semantic_identity: Some(effect_identity.clone()),
+                            name: effect.target.clone(),
+                            kind: state_region_kind(&effect.kind),
+                            capability: Some(capability.clone()),
+                        });
+                        (
+                            IrOperationKind::Effect,
+                            vec![effect_identity],
+                            vec![CapabilityUse {
+                                capability: capability.clone(),
+                                semantic_declaration: Some(capability),
+                            }],
+                            None,
+                            Some(state_identity),
+                        )
+                    }
+                    BodyOperationKind::RuntimeCheck {
+                        obligation,
+                        fact,
+                        failure,
+                    } => (
+                        IrOperationKind::RuntimeCheck {
+                            obligation: obligation.clone(),
+                            fact: fact.identity.clone(),
+                            failure: failure.clone(),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                };
+            let operation = IrOperation {
+                identity: ir_operation_identity,
+                semantic_identity: Some(semantic_operation.clone()),
+                kind,
+                inputs,
+                outputs: outputs_for_operation
+                    .into_iter()
+                    .map(|(_, value)| value)
+                    .collect(),
+                state_region,
+                effects,
+                capability_uses,
+                contracts: operation
+                    .contracts
+                    .iter()
+                    .map(|contract| contract_id(&program.module, &function.name, contract))
+                    .collect(),
+                assumptions: operation
+                    .assumptions
+                    .iter()
+                    .map(|assumption| assumption_id(&program.module, assumption))
+                    .collect(),
+                evidence: operation_evidence(evidence, program, function, operation),
+                machine_intent,
+                obligations: operation_obligations,
+                lowering: operation.lowering.clone(),
+                portability: operation.portability.clone(),
+            };
+            let mut transformation = TransformationRecord::new(
+                semantic_operation.clone(),
+                operation.identity.clone(),
+                "semantic-body-to-high-level-ir".to_owned(),
+                semantic_operation.clone(),
+                TargetIdentity {
+                    identity: SemanticId("mncs:0.3:target:portable".to_owned()),
+                    family: "portable".to_owned(),
+                    features: Vec::new(),
+                    integer_widths: vec![8, 16, 32, 64, 128],
+                    abi: None,
+                },
+                SemanticId("mncs:0.3:lowering:executable-body".to_owned()),
+            );
+            transformation
+                .obligations_required
+                .clone_from(&operation.obligations);
+            transformation
+                .evidence_consumed
+                .clone_from(&operation.evidence);
+            if let IrOperationKind::RuntimeCheck { fact, .. } = &operation.kind {
+                transformation
+                    .runtime_checks_inserted
+                    .push(operation.identity.clone());
+                transformation.facts_established.push(fact.clone());
+            }
+            if matches!(operation.kind, IrOperationKind::Integer { .. }) {
+                transformation
+                    .backend_promises_withheld
+                    .push("no-overflow".to_owned());
+            }
+            transformations.push(transformation);
+            operations.push(operation);
+        }
+        let block_ir_identity = ir_identity("body-block", &block_identity, 0);
+        match &block.terminator {
+            BodyTerminator::Return { values: returned } => {
+                let return_operation = IrOperation {
+                    identity: ir_identity("body-return", &block_identity, 0),
+                    semantic_identity: None,
+                    kind: IrOperationKind::Return,
+                    inputs: returned
+                        .iter()
+                        .filter_map(|value| values.get(value).cloned())
+                        .collect(),
+                    outputs: Vec::new(),
+                    state_region: None,
+                    effects: Vec::new(),
+                    capability_uses: Vec::new(),
+                    contracts: contracts.clone(),
+                    assumptions: assumptions.clone(),
+                    evidence: Vec::new(),
+                    machine_intent: None,
+                    obligations: Vec::new(),
+                    lowering: None,
+                    portability: None,
+                };
+                operations.push(return_operation);
+            }
+            BodyTerminator::Branch { target, .. } => transitions.push(IrTransition {
+                identity: ir_identity("body-transition", &block_identity, transitions.len()),
+                from: block_ir_identity.clone(),
+                to: ir_identity(
+                    "body-block",
+                    &body.block_identity(&program.module, &function.name, target),
+                    0,
+                ),
+                path: PathKind::Normal,
+            }),
+            BodyTerminator::ConditionalBranch {
+                then_target,
+                else_target,
+                ..
+            } => {
+                for target in [then_target, else_target] {
+                    transitions.push(IrTransition {
+                        identity: ir_identity(
+                            "body-transition",
+                            &block_identity,
+                            transitions.len(),
+                        ),
+                        from: block_ir_identity.clone(),
+                        to: ir_identity(
+                            "body-block",
+                            &body.block_identity(&program.module, &function.name, target),
+                            0,
+                        ),
+                        path: PathKind::Normal,
+                    });
+                }
+            }
+        }
+        blocks.push(IrBlock {
+            identity: block_ir_identity,
+            path: PathKind::Normal,
+            operations,
+        });
+    }
+    let error_block = failure_block(function, &semantic_function, PathKind::Error);
+    blocks.push(error_block.clone());
+    if let Some(last) = blocks.iter().rev().nth(1) {
+        transitions.push(IrTransition {
+            identity: ir_identity("body-error-transition", &last.identity, 0),
+            from: last.identity.clone(),
+            to: error_block.identity.clone(),
+            path: PathKind::Error,
+        });
+    }
+    if function.failure == FailureMode::Compensating {
+        let compensation = failure_block(function, &semantic_function, PathKind::Compensation);
+        transitions.push(IrTransition {
+            identity: ir_identity("body-compensation-transition", &error_block.identity, 0),
+            from: error_block.identity.clone(),
+            to: compensation.identity.clone(),
+            path: PathKind::Compensation,
+        });
+        blocks.push(compensation);
+    }
+    if function.failure == FailureMode::Fatal {
+        let fatal = failure_block(function, &semantic_function, PathKind::Fatal);
+        transitions.push(IrTransition {
+            identity: ir_identity("body-fatal-transition", &error_block.identity, 0),
+            from: error_block.identity.clone(),
+            to: fatal.identity.clone(),
+            path: PathKind::Fatal,
+        });
+        blocks.push(fatal);
+    }
+    (
+        IrFunction {
+            identity: ir_identity("function", &semantic_function, 0),
+            semantic_identity: semantic_function,
+            inputs,
+            outputs,
+            blocks,
+            transitions,
+            contracts,
+            assumptions,
+            capabilities,
+            failure: function.failure.clone(),
+        },
+        regions,
+        transformations,
+    )
 }
 
 impl MachineIntentExpression {
@@ -510,6 +956,8 @@ impl MachineIntentExpression {
             evidence: Vec::new(),
             machine_intent: Some(links.clone()),
             obligations: links.obligation_identities,
+            lowering: None,
+            portability: None,
         }
     }
 }
@@ -547,6 +995,98 @@ fn trace_entry(
     entry.related.extend(related);
 }
 
+fn ir_type(ty: &BodyType) -> IrType {
+    IrType::Named(ty.semantic_name())
+}
+
+fn declared_effect_identity(
+    program: &Program,
+    function: &Function,
+    effect: &crate::Effect,
+) -> SemanticId {
+    let canonical =
+        serde_json::to_string(&crate::canonical::canonical_effect(effect)).expect("body effect");
+    let occurrence = function
+        .effects
+        .iter()
+        .position(|declared| declared == effect)
+        .unwrap_or(0);
+    effect_id(&program.module, &function.name, &canonical, occurrence)
+}
+
+fn operation_evidence(
+    evidence: &crate::EvidenceManifest,
+    program: &Program,
+    function: &Function,
+    operation: &BodyOperation,
+) -> Vec<SemanticId> {
+    let contracts = operation
+        .contracts
+        .iter()
+        .map(|contract| contract_id(&program.module, &function.name, contract))
+        .collect::<BTreeSet<_>>();
+    evidence
+        .evidence
+        .iter()
+        .filter(|record| contracts.contains(&record.property))
+        .map(|record| record.identity.clone())
+        .collect()
+}
+
+fn machine_intent_links(
+    program: &Program,
+    function: &Function,
+    block: &crate::BodyBlock,
+    operation: &BodyOperation,
+) -> MachineIntentLinks {
+    let operation_identity = operation.identity(&program.module, &function.name, &block.id);
+    let machine_identity = operation
+        .machine_intent_identity(&program.module, &function.name, &block.id)
+        .unwrap_or_else(|| {
+            machine_intent_id(&program.module, &function.name, &block.id, &operation.id)
+        });
+    let spec = operation.machine_intent.as_ref();
+    MachineIntentLinks {
+        operation_identity,
+        intent_identity: spec
+            .map(|spec| spec.intent.identity.clone())
+            .unwrap_or_else(|| SemanticId(format!("{}:intent", machine_identity.0))),
+        fact_identities: spec
+            .map(|spec| {
+                spec.facts
+                    .iter()
+                    .map(|fact| fact.identity.clone())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        preference_identities: spec
+            .map(|spec| {
+                spec.preferences
+                    .iter()
+                    .map(|preference| preference.identity.clone())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        requirement_identities: spec
+            .map(|spec| {
+                spec.requirements
+                    .iter()
+                    .map(|requirement| requirement.identity.clone())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        obligation_identities: spec
+            .map(|spec| {
+                spec.obligations
+                    .iter()
+                    .map(|obligation| obligation.identity.clone())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        capability_identities: Vec::new(),
+    }
+}
+
 fn failure_block(function: &Function, semantic_function: &SemanticId, path: PathKind) -> IrBlock {
     let path_kind = match path {
         PathKind::Error => FailurePathKind::Error,
@@ -575,6 +1115,8 @@ fn failure_block(function: &Function, semantic_function: &SemanticId, path: Path
             evidence: Vec::new(),
             machine_intent: None,
             obligations: Vec::new(),
+            lowering: None,
+            portability: None,
         }],
     }
 }

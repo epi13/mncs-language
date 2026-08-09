@@ -66,12 +66,17 @@ Initial executable foundation delivered in the Rust model and CLI:
 - executable diagnostic obligations and conservative graph-based causal slices;
 - finite refinement budgets, untrusted isolated repair proposals, and explicit promotion decisions;
 - semantic, authority, and evidence delta records with explicit authority-broadening flags; and
-- distinct observation, verification, mutation, generation, and promotion capabilities.
+- distinct observation, verification, mutation, generation, and promotion capabilities;
+- typed semantic patches, protected-property evaluations, realization/portability envelopes, and
+  transformation provenance; and
+- versioned verifier request/result artifacts with exact subject, scope, dependency, freshness, and
+  verifier-independence checks.
 
-The implemented recursive artifacts are intentionally partial: causal slices are graph-only,
-repair application supports one isolated contract-expression change, and promotion remains an
-explicit record rather than an automatic mutation. Diagnostic, transformation, realization, and
-verifier identities will need a broader versioned vocabulary over time.
+The implemented recursive artifacts are intentionally partial: causal slices are conservative
+backward graph slices rather than formal minimal slices, repair application supports a small typed
+patch vocabulary, realization selection is envelope-only, and promotion remains an explicit record
+rather than an automatic mutation. Control/data-flow-complete refinement and target-specific
+realizations remain future work.
 
 - define stable identities for components, properties, assumptions, verifiers, artifacts, diagnostics, transformations, machine-intent operations, obligations, references, and realizations;
 - model dependency and invalidation edges;
@@ -95,12 +100,16 @@ Early executable foundation now present for the supported 0.1 manifest subset:
 - effect operations with explicit capability uses;
 - contract, assumption, evidence, and semantic graph traceability;
 - generated obligations carried by the IR;
-- a pure verifier request/result protocol with a deterministic capability-consistency verifier; and
+- executable semantic bodies with symbolic constants/integer/effect/runtime-check operations;
+- direct body-to-HIR lowering with machine-intent links and transformation provenance;
+- versioned lowering and portability envelopes with conservative realization selection; and
+- a pure verifier request/result protocol with a deterministic capability-consistency verifier and
+  import validation for external artifacts;
 - conservative diagnostic output connected to generated obligations.
 
 This is not verified SSA and does not claim complete lowering correctness. The remaining work is to
-expand supported semantic constructs, add richer state/transition and machine-intent lowering, and
-connect independent verifier evidence without weakening freshness or authority checks.
+expand supported body control flow and state semantics, connect independent verifier evidence to
+realization selection, and build the smallest trustworthy SSA layer.
 
 - define typed state, transitions, ownership relationships, and regions;
 - represent normal, error, compensation, and diagnostic paths;

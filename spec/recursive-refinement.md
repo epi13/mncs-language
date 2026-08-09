@@ -126,10 +126,11 @@ The semantic artifacts defined here SHOULD be usable by MNCS Forge, RAVEL, and i
 ## 12. Current executable subset
 
 The current model serializes the artifacts above with stable semantic identities and deterministic
-ordering. A causal slice contains the connected semantic-graph neighborhood currently defensible;
-it is marked incomplete because control-flow, data-flow, verifier, and artifact causality are not
-yet represented. A repair proposal can apply only one explicitly permitted contract-expression
-change to an isolated clone, subject to finite budgets and explicit mutation authority. The result
-includes a semantic delta and does not promote the candidate. Promotion is represented separately
-and requires an explicit promotion authority. Invalid manifests retain dependency-only diagnostic
-slices rather than being presented as complete localization.
+ordering. A causal slice follows conservative backward semantic-graph dependencies from an
+obligation or subject; it is marked incomplete because path-sensitive control-flow and complete
+verifier/artifact causality are not yet represented. Typed patches currently cover a small set of
+contract, assumption, integer-intent, and runtime-check changes and always operate on an isolated
+clone. Candidate evaluation produces semantic, authority, evidence, and protected-property
+records but does not promote the candidate. Promotion is represented separately and requires an
+explicit promotion authority. Invalid manifests retain dependency-only diagnostic slices rather
+than being presented as complete localization.

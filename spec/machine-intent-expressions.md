@@ -496,3 +496,9 @@ The first executable subset SHOULD be limited to:
 
 Constant-time, layout search, lock-free progress, and target-dispatch claims SHOULD remain later
 pilots until their trust models and verifier requirements are explicit.
+
+The current implementation exercises this direction with symbolic executable-body integer
+operations, deterministic `0.3` HIR lowering, explicit `UNKNOWN` obligations, versioned lowering
+and portability envelopes, and conservative realization selection. An unresolved obligation
+remains `UNKNOWN` and selects the declared fallback; it does not authorize a specialized
+realization or a backend promise.

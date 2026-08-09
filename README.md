@@ -54,7 +54,7 @@ The 0.1 model contains:
 
 A key initial rule is that every effect must identify an authorizing capability, and that capability must be declared by the function. Evidence must reference a declared contract property rather than floating as unbound metadata.
 
-The experimental 0.2 layer adds deterministic SHA-256 content fingerprints, structural semantic identities, a typed semantic graph, dependency-aware evidence manifests, conservative invalidation, diagnostic obligations, graph-based causal slices, finite refinement budgets, untrusted isolated repair proposals, explicit promotion records, and semantic/authority/evidence deltas. The early 0.3 layer lowers the supported manifest subset into deterministic high-level IR with typed values, state regions, normal and failure paths, explicit effect capability uses, contract/evidence traceability, generated obligations, a verifier request/result protocol, and a deterministic local verifier. It also contains a deliberately small machine-intent pilot: explicit integer addition intents, PASS/FAIL/UNKNOWN obligations, alignment capabilities bound to subject and scope, intent-preserving IR records, and a no-overflow backend-promise decision. This is not a production compiler or backend.
+The experimental 0.2 layer adds deterministic SHA-256 content fingerprints, structural semantic identities, a typed semantic graph, dependency-aware evidence manifests, conservative invalidation, diagnostic obligations, backward causal slices, finite refinement budgets, typed isolated repair patches, explicit promotion records, semantic/authority/evidence deltas, and versioned verifier artifact import checks. The early 0.3 layer now accepts a small syntax-independent executable body model and lowers it into deterministic high-level IR with symbolic values, state regions, normal and failure paths, explicit effect capability uses, contract/evidence traceability, generated obligations, machine-intent links, lowering/portability envelopes, transformation provenance, and a pure local verifier. It also contains a deliberately small machine-intent pilot: explicit integer addition intents, PASS/FAIL/UNKNOWN obligations, alignment capabilities bound to subject and scope, intent-preserving IR records, and a no-overflow backend-promise decision. This is not a production compiler, verified SSA, or backend.
 
 ## Try the semantic prototype
 
@@ -90,11 +90,14 @@ cargo run -p mncs-cli -- diagnose examples/invalid-undeclared-effect.mncs.json
 cargo run -p mncs-cli -- compare \
   examples/semantic-foundation/before.mncs.json \
   examples/semantic-foundation/after.mncs.json
+cargo run -p mncs-cli -- body examples/executable/checked-add.mncs.json
+cargo run -p mncs-cli -- trace examples/executable/checked-add.mncs.json
+cargo run -p mncs-cli -- verifier-request examples/executable/checked-add.mncs.json
 ```
 
 The local contract-expression change changes the contract and function fingerprints and marks the dependent evidence stale. Canonicalization sorts set-like declarations while preserving ordered inputs and outputs.
 
-The IR command emits a deterministic, inspectable projection with state regions, capability uses, failure blocks, generated obligations, and a semantic-to-IR trace map. `verify` exercises the pure local capability/effect verifier; `diagnose` retains a conservative dependency-only slice when an invalid manifest prevents graph construction. The isolated repair proposal and promotion types are currently library-level artifacts, not an automatic source-rewrite command.
+The IR command emits a deterministic, inspectable projection with state regions, capability uses, failure blocks, generated obligations, semantic-to-IR traceability, and transformation provenance. Executable-body manifests lower symbolic operations directly; `verifier-request` and `verify-result` exchange identity- and dependency-bound JSON artifacts. `verify` exercises the pure local verifier; `diagnose` emits a conservative backward slice when graph construction is available and a dependency-only slice for invalid input. Candidate evaluation remains isolated and does not promote or rewrite the trusted baseline.
 
 ## Explore the source syntax laboratory
 

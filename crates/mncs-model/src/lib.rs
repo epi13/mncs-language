@@ -4,6 +4,7 @@
 //! representation is a transport format for experiments, not a proposed final
 //! language grammar.
 
+mod body;
 mod canonical;
 mod core;
 mod delta;
@@ -13,10 +14,16 @@ mod identity;
 mod ir;
 mod machine_intent;
 mod obligations;
+mod provenance;
 mod refinement;
 mod validation;
 mod verifier;
 
+pub use body::{
+    BodyBlock, BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator, BodyType,
+    BodyValue, FunctionBody, LoweringEnvelope, MachineIntentSpec, PortabilityEnvelope,
+    PortabilityTarget, RealizationClass, EXECUTABLE_BODY_SCHEMA_VERSION,
+};
 pub use canonical::{CanonicalError, CanonicalForm, CANONICAL_SCHEMA_VERSION};
 pub use core::{
     Assumption, AssumptionConfidence, ContractClause, ContractKind, Effect, EvidenceClaim,
@@ -47,15 +54,20 @@ pub use machine_intent::{
 pub use obligations::{
     generate_machine_intent_obligations, ObligationGeneration, ObligationRecord,
 };
+pub use provenance::{
+    evidence_is_current, Realization, RealizationError, RealizationSelection, TargetIdentity,
+    TransformationRecord, PROVENANCE_SCHEMA_VERSION,
+};
 pub use refinement::{
     AuthorityCapability, AuthorityKind, AuthorityScope, CandidateEvaluation, CandidateState,
     CausalSlice, CausalSliceEdge, Confidence, DiagnosticCategory, DiagnosticObligation,
-    PromotionDecision, PromotionDisposition, RefinementBudget, RefinementError, RepairProposal,
-    ResourceLimits, SemanticChange, VerificationPlan,
+    PatchOperation, PromotionDecision, PromotionDisposition, ProtectedPropertyEvaluation,
+    ProtectedPropertyResult, ProtectedPropertyStatus, RefinementBudget, RefinementError,
+    RepairProposal, ResourceLimits, SemanticChange, SemanticPatch, VerificationPlan,
 };
 pub use validation::{Diagnostic, ValidationReport, ValidationSummary};
 pub use verifier::{
     AlignmentVerifierInput, CapabilityVerifierInput, DeterministicVerifier, IntegerVerifierInput,
-    MicroVerifier, VerifierIdentity, VerifierInput, VerifierMethod, VerifierRequest,
-    VerifierResult,
+    MicroVerifier, VerifierArtifactError, VerifierIdentity, VerifierIndependence, VerifierInput,
+    VerifierMethod, VerifierRequest, VerifierResult,
 };

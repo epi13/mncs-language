@@ -175,6 +175,9 @@ impl Program {
                     "function declares no behavioral contract",
                 ));
             }
+            if let Some(body) = &function.body {
+                body.validate(self, function, &function_path, &mut errors);
+            }
         }
 
         if self.functions.is_empty() {
@@ -307,6 +310,7 @@ pub(crate) mod tests {
                     artifact: Some("sha256:example".to_owned()),
                 }],
                 failure: FailureMode::Atomic,
+                body: None,
             }],
         }
     }

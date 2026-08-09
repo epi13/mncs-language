@@ -57,3 +57,32 @@ jobs:
           fi
           cargo run -p mncs-cli -- evidence-manifest examples/semantic-foundation/before.mncs.json > /tmp/mncs-evidence.json
           cargo run -p mncs-cli -- evidence-check /tmp/mncs-evidence.json examples/semantic-foundation/after.mncs.json
+      - name: Exercise executable semantic body workflows
+        shell: bash
+        run: |
+          cargo run -p mncs-cli -- validate examples/executable/checked-add.mncs.json
+          cargo run -p mncs-cli -- validate examples/executable/effectful-record.mncs.json
+          cargo run -p mncs-cli -- validate examples/executable/runtime-check.mncs.json
+          if cargo run -p mncs-cli -- validate examples/executable/invalid-body-capability.mncs.json; then
+            echo "invalid executable body was unexpectedly accepted" >&2
+            exit 1
+          fi
+          cargo run -p mncs-cli -- body examples/executable/checked-add.mncs.json
+          cargo run -p mncs-cli -- ir examples/executable/checked-add.mncs.json
+          cargo run -p mncs-cli -- trace examples/executable/checked-add.mncs.json
+          cargo run -p mncs-cli -- obligations examples/executable/checked-add.mncs.json
+          cargo run -p mncs-cli -- verifier-request examples/executable/checked-add.mncs.json > /tmp/mncs-verifier-requests.json
+          if cargo run -p mncs-cli -- verify examples/executable/checked-add.mncs.json > /tmp/mncs-verifier-results.json; then
+            echo "unresolved executable obligation was unexpectedly verified" >&2
+            exit 1
+          fi
+          jq '.[0]' /tmp/mncs-verifier-requests.json > /tmp/mncs-verifier-request.json
+          jq '.[0]' /tmp/mncs-verifier-results.json > /tmp/mncs-verifier-result.json
+          if cargo run -p mncs-cli -- verify-result examples/executable/checked-add.mncs.json /tmp/mncs-verifier-request.json /tmp/mncs-verifier-result.json; then
+            echo "UNKNOWN imported verifier result was unexpectedly accepted" >&2
+            exit 1
+          fi
+          if cargo run -p mncs-cli -- evaluate-candidate examples/semantic-foundation/before.mncs.json examples/refinement/contract-repair.proposal.json; then
+            echo "candidate with regressed protected property was unexpectedly accepted" >&2
+            exit 1
+          fi

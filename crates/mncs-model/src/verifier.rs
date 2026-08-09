@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::canonical::sha256_hex;
 use crate::{
@@ -10,11 +11,22 @@ use crate::{
 
 pub const VERIFIER_SCHEMA_VERSION: &str = "0.2";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerifierIndependence {
+    Generator,
+    Compiler,
+    IndependentImplementation,
+    IndependentEnvironment,
+    External,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifierIdentity {
     pub identity: SemanticId,
     pub name: String,
     pub version: String,
+    pub independence: VerifierIndependence,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +79,7 @@ pub struct VerifierResult {
     pub schema_version: String,
     pub obligation: SemanticId,
     pub subject: SemanticId,
+    pub scope: String,
     pub status: ObligationStatus,
     pub verifier: VerifierIdentity,
     pub method: VerifierMethod,
@@ -76,6 +89,22 @@ pub struct VerifierResult {
     pub artifact: Option<String>,
     pub limitations: Vec<String>,
     pub freshness: EvidenceFreshness,
+}
+
+#[derive(Debug, Error)]
+pub enum VerifierArtifactError {
+    #[error("invalid verifier artifact JSON: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("verifier artifact schema {actual:?} does not match request schema {expected:?}")]
+    Schema { actual: String, expected: String },
+    #[error("verifier artifact does not match the exact requested obligation or subject")]
+    SubjectMismatch,
+    #[error("verifier artifact scope does not match the requested scope")]
+    ScopeMismatch,
+    #[error("verifier artifact assumptions or dependencies do not match the request")]
+    DependencyMismatch,
+    #[error("verifier artifact has no verifier identity")]
+    MissingVerifier,
 }
 
 pub trait MicroVerifier {
@@ -104,6 +133,7 @@ impl DeterministicVerifier {
                 )),
                 name: name.to_owned(),
                 version: version.to_owned(),
+                independence: VerifierIndependence::IndependentImplementation,
             },
         }
     }
@@ -184,6 +214,7 @@ impl MicroVerifier for DeterministicVerifier {
             schema_version: VERIFIER_SCHEMA_VERSION.to_owned(),
             obligation: request.obligation.identity.clone(),
             subject: request.subject.clone(),
+            scope: request.scope.clone(),
             status,
             verifier,
             method,
@@ -198,7 +229,7 @@ impl MicroVerifier for DeterministicVerifier {
 }
 
 impl crate::Program {
-    pub fn verify_obligations<V: MicroVerifier>(&self, verifier: &V) -> Vec<VerifierResult> {
+    pub fn verifier_requests(&self) -> Vec<VerifierRequest> {
         let identities = self.semantic_identities();
         self.generate_obligations()
             .obligations
@@ -222,7 +253,7 @@ impl crate::Program {
                     ObligationStatus::Fail => Some(false),
                     ObligationStatus::Unknown => None,
                 };
-                verifier.verify(&VerifierRequest {
+                VerifierRequest {
                     schema_version: VERIFIER_SCHEMA_VERSION.to_owned(),
                     subject: obligation.subject.clone(),
                     scope: self.module.clone(),
@@ -231,13 +262,60 @@ impl crate::Program {
                     dependencies: obligation.dependencies.clone(),
                     dependency_fingerprints,
                     obligation,
-                })
+                }
             })
+            .collect()
+    }
+
+    pub fn verify_obligations<V: MicroVerifier>(&self, verifier: &V) -> Vec<VerifierResult> {
+        self.verifier_requests()
+            .iter()
+            .map(|request| verifier.verify(request))
             .collect()
     }
 }
 
 impl VerifierResult {
+    pub fn validate_against(
+        &self,
+        request: &VerifierRequest,
+        current: &SemanticIdentities,
+    ) -> Result<Self, VerifierArtifactError> {
+        if self.schema_version != request.schema_version {
+            return Err(VerifierArtifactError::Schema {
+                actual: self.schema_version.clone(),
+                expected: request.schema_version.clone(),
+            });
+        }
+        if self.obligation != request.obligation.identity || self.subject != request.subject {
+            return Err(VerifierArtifactError::SubjectMismatch);
+        }
+        if self.scope != request.scope {
+            return Err(VerifierArtifactError::ScopeMismatch);
+        }
+        if self.assumptions != request.assumptions
+            || self.dependencies != request.dependencies
+            || self.dependency_fingerprints != request.dependency_fingerprints
+        {
+            return Err(VerifierArtifactError::DependencyMismatch);
+        }
+        if self.verifier.identity.0.trim().is_empty() {
+            return Err(VerifierArtifactError::MissingVerifier);
+        }
+        let mut refreshed = self.clone();
+        refreshed.freshness = EvidenceFreshness::Unknown;
+        Ok(refreshed.refresh(current))
+    }
+
+    pub fn import_json(
+        input: &str,
+        request: &VerifierRequest,
+        current: &SemanticIdentities,
+    ) -> Result<Self, VerifierArtifactError> {
+        let artifact: Self = serde_json::from_str(input)?;
+        artifact.validate_against(request, current)
+    }
+
     pub fn refresh(&self, current: &SemanticIdentities) -> Self {
         let mut refreshed = self.clone();
         refreshed.freshness = if self.dependencies.iter().all(|dependency| {
@@ -339,6 +417,23 @@ mod tests {
         let mut stale = result.clone();
         stale.freshness = EvidenceFreshness::Stale;
         assert!(!stale.can_satisfy(&request.obligation, &request.subject));
+    }
+
+    #[test]
+    fn imported_verifier_artifacts_are_scope_and_dependency_bound() {
+        let verifier = DeterministicVerifier::default();
+        let request = integer_request();
+        let result = verifier.verify(&request);
+        let imported = result
+            .validate_against(&request, &valid_program().semantic_identities())
+            .expect("artifact validation");
+        assert_eq!(imported.freshness, EvidenceFreshness::Stale);
+        let mut wrong_scope = result;
+        "different-scope".clone_into(&mut wrong_scope.scope);
+        assert!(matches!(
+            wrong_scope.validate_against(&request, &valid_program().semantic_identities()),
+            Err(VerifierArtifactError::ScopeMismatch)
+        ));
     }
 
     #[test]

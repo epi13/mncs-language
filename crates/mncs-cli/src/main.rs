@@ -1,9 +1,9 @@
 use std::{env, fs, path::Path, process::ExitCode};
 
 use mncs_model::{
-    CausalSlice, Confidence, DeterministicVerifier, DiagnosticCategory, DiagnosticObligation,
-    EvidenceFreshness, EvidenceManifest, EvidenceState, ObligationStatus, Program, SemanticDiff,
-    SemanticId,
+    CandidateEvaluation, CausalSlice, Confidence, DeterministicVerifier, DiagnosticCategory,
+    DiagnosticObligation, EvidenceFreshness, EvidenceManifest, EvidenceState, FunctionBody,
+    ObligationStatus, Program, SemanticDiff, SemanticId,
 };
 use mncs_syntax::{analyze, SourceMetrics};
 use serde::{Deserialize, Serialize};
@@ -36,8 +36,14 @@ fn main() -> ExitCode {
         "obligations" => one_manifest_command(args, obligations),
         "verify" => one_manifest_command(args, verify),
         "diagnose" => one_manifest_command(args, diagnose),
+        "body" => one_manifest_command(args, body),
+        "trace" => one_manifest_command(args, trace),
+        "verifier-request" => one_manifest_command(args, verifier_request),
         "diff" => two_manifest_command(args, diff),
         "compare" => two_manifest_command(args, compare),
+        "slice" => slice_command(args),
+        "evaluate-candidate" => evaluate_candidate_command(args),
+        "verify-result" => verify_result_command(args),
         "evidence-check" => two_path_command(args, evidence_check),
         "syntax-metrics" => {
             let paths: Vec<String> = args.collect();
@@ -252,6 +258,72 @@ fn verify(path: &str) -> ExitCode {
 }
 
 #[derive(Debug, Serialize)]
+struct BodyReport {
+    schema_version: String,
+    functions: Vec<BodyFunctionReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct BodyFunctionReport {
+    name: String,
+    identity: SemanticId,
+    fingerprint: String,
+    body: FunctionBody,
+}
+
+fn body(path: &str) -> ExitCode {
+    let program = match read_valid_program(path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let mut functions = Vec::new();
+    for function in &program.functions {
+        if let Some(body) = &function.body {
+            functions.push(BodyFunctionReport {
+                name: function.name.clone(),
+                identity: body.identity(&program.module, &function.name),
+                fingerprint: body.fingerprint().expect("canonical body"),
+                body: body.clone(),
+            });
+        }
+    }
+    if print_json(&BodyReport {
+        schema_version: "0.2".to_owned(),
+        functions,
+    }) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(2)
+    }
+}
+
+fn trace(path: &str) -> ExitCode {
+    let program = match read_valid_program(path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    match program.lower_to_ir() {
+        Ok(ir) if print_json(&ir.trace) => ExitCode::SUCCESS,
+        Ok(_) | Err(_) => {
+            eprintln!("error: unable to lower manifest for trace emission");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn verifier_request(path: &str) -> ExitCode {
+    let program = match read_valid_program(path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    if print_json(&program.verifier_requests()) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(2)
+    }
+}
+
+#[derive(Debug, Serialize)]
 struct DiagnosticReport {
     obligations: Vec<DiagnosticObligation>,
     causal_slices: Vec<CausalSlice>,
@@ -346,6 +418,160 @@ fn diagnose(path: &str) -> ExitCode {
 struct DiffReport {
     semantic: SemanticDiff,
     invalidation: mncs_model::InvalidationReport,
+}
+
+fn slice_command(mut args: impl Iterator<Item = String>) -> ExitCode {
+    let Some(path) = args.next() else {
+        eprintln!("error: slice requires a manifest path and semantic identity");
+        return ExitCode::from(2);
+    };
+    let Some(identity) = args.next() else {
+        eprintln!("error: slice requires a manifest path and semantic identity");
+        return ExitCode::from(2);
+    };
+    if args.next().is_some() {
+        eprintln!("error: unexpected additional arguments");
+        return ExitCode::from(2);
+    }
+    let program = match read_valid_program(&path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let graph = match program.semantic_graph() {
+        Ok(graph) => graph,
+        Err(error) => {
+            eprintln!("error: unable to construct graph: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if print_json(&graph.causal_slice(&SemanticId(identity))) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(2)
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct CandidateEvaluationReport {
+    candidate: mncs_model::CandidateState,
+    evaluation: CandidateEvaluation,
+    protected_properties: mncs_model::ProtectedPropertyEvaluation,
+}
+
+fn evaluate_candidate_command(mut args: impl Iterator<Item = String>) -> ExitCode {
+    let Some(baseline_path) = args.next() else {
+        eprintln!("error: evaluate-candidate requires a baseline and proposal");
+        return ExitCode::from(2);
+    };
+    let Some(proposal_path) = args.next() else {
+        eprintln!("error: evaluate-candidate requires a baseline and proposal");
+        return ExitCode::from(2);
+    };
+    if args.next().is_some() {
+        eprintln!("error: unexpected additional arguments");
+        return ExitCode::from(2);
+    }
+    let baseline = match read_valid_program(&baseline_path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let proposal_input = match read_source(&proposal_path) {
+        Ok(input) => input,
+        Err(code) => return code,
+    };
+    let proposal: mncs_model::RepairProposal = match serde_json::from_str(&proposal_input) {
+        Ok(proposal) => proposal,
+        Err(error) => {
+            eprintln!("error: invalid repair proposal: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let candidate = match proposal.apply_isolated(&baseline) {
+        Ok(candidate) => candidate,
+        Err(error) => {
+            eprintln!("error: candidate evaluation rejected: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let evaluation = candidate.evaluate(&DeterministicVerifier::default());
+    let protected = candidate.evaluate_protected_properties(&proposal.protected_properties);
+    let success = evaluation
+        .verifier_results
+        .iter()
+        .all(|result| result.status == ObligationStatus::Pass)
+        && protected
+            .results
+            .iter()
+            .all(|result| result.status == mncs_model::ProtectedPropertyStatus::Preserved);
+    if !print_json(&CandidateEvaluationReport {
+        candidate,
+        evaluation,
+        protected_properties: protected,
+    }) {
+        ExitCode::from(2)
+    } else if success {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+fn verify_result_command(mut args: impl Iterator<Item = String>) -> ExitCode {
+    let Some(manifest_path) = args.next() else {
+        eprintln!("error: verify-result requires manifest, request, and result paths");
+        return ExitCode::from(2);
+    };
+    let Some(request_path) = args.next() else {
+        eprintln!("error: verify-result requires manifest, request, and result paths");
+        return ExitCode::from(2);
+    };
+    let Some(result_path) = args.next() else {
+        eprintln!("error: verify-result requires manifest, request, and result paths");
+        return ExitCode::from(2);
+    };
+    if args.next().is_some() {
+        eprintln!("error: unexpected additional arguments");
+        return ExitCode::from(2);
+    }
+    let program = match read_valid_program(&manifest_path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let request_input = match read_source(&request_path) {
+        Ok(input) => input,
+        Err(code) => return code,
+    };
+    let result_input = match read_source(&result_path) {
+        Ok(input) => input,
+        Err(code) => return code,
+    };
+    let request: mncs_model::VerifierRequest = match serde_json::from_str(&request_input) {
+        Ok(request) => request,
+        Err(error) => {
+            eprintln!("error: invalid verifier request: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let result = match mncs_model::VerifierResult::import_json(
+        &result_input,
+        &request,
+        &program.semantic_identities(),
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("error: verifier result rejected: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let success =
+        result.status == ObligationStatus::Pass && result.freshness == EvidenceFreshness::Current;
+    if !print_json(&result) {
+        ExitCode::from(2)
+    } else if success {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }
 
 fn diff(before_path: &str, after_path: &str) -> ExitCode {
@@ -580,8 +806,14 @@ fn print_usage() {
     eprintln!("  mncs obligations <manifest.json>");
     eprintln!("  mncs verify <manifest.json>");
     eprintln!("  mncs diagnose <manifest.json>");
+    eprintln!("  mncs body <manifest.json>");
+    eprintln!("  mncs trace <manifest.json>");
+    eprintln!("  mncs verifier-request <manifest.json>");
     eprintln!("  mncs diff <before.json> <after.json>");
     eprintln!("  mncs compare <before.json> <after.json>");
+    eprintln!("  mncs slice <manifest.json> <semantic-identity>");
+    eprintln!("  mncs evaluate-candidate <baseline.json> <proposal.json>");
+    eprintln!("  mncs verify-result <manifest.json> <request.json> <result.json>");
     eprintln!("  mncs evidence-check <evidence.json> <current.json>");
     eprintln!("  mncs syntax-metrics <source> [source ...]");
     eprintln!("  mncs syntax-tournament <tournament.json>");

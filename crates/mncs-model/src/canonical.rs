@@ -84,7 +84,7 @@ fn canonical_program(program: &Program) -> JsonValue {
 }
 
 pub(crate) fn canonical_function(function: &Function) -> JsonValue {
-    object([
+    let mut result = object([
         ("assumptions", sorted_strings(&function.assumptions)),
         ("capabilities", sorted_strings(&function.capabilities)),
         (
@@ -112,7 +112,17 @@ pub(crate) fn canonical_function(function: &Function) -> JsonValue {
             "outputs",
             JsonValue::Array(function.outputs.iter().map(canonical_value).collect()),
         ),
-    ])
+    ]);
+    if let Some(body) = &function.body {
+        if let JsonValue::Object(fields) = &mut result {
+            fields.insert(
+                "body".to_owned(),
+                serde_json::from_str(&body.canonical_json().expect("canonical body"))
+                    .expect("canonical body JSON"),
+            );
+        }
+    }
+    result
 }
 
 pub(crate) fn canonical_contract(contract: &ContractClause) -> JsonValue {
@@ -340,6 +350,7 @@ mod tests {
                 assumptions: vec![],
                 evidence: vec![],
                 failure: FailureMode::default(),
+                body: None,
             }],
         }
     }
