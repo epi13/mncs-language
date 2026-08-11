@@ -83,6 +83,12 @@ jobs:
             echo "UNKNOWN imported verifier result was unexpectedly accepted" >&2
             exit 1
           fi
+          cargo run -p mncs-cli -- execute examples/executable/checked-add.mncs.json examples/execution/checked-add-request.json
+          cargo run -p mncs-cli -- compare-execution examples/execution/bounded-sum-baseline.mncs.json examples/execution/bounded-sum-equivalent-refactor.mncs.json examples/execution/bounded-sum-corpus.json
+          if cargo run -p mncs-cli -- compare-execution examples/execution/bounded-sum-baseline.mncs.json examples/execution/bounded-sum-regression.mncs.json examples/execution/bounded-sum-corpus.json; then
+            echo "intentional execution regression was unexpectedly accepted" >&2
+            exit 1
+          fi
           if cargo run -p mncs-cli -- evaluate-candidate examples/semantic-foundation/before.mncs.json examples/refinement/contract-repair.proposal.json; then
             echo "candidate with regressed protected property was unexpectedly accepted" >&2
             exit 1
@@ -94,3 +100,5 @@ jobs:
             | python3 tools/mncs_language_forge_provider.py | jq -e '.type == "capabilities" and (.analyses | index("mncs-language-ssa-integrity")) != null'
           printf '%s\n' '{"protocol_version":"0.1","type":"analysis_request","request_id":"ci-ssa","analysis":"mncs-language-ssa-integrity","component":{"candidate_identity":"ci","changed_paths":[]}}' \
             | python3 tools/mncs_language_forge_provider.py | jq -e '.type == "analysis_response" and .status == "PASS" and .witnesses[0].schema_version == "0.4"'
+          printf '%s\n' '{"protocol_version":"0.1","type":"analysis_request","request_id":"ci-execution","analysis":"mncs-language-execution-equivalence","component":{"candidate_identity":"ci","changed_paths":[]}}' \
+            | python3 tools/mncs_language_forge_provider.py | jq -e '.type == "analysis_response" and .status == "PASS" and .witnesses[0].matching_cases == .witnesses[0].corpus_size and .witnesses[1].mismatching_cases > 0'

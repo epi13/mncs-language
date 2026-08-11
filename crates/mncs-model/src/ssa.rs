@@ -42,6 +42,10 @@ pub enum SsaInstructionKind {
         operand_type: crate::IntegerType,
         intent: ArithmeticIntent,
     },
+    IntegerCompare {
+        predicate: String,
+        operand_type: crate::IntegerType,
+    },
     Effect,
     RuntimeCheck {
         obligation: SemanticId,
@@ -1023,6 +1027,13 @@ fn ssa_kind(kind: &IrOperationKind) -> SsaInstructionKind {
             operand_type: *operand_type,
             intent: *intent,
         },
+        IrOperationKind::IntegerCompare {
+            predicate,
+            operand_type,
+        } => SsaInstructionKind::IntegerCompare {
+            predicate: predicate.clone(),
+            operand_type: *operand_type,
+        },
         IrOperationKind::Effect => SsaInstructionKind::Effect,
         IrOperationKind::RuntimeCheck {
             obligation,
@@ -1051,6 +1062,13 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
             operator: operator.clone(),
             operand_type: *operand_type,
             intent: *intent,
+        },
+        BodyOperationKind::IntegerCompare {
+            predicate,
+            operand_type,
+        } => SsaInstructionKind::IntegerCompare {
+            predicate: predicate.clone(),
+            operand_type: *operand_type,
         },
         BodyOperationKind::Effect { .. } => SsaInstructionKind::Effect,
         BodyOperationKind::RuntimeCheck {

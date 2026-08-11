@@ -172,6 +172,7 @@ impl Program {
                                     &operation_identity,
                                 ))
                             }
+                            crate::BodyOperationKind::IntegerCompare { .. } => None,
                             crate::BodyOperationKind::Effect { .. } => {
                                 Some(crate::obligations::body_obligation_id(
                                     "effect-authorized",

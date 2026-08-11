@@ -4,7 +4,7 @@
 
 Research and reference implementation for a general-purpose, verification-native programming language built on Machine-Native Complexity Standard (MNCS) principles.
 
-> **Project status:** the 0.1 executable semantic model now has an experimental 0.2 foundation for canonical form, stable semantic identities, graph dependencies, evidence invalidation, recursive artifacts, and authority-aware deltas. The supported 0.3 subset now has CFG-correct executable bodies, deterministic HIR, and a small validated 0.4 SSA artifact with body→HIR→SSA provenance and evidence-aware transformation refusal. Forge development evidence is configured locally; no final grammar, compiler stability, backend, independent evaluation, or production suitability is claimed.
+> **Project status:** the 0.1 executable semantic model now has an experimental 0.2 foundation for canonical form, stable semantic identities, graph dependencies, evidence invalidation, recursive artifacts, and authority-aware deltas. The supported 0.3 subset now has CFG-correct executable bodies, typed integer comparison, deterministic HIR, and a small validated 0.4 SSA artifact with body→HIR→SSA provenance and evidence-aware transformation refusal. A versioned, deterministic, bounded reference executor and corpus differential checker now enable experimental language-native refactoring/reference studies. Forge development evidence is configured locally; no final grammar, compiler stability, production backend, independent evaluation, universal equivalence, or production suitability is claimed.
 
 ## Why this project exists
 
@@ -94,9 +94,20 @@ cargo run -p mncs-cli -- body examples/executable/checked-add.mncs.json
 cargo run -p mncs-cli -- ssa examples/executable/checked-add.mncs.json
 cargo run -p mncs-cli -- trace examples/executable/checked-add.mncs.json
 cargo run -p mncs-cli -- verifier-request examples/executable/checked-add.mncs.json
+cargo run -p mncs-cli -- execute \
+  examples/executable/checked-add.mncs.json \
+  examples/execution/checked-add-request.json
+cargo run -p mncs-cli -- compare-execution \
+  examples/execution/bounded-sum-baseline.mncs.json \
+  examples/execution/bounded-sum-equivalent-refactor.mncs.json \
+  examples/execution/bounded-sum-corpus.json
+cargo run -p mncs-cli -- compare-execution \
+  examples/execution/bounded-sum-baseline.mncs.json \
+  examples/execution/bounded-sum-regression.mncs.json \
+  examples/execution/bounded-sum-corpus.json  # exits 1: mismatch detected
 ```
 
-The local contract-expression change changes the contract and function fingerprints and marks the dependent evidence stale. Canonicalization sorts set-like declarations while preserving ordered inputs and outputs.
+The local contract-expression change changes the contract and function fingerprints and marks the dependent evidence stale. Canonicalization sorts set-like declarations while preserving ordered inputs and outputs. The execution command is a research interpreter for validated executable bodies: every request has a finite step budget, effects are unsupported by default, and unsupported/runtime-failure/budget-exhausted outcomes are explicit. The comparison command reports finite corpus agreement or bounded mismatches; it does not establish universal equivalence.
 
 The IR command emits a deterministic, inspectable projection with state regions, capability uses, failure blocks, generated obligations, semantic-to-IR traceability, and transformation provenance. `body` includes a deterministic CFG projection; `ssa` emits the experimental validated block-parameter SSA artifact. Executable-body manifests lower symbolic operations directly; `verifier-request` and `verify-result` exchange identity- and dependency-bound JSON artifacts. `verify` exercises the pure local verifier; `diagnose` emits a conservative backward slice when graph construction is available and a dependency-only slice for invalid input. Candidate evaluation remains isolated and does not promote or rewrite the trusted baseline.
 
@@ -104,7 +115,8 @@ The IR command emits a deterministic, inspectable projection with state regions,
 
 `mncs-forge.toml` configures the installed MNCS Forge Provider Protocol adapter in
 `tools/mncs_language_forge_provider.py`. Its bounded development workflows exercise Rust quality,
-semantic fixtures, HIR trace integrity, SSA integrity, and evidence freshness. Forge records are
+semantic fixtures, HIR trace integrity, SSA integrity, evidence freshness, and the frozen bounded-sum
+execution-equivalence study. Forge records are
 development evidence only: local provider execution is not sandboxed, process success alone is not
 proof, and no evaluator or promotion authority is claimed. The portable execution-bundle fixture
 under `compatibility/execution-bundle/` is checked with the sibling MNCS standard tool and is not a
@@ -188,6 +200,8 @@ obligation generation and evidence resolution
 high-level MNCS IR
         ↓
 verified SSA IR
+        ↓
+bounded deterministic reference execution (experimental study path)
         ↓
 LLVM IR / Cranelift IR / another backend
         ↓

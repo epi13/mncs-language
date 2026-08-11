@@ -1,0 +1,36 @@
+{
+  "schema_version": "0.1",
+  "module": "Examples.ReferenceStudy",
+  "functions": [
+    {
+      "name": "bounded_sum",
+      "inputs": [{"name": "n", "type": "u8"}],
+      "outputs": [{"name": "result", "type": "u8"}],
+      "contracts": [{"id": "sum-behavior", "kind": "ensures", "expression": "result is the bounded sum"}], "effects": [], "capabilities": [], "assumptions": [], "evidence": [{"property": "sum-behavior", "verifier": "bounded-corpus", "status": "tested"}], "failure": "isolated",
+      "body": {
+        "schema_version": "0.2", "entry": "entry",
+        "parameters": [{"id": "n", "name": "n", "type": {"integer": {"bits": 8, "signed": false}}}],
+        "blocks": [
+          {"id": "entry", "parameters": [], "operations": [
+            {"id": "zero", "kind": {"constant": {"value": 0, "type": {"integer": {"bits": 8, "signed": false}}}}, "results": [{"id": "zero", "type": {"integer": {"bits": 8, "signed": false}}}]},
+            {"id": "one", "kind": {"constant": {"value": 1, "type": {"integer": {"bits": 8, "signed": false}}}}, "results": [{"id": "one", "type": {"integer": {"bits": 8, "signed": false}}}]}
+          ], "terminator": {"branch": {"target": "loop", "arguments": ["one", "zero"]}}},
+          {"id": "loop", "parameters": [
+            {"id": "i", "type": {"integer": {"bits": 8, "signed": false}}},
+            {"id": "acc", "type": {"integer": {"bits": 8, "signed": false}}}
+          ], "operations": [
+            {"id": "in_range", "kind": {"integer_compare": {"predicate": "le", "operand_type": {"bits": 8, "signed": false}}}, "operands": ["i", "n"], "results": [{"id": "in_range", "type": {"named": "bool"}}]}
+          ], "terminator": {"conditional_branch": {"condition": "in_range", "then_target": "body", "then_arguments": ["i", "acc"], "else_target": "exit", "else_arguments": ["acc"]}}},
+          {"id": "body", "parameters": [
+            {"id": "body_i", "type": {"integer": {"bits": 8, "signed": false}}},
+            {"id": "body_acc", "type": {"integer": {"bits": 8, "signed": false}}}
+          ], "operations": [
+            {"id": "add", "kind": {"integer": {"operator": "add", "operand_type": {"bits": 8, "signed": false}, "intent": "checked"}}, "operands": ["body_acc", "body_i"], "results": [{"id": "next_acc", "type": {"integer": {"bits": 8, "signed": false}}}]},
+            {"id": "inc", "kind": {"integer": {"operator": "add", "operand_type": {"bits": 8, "signed": false}, "intent": "wrapping"}}, "operands": ["body_i", "one"], "results": [{"id": "next_i", "type": {"integer": {"bits": 8, "signed": false}}}]}
+          ], "terminator": {"branch": {"target": "loop", "arguments": ["next_i", "next_acc"]}}},
+          {"id": "exit", "parameters": [{"id": "result_value", "type": {"integer": {"bits": 8, "signed": false}}}], "operations": [], "terminator": {"return": {"values": ["result_value"]}}}
+        ]
+      }
+    }
+  ]
+}

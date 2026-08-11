@@ -135,6 +135,23 @@ Initial bounded foundation now present:
 
 This is not verified compiler correctness, SSA optimization, memory SSA, or a backend.
 
+The Luna bounded reference-execution increment is now also present:
+
+- versioned JSON execution requests/results with explicit returned, runtime-failure, unsupported,
+  budget-exhausted, and invalid-request outcomes;
+- deterministic body-level interpretation with a mandatory finite step budget and capped identity
+  traces;
+- typed integer comparison (`eq`, `ne`, `lt`, `le`, `gt`, `ge`) through body validation, HIR, and
+  SSA, with signed/unsigned interpretation;
+- conservative effect handling with explicit deterministic recording policy and no ambient authority;
+- reusable corpus comparison reports with mismatch localization and finite-equivalence language;
+- a bounded-sum baseline, structural equivalent refactor, intentional regression, and frozen edge corpus;
+- CLI commands `execute` and `compare-execution`; and
+- Forge development verifier `mncs-language.execution-equivalence`.
+
+This enables experimental MNCS-Language refactoring/reference studies before backend completion. It
+does not establish universal equivalence, production runtime behavior, or compiler correctness.
+
 - introduce basic blocks, SSA values, phi-like joins, and explicit memory regions;
 - attach proof obligations to transformations;
 - define conservative aliasing and overflow semantics;
@@ -162,6 +179,10 @@ This is not verified compiler correctness, SSA optimization, memory SSA, or a ba
 - complete one bounded observe–localize–propose–verify–compare–promote cycle;
 - require independent evidence before automatic candidate promotion;
 - retain an auditable record of accepted and rejected candidate transformations.
+
+The next Sol High pass should decide whether the body reference evaluator is sufficient as a study
+oracle or whether a separately validated SSA evaluator is needed, without conflating either with a
+production backend.
 
 ## 0.6 — Surface-language and self-description experiments
 

@@ -10,6 +10,7 @@ mod cfg;
 mod core;
 mod delta;
 mod evidence;
+mod execution;
 mod graph;
 mod identity;
 mod ir;
@@ -35,6 +36,14 @@ pub use core::{
 pub use delta::{AuthorityDelta, EvidenceDelta, FailureChange, SemanticChangeSet, SemanticDelta};
 pub use evidence::{
     EvidenceFreshness, EvidenceManifest, EvidenceRecord, EvidenceState, EvidenceStatusReport,
+};
+pub use execution::{
+    compare as compare_execution, execute, execute_with_policy, ComparisonStatus,
+    EffectExecutionPolicy, ExecutionCase, ExecutionComparison, ExecutionCorpus,
+    ExecutionEffectEvent, ExecutionFailure, ExecutionPolicy, ExecutionRequest, ExecutionResult,
+    ExecutionStatus, ExecutionSubject, ExecutionTarget, ExecutionTraceEntry, ExecutionValue,
+    EXECUTION_COMPARISON_SCHEMA_VERSION, EXECUTION_CORPUS_SCHEMA_VERSION,
+    EXECUTION_REQUEST_SCHEMA_VERSION, EXECUTION_RESULT_SCHEMA_VERSION, MAX_EXECUTION_BUDGET,
 };
 pub use graph::{
     EdgeKind, GraphEdge, GraphError, GraphNode, InvalidationReason, InvalidationReport,

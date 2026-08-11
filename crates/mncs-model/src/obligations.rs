@@ -183,6 +183,7 @@ impl Program {
                                     ),
                                 });
                             }
+                            BodyOperationKind::IntegerCompare { .. } => {}
                             BodyOperationKind::Constant { .. } => {}
                         }
                         if let Some(machine_intent) = &operation.machine_intent {

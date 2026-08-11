@@ -359,6 +359,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                                 &operation_identity,
                             ))
                         }
+                        crate::BodyOperationKind::IntegerCompare { .. } => None,
                         crate::BodyOperationKind::Effect { .. } => {
                             Some(crate::obligations::body_obligation_id(
                                 "effect-authorized",

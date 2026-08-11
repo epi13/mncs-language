@@ -82,6 +82,10 @@ pub enum IrOperationKind {
         operand_type: crate::IntegerType,
         intent: crate::ArithmeticIntent,
     },
+    IntegerCompare {
+        predicate: String,
+        operand_type: crate::IntegerType,
+    },
     ContractCheck {
         kind: ContractKind,
     },
@@ -707,6 +711,19 @@ fn lower_executable_body(
                             operator: operator.clone(),
                             operand_type: *operand_type,
                             intent: *intent,
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        Some(machine_intent_links(program, function, block, operation)),
+                        None,
+                    ),
+                    BodyOperationKind::IntegerCompare {
+                        predicate,
+                        operand_type,
+                    } => (
+                        IrOperationKind::IntegerCompare {
+                            predicate: predicate.clone(),
+                            operand_type: *operand_type,
                         },
                         Vec::new(),
                         Vec::new(),
