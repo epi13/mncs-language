@@ -332,6 +332,19 @@ fn bounded_execution_and_corpus_comparison_are_explicitly_limited() {
     assert_eq!(result["returned"][0]["integer"]["value"], 1);
     assert!(!result["trace"].as_array().unwrap().is_empty());
 
+    let executed_ssa = binary()
+        .args(["execute-ssa", &baseline, &request])
+        .output()
+        .expect("run bounded SSA execution");
+    assert!(executed_ssa.status.success());
+    let ssa_result: Value =
+        serde_json::from_slice(&executed_ssa.stdout).expect("SSA execution JSON");
+    assert_eq!(ssa_result["schema_version"], "0.1");
+    assert_eq!(ssa_result["status"], "returned");
+    assert_eq!(ssa_result["returned"][0]["integer"]["value"], 1);
+    assert!(ssa_result["ssa_module_identity"].is_string());
+    assert!(ssa_result["hir_fingerprint"].is_string());
+
     let effect_manifest = example("executable/effectful-record.mncs.json");
     let effect_request = example("execution/effect-record-request.json");
     let effect = binary()
@@ -346,6 +359,16 @@ fn bounded_execution_and_corpus_comparison_are_explicitly_limited() {
     let equivalent = example("execution/bounded-sum-equivalent-refactor.mncs.json");
     let regression = example("execution/bounded-sum-regression.mncs.json");
     let corpus = example("execution/bounded-sum-corpus.json");
+    let lowering = binary()
+        .args(["check-lowering-execution", &baseline, &corpus])
+        .output()
+        .expect("run body SSA conformance");
+    assert!(lowering.status.success());
+    let lowering_report: Value = serde_json::from_slice(&lowering.stdout).expect("lowering JSON");
+    assert_eq!(lowering_report["status"], "consistent_over_corpus");
+    assert_eq!(lowering_report["matching_cases"], 7);
+    assert_eq!(lowering_report["mismatching_cases"], 0);
+
     let pass = binary()
         .args(["compare-execution", &baseline, &equivalent, &corpus])
         .output()

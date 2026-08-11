@@ -1,0 +1,6 @@
+{
+  "schema_version": "0.1",
+  "target": {"module": "Examples.Executable", "function": "checked_path"},
+  "arguments": [],
+  "step_budget": 16
+}

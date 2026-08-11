@@ -459,30 +459,23 @@ fn execute_operation(
                 );
                 return Some(result.clone());
             };
-            let Some(value) = evaluate_add(*operand_type, *intent, left, right) else {
-                result.fail(
-                    ExecutionStatus::RuntimeFailure,
-                    Some(identity.clone()),
-                    match intent {
-                        ArithmeticIntent::Trapping => "trapping integer addition overflow",
-                        ArithmeticIntent::Checked => "checked integer addition overflow",
-                        ArithmeticIntent::Widening { .. } => "widening integer addition overflow",
-                        ArithmeticIntent::Wrapping | ArithmeticIntent::Saturating => {
-                            "integer operation did not produce a value"
-                        }
-                    }
-                    .to_owned(),
-                );
-                return Some(result.clone());
-            };
-            if operator != "add" {
+            if !integer_operator_supported(operator, *intent) {
                 result.fail(
                     ExecutionStatus::Unsupported,
                     Some(identity.clone()),
-                    format!("unsupported integer operator {operator:?}"),
+                    format!("unsupported integer operator or intent {operator:?}/{intent:?}"),
                 );
                 return Some(result.clone());
             }
+            let Some(value) = evaluate_integer(operator, *operand_type, *intent, left, right)
+            else {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    format!("integer {operator} overflow or did not produce a value"),
+                );
+                return Some(result.clone());
+            };
             values.insert(
                 operation.results[0].id.clone(),
                 ExecutionValue::Integer {
@@ -637,7 +630,12 @@ fn integer_operands(
     Some((*left, *right))
 }
 
-fn compare_integers(predicate: &str, ty: IntegerType, left: i128, right: i128) -> Option<bool> {
+pub(crate) fn compare_integers(
+    predicate: &str,
+    ty: IntegerType,
+    left: i128,
+    right: i128,
+) -> Option<bool> {
     if !in_range(left, ty) || !in_range(right, ty) {
         return None;
     }
@@ -652,7 +650,14 @@ fn compare_integers(predicate: &str, ty: IntegerType, left: i128, right: i128) -
     })
 }
 
-fn evaluate_add(
+pub(crate) fn integer_operator_supported(operator: &str, intent: ArithmeticIntent) -> bool {
+    matches!(operator, "add" | "sub" | "mul")
+        || (matches!(operator, "and" | "or" | "xor")
+            && matches!(intent, ArithmeticIntent::Wrapping))
+}
+
+pub(crate) fn evaluate_integer(
+    operator: &str,
     ty: IntegerType,
     intent: ArithmeticIntent,
     left: i128,
@@ -661,7 +666,18 @@ fn evaluate_add(
     if !in_range(left, ty) || !in_range(right, ty) || !(1..=126).contains(&ty.bits) {
         return None;
     }
-    let raw = left.checked_add(right)?;
+    if !integer_operator_supported(operator, intent) {
+        return None;
+    }
+    if matches!(operator, "and" | "or" | "xor") {
+        return evaluate_bitwise(operator, ty, left, right);
+    }
+    let raw = match operator {
+        "add" => left.checked_add(right)?,
+        "sub" => left.checked_sub(right)?,
+        "mul" => left.checked_mul(right)?,
+        _ => return None,
+    };
     let result_bits = match intent {
         ArithmeticIntent::Widening { bits } => bits,
         _ => ty.bits,
@@ -687,6 +703,29 @@ fn evaluate_add(
         | ArithmeticIntent::Trapping
         | ArithmeticIntent::Widening { .. } => Some(raw),
         ArithmeticIntent::Saturating => Some(raw.clamp(minimum, maximum)),
+    }
+}
+
+fn evaluate_bitwise(operator: &str, ty: IntegerType, left: i128, right: i128) -> Option<i128> {
+    let (_, maximum) = integer_limits(ty.bits, false)?;
+    let left = left.rem_euclid(maximum.checked_add(1)?);
+    let right = right.rem_euclid(maximum.checked_add(1)?);
+    let value = match operator {
+        "and" => left & right,
+        "or" => left | right,
+        "xor" => left ^ right,
+        _ => return None,
+    };
+    if ty.signed {
+        let sign = 1_i128.checked_shl(u32::from(ty.bits - 1))?;
+        let modulus = maximum.checked_add(1)?;
+        Some(if value >= sign {
+            value - modulus
+        } else {
+            value
+        })
+    } else {
+        Some(value)
     }
 }
 
@@ -909,13 +948,44 @@ mod tests {
             signed: true,
         };
         assert_eq!(
-            evaluate_add(ty, ArithmeticIntent::Wrapping, 127, 1),
+            evaluate_integer("add", ty, ArithmeticIntent::Wrapping, 127, 1),
             Some(-128)
         );
-        assert_eq!(evaluate_add(ty, ArithmeticIntent::Checked, 127, 1), None);
         assert_eq!(
-            evaluate_add(ty, ArithmeticIntent::Saturating, 127, 1),
+            evaluate_integer("add", ty, ArithmeticIntent::Checked, 127, 1),
+            None
+        );
+        assert_eq!(
+            evaluate_integer("add", ty, ArithmeticIntent::Saturating, 127, 1),
             Some(127)
+        );
+        assert_eq!(
+            evaluate_integer("sub", ty, ArithmeticIntent::Wrapping, -128, 1),
+            Some(127)
+        );
+        assert_eq!(
+            evaluate_integer("mul", ty, ArithmeticIntent::Saturating, 64, 2),
+            Some(127)
+        );
+        assert_eq!(
+            evaluate_integer("xor", ty, ArithmeticIntent::Wrapping, -1, 1),
+            Some(-2)
+        );
+        let unsigned = IntegerType {
+            bits: 8,
+            signed: false,
+        };
+        assert_eq!(
+            evaluate_integer("mul", unsigned, ArithmeticIntent::Wrapping, 255, 2),
+            Some(254)
+        );
+        assert_eq!(
+            evaluate_integer("mul", unsigned, ArithmeticIntent::Checked, 255, 2),
+            None
+        );
+        assert_eq!(
+            evaluate_integer("mul", unsigned, ArithmeticIntent::Saturating, 255, 2),
+            Some(255)
         );
     }
 

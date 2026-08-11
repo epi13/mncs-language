@@ -1,0 +1,32 @@
+{
+  "schema_version": "0.1",
+  "module": "Examples.ReferenceStudy",
+  "functions": [{
+    "name": "bounded_range_plan",
+    "inputs": [{"name": "offset", "type": "u8"}, {"name": "length", "type": "u8"}, {"name": "capacity", "type": "u8"}],
+    "outputs": [{"name": "valid", "type": "bool"}, {"name": "end", "type": "u8"}],
+    "contracts": [{"id": "range-behavior", "kind": "ensures", "expression": "valid range and checked end"}],
+    "effects": [], "capabilities": [], "assumptions": [],
+    "evidence": [{"property": "range-behavior", "verifier": "bounded-range-corpus", "status": "tested"}],
+    "failure": "isolated",
+    "body": {
+      "schema_version": "0.2", "entry": "entry",
+      "parameters": [
+        {"id": "offset", "name": "offset", "type": {"integer": {"bits": 8, "signed": false}}},
+        {"id": "length", "name": "length", "type": {"integer": {"bits": 8, "signed": false}}},
+        {"id": "capacity", "name": "capacity", "type": {"integer": {"bits": 8, "signed": false}}}
+      ],
+      "blocks": [
+        {"id": "entry", "parameters": [], "operations": [
+          {"id": "end", "kind": {"integer": {"operator": "add", "operand_type": {"bits": 8, "signed": false}, "intent": "checked"}}, "operands": ["offset", "length"], "results": [{"id": "end", "type": {"integer": {"bits": 8, "signed": false}}}]},
+          {"id": "within", "kind": {"integer_compare": {"predicate": "le", "operand_type": {"bits": 8, "signed": false}}}, "operands": ["end", "capacity"], "results": [{"id": "within", "type": {"named": "bool"}}]},
+          {"id": "two", "kind": {"constant": {"value": 2, "type": {"integer": {"bits": 8, "signed": false}}}}, "results": [{"id": "two", "type": {"integer": {"bits": 8, "signed": false}}}]},
+          {"id": "double_length", "kind": {"integer": {"operator": "mul", "operand_type": {"bits": 8, "signed": false}, "intent": "saturating"}}, "operands": ["length", "two"], "results": [{"id": "double_length", "type": {"integer": {"bits": 8, "signed": false}}}]},
+          {"id": "span_ok", "kind": {"integer_compare": {"predicate": "lt", "operand_type": {"bits": 8, "signed": false}}}, "operands": ["double_length", "capacity"], "results": [{"id": "span_ok", "type": {"named": "bool"}}]}
+        ], "terminator": {"conditional_branch": {"condition": "span_ok", "then_target": "accept", "then_arguments": ["end"], "else_target": "reject", "else_arguments": ["end"]}}},
+        {"id": "accept", "parameters": [{"id": "accepted_end", "type": {"integer": {"bits": 8, "signed": false}}}], "operations": [{"id": "true", "kind": {"constant": {"value": 1, "type": {"named": "bool"}}}, "results": [{"id": "true", "type": {"named": "bool"}}]}], "terminator": {"return": {"values": ["true", "accepted_end"]}}},
+        {"id": "reject", "parameters": [{"id": "rejected_end", "type": {"integer": {"bits": 8, "signed": false}}}], "operations": [{"id": "false", "kind": {"constant": {"value": 0, "type": {"named": "bool"}}}, "results": [{"id": "false", "type": {"named": "bool"}}]}], "terminator": {"return": {"values": ["false", "rejected_end"]}}}
+      ]
+    }
+  }]
+}

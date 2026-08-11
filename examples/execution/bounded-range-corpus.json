@@ -1,0 +1,12 @@
+{
+  "schema_version": "0.1",
+  "name": "bounded-range-frozen-v1",
+  "cases": [
+    {"id": "empty", "request": {"schema_version": "0.1", "target": {"module": "Examples.ReferenceStudy", "function": "bounded_range_plan"}, "arguments": [{"integer": {"value": 0, "type": {"bits": 8, "signed": false}}}, {"integer": {"value": 0, "type": {"bits": 8, "signed": false}}}, {"integer": {"value": 0, "type": {"bits": 8, "signed": false}}}], "step_budget": 256}},
+    {"id": "ordinary", "request": {"schema_version": "0.1", "target": {"module": "Examples.ReferenceStudy", "function": "bounded_range_plan"}, "arguments": [{"integer": {"value": 3, "type": {"bits": 8, "signed": false}}}, {"integer": {"value": 2, "type": {"bits": 8, "signed": false}}}, {"integer": {"value": 8, "type": {"bits": 8, "signed": false}}}], "step_budget": 256}},
+    {"id": "exact-capacity", "request": {"schema_version": "0.1", "target": {"module": "Examples.ReferenceStudy", "function": "bounded_range_plan"}, "arguments": [{"integer": {"value": 4, "type": {"bits": 8, "signed": false}}}, {"integer": {"value": 4, "type": {"bits": 8, "signed": false}}}, {"integer": {"value": 8, "type": {"bits": 8, "signed": false}}}], "step_budget": 256}},
+    {"id": "zero-length-at-edge", "request": {"schema_version": "0.1", "target": {"module": "Examples.ReferenceStudy", "function": "bounded_range_plan"}, "arguments": [{"integer": {"value": 8, "type": {"bits": 8, "signed": false}}}, {"integer": {"value": 0, "type": {"bits": 8, "signed": false}}}, {"integer": {"value": 8, "type": {"bits": 8, "signed": false}}}], "step_budget": 256}},
+    {"id": "double-span-boundary", "request": {"schema_version": "0.1", "target": {"module": "Examples.ReferenceStudy", "function": "bounded_range_plan"}, "arguments": [{"integer": {"value": 1, "type": {"bits": 8, "signed": false}}}, {"integer": {"value": 4, "type": {"bits": 8, "signed": false}}}, {"integer": {"value": 8, "type": {"bits": 8, "signed": false}}}], "step_budget": 256}},
+    {"id": "near-u8-edge", "request": {"schema_version": "0.1", "target": {"module": "Examples.ReferenceStudy", "function": "bounded_range_plan"}, "arguments": [{"integer": {"value": 100, "type": {"bits": 8, "signed": false}}}, {"integer": {"value": 20, "type": {"bits": 8, "signed": false}}}, {"integer": {"value": 200, "type": {"bits": 8, "signed": false}}}], "step_budget": 256}}
+  ]
+}

@@ -36,6 +36,7 @@ Agent-generated code receives no special trust. It must satisfy the same contrac
 
 ## Not universal equivalence from a frozen corpus
 
-The bounded reference executor and differential checker provide reproducible finite behavioral
-evidence for declared inputs. Matching cases do not prove universal semantic equivalence, production
-backend correctness, or independent evaluation.
+The bounded body and independent SSA reference evaluators and differential checker provide
+reproducible finite behavioral evidence for declared inputs. Matching cases do not prove universal
+semantic equivalence, formal lowering/compiler correctness, production backend correctness, or
+independent evaluation; shared helpers can still create common-mode defects.

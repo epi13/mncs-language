@@ -19,6 +19,7 @@ mod obligations;
 mod provenance;
 mod refinement;
 mod ssa;
+mod ssa_execution;
 mod validation;
 mod verifier;
 
@@ -81,6 +82,12 @@ pub use ssa::{
     SsaBlock, SsaDiagnostic, SsaError, SsaFunction, SsaInstruction, SsaInstructionKind, SsaModule,
     SsaTerminator, SsaTraceEntry, SsaTraceMap, SsaTransformationDecision, SsaValidationReport,
     SsaValue, SSA_SCHEMA_VERSION,
+};
+pub use ssa_execution::{
+    compare_body_and_ssa, execute_ssa, execute_ssa_module, LoweringDivergenceContext,
+    LoweringExecutionComparison, LoweringExecutionMismatch, LoweringExecutionStatus,
+    SsaExecutionResult, SsaExecutionTraceEntry, LOWERING_EXECUTION_COMPARISON_SCHEMA_VERSION,
+    SSA_EXECUTION_RESULT_SCHEMA_VERSION,
 };
 pub use validation::{Diagnostic, ValidationReport, ValidationSummary};
 pub use verifier::{

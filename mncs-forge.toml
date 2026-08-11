@@ -55,8 +55,8 @@ version = "0.1"
 command = ["python3", "tools/mncs_language_forge_provider.py"]
 transport = "stdio-jsonl"
 required = true
-capabilities = ["mncs-language-rust-quality", "mncs-language-semantic-validation", "mncs-language-hir-trace-integrity", "mncs-language-ssa-integrity", "mncs-language-evidence-freshness", "mncs-language-execution-equivalence"]
-supported_constructs = ["rust-workspace", "semantic-body", "high-level-ir", "verified-ssa", "evidence-freshness", "bounded-reference-execution", "corpus-differential-check"]
+capabilities = ["mncs-language-rust-quality", "mncs-language-semantic-validation", "mncs-language-hir-trace-integrity", "mncs-language-ssa-integrity", "mncs-language-evidence-freshness", "mncs-language-execution-equivalence", "mncs-language-lowering-execution-consistency"]
+supported_constructs = ["rust-workspace", "semantic-body", "high-level-ir", "verified-ssa", "evidence-freshness", "bounded-reference-execution", "ssa-reference-execution", "lowering-execution-consistency", "corpus-differential-check", "scalar-integer-operations"]
 unsupported_constructs = ["formal-compiler-correctness", "backend-code-generation"]
 limitations = ["development provider runs as a normal local process and is not a sandbox", "structural checks do not establish independent evaluation or conformance"]
 
@@ -107,6 +107,15 @@ disclosure = "compact"
 
 [[workflows]]
 name = "mncs-language-execution"
+category = "differential_behavior"
+mode = "development"
+command = ["python3", "tools/mncs_language_forge_provider.py"]
+provider_protocol = true
+provider_id = "mncs-language-provider"
+disclosure = "compact"
+
+[[workflows]]
+name = "mncs-language-lowering-execution"
 category = "differential_behavior"
 mode = "development"
 command = ["python3", "tools/mncs_language_forge_provider.py"]
@@ -208,3 +217,22 @@ timeout_seconds = 30
 cost = "medium"
 uncertainty_classes = ["corpus-equivalence", "reference-execution", "traceability"]
 tags = ["mncs-language", "execution", "refactoring"]
+
+[[verifiers]]
+id = "mncs-language.lowering-execution-consistency"
+version = "0.1"
+workflow = "mncs-language-lowering-execution"
+provider = "mncs-language-provider"
+method = "mncs-language-lowering-execution-consistency"
+claim = "For the declared bounded-sum and bounded-range fixtures, independently evaluated SSA produces the same observable results as body reference execution over each frozen corpus; equivalent refactors agree and intentional regressions are detected."
+category = "differential_behavior"
+modes = ["development"]
+artifact_types = ["source", "execution-result", "corpus", "ssa"]
+scopes = ["module"]
+input_kinds = ["candidate_identity", "changed_paths"]
+limitations = ["Agreement is finite corpus evidence, not universal equivalence or formal compiler correctness.", "Reference evaluators are not production backend validation.", "Shared project code can create common-mode defects.", "The local provider is development evidence, not independent evaluation."]
+assumptions = ["The checked fixtures and frozen corpora represent the declared scalar SSA subset."]
+timeout_seconds = 45
+cost = "high"
+uncertainty_classes = ["lowering-execution", "corpus-equivalence", "reference-execution", "common-mode-risk"]
+tags = ["mncs-language", "ssa", "execution", "lowering", "refactoring"]

@@ -25,11 +25,12 @@ timestamps or ambient environment values.
 
 ## Supported body operations
 
-The current evaluator supports integer parameters, integer constants, integer `add` with the
-represented arithmetic intent, typed integer comparison predicates `eq`, `ne`, `lt`, `le`, `gt`, and
-`ge`, direct/conditional branches, block arguments, returns, and cyclic CFG execution under the step
-budget. Signed and unsigned comparisons use the declared integer type. Checked/trapping/widening
-overflow is an explicit runtime failure; wrapping and saturating behavior is preserved.
+The current body evaluator supports integer parameters, integer constants, integer `add`, `sub`, and
+`mul` with represented arithmetic intent, wrapping bitwise `and`, `or`, and `xor`, typed integer
+comparison predicates `eq`, `ne`, `lt`, `le`, `gt`, and `ge`, direct/conditional branches, block
+arguments, returns, and cyclic CFG execution under the step budget. Signed and unsigned comparisons
+use the declared integer type. Checked/trapping/widening overflow is an explicit runtime failure;
+wrapping and saturating behavior is preserved. Bitwise operations currently require wrapping intent.
 
 Effect operations require explicit recording policy and never perform external side effects. Runtime
 checks are unsupported until their body representation carries an executable condition. Named types
@@ -51,3 +52,24 @@ or production backend evidence.
 
 The repository's bounded-sum fixture demonstrates a baseline, a structurally different equivalent
 refactor, and a plausible regression whose comparison fails on ordinary and overflow-edge cases.
+
+## SSA reference execution and cross-layer consistency
+
+`SsaModule` schema `0.4` is independently interpreted by the SSA reference evaluator. Its result
+schema is `0.1` and retains the target, semantic program/function identities, SSA module and HIR
+fingerprints, values, bounded steps, effects, and a trace containing block, semantic operation, HIR,
+and SSA identities. The evaluator supports the currently validated scalar SSA instructions,
+block-parameter edges, returns, failure terminators, and bounded loops. It does not reconstruct the
+body and invoke the body evaluator.
+
+`LoweringExecutionComparison` schema `0.1` is emitted by:
+
+```text
+mncs check-lowering-execution PROGRAM CORPUS
+```
+
+Its statuses distinguish `consistent_over_corpus`, `mismatch_detected`, `unsupported`, and
+`invalid_input`. `consistent_over_corpus` means only that body and SSA reference outcomes matched
+over the declared finite corpus. It is not universal equivalence, formal compiler correctness,
+backend validation, or independent evaluation. Shared low-level arithmetic helpers mean the two paths
+are not fully independent implementations.

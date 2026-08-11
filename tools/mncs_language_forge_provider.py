@@ -22,6 +22,7 @@ METHODS = [
     "mncs-language-ssa-integrity",
     "mncs-language-evidence-freshness",
     "mncs-language-execution-equivalence",
+    "mncs-language-lowering-execution-consistency",
 ]
 OUTPUT_LIMIT = 65_536
 TIMEOUT_SECONDS = 30
@@ -311,6 +312,106 @@ def execution_equivalence(request: dict[str, Any]) -> dict[str, object]:
     )
 
 
+def lowering_execution_consistency(request: dict[str, Any]) -> dict[str, object]:
+    corpora = [
+        (
+            "bounded-sum-baseline",
+            "examples/execution/bounded-sum-baseline.mncs.json",
+            "examples/execution/bounded-sum-corpus.json",
+        ),
+        (
+            "bounded-sum-equivalent-refactor",
+            "examples/execution/bounded-sum-equivalent-refactor.mncs.json",
+            "examples/execution/bounded-sum-corpus.json",
+        ),
+        (
+            "bounded-sum-regression",
+            "examples/execution/bounded-sum-regression.mncs.json",
+            "examples/execution/bounded-sum-corpus.json",
+        ),
+        (
+            "bounded-range-baseline",
+            "examples/execution/bounded-range-baseline.mncs.json",
+            "examples/execution/bounded-range-corpus.json",
+        ),
+        (
+            "bounded-range-equivalent-refactor",
+            "examples/execution/bounded-range-equivalent-refactor.mncs.json",
+            "examples/execution/bounded-range-corpus.json",
+        ),
+        (
+            "bounded-range-regression",
+            "examples/execution/bounded-range-regression.mncs.json",
+            "examples/execution/bounded-range-corpus.json",
+        ),
+    ]
+    witnesses = []
+    all_consistent = True
+    for fixture, program, corpus in corpora:
+        ok, output = run([
+            "cargo", "run", "-q", "-p", "mncs-cli", "--",
+            "check-lowering-execution", program, corpus,
+        ])
+        report = parse_json_line(output)
+        consistent = ok and report.get("status") == "consistent_over_corpus" and report.get("matching_cases") == report.get("corpus_size")
+        all_consistent = all_consistent and consistent
+        witnesses.append({
+            "fixture": fixture,
+            "process_passed": ok,
+            "status": report.get("status"),
+            "matching_cases": report.get("matching_cases"),
+            "corpus_size": report.get("corpus_size"),
+        })
+
+    baseline = "examples/execution/bounded-range-baseline.mncs.json"
+    equivalent = "examples/execution/bounded-range-equivalent-refactor.mncs.json"
+    regression = "examples/execution/bounded-range-regression.mncs.json"
+    corpus = "examples/execution/bounded-range-corpus.json"
+    equivalent_ok, equivalent_output = run([
+        "cargo", "run", "-q", "-p", "mncs-cli", "--", "compare-execution",
+        baseline, equivalent, corpus,
+    ])
+    regression_ok, regression_output = run([
+        "cargo", "run", "-q", "-p", "mncs-cli", "--", "compare-execution",
+        baseline, regression, corpus,
+    ])
+    equivalent_report = parse_json_line(equivalent_output)
+    regression_report = parse_json_line(regression_output)
+    equivalent_passed = equivalent_ok and equivalent_report.get("status") == "equivalent_over_corpus"
+    regression_detected = not regression_ok and regression_report.get("status") == "mismatch_detected" and regression_report.get("mismatching_cases", 0) > 0
+    passed = all_consistent and equivalent_passed and regression_detected
+    witnesses.extend([
+        {
+            "fixture": "bounded-range-equivalent-refactor-behavior",
+            "process_passed": equivalent_ok,
+            "status": equivalent_report.get("status"),
+            "matching_cases": equivalent_report.get("matching_cases"),
+            "corpus_size": equivalent_report.get("corpus_size"),
+        },
+        {
+            "fixture": "bounded-range-regression-behavior",
+            "process_rejected": not regression_ok,
+            "status": regression_report.get("status"),
+            "mismatching_cases": regression_report.get("mismatching_cases"),
+        },
+    ])
+    return response(
+        request,
+        "PASS" if passed else "FAIL",
+        "body and independently evaluated SSA agree for both study kernels; the refactor passes and regression is detected"
+        if passed else "body/SSA lowering consistency or study-kernel differential behavior did not match the declared outcomes",
+        witnesses=witnesses,
+        limitations=[
+            "consistency is finite corpus evidence, not formal compiler correctness",
+            "both evaluators are reference interpreters, not backend validation",
+            "shared project helpers can create common-mode defects",
+            "local Forge provider results are development evidence, not independent evaluation",
+        ],
+        dependency_paths=["examples/execution", "crates/mncs-model", "crates/mncs-cli"],
+        complete=True,
+    )
+
+
 def structural_workflow(request: dict[str, Any]) -> dict[str, object]:
     results = [
         semantic_validation(request),
@@ -351,7 +452,7 @@ def dispatch(request: dict[str, Any]) -> dict[str, object]:
             "cancellation": False,
             "health_checks": False,
             "extensions": {
-                "supported_constructs": ["rust-workspace", "semantic-body", "high-level-ir", "verified-ssa", "evidence-freshness", "bounded-reference-execution", "corpus-differential-check"],
+                "supported_constructs": ["rust-workspace", "semantic-body", "high-level-ir", "verified-ssa", "evidence-freshness", "bounded-reference-execution", "ssa-reference-execution", "lowering-execution-consistency", "corpus-differential-check", "scalar-integer-operations"],
                 "unsupported_constructs": ["formal-compiler-correctness", "backend-code-generation"],
                 "limitations": ["normal local process; not a sandbox"],
             },
@@ -369,6 +470,7 @@ def dispatch(request: dict[str, Any]) -> dict[str, object]:
         "mncs-language-ssa-integrity": ssa_integrity,
         "mncs-language-evidence-freshness": evidence_freshness,
         "mncs-language-execution-equivalence": execution_equivalence,
+        "mncs-language-lowering-execution-consistency": lowering_execution_consistency,
     }
     handler = handlers.get(method)
     if handler is None:
