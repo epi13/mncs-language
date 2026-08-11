@@ -499,18 +499,36 @@ fn validate_operation(
             operand_type,
             intent: _,
         } => {
-            if operator != "add" {
+            if !matches!(
+                operator.as_str(),
+                "add" | "sub" | "mul" | "and" | "or" | "xor"
+            ) {
                 errors.push(body_diagnostic(
                     "MNB015",
                     format!("{path}.kind"),
                     format!("unsupported symbolic integer operator {:?}", operator),
                 ));
             }
+            if matches!(operator.as_str(), "and" | "or" | "xor")
+                && !matches!(
+                    &operation.kind,
+                    BodyOperationKind::Integer {
+                        intent: ArithmeticIntent::Wrapping,
+                        ..
+                    }
+                )
+            {
+                errors.push(body_diagnostic(
+                    "MNB043",
+                    format!("{path}.kind.intent"),
+                    "bitwise integer operations currently require wrapping intent",
+                ));
+            }
             if operation.operands.len() != 2 || operation.results.len() != 1 {
                 errors.push(body_diagnostic(
                     "MNB016",
                     path.to_owned(),
-                    "integer addition requires two operands and one result",
+                    "integer operations require two operands and one result",
                 ));
             }
             for operand in &operation.operands {
@@ -1081,6 +1099,25 @@ pub(crate) mod tests {
         let report = program.validate();
         assert!(!report.valid);
         assert!(report.errors.iter().any(|error| error.code == "MNB039"));
+    }
+
+    #[test]
+    fn body_rejects_non_wrapping_bitwise_intent() {
+        let mut program = executable_program();
+        let body = program.functions[0].body.as_mut().expect("body");
+        let operation = &mut body.blocks[0].operations[1];
+        operation.kind = BodyOperationKind::Integer {
+            operator: "xor".to_owned(),
+            operand_type: IntegerType {
+                bits: 32,
+                signed: true,
+            },
+            intent: ArithmeticIntent::Checked,
+        };
+        operation.operands = vec!["a".to_owned(), "one".to_owned()];
+        let report = program.validate();
+        assert!(!report.valid);
+        assert!(report.errors.iter().any(|error| error.code == "MNB043"));
     }
 
     #[test]

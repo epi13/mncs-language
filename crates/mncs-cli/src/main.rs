@@ -1,10 +1,11 @@
 use std::{env, fs, path::Path, process::ExitCode};
 
 use mncs_model::{
-    compare_execution, execute_with_policy, CandidateEvaluation, CausalSlice, ComparisonStatus,
-    Confidence, DeterministicVerifier, DiagnosticCategory, DiagnosticObligation, EvidenceFreshness,
-    EvidenceManifest, EvidenceState, ExecutionComparison, ExecutionCorpus, ExecutionRequest,
-    ExecutionStatus, FunctionBody, ObligationStatus, Program, SemanticDiff, SemanticId,
+    compare_body_and_ssa, compare_execution, execute_ssa, execute_with_policy, CandidateEvaluation,
+    CausalSlice, ComparisonStatus, Confidence, DeterministicVerifier, DiagnosticCategory,
+    DiagnosticObligation, EvidenceFreshness, EvidenceManifest, EvidenceState, ExecutionComparison,
+    ExecutionCorpus, ExecutionRequest, ExecutionStatus, FunctionBody, LoweringExecutionComparison,
+    LoweringExecutionStatus, ObligationStatus, Program, SemanticDiff, SemanticId,
 };
 use mncs_syntax::{analyze, SourceMetrics};
 use serde::{Deserialize, Serialize};
@@ -42,7 +43,9 @@ fn main() -> ExitCode {
         "trace" => one_manifest_command(args, trace),
         "verifier-request" => one_manifest_command(args, verifier_request),
         "execute" => execution_command(args),
+        "execute-ssa" => ssa_execution_command(args),
         "compare-execution" => execution_compare_command(args),
+        "check-lowering-execution" => lowering_execution_command(args),
         "diff" => two_manifest_command(args, diff),
         "compare" => two_manifest_command(args, compare),
         "slice" => slice_command(args),
@@ -435,6 +438,88 @@ where
             ComparisonStatus::EquivalentOverCorpus => ExitCode::SUCCESS,
             ComparisonStatus::MismatchDetected => ExitCode::FAILURE,
             ComparisonStatus::InvalidInput => ExitCode::from(2),
+        }
+    }
+}
+
+fn ssa_execution_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let (Some(program_path), Some(request_path)) = (args.next(), args.next()) else {
+        eprintln!("error: execute-ssa requires a program and execution request path");
+        print_usage();
+        return ExitCode::from(2);
+    };
+    if args.next().is_some() {
+        eprintln!("error: unexpected additional arguments");
+        return ExitCode::from(2);
+    }
+    let request_input = match read_source(&request_path) {
+        Ok(input) => input,
+        Err(code) => return code,
+    };
+    let request: ExecutionRequest = match serde_json::from_str(&request_input) {
+        Ok(request) => request,
+        Err(error) => {
+            eprintln!("error: invalid execution request: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let program = match read_program_for_execution(&program_path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let result = execute_ssa(&program, &request);
+    let status = result.status;
+    if !print_json(&result) {
+        ExitCode::from(2)
+    } else {
+        execution_status_code(status)
+    }
+}
+
+fn lowering_execution_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let (Some(program_path), Some(corpus_path)) = (args.next(), args.next()) else {
+        eprintln!("error: check-lowering-execution requires a program and corpus path");
+        print_usage();
+        return ExitCode::from(2);
+    };
+    if args.next().is_some() {
+        eprintln!("error: unexpected additional arguments");
+        return ExitCode::from(2);
+    }
+    let program = match read_program_for_execution(&program_path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let corpus_input = match read_source(&corpus_path) {
+        Ok(input) => input,
+        Err(code) => return code,
+    };
+    let corpus: ExecutionCorpus = match serde_json::from_str(&corpus_input) {
+        Ok(corpus) => corpus,
+        Err(error) => {
+            eprintln!("error: invalid execution corpus: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let report: LoweringExecutionComparison = compare_body_and_ssa(&program, &corpus);
+    let status = report.status;
+    if !print_json(&report) {
+        ExitCode::from(2)
+    } else {
+        match status {
+            LoweringExecutionStatus::ConsistentOverCorpus => ExitCode::SUCCESS,
+            LoweringExecutionStatus::MismatchDetected | LoweringExecutionStatus::Unsupported => {
+                ExitCode::FAILURE
+            }
+            LoweringExecutionStatus::InvalidInput => ExitCode::from(2),
         }
     }
 }
@@ -945,7 +1030,9 @@ fn print_usage() {
     eprintln!("  mncs trace <manifest.json>");
     eprintln!("  mncs verifier-request <manifest.json>");
     eprintln!("  mncs execute <program.json> <execution-request.json>");
+    eprintln!("  mncs execute-ssa <program.json> <execution-request.json>");
     eprintln!("  mncs compare-execution <baseline.json> <candidate.json> <corpus.json>");
+    eprintln!("  mncs check-lowering-execution <program.json> <corpus.json>");
     eprintln!("  mncs diff <before.json> <after.json>");
     eprintln!("  mncs compare <before.json> <after.json>");
     eprintln!("  mncs slice <manifest.json> <semantic-identity>");

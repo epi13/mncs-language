@@ -84,6 +84,15 @@ jobs:
             exit 1
           fi
           cargo run -p mncs-cli -- execute examples/executable/checked-add.mncs.json examples/execution/checked-add-request.json
+          cargo run -p mncs-cli -- execute-ssa examples/executable/checked-add.mncs.json examples/execution/checked-add-request.json
+          if cargo run -p mncs-cli -- execute examples/executable/runtime-check.mncs.json examples/execution/runtime-check-request.json; then
+            echo "body runtime check was unexpectedly executable" >&2
+            exit 1
+          fi
+          if cargo run -p mncs-cli -- execute-ssa examples/executable/runtime-check.mncs.json examples/execution/runtime-check-request.json; then
+            echo "SSA runtime check was unexpectedly executable" >&2
+            exit 1
+          fi
           cargo run -p mncs-cli -- compare-execution examples/execution/bounded-sum-baseline.mncs.json examples/execution/bounded-sum-equivalent-refactor.mncs.json examples/execution/bounded-sum-corpus.json
           if cargo run -p mncs-cli -- compare-execution examples/execution/bounded-sum-baseline.mncs.json examples/execution/bounded-sum-regression.mncs.json examples/execution/bounded-sum-corpus.json; then
             echo "intentional execution regression was unexpectedly accepted" >&2
@@ -91,6 +100,18 @@ jobs:
           fi
           if cargo run -p mncs-cli -- evaluate-candidate examples/semantic-foundation/before.mncs.json examples/refinement/contract-repair.proposal.json; then
             echo "candidate with regressed protected property was unexpectedly accepted" >&2
+            exit 1
+          fi
+          for fixture in bounded-sum-baseline bounded-sum-equivalent-refactor bounded-sum-regression; do
+            cargo run -p mncs-cli -- check-lowering-execution "examples/execution/${fixture}.mncs.json" examples/execution/bounded-sum-corpus.json
+          done
+          for fixture in bounded-range-baseline bounded-range-equivalent-refactor bounded-range-regression; do
+            cargo run -p mncs-cli -- validate "examples/execution/${fixture}.mncs.json"
+            cargo run -p mncs-cli -- check-lowering-execution "examples/execution/${fixture}.mncs.json" examples/execution/bounded-range-corpus.json
+          done
+          cargo run -p mncs-cli -- compare-execution examples/execution/bounded-range-baseline.mncs.json examples/execution/bounded-range-equivalent-refactor.mncs.json examples/execution/bounded-range-corpus.json
+          if cargo run -p mncs-cli -- compare-execution examples/execution/bounded-range-baseline.mncs.json examples/execution/bounded-range-regression.mncs.json examples/execution/bounded-range-corpus.json; then
+            echo "bounded-range regression was unexpectedly accepted" >&2
             exit 1
           fi
       - name: Exercise Forge Provider Protocol adapter
@@ -102,3 +123,5 @@ jobs:
             | python3 tools/mncs_language_forge_provider.py | jq -e '.type == "analysis_response" and .status == "PASS" and .witnesses[0].schema_version == "0.4"'
           printf '%s\n' '{"protocol_version":"0.1","type":"analysis_request","request_id":"ci-execution","analysis":"mncs-language-execution-equivalence","component":{"candidate_identity":"ci","changed_paths":[]}}' \
             | python3 tools/mncs_language_forge_provider.py | jq -e '.type == "analysis_response" and .status == "PASS" and .witnesses[0].matching_cases == .witnesses[0].corpus_size and .witnesses[1].mismatching_cases > 0'
+          printf '%s\n' '{"protocol_version":"0.1","type":"analysis_request","request_id":"ci-lowering-execution","analysis":"mncs-language-lowering-execution-consistency","component":{"candidate_identity":"ci","changed_paths":[]}}' \
+            | python3 tools/mncs_language_forge_provider.py | jq -e '.type == "analysis_response" and .status == "PASS" and (.witnesses | length) == 8 and (.witnesses | all(.[]; (.matching_cases == .corpus_size) or (.mismatching_cases > 0)))'

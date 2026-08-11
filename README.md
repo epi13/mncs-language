@@ -4,7 +4,7 @@
 
 Research and reference implementation for a general-purpose, verification-native programming language built on Machine-Native Complexity Standard (MNCS) principles.
 
-> **Project status:** the 0.1 executable semantic model now has an experimental 0.2 foundation for canonical form, stable semantic identities, graph dependencies, evidence invalidation, recursive artifacts, and authority-aware deltas. The supported 0.3 subset now has CFG-correct executable bodies, typed integer comparison, deterministic HIR, and a small validated 0.4 SSA artifact with body→HIR→SSA provenance and evidence-aware transformation refusal. A versioned, deterministic, bounded reference executor and corpus differential checker now enable experimental language-native refactoring/reference studies. Forge development evidence is configured locally; no final grammar, compiler stability, production backend, independent evaluation, universal equivalence, or production suitability is claimed.
+> **Project status:** the 0.1 executable semantic model now has an experimental 0.2 foundation for canonical form, stable semantic identities, graph dependencies, evidence invalidation, recursive artifacts, and authority-aware deltas. The supported 0.3 subset now has CFG-correct executable bodies, typed integer comparison, deterministic HIR, and a small validated 0.4 SSA artifact with body→HIR→SSA provenance and evidence-aware transformation refusal. Versioned, deterministic, bounded body and independent SSA reference evaluators now support cross-layer conformance and finite refactoring studies. Forge development evidence is configured locally; no final grammar, compiler stability, production backend, independent evaluation, universal equivalence, or production suitability is claimed.
 
 ## Why this project exists
 
@@ -97,6 +97,12 @@ cargo run -p mncs-cli -- verifier-request examples/executable/checked-add.mncs.j
 cargo run -p mncs-cli -- execute \
   examples/executable/checked-add.mncs.json \
   examples/execution/checked-add-request.json
+cargo run -p mncs-cli -- execute-ssa \
+  examples/executable/checked-add.mncs.json \
+  examples/execution/checked-add-request.json
+cargo run -p mncs-cli -- check-lowering-execution \
+  examples/execution/bounded-sum-baseline.mncs.json \
+  examples/execution/bounded-sum-corpus.json
 cargo run -p mncs-cli -- compare-execution \
   examples/execution/bounded-sum-baseline.mncs.json \
   examples/execution/bounded-sum-equivalent-refactor.mncs.json \
@@ -105,9 +111,13 @@ cargo run -p mncs-cli -- compare-execution \
   examples/execution/bounded-sum-baseline.mncs.json \
   examples/execution/bounded-sum-regression.mncs.json \
   examples/execution/bounded-sum-corpus.json  # exits 1: mismatch detected
+cargo run -p mncs-cli -- compare-execution \
+  examples/execution/bounded-range-baseline.mncs.json \
+  examples/execution/bounded-range-equivalent-refactor.mncs.json \
+  examples/execution/bounded-range-corpus.json
 ```
 
-The local contract-expression change changes the contract and function fingerprints and marks the dependent evidence stale. Canonicalization sorts set-like declarations while preserving ordered inputs and outputs. The execution command is a research interpreter for validated executable bodies: every request has a finite step budget, effects are unsupported by default, and unsupported/runtime-failure/budget-exhausted outcomes are explicit. The comparison command reports finite corpus agreement or bounded mismatches; it does not establish universal equivalence.
+The local contract-expression change changes the contract and function fingerprints and marks the dependent evidence stale. Canonicalization sorts set-like declarations while preserving ordered inputs and outputs. `execute` is a research interpreter for validated executable bodies and `execute-ssa` independently interprets the lowered SSA artifact; both have finite step budgets, bounded traces, conservative effects, and explicit unsupported/runtime-failure/budget-exhausted outcomes. `check-lowering-execution` compares the two reference paths over a corpus. These reports are finite behavioral evidence, not universal equivalence, compiler correctness, or backend validation.
 
 The IR command emits a deterministic, inspectable projection with state regions, capability uses, failure blocks, generated obligations, semantic-to-IR traceability, and transformation provenance. `body` includes a deterministic CFG projection; `ssa` emits the experimental validated block-parameter SSA artifact. Executable-body manifests lower symbolic operations directly; `verifier-request` and `verify-result` exchange identity- and dependency-bound JSON artifacts. `verify` exercises the pure local verifier; `diagnose` emits a conservative backward slice when graph construction is available and a dependency-only slice for invalid input. Candidate evaluation remains isolated and does not promote or rewrite the trusted baseline.
 
@@ -115,8 +125,8 @@ The IR command emits a deterministic, inspectable projection with state regions,
 
 `mncs-forge.toml` configures the installed MNCS Forge Provider Protocol adapter in
 `tools/mncs_language_forge_provider.py`. Its bounded development workflows exercise Rust quality,
-semantic fixtures, HIR trace integrity, SSA integrity, evidence freshness, and the frozen bounded-sum
-execution-equivalence study. Forge records are
+semantic fixtures, HIR trace integrity, SSA integrity, evidence freshness, bounded body execution,
+independent SSA execution, and the bounded-sum/bounded-range lowering-consistency studies. Forge records are
 development evidence only: local provider execution is not sandboxed, process success alone is not
 proof, and no evaluator or promotion authority is claimed. The portable execution-bundle fixture
 under `compatibility/execution-bundle/` is checked with the sibling MNCS standard tool and is not a
@@ -149,7 +159,7 @@ See [Source Syntax Laboratory](docs/source-syntax-lab.md), [Source Representatio
 
 ## Machine-intent expressions
 
-The experimental pilot makes useful low-level behavior explicit rather than relying on accidental source patterns or backend folklore. It currently models integer addition and the identity/obligation boundary; the broader expression families remain design work.
+The experimental pilot makes useful low-level behavior explicit rather than relying on accidental source patterns or backend folklore. The bounded scalar subset now models addition, subtraction, multiplication, bitwise AND/OR/XOR, typed comparisons, explicit arithmetic intents, and the identity/obligation boundary; shifts, rotates, memory, and broader expression families remain design work.
 
 For example, a future language should distinguish:
 
@@ -201,7 +211,9 @@ high-level MNCS IR
         ↓
 verified SSA IR
         ↓
-bounded deterministic reference execution (experimental study path)
+bounded deterministic body reference execution
+        ↕ cross-layer comparison
+bounded deterministic SSA reference execution
         ↓
 LLVM IR / Cranelift IR / another backend
         ↓

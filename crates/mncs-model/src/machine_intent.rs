@@ -52,40 +52,78 @@ impl IntegerOperation {
             _ => self.operand_type.bits,
         };
         let (minimum, maximum) = limits(result_bits, self.operand_type.signed);
-        let raw = self.left.saturating_add(self.right);
-        let overflow = raw < minimum || raw > maximum;
+        let raw = match self.operator.as_str() {
+            "add" => self.left.checked_add(self.right),
+            "sub" => self.left.checked_sub(self.right),
+            "mul" => self.left.checked_mul(self.right),
+            "and" | "or" | "xor" if matches!(self.intent, ArithmeticIntent::Wrapping) => bitwise(
+                self.operator.as_str(),
+                self.operand_type,
+                self.left,
+                self.right,
+            ),
+            _ => None,
+        };
+        let overflow = raw
+            .as_ref()
+            .map(|value| *value < minimum || *value > maximum)
+            .unwrap_or(true);
         match self.intent {
             ArithmeticIntent::Wrapping => IntegerEvaluation {
-                value: Some(wrap(raw, self.operand_type.bits, self.operand_type.signed)),
+                value: raw
+                    .map(|value| wrap(value, self.operand_type.bits, self.operand_type.signed)),
                 overflow,
                 trapped: false,
                 result_bits,
             },
             ArithmeticIntent::Checked => IntegerEvaluation {
-                value: (!overflow).then_some(raw),
+                value: if !overflow { raw } else { None },
                 overflow,
                 trapped: false,
                 result_bits,
             },
             ArithmeticIntent::Saturating => IntegerEvaluation {
-                value: Some(raw.clamp(minimum, maximum)),
+                value: raw.map(|value| value.clamp(minimum, maximum)),
                 overflow,
                 trapped: false,
                 result_bits,
             },
             ArithmeticIntent::Trapping => IntegerEvaluation {
-                value: (!overflow).then_some(raw),
+                value: if !overflow { raw } else { None },
                 overflow,
                 trapped: overflow,
                 result_bits,
             },
             ArithmeticIntent::Widening { .. } => IntegerEvaluation {
-                value: (!overflow).then_some(raw),
+                value: if !overflow { raw } else { None },
                 overflow,
                 trapped: false,
                 result_bits,
             },
         }
+    }
+}
+
+fn bitwise(operator: &str, ty: IntegerType, left: i128, right: i128) -> Option<i128> {
+    let (_, maximum) = limits(ty.bits, false);
+    let modulus = maximum.checked_add(1)?;
+    let left = left.rem_euclid(modulus);
+    let right = right.rem_euclid(modulus);
+    let value = match operator {
+        "and" => left & right,
+        "or" => left | right,
+        "xor" => left ^ right,
+        _ => return None,
+    };
+    if ty.signed {
+        let sign = 1_i128.checked_shl(u32::from(ty.bits - 1))?;
+        Some(if value >= sign {
+            value - modulus
+        } else {
+            value
+        })
+    } else {
+        Some(value)
     }
 }
 
@@ -315,6 +353,37 @@ mod tests {
             Some(127)
         );
         assert!(operation(ArithmeticIntent::Trapping).evaluate().trapped);
+    }
+
+    #[test]
+    fn scalar_integer_operators_have_explicit_edge_behavior() {
+        let ty = IntegerType {
+            bits: 8,
+            signed: false,
+        };
+        let mut subtraction = operation(ArithmeticIntent::Wrapping);
+        subtraction.operator = "sub".to_owned();
+        subtraction.operand_type = ty;
+        subtraction.left = 0;
+        subtraction.right = 1;
+        assert_eq!(subtraction.evaluate().value, Some(255));
+
+        let mut multiplication = operation(ArithmeticIntent::Saturating);
+        multiplication.operator = "mul".to_owned();
+        multiplication.operand_type = ty;
+        multiplication.left = 255;
+        multiplication.right = 2;
+        assert_eq!(multiplication.evaluate().value, Some(255));
+
+        let mut bitwise = operation(ArithmeticIntent::Wrapping);
+        bitwise.operator = "xor".to_owned();
+        bitwise.operand_type = IntegerType {
+            bits: 8,
+            signed: true,
+        };
+        bitwise.left = -1;
+        bitwise.right = 1;
+        assert_eq!(bitwise.evaluate().value, Some(-2));
     }
 
     #[test]

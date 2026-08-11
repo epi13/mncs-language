@@ -74,6 +74,13 @@ terminators, obligation links, capability uses, and a deterministic semantic→H
 arguments, terminators, reachability, effect authorization links, and machine-intent/obligation
 retention. It intentionally rejects unreachable blocks in this subset.
 
+The experimental `ssa_execution` module independently interprets this validated artifact for the
+supported scalar subset. It is a bounded reference evaluator rather than a backend. Cross-layer
+reports retain semantic, HIR, and SSA identities and distinguish finite `consistent_over_corpus`
+evidence from structural SSA validity. Agreement does not establish lowering correctness or compiler
+correctness; the body and SSA paths share small host-safe arithmetic helpers and therefore retain a
+common-mode defect risk.
+
 The following remains a direction for later verified SSA work:
 
 The lower IR should include:

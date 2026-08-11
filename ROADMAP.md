@@ -149,6 +149,17 @@ The Luna bounded reference-execution increment is now also present:
 - CLI commands `execute` and `compare-execution`; and
 - Forge development verifier `mncs-language.execution-equivalence`.
 
+The next bounded conformance slice is now present:
+
+- an independent SSA reference evaluator with versioned results, SSA/HIR fingerprints, bounded
+  traces, explicit unsupported/failure/budget outcomes, and semantic/HIR/SSA divergence context;
+- CLI commands `execute-ssa` and `check-lowering-execution`;
+- body↔SSA consistency checks over the bounded-sum corpus and a six-case bounded range/offset kernel;
+- scalar `sub`, `mul`, and wrapping bitwise `and`/`or`/`xor` propagation through validation, HIR,
+  SSA, body execution, and SSA execution; and
+- Forge development verifier `mncs-language.lowering-execution-consistency`, kept separate from
+  structural SSA validation.
+
 This enables experimental MNCS-Language refactoring/reference studies before backend completion. It
 does not establish universal equivalence, production runtime behavior, or compiler correctness.
 

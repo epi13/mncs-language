@@ -135,6 +135,13 @@ events over a declared frozen corpus. It retains the first bounded mismatch trac
 total mismatch count. A matching corpus is finite behavioral evidence, not universal semantic
 equivalence, formal proof, or backend validation.
 
+The independent SSA evaluator in `mncs-model::ssa_execution` interprets the validated SSA artifact
+directly. `execute-ssa` exposes its versioned result, while `check-lowering-execution` compares body
+and SSA outcomes and carries semantic/HIR/SSA divergence context. Body and SSA step counts are not
+required to match because the representations have different granularity. Shared small arithmetic
+helpers reduce accidental semantic drift but leave the control-flow and value interpretation paths
+separate, so common-mode defects remain an explicit limitation.
+
 ## Machine-intent lowering plane
 
 Machine-oriented lowering should proceed through explicit obligation generation rather than
