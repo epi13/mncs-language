@@ -102,6 +102,39 @@ LLVM, Cranelift, WebAssembly, C, or another backend performs target lowering, re
 Backend intrinsics may implement one realization of a stable semantic operation, but should not
 normally define the operation's language-level meaning.
 
+## Bounded reference-execution study path
+
+Before a production backend exists, validated executable bodies can be evaluated by the experimental
+reference executor in `mncs-model::execution`. This is a separate study path, not a new ambient
+runtime layer:
+
+```text
+validated semantic body
+        ↓
+finite execution request
+        ↓
+bounded deterministic result + identity trace
+        ↓
+corpus differential comparison
+```
+
+The request and result schemas are versioned JSON artifacts. Execution has a mandatory finite step
+budget, a fixed trace cap, and explicit `returned`, `runtime_failure`, `unsupported`,
+`budget_exhausted`, and `invalid_request` outcomes. Integer arithmetic follows the represented
+wrapping, checked, saturating, trapping, or currently supported widening intent without relying on
+host overflow. Integer comparisons are typed and interpret signed and unsigned operands according to
+their declared type.
+
+Effectful operations never acquire filesystem, network, process, clock, credential, randomness, or
+environment authority implicitly. They are unsupported by default; an explicit record policy can
+produce deterministic effect events without performing the external effect. Runtime checks remain
+unsupported when the body representation does not provide an executable condition.
+
+`compare-execution` compares observable status, returned values, failure reason, and recorded effect
+events over a declared frozen corpus. It retains the first bounded mismatch trace and reports the
+total mismatch count. A matching corpus is finite behavioral evidence, not universal semantic
+equivalence, formal proof, or backend validation.
+
 ## Machine-intent lowering plane
 
 Machine-oriented lowering should proceed through explicit obligation generation rather than

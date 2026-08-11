@@ -1,0 +1,6 @@
+{
+  "schema_version": "0.1",
+  "target": {"module": "Examples.ReferenceStudy", "function": "bounded_sum"},
+  "arguments": [{"integer": {"value": 1, "type": {"bits": 8, "signed": false}}}],
+  "step_budget": 64
+}

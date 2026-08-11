@@ -55,8 +55,8 @@ version = "0.1"
 command = ["python3", "tools/mncs_language_forge_provider.py"]
 transport = "stdio-jsonl"
 required = true
-capabilities = ["mncs-language-rust-quality", "mncs-language-semantic-validation", "mncs-language-hir-trace-integrity", "mncs-language-ssa-integrity", "mncs-language-evidence-freshness"]
-supported_constructs = ["rust-workspace", "semantic-body", "high-level-ir", "verified-ssa", "evidence-freshness"]
+capabilities = ["mncs-language-rust-quality", "mncs-language-semantic-validation", "mncs-language-hir-trace-integrity", "mncs-language-ssa-integrity", "mncs-language-evidence-freshness", "mncs-language-execution-equivalence"]
+supported_constructs = ["rust-workspace", "semantic-body", "high-level-ir", "verified-ssa", "evidence-freshness", "bounded-reference-execution", "corpus-differential-check"]
 unsupported_constructs = ["formal-compiler-correctness", "backend-code-generation"]
 limitations = ["development provider runs as a normal local process and is not a sandbox", "structural checks do not establish independent evaluation or conformance"]
 
@@ -99,6 +99,15 @@ disclosure = "compact"
 [[workflows]]
 name = "mncs-language-development-bundle"
 category = "mncs_bundle_validation"
+mode = "development"
+command = ["python3", "tools/mncs_language_forge_provider.py"]
+provider_protocol = true
+provider_id = "mncs-language-provider"
+disclosure = "compact"
+
+[[workflows]]
+name = "mncs-language-execution"
+category = "differential_behavior"
 mode = "development"
 command = ["python3", "tools/mncs_language_forge_provider.py"]
 provider_protocol = true
@@ -180,3 +189,22 @@ timeout_seconds = 30
 cost = "low"
 uncertainty_classes = ["evidence-freshness", "invalidation"]
 tags = ["mncs-language", "evidence"]
+
+[[verifiers]]
+id = "mncs-language.execution-equivalence"
+version = "0.1"
+workflow = "mncs-language-execution"
+provider = "mncs-language-provider"
+method = "mncs-language-execution-equivalence"
+claim = "The baseline and equivalent bounded-sum refactor have matching reference-execution results over the frozen corpus, while the intentional regression is detected."
+category = "differential_behavior"
+modes = ["development"]
+artifact_types = ["source", "execution-result", "corpus"]
+scopes = ["module"]
+input_kinds = ["candidate_identity", "changed_paths"]
+limitations = ["Corpus agreement is not universal semantic equivalence.", "The interpreter is a bounded reference model, not a production backend.", "The local provider is development evidence, not independent evaluation."]
+assumptions = ["The frozen corpus and three repository fixtures remain the declared study case."]
+timeout_seconds = 30
+cost = "medium"
+uncertainty_classes = ["corpus-equivalence", "reference-execution", "traceability"]
+tags = ["mncs-language", "execution", "refactoring"]

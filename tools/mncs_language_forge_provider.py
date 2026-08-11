@@ -21,6 +21,7 @@ METHODS = [
     "mncs-language-hir-trace-integrity",
     "mncs-language-ssa-integrity",
     "mncs-language-evidence-freshness",
+    "mncs-language-execution-equivalence",
 ]
 OUTPUT_LIMIT = 65_536
 TIMEOUT_SECONDS = 30
@@ -79,6 +80,24 @@ def run(command: list[str], *, timeout: int = TIMEOUT_SECONDS) -> tuple[bool, st
     except (OSError, subprocess.TimeoutExpired) as error:
         return False, str(error)
     return completed.returncode == 0, completed.stdout[-OUTPUT_LIMIT:]
+
+
+def parse_json_line(output: str) -> dict[str, Any]:
+    decoder = json.JSONDecoder()
+    start = 0
+    while True:
+        start = output.find("{", start)
+        if start < 0:
+            break
+        try:
+            parsed, _ = decoder.raw_decode(output[start:])
+        except json.JSONDecodeError:
+            start += 1
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+        start += 1
+    return {}
 
 
 def rust_quality(request: dict[str, Any]) -> dict[str, object]:
@@ -238,6 +257,60 @@ def evidence_freshness(request: dict[str, Any]) -> dict[str, object]:
     )
 
 
+def execution_equivalence(request: dict[str, Any]) -> dict[str, object]:
+    baseline = "examples/execution/bounded-sum-baseline.mncs.json"
+    equivalent = "examples/execution/bounded-sum-equivalent-refactor.mncs.json"
+    regression = "examples/execution/bounded-sum-regression.mncs.json"
+    corpus = "examples/execution/bounded-sum-corpus.json"
+    equivalent_ok, equivalent_output = run([
+        "cargo", "run", "-q", "-p", "mncs-cli", "--", "compare-execution",
+        baseline, equivalent, corpus,
+    ])
+    regression_ok, regression_output = run([
+        "cargo", "run", "-q", "-p", "mncs-cli", "--", "compare-execution",
+        baseline, regression, corpus,
+    ])
+    equivalent_report = parse_json_line(equivalent_output)
+    regression_report = parse_json_line(regression_output)
+    equivalent_passed = (
+        equivalent_report.get("status") == "equivalent_over_corpus"
+        and equivalent_report.get("matching_cases") == equivalent_report.get("corpus_size")
+    )
+    regression_detected = (
+        regression_report.get("status") == "mismatch_detected"
+        and regression_report.get("mismatching_cases", 0) > 0
+    )
+    passed = equivalent_ok and not regression_ok and equivalent_passed and regression_detected
+    return response(
+        request,
+        "PASS" if passed else "FAIL",
+        "bounded corpus equivalence passed and the intentional regression was detected"
+        if passed else "bounded execution equivalence check did not match the declared outcomes",
+        witnesses=[
+            {
+                "fixture": "bounded-sum-equivalent-refactor",
+                "process_passed": equivalent_ok,
+                "status": equivalent_report.get("status"),
+                "matching_cases": equivalent_report.get("matching_cases"),
+                "corpus_size": equivalent_report.get("corpus_size"),
+            },
+            {
+                "fixture": "bounded-sum-regression",
+                "process_rejected": not regression_ok,
+                "status": regression_report.get("status"),
+                "mismatching_cases": regression_report.get("mismatching_cases"),
+            },
+        ],
+        limitations=[
+            "corpus equivalence is finite behavioral evidence, not universal equivalence",
+            "reference execution is not production backend execution",
+            "local Forge provider results are development evidence, not independent evaluation",
+        ],
+        dependency_paths=["examples/execution", "crates/mncs-model", "crates/mncs-cli"],
+        complete=True,
+    )
+
+
 def structural_workflow(request: dict[str, Any]) -> dict[str, object]:
     results = [
         semantic_validation(request),
@@ -278,7 +351,7 @@ def dispatch(request: dict[str, Any]) -> dict[str, object]:
             "cancellation": False,
             "health_checks": False,
             "extensions": {
-                "supported_constructs": ["rust-workspace", "semantic-body", "high-level-ir", "verified-ssa", "evidence-freshness"],
+                "supported_constructs": ["rust-workspace", "semantic-body", "high-level-ir", "verified-ssa", "evidence-freshness", "bounded-reference-execution", "corpus-differential-check"],
                 "unsupported_constructs": ["formal-compiler-correctness", "backend-code-generation"],
                 "limitations": ["normal local process; not a sandbox"],
             },
@@ -295,6 +368,7 @@ def dispatch(request: dict[str, Any]) -> dict[str, object]:
         "mncs-language-hir-trace-integrity": hir_trace,
         "mncs-language-ssa-integrity": ssa_integrity,
         "mncs-language-evidence-freshness": evidence_freshness,
+        "mncs-language-execution-equivalence": execution_equivalence,
     }
     handler = handlers.get(method)
     if handler is None:

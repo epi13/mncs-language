@@ -1,0 +1,13 @@
+{
+  "schema_version": "0.1",
+  "name": "bounded-sum-frozen-v1",
+  "cases": [
+    {"id": "zero", "request": {"schema_version": "0.1", "target": {"module": "Examples.ReferenceStudy", "function": "bounded_sum"}, "arguments": [{"integer": {"value": 0, "type": {"bits": 8, "signed": false}}}], "step_budget": 256}},
+    {"id": "one", "request": {"schema_version": "0.1", "target": {"module": "Examples.ReferenceStudy", "function": "bounded_sum"}, "arguments": [{"integer": {"value": 1, "type": {"bits": 8, "signed": false}}}], "step_budget": 256}},
+    {"id": "ordinary", "request": {"schema_version": "0.1", "target": {"module": "Examples.ReferenceStudy", "function": "bounded_sum"}, "arguments": [{"integer": {"value": 7, "type": {"bits": 8, "signed": false}}}], "step_budget": 256}},
+    {"id": "last-safe", "request": {"schema_version": "0.1", "target": {"module": "Examples.ReferenceStudy", "function": "bounded_sum"}, "arguments": [{"integer": {"value": 22, "type": {"bits": 8, "signed": false}}}], "step_budget": 256}},
+    {"id": "checked-overflow", "request": {"schema_version": "0.1", "target": {"module": "Examples.ReferenceStudy", "function": "bounded_sum"}, "arguments": [{"integer": {"value": 23, "type": {"bits": 8, "signed": false}}}], "step_budget": 256}},
+    {"id": "post-overflow", "request": {"schema_version": "0.1", "target": {"module": "Examples.ReferenceStudy", "function": "bounded_sum"}, "arguments": [{"integer": {"value": 24, "type": {"bits": 8, "signed": false}}}], "step_budget": 256}},
+    {"id": "unsigned-edge", "request": {"schema_version": "0.1", "target": {"module": "Examples.ReferenceStudy", "function": "bounded_sum"}, "arguments": [{"integer": {"value": 255, "type": {"bits": 8, "signed": false}}}], "step_budget": 256}}
+  ]
+}

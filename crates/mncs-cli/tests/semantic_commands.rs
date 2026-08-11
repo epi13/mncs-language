@@ -316,3 +316,88 @@ fn candidate_evaluation_stays_isolated_and_rejects_protected_regression() {
         .unwrap()
         .is_empty());
 }
+
+#[test]
+fn bounded_execution_and_corpus_comparison_are_explicitly_limited() {
+    let baseline = example("execution/bounded-sum-baseline.mncs.json");
+    let request = example("execution/bounded-sum-one-request.json");
+    let executed = binary()
+        .args(["execute", &baseline, &request])
+        .output()
+        .expect("run bounded execution");
+    assert!(executed.status.success());
+    let result: Value = serde_json::from_slice(&executed.stdout).expect("execution JSON");
+    assert_eq!(result["schema_version"], "0.1");
+    assert_eq!(result["status"], "returned");
+    assert_eq!(result["returned"][0]["integer"]["value"], 1);
+    assert!(!result["trace"].as_array().unwrap().is_empty());
+
+    let effect_manifest = example("executable/effectful-record.mncs.json");
+    let effect_request = example("execution/effect-record-request.json");
+    let effect = binary()
+        .args(["execute", &effect_manifest, &effect_request])
+        .output()
+        .expect("run recorded effect");
+    assert!(effect.status.success());
+    let effect_result: Value = serde_json::from_slice(&effect.stdout).expect("effect JSON");
+    assert_eq!(effect_result["status"], "returned");
+    assert_eq!(effect_result["effects"].as_array().unwrap().len(), 1);
+
+    let equivalent = example("execution/bounded-sum-equivalent-refactor.mncs.json");
+    let regression = example("execution/bounded-sum-regression.mncs.json");
+    let corpus = example("execution/bounded-sum-corpus.json");
+    let pass = binary()
+        .args(["compare-execution", &baseline, &equivalent, &corpus])
+        .output()
+        .expect("run equivalent corpus comparison");
+    assert!(pass.status.success());
+    let pass_report: Value = serde_json::from_slice(&pass.stdout).expect("comparison JSON");
+    assert_eq!(pass_report["status"], "equivalent_over_corpus");
+    assert_eq!(pass_report["matching_cases"], 7);
+
+    let diff = binary()
+        .args(["diff", &baseline, &equivalent])
+        .output()
+        .expect("run execution fixture diff");
+    assert!(diff.status.success());
+    let diff_report: Value = serde_json::from_slice(&diff.stdout).expect("fixture diff JSON");
+    assert!(!diff_report["semantic"]["changed"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(!diff_report["invalidation"]["invalidated_evidence"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
+    let failed = binary()
+        .args(["compare-execution", &baseline, &regression, &corpus])
+        .output()
+        .expect("run regression corpus comparison");
+    assert_eq!(failed.status.code(), Some(1));
+    let failed_report: Value = serde_json::from_slice(&failed.stdout).expect("comparison JSON");
+    assert_eq!(failed_report["status"], "mismatch_detected");
+    assert!(!failed_report["mismatches"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn bounded_execution_exhausts_its_model_budget_without_hanging() {
+    let baseline = example("execution/bounded-sum-baseline.mncs.json");
+    let request = example("execution/bounded-sum-one-request.json");
+    let mut request_json: Value =
+        serde_json::from_slice(&std::fs::read(&request).expect("read execution request"))
+            .expect("request JSON");
+    request_json["step_budget"] = 1.into();
+    let path =
+        std::env::temp_dir().join(format!("mncs-execution-budget-{}.json", std::process::id()));
+    std::fs::write(&path, serde_json::to_vec(&request_json).unwrap()).expect("write request");
+    let path_string = path.to_string_lossy().into_owned();
+    let output = binary()
+        .args(["execute", &baseline, &path_string])
+        .output()
+        .expect("run budgeted execution");
+    let _ = std::fs::remove_file(path);
+    assert_eq!(output.status.code(), Some(1));
+    let result: Value = serde_json::from_slice(&output.stdout).expect("execution JSON");
+    assert_eq!(result["status"], "budget_exhausted");
+}

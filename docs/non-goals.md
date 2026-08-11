@@ -33,3 +33,9 @@ The language can make security-relevant relationships more visible, but vulnerab
 ## Not a guarantee that generated code is correct
 
 Agent-generated code receives no special trust. It must satisfy the same contracts and evidence requirements as human-authored code.
+
+## Not universal equivalence from a frozen corpus
+
+The bounded reference executor and differential checker provide reproducible finite behavioral
+evidence for declared inputs. Matching cases do not prove universal semantic equivalence, production
+backend correctness, or independent evaluation.

@@ -112,6 +112,10 @@ pub enum BodyOperationKind {
         operand_type: IntegerType,
         intent: ArithmeticIntent,
     },
+    IntegerCompare {
+        predicate: String,
+        operand_type: IntegerType,
+    },
     Effect {
         effect: Effect,
         capability: String,
@@ -527,6 +531,45 @@ fn validate_operation(
                     "MNB018",
                     format!("{path}.results"),
                     "integer result type does not match the operation type",
+                ));
+            }
+        }
+        BodyOperationKind::IntegerCompare {
+            predicate,
+            operand_type,
+        } => {
+            if !matches!(predicate.as_str(), "eq" | "ne" | "lt" | "le" | "gt" | "ge") {
+                errors.push(body_diagnostic(
+                    "MNB039",
+                    format!("{path}.kind.predicate"),
+                    format!("unsupported integer comparison predicate {predicate:?}"),
+                ));
+            }
+            if operation.operands.len() != 2 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB040",
+                    path.to_owned(),
+                    "integer comparison requires two operands and one result",
+                ));
+            }
+            for operand in &operation.operands {
+                if available.get(operand) != Some(&BodyType::Integer(*operand_type)) {
+                    errors.push(body_diagnostic(
+                        "MNB041",
+                        format!("{path}.operands"),
+                        "integer comparison operand type does not match the operation type",
+                    ));
+                }
+            }
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| !result.ty.is_boolean())
+            {
+                errors.push(body_diagnostic(
+                    "MNB042",
+                    format!("{path}.results"),
+                    "integer comparison result must have boolean type",
                 ));
             }
         }
@@ -1020,6 +1063,24 @@ pub(crate) mod tests {
         assert!(report.errors.iter().any(|error| error.code == "MNB021"));
         assert!(report.errors.iter().any(|error| error.code == "MNB036"));
         assert_eq!(program.schema_version, SUPPORTED_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn body_rejects_unknown_integer_comparison_predicate() {
+        let mut program = executable_program();
+        let body = program.functions[0].body.as_mut().expect("body");
+        let operation = &mut body.blocks[0].operations[1];
+        operation.kind = BodyOperationKind::IntegerCompare {
+            predicate: "unordered".to_owned(),
+            operand_type: IntegerType {
+                bits: 32,
+                signed: true,
+            },
+        };
+        operation.operands = vec!["a".to_owned(), "one".to_owned()];
+        let report = program.validate();
+        assert!(!report.valid);
+        assert!(report.errors.iter().any(|error| error.code == "MNB039"));
     }
 
     #[test]
