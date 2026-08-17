@@ -1,6 +1,6 @@
 # Roadmap
 
-This roadmap separates semantic research from final surface-language selection while treating recursive introspection, representation efficiency, machine-intent semantics, and refinement as cross-cutting requirements.
+This roadmap separates semantic research from final surface-language selection while treating recursive introspection, representation efficiency, machine-intent semantics, proof-carrying semantics, and refinement as cross-cutting requirements.
 
 ## Active cross-cutting track — source representations
 
@@ -36,6 +36,35 @@ Current design work:
 
 The first implementation pilot should remain narrow: integer arithmetic, one memory capability,
 canonical serialization, IR preservation, and one conservative backend-promise experiment.
+
+## Active cross-cutting track — proof-carrying dependent core
+
+[RFC 0007](rfcs/0007-proof-carrying-dependent-core.md) proposes a small dependent proof core as the
+formal trust boundary for machine-generated proofs while keeping general execution, empirical
+evidence, automation, and orchestration outside that kernel.
+
+Current design work:
+
+- use intensional dependent type theory as the conservative starting point while studying extensional,
+  observational, homotopical, cubical, linear, and quantitative variants selectively;
+- keep proof generation and proof checking separate so LLMs, solvers, Forge workflows, and other
+  agents can remain untrusted proof producers;
+- distinguish kernel-checkable proof terms, checkable certificates, verifier results, empirical
+  observations, assumptions, and unresolved obligations;
+- derive proof obligations from language constructs instead of relying on authors to remember them;
+- preserve `PASS`, `FAIL`, and `UNKNOWN` as method- and scope-specific obligation outcomes;
+- model a total logical stratum separately from partial, effectful, concurrent, foreign, and
+  target-specific execution;
+- make transformation preservation/refinement claims proof-carrying where feasible;
+- investigate linear or quantitative usage information for capabilities, resources, regions, and
+  authority without prematurely fixing the final calculus; and
+- keep the kernel small, deterministic, versioned, and suitable for independent implementations.
+
+The first implementation pilot should be deliberately tiny: a versioned proof-term representation,
+a minimal universe/inductive/dependent-function core, deterministic checking and proof identity, and
+one automatically generated proof obligation tied to an existing executable or machine-intent
+construct. It should include accepted, rejected, and unresolved fixtures before claiming a theorem
+prover or verified compiler.
 
 ## 0.1 — Executable semantic model
 
@@ -121,7 +150,9 @@ foundation, including deterministic identities, validation, and body→HIR→SSA
 - represent explicit integer edge behavior without backend undefined behavior;
 - preserve enough structure to identify bounded repair regions and protected properties;
 - represent candidate transformations without modifying the trusted baseline;
-- demonstrate lossless projection from human source to canonical semantic form for the supported subset.
+- demonstrate lossless projection from human source to canonical semantic form for the supported subset;
+- prototype a proof-term subject/obligation link without making HIR itself the proof kernel; and
+- preserve proof-object and assumption identities through HIR traceability where the supported subset allows it.
 
 ## 0.4 — Verified SSA and micro-debugging
 
@@ -175,7 +206,9 @@ does not establish universal equivalence, production runtime behavior, or compil
 - produce a minimal defensible causal slice;
 - generate and evaluate at least one isolated repair proposal;
 - compare the baseline and candidate across contracts, effects, capabilities, assumptions, complexity, target support, backend promises, and evidence;
-- enforce recursion, authority, candidate-count, and verifier-call budgets.
+- enforce recursion, authority, candidate-count, and verifier-call budgets;
+- add the first kernel-checkable proof or independently checkable certificate to a transformation obligation; and
+- demonstrate that stale proof dependencies invalidate only the dependent transformation authority.
 
 ## 0.5 — Backend and bounded recursive-refinement experiment
 
@@ -189,22 +222,23 @@ does not establish universal equivalence, production runtime behavior, or compil
 - document all backend-introduced assumptions;
 - complete one bounded observe–localize–propose–verify–compare–promote cycle;
 - require independent evidence before automatic candidate promotion;
-- retain an auditable record of accepted and rejected candidate transformations.
+- retain an auditable record of accepted and rejected candidate transformations;
+- test proof-carrying lowering for one narrowly defined backend promise; and
+- keep proof search outside the trusted kernel even when Forge orchestrates it.
 
-The next Sol High pass should decide whether the body reference evaluator is sufficient as a study
-oracle or whether a separately validated SSA evaluator is needed, without conflating either with a
-production backend.
+The body and SSA reference evaluators are study oracles and finite conformance tools, not substitutes
+for the proof kernel or a production backend.
 
 ## 0.6 — Surface-language and self-description experiments
 
 - expand the syntax tournament to a representative corpus;
 - implement parsers and canonical formatters for at least two competing source candidates;
 - include machine-intent expressions in syntax and semantic-density comparisons;
-- measure human readability, agent generation, localized repair, model-token counts, parser recovery, canonical formatting, graph round trips, omission rates, and verifier workload;
+- measure human readability, agent generation, localized repair, model-token counts, parser recovery, canonical formatting, graph round trips, omission rates, proof search/checking cost, and verifier workload;
 - ensure every compared candidate represents the same declared semantic claims;
 - avoid syntax that cannot round-trip to the semantic graph without hidden meaning;
 - select or reject the Zig-influenced direction using collected evidence;
-- expose compiler and verifier contracts, operation vocabularies, obligation templates, and lowering rules through the same introspection model used for ordinary programs;
+- expose compiler and verifier contracts, operation vocabularies, obligation templates, proof-core terms, and lowering rules through the same introspection model used for ordinary programs;
 - begin a limited self-hosting experiment without obscuring bootstrap trust;
 - select a grammar only after semantic coverage and repairability are demonstrated.
 
@@ -215,7 +249,7 @@ production backend.
 - compare scalar and SIMD realizations under one semantic operation identity;
 - add a bounded optimization-region model with mutation, target, authority, resource, candidate, and verifier limits;
 - reject a faster candidate that violates a protected requirement;
-- measure performance, code size, evidence cost, portability, and invalidation behavior;
+- measure performance, code size, evidence cost, proof cost, portability, and invalidation behavior;
 - preserve accepted and rejected realization histories; and
 - demonstrate stale evidence after target, compiler, backend, or pass-pipeline changes.
 
@@ -228,12 +262,14 @@ A 1.0 designation would indicate a coherent research language and toolchain, not
 - deterministic parsing and canonical formatting;
 - a versioned canonical semantic representation;
 - explicit machine-intent, obligation, lowering-envelope, and portability-envelope semantics;
+- a documented formal proof boundary and versioned proof-core representation;
+- at least one independently checkable proof path for a language-generated obligation;
 - at least one executable backend;
 - an evidence manifest with verifiable artifacts;
 - conservative and traceable backend-promise emission;
 - bounded unsafe and foreign-function interfaces;
 - a versioned recursive diagnostic and refinement protocol;
 - isolated candidate transformations and explicit promotion policy;
-- documented recursion, authority, resource, target, and representation limits;
+- documented recursion, authority, resource, target, representation, universe, equality, and assumption limits;
 - documented soundness and bootstrap limits;
 - conformance tests and independent implementation guidance.

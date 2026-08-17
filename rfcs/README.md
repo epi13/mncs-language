@@ -21,3 +21,4 @@ RFC acceptance does not imply production stability. The repository remains pre-s
 - [RFC 0004: Recursive Introspection and Refinement](0004-recursive-introspection-and-refinement.md)
 - [RFC 0005: Source Representations and Semantic Density](0005-source-representations-and-semantic-density.md)
 - [RFC 0006: Machine-Intent Expressions and Verified Lowering Envelopes](0006-machine-intent-expressions.md)
+- [RFC 0007: Proof-Carrying Dependent Core](0007-proof-carrying-dependent-core.md)
