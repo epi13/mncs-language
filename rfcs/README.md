@@ -22,3 +22,4 @@ RFC acceptance does not imply production stability. The repository remains pre-s
 - [RFC 0005: Source Representations and Semantic Density](0005-source-representations-and-semantic-density.md)
 - [RFC 0006: Machine-Intent Expressions and Verified Lowering Envelopes](0006-machine-intent-expressions.md)
 - [RFC 0007: Proof-Carrying Dependent Core](0007-proof-carrying-dependent-core.md)
+- [RFC 0008: Machine-Native I/O, Resource, Effect, and Event Semantics](0008-machine-native-io-resource-effect-event-semantics.md)
