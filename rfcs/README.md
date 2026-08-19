@@ -30,3 +30,4 @@ RFC acceptance does not imply production stability. The repository remains pre-s
 - [RFC 0013: Machine-Native Abstraction, Polymorphism, Interface, and Evidence Semantics](0013-machine-native-abstraction-polymorphism-interface-evidence-semantics.md)
 - [RFC 0014: Machine-Native Module, Component, Linking, Dependency, and Compatibility Semantics](0014-machine-native-module-component-linking-dependency-compatibility-semantics.md)
 - [RFC 0015: Machine-Native Trust Boundary, Unsafe Operation, Foreign Interface, ABI, and Containment Semantics](0015-machine-native-trust-boundary-unsafe-foreign-interface-abi-containment-semantics.md)
+- [RFC 0016: Machine-Native Staging, Metaprogramming, Introspection, Specialization, and Self-Transformation Semantics](0016-machine-native-staging-metaprogramming-introspection-specialization-self-transformation-semantics.md)
