@@ -25,3 +25,4 @@ RFC acceptance does not imply production stability. The repository remains pre-s
 - [RFC 0008: Machine-Native I/O, Resource, Effect, and Event Semantics](0008-machine-native-io-resource-effect-event-semantics.md)
 - [RFC 0009: Machine-Native Memory, Reference, Provenance, and Storage Semantics](0009-machine-native-memory-reference-provenance-storage-semantics.md)
 - [RFC 0010: Machine-Native Concurrency, Causality, Atomicity, and Memory Consistency Semantics](0010-machine-native-concurrency-causality-atomicity-memory-consistency-semantics.md)
+- [RFC 0011: Machine-Native Failure, Recovery, Nondeterminism, and External Observation Semantics](0011-machine-native-failure-recovery-nondeterminism-external-observation-semantics.md)
