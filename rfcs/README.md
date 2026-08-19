@@ -27,3 +27,4 @@ RFC acceptance does not imply production stability. The repository remains pre-s
 - [RFC 0010: Machine-Native Concurrency, Causality, Atomicity, and Memory Consistency Semantics](0010-machine-native-concurrency-causality-atomicity-memory-consistency-semantics.md)
 - [RFC 0011: Machine-Native Failure, Recovery, Nondeterminism, and External Observation Semantics](0011-machine-native-failure-recovery-nondeterminism-external-observation-semantics.md)
 - [RFC 0012: Machine-Native Executable Semantic Core](0012-machine-native-executable-semantic-core.md)
+- [RFC 0013: Machine-Native Abstraction, Polymorphism, Interface, and Evidence Semantics](0013-machine-native-abstraction-polymorphism-interface-evidence-semantics.md)
