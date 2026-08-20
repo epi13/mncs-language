@@ -47,6 +47,11 @@ cargo run -p mncs-cli -- compiler-architecture
 
 See [the 2026-08 compiler architecture assessment](docs/compiler-architecture-assessment-2026-08.md), [RFC 0039](rfcs/0039-machine-native-compiler-stage-and-experiment-contracts.md), and [RFC 0040](rfcs/0040-machine-native-source-profile-0.1.md).
 
+The [2026-08-20 experimental Fabric validation](docs/experimental-fabric-validation-2026-08-20.md)
+records a real heterogeneous multi-model run. Its execution infrastructure
+passed, but its proposed protocol was rejected because the agents changed
+frozen identities and then failed to detect the contradiction.
+
 Run the source vertical slice and emit its language-owned study record:
 
 ```bash
