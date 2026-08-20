@@ -362,21 +362,21 @@ mod tests {
             signed: false,
         };
         let mut subtraction = operation(ArithmeticIntent::Wrapping);
-        subtraction.operator = "sub".to_owned();
+        "sub".clone_into(&mut subtraction.operator);
         subtraction.operand_type = ty;
         subtraction.left = 0;
         subtraction.right = 1;
         assert_eq!(subtraction.evaluate().value, Some(255));
 
         let mut multiplication = operation(ArithmeticIntent::Saturating);
-        multiplication.operator = "mul".to_owned();
+        "mul".clone_into(&mut multiplication.operator);
         multiplication.operand_type = ty;
         multiplication.left = 255;
         multiplication.right = 2;
         assert_eq!(multiplication.evaluate().value, Some(255));
 
         let mut bitwise = operation(ArithmeticIntent::Wrapping);
-        bitwise.operator = "xor".to_owned();
+        "xor".clone_into(&mut bitwise.operator);
         bitwise.operand_type = IntegerType {
             bits: 8,
             signed: true,

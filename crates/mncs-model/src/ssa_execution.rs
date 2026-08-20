@@ -841,7 +841,7 @@ fn divergence_context(
                 && left.block == right.block
                 && left.event == right.event)
         {
-            last_matching = left.operation.clone();
+            last_matching.clone_from(&left.operation);
         } else {
             body_event = Some(left.event.clone());
             ssa_event = Some(right.event.clone());
