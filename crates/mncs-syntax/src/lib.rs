@@ -2,6 +2,10 @@ use std::collections::BTreeSet;
 
 use serde::Serialize;
 
+mod source;
+
+pub use source::*;
+
 /// Tokenizer-neutral measurements for one source representation.
 ///
 /// `lexical_units` is not intended to predict any particular model tokenizer.
