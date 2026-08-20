@@ -723,38 +723,48 @@ mod tests {
     fn host_change_changes_derivation_but_not_semantic_hir_or_ssa() {
         let compiler = ReferenceCompiler::default();
         let program = program("compiler-host-invariance");
-        let linux_request = compiler.request_for_program(&program, emissions(), None);
-        let windows_host =
-            CompilerHostIdentity::new("x86_64", "windows", "native-windows", BTreeMap::new());
-        let windows_request = CompilationRequest::new(
-            linux_request.input.clone(),
-            linux_request.language_profile.clone(),
-            linux_request.emit.clone(),
-            linux_request.compiler.clone(),
-            windows_host,
-            linux_request.build_host.clone(),
+        let native_request = compiler.request_for_program(&program, emissions(), None);
+        let (alternate_os, alternate_environment) =
+            if native_request.compiler_host.operating_system == "windows" {
+                ("linux", "native-linux")
+            } else {
+                ("windows", "native-windows")
+            };
+        let alternate_host = CompilerHostIdentity::new(
+            "x86_64",
+            alternate_os,
+            alternate_environment,
+            BTreeMap::new(),
+        );
+        let alternate_request = CompilationRequest::new(
+            native_request.input.clone(),
+            native_request.language_profile.clone(),
+            native_request.emit.clone(),
+            native_request.compiler.clone(),
+            alternate_host,
+            native_request.build_host.clone(),
             None,
             None,
-            linux_request.pipeline.clone(),
+            native_request.pipeline.clone(),
             Vec::new(),
             None,
             None,
         );
-        let linux = compiler.compile(linux_request.clone(), &program);
-        let windows = compiler.compile(windows_request.clone(), &program);
-        assert_ne!(linux_request.identity, windows_request.identity);
-        assert_ne!(linux.identity, windows.identity);
+        let native = compiler.compile(native_request.clone(), &program);
+        let alternate = compiler.compile(alternate_request.clone(), &program);
+        assert_ne!(native_request.identity, alternate_request.identity);
+        assert_ne!(native.identity, alternate.identity);
         for representation in [
             ArtifactRepresentation::Semantic,
             ArtifactRepresentation::Hir,
             ArtifactRepresentation::Ssa,
         ] {
-            let left = linux
+            let left = native
                 .artifacts
                 .iter()
                 .find(|item| item.representation == representation)
                 .unwrap();
-            let right = windows
+            let right = alternate
                 .artifacts
                 .iter()
                 .find(|item| item.representation == representation)
