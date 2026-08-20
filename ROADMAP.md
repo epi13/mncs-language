@@ -112,7 +112,7 @@ Current design work:
 - keep dynamic values existentially typed and witness-bearing rather than introducing an unchecked `Any`;
 - distinguish logical, view, representation, storage, and serialization observations;
 - make representation-sensitive observations such as layout, size, alignment, field order, tag encoding,
-  and addressability explicit so they narrow realization freedom visibly;
+  and addressability explicit so they narrow the realization freedom visibly;
 - represent hard representation requirements separately from preferences and target-dependent facts;
 - model candidate representation realizations with validity, constructor-distinction, decode,
   observation-preservation, target-applicability, and evidence obligations;
@@ -341,6 +341,55 @@ security relation claims where the same subject passes one observer profile and 
 target-dependent security evidence; and RFC 0018 policies separating sandbox experimentation from
 stronger security-boundary promotion.
 
+## Active cross-cutting track — principals, identity, credentials, delegation, and attestation
+
+[RFC 0025](rfcs/0025-machine-native-principal-identity-authentication-credential-attestation-cryptographic-trust-semantics.md)
+establishes principal identity and cryptographic trust as a graph of scoped bindings, authentication
+events, credentials, delegation paths, trust-domain relations, and attestation evidence rather than a
+username, certificate, key, account, or universal `trusted` bit.
+
+Current design work:
+
+- distinguish principal identity, names/namespaces, key/authenticator identity, credentials, workload,
+  device, service, agent, code-artifact, platform, execution-instance, and session identity;
+- distinguish identity proofing, enrollment, current authentication, credential cryptographic validity,
+  claim acceptance, authorization, delegation authority, attestation, trustworthiness, and trust;
+- support local/scoped names and explicit trust domains so equal strings do not fabricate principal identity;
+- model principal↔authenticator bindings with key usage, provenance, context, validity, rotation, compromise,
+  recovery, and algorithm agility rather than equating a principal with one permanent key;
+- distinguish bearer credentials from proof-of-possession credentials and make audience/purpose/context
+  bindings explicit;
+- make issuer authority claim-class specific so authentic issuance cannot silently establish claim truth;
+- preserve credential expiration, revocation, compromise, and `UNKNOWN` status as distinct evidence states;
+- represent authority scopes, delegation rights, attenuation, caveats, delegation provenance, and
+  threshold principals so delegated authority cannot silently broaden;
+- treat long-lived semantic identity and short-lived credential realizations separately, including
+  SPIFFE-like workload identity and ephemeral/keyless signing directions;
+- model trust anchors as scoped policy roots and federation as explicit claim translation between trust
+  domains rather than assuming global trust transitivity;
+- align attestation with the RATS Attester → Evidence → Verifier → Attestation Result → Relying Policy
+  pipeline while keeping measurements, reference values, attestation endorsements, appraisal, and final
+  action authorization distinct;
+- support nonce-, time-, epoch-, and session-based freshness without requiring one universal mechanism;
+- preserve layered/composite attestation dependencies from hardware/firmware/runtime through workloads and agents;
+- keep authentic attestation distinct from acceptable measured state and trustworthiness distinct from
+  relying trust decisions;
+- apply RFC 0024 information-flow policy to identity, credential, pseudonym-linkage, and attestation evidence;
+- expose signing/authentication/attestation/key-management operations as RFC 0008 effects and foreign
+  credential translation through RFC 0015 trust boundaries;
+- preserve identity/trust/authority deltas through recursive refinement, with authority broadening made
+  explicitly reviewable; and
+- allow Forge to search authentication, credential, delegation, and attestation realizations while
+  protected least-authority, freshness, identity, and state requirements remain explicit.
+
+The first implementation pilot should remain bounded: versioned principal/name/trust-domain,
+principal-authenticator binding, authentication, credential/status/issuer-authority, delegation/caveat,
+trust-anchor/federation, and attestation/reference-value artifacts; a key-rotation case preserving principal
+identity; valid-signature-but-unauthorized and bearer-versus-PoP fixtures; accepted attenuation and rejected
+privilege escalation; caveat accumulation; `UNKNOWN` credential status; rejected foreign claim translation;
+authentic acceptable and authentic-but-unacceptable attestation cases; stale attestation; agent lineage
+without authority inheritance; and RFC 0018 policies separating verifier, mutation, and promotion authority.
+
 ## 0.1 — Executable semantic model
 
 **Goal:** demonstrate that MNCS relationships can be represented and mechanically checked before a source grammar exists.
@@ -556,10 +605,18 @@ A 1.0 designation would indicate a coherent research language and toolchain, not
 - a versioned information-flow model that distinguishes confidentiality, integrity, flow ordering, observer/channel scope, noninterference families, bounded declassification/endorsement, and target-sensitive side-channel claims;
 - at least one information-flow study where the same program satisfies a narrow observer relation while failing a broader termination/timing/address/scheduler-sensitive relation, without collapsing either result into a universal security bit;
 - at least one explicit declassification/endorsement study proving that validation or successful execution cannot fabricate downgrade/endorsement authority, plus one Forge candidate rejected for violating a protected security relation despite otherwise valid functional behavior;
+- a versioned principal/identity model that distinguishes principals, names/namespaces, keys/authenticators, credentials, workloads, devices, agents, code artifacts, platforms, execution instances, and sessions;
+- a versioned authentication/credential model that distinguishes identity proofing, enrollment, cryptographic validity, bearer versus proof-of-possession semantics, issuer authority, authentication, authorization, audience/context, expiration, revocation, and `UNKNOWN` status;
+- a versioned delegation/trust model with explicit authority scope, delegation rights, attenuation, caveats, derivation provenance, threshold principals, trust domains, federation, and claim-class-specific trust anchors;
+- a versioned attestation model that separates attesters, evidence, measurements, reference values, attestation endorsements, verifier appraisal, results, freshness, trustworthiness, and final relying decisions;
+- at least one identity study where principal identity survives key rotation while key identity changes, and one credential study where cryptographic validity passes while action authorization fails;
+- at least one delegation study where a narrower child authority is accepted while a broader child authority is mechanically rejected, plus one status case where `UNKNOWN` remains distinct from `GOOD`;
+- at least one attestation study where evidence is authentic and fresh but the measured state is unacceptable, plus one stale-attestation study that cannot establish current state;
+- at least one Forge identity-realization study where a broader or longer-lived credential is rejected in favor of a least-sufficient, short-lived proof-of-possession realization with appropriate current attestation;
 - conservative and traceable backend-promise emission;
 - bounded unsafe and foreign-function interfaces;
 - a versioned recursive diagnostic and refinement protocol;
 - isolated candidate transformations and explicit promotion policy;
-- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, clock, temporal-validity, scheduling, information-flow, observer, reclassification, side-channel, and assumption limits;
+- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, clock, temporal-validity, scheduling, information-flow, observer, reclassification, side-channel, principal, identity, credential, delegation, trust-domain, federation, revocation, cryptographic-algorithm, freshness, attestation, and assumption limits;
 - documented soundness and bootstrap limits;
 - conformance tests and independent implementation guidance.
