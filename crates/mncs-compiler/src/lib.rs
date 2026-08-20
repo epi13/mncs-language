@@ -624,7 +624,7 @@ mod tests {
             "/../../examples/executable/checked-add.mncs.json"
         )))
         .map(|mut program| {
-            program.module = name.to_owned();
+            name.clone_into(&mut program.module);
             program
         })
         .expect("fixture program")
