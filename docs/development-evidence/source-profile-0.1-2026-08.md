@@ -60,3 +60,7 @@ The queries ran from `/tmp` with absolute paths because Joern creates its own lo
 ## Residual uncertainty
 
 Profile 0.1 intentionally supports only pure functions that explicitly return one input with the declared output type. General scopes, recursive artifact resolution, contract syntax, effects, calls, branching, partial-program identity, profile migration, translation validation, and executable backends remain undefined or unimplemented.
+
+## Hosted-clippy follow-up
+
+The first hosted CI run used a newer current Clippy lint set than the local repository baseline and rejected iterator `format!` collection plus a test-only owned-string assignment. The implementation now uses the repository-standard bounded hex-write loop and `clone_into`. Formatting, clippy, all 96 tests, and diff validation passed again. Repeating the same source vertical-slice Joern query after the repair preserved all stage method/control counts and boundaries; the change adds no compiler-stage, validation, backend, or authority branch.
