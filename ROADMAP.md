@@ -572,6 +572,67 @@ The first Forge studies should demonstrate both a coordination-free realization 
 permit it and a globally constrained operation that either generates coordination or is reported unrealizable
 under the requested partition/availability model.
 
+## Active cross-cutting track — placement, topology, locality, mobility, and heterogeneous execution
+
+[RFC 0029](rfcs/0029-machine-native-placement-topology-locality-mobility-migration-heterogeneous-execution-semantics.md)
+establishes a spatial semantic model that separates logical identity from physical location, logical topology
+from physical topology, computation placement from data placement, hard placement requirements from preferences,
+and mobility/migration semantics from deployment/version change. Placement remains an unresolved realization
+choice until a contract or observation makes spatial relationships semantically relevant.
+
+Current design work:
+
+- distinguish logical identity, place identity, virtual-place identity, execution-slot identity, physical-resource
+  identity, topology identity, physical-instance identity, and placement identity;
+- model physical machines as evidence-bearing resource/topology graphs rather than assuming one static hierarchy,
+  while retaining containment, accessibility, transfer, sharing, trust, and fault-domain relations;
+- keep logical/application topology separate from physical topology and represent mapping as an explicit
+  proof-bearing relation;
+- prohibit identifier adjacency from fabricating proximity and require locality claims to name an actual
+  relation/domain rather than a universal `local` bit;
+- separate `PlacementRequirement` from `PlacementPreference` so optimization can trade preferences but cannot
+  override hard semantic constraints;
+- model affinity, anti-affinity, colocation, direct-access, communication-boundary, trust-domain, and fault-domain
+  constraints explicitly;
+- provide spatial evidence for RFC 0028 replica independence so replica count cannot substitute for actual
+  separation under the declared failure model;
+- allow location variables/unresolved placement holes and explicit `SAT`, `UNSAT`, and `UNKNOWN` placement
+  conclusions;
+- separate computation placement, logical data identity, physical data instances, and memory-resource placement;
+- use capability-based heterogeneous resource requirements rather than assuming CPU/GPU/device-class labels
+  establish required execution semantics;
+- bind device realizations to RFC 0019 representation, RFC 0021 numeric, RFC 0023 timing, RFC 0024 security,
+  RFC 0025 trust/attestation, RFC 0026 persistence, RFC 0027 serialization, and RFC 0028 distribution obligations;
+- allow placement to generate explicit serialization/distribution obligations when a realization crosses
+  address-space, device, process, node, or independent-failure boundaries;
+- keep static, dynamic, and adaptive placement legal while treating work stealing, overdecomposition, graph/
+  hypergraph partitioning, HEFT-like mapping, learned mappers, and runtime heuristics as proposal strategies;
+- model mobility boundaries, migration units, migration closure, transfer, cutover, destination activation,
+  source retirement, capability rebinding, rollback, and `UNKNOWN` migration outcome explicitly;
+- preserve logical identity across valid movement while keeping migration transparency relation- and
+  observation-scoped;
+- require migration to surface stale or invalidated topology, target, attestation, clock, schedule, persistent-
+  reference, locality, side-channel, and fault-domain evidence;
+- prevent migration-induced split brain through explicit cutover authority/fencing when one-writer semantics
+  are required;
+- preserve placement/migration obligations through HIR/SSA/backend lowering and expose topology, placement,
+  and migration deltas to Forge recursive refinement;
+- separate untrusted placement search from narrow deterministic checking of hard resource, capability,
+  locality, separation, trust, boundary, and migration constraints; and
+- leave quantitative placement quality, latency, bandwidth, energy, migration cost, and Pareto ranking to
+  RFCs 0032–0033 after semantic admissibility is established.
+
+The first implementation pilot should remain bounded: versioned place/topology/resource/capability,
+location-variable, computation/data-placement, requirement/preference, affinity/anti-affinity/fault-domain,
+mobility/migration/rebinding, witness/counterexample/delta artifacts; identity-survives-movement and
+placement-observation fixtures; preference-versus-requirement; topology-ID-versus-proximity; replica
+fault-domain separation; capability-based CPU/GPU admissibility; unresolved placement holes; move-task-
+versus-move-data; migration-attestation invalidation; capability rebinding; distributed-boundary crossing;
+communication-free placement; fenced migration cutover; stale topology evidence; numeric-invalid accelerator;
+and placement-generated serialization obligations. The first Forge studies should compare heterogeneous
+placement candidates and reject any faster candidate that violates protected numeric, trust, memory,
+fault-domain, security, serialization, distribution, or migration relations.
+
 ## 0.1 — Executable semantic model
 
 **Goal:** demonstrate that MNCS relationships can be represented and mechanically checked before a source grammar exists.
@@ -837,10 +898,34 @@ A 1.0 designation would indicate a coherent research language and toolchain, not
 - at least one distributed-commit study where safety remains protected while liveness blocks after a coordinator failure, and one compensation study that restores a declared business relation without claiming historical rollback;
 - at least one Byzantine/fault-threshold claim whose meaning is explicitly scoped to configuration, network, authentication, quorum, and independence assumptions;
 - at least one bounded partition/failure exploration result that remains explicitly bounded evidence rather than being upgraded to universal distributed correctness;
+- a versioned spatial model distinguishing logical identity, place/virtual-place identity, physical resource identity, physical data-instance identity, topology identity, and placement identity;
+- a versioned topology model supporting containment plus at least one non-tree relation such as accessibility, affinity, transfer, trust sharing, or fault-domain sharing;
+- a versioned placement contract model that distinguishes hard requirements from preferences and represents affinity, anti-affinity, direct-access, communication-boundary, trust-domain, and fault-domain constraints explicitly;
+- explicit computation placement and data placement with unresolved location variables or equivalent placement holes and `SAT`, `UNSAT`, and `UNKNOWN` placement conclusions;
+- a capability-based heterogeneous resource model that distinguishes device class from actual execution/memory capabilities and cross-RFC realization applicability;
+- at least one placement study where logical task/object identity survives a physical movement while placement identity changes;
+- at least one RFC 0020 placement-observation study where two placements satisfy a narrow functional relation but fail a location-observing relation after placement becomes observable;
+- at least one preference-versus-requirement study where a candidate remains semantically admissible but suboptimal under a preference and becomes invalid when the same locality condition is promoted to a hard requirement;
+- at least one topology study proving identifier adjacency does not establish proximity;
+- at least one fault-domain study where multiple RFC 0028 replicas fail an independence claim because physical topology reveals a shared failure domain, plus one mapping that satisfies the required separation;
+- at least one heterogeneous-device study where different resource classes remain admissible because they satisfy the actual capability set and one nominally appropriate device is rejected because a required capability is absent;
+- at least one placement-hole study where the checker establishes `SAT`, `UNSAT`, or explicit `UNKNOWN` under a concrete topology snapshot;
+- at least one communication-free/locality study that passes under one placement and produces a concrete counterexample after required data crosses the protected boundary;
+- a versioned mobility model distinguishing migration unit, mobility boundary, migration closure, transfer, cutover, destination activation, source retirement, rollback, and unknown outcome;
+- at least one migration study where logical identity survives movement while destination trust/attestation evidence must be refreshed and source evidence cannot be reused as destination evidence;
+- at least one capability-rebinding study that preserves, explicitly rebinds, invalidates, or refuses a location-bound capability without fabricating new authority;
+- at least one migration-cutover study using fencing or equivalent authority to reject stale-source mutation after destination activation;
+- at least one RFC 0028 boundary-crossing study where moving a previously local interaction across an independent failure domain is rejected unless a distributed realization preserves the required relation;
+- at least one RFC 0027 placement-generated serialization study where a boundary introduces a wire obligation and an invalid codec causes the placement realization to fail;
+- at least one RFC 0021 placement study where a faster accelerator candidate is rejected because its available numerical realization violates the protected numeric relation;
+- at least one topology-change study where stale topology/capability evidence invalidates only dependent placement claims rather than globally invalidating unrelated mappings;
+- at least one placement witness produced by an untrusted search mechanism and independently checked by a narrower placement verifier;
+- at least one Forge heterogeneous-placement study comparing multiple valid/invalid candidates and rejecting a faster candidate that violates a protected numeric, trust, memory-access, fault-domain, security, serialization, distribution, or migration relation;
+- at least one bounded placement/migration exploration result that remains explicitly bounded rather than being upgraded to universal placement independence or migration transparency;
 - conservative and traceable backend-promise emission;
 - bounded unsafe and foreign-function interfaces;
 - a versioned recursive diagnostic and refinement protocol;
 - isolated candidate transformations and explicit promotion policy;
-- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, clock, temporal-validity, scheduling, information-flow, observer, reclassification, side-channel, principal, identity, credential, delegation, trust-domain, federation, revocation, cryptographic-algorithm, freshness, attestation, persistent-state, transaction, failure-model, persistence-domain, persist-order, durability, journal, snapshot, checkpoint, recovery, persistent-reference, retention, schema, schema-lineage, field-identity, presence, unknown-field, duplicate-field, wire-contract, encoding-profile, canonicalization, framing, migration, Unicode, decode-budget, compatibility, participant, message, logical-operation, invocation-attempt, network-model, partition, failure-detector, suspicion, configuration, epoch, replica, quorum, consistency, convergence, conflict-resolution, consensus, broadcast, Byzantine, lease, fencing, distributed-snapshot, distributed-transaction, coordination, and assumption limits;
+- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, clock, temporal-validity, scheduling, information-flow, observer, reclassification, side-channel, principal, identity, credential, delegation, trust-domain, federation, revocation, cryptographic-algorithm, freshness, attestation, persistent-state, transaction, failure-model, persistence-domain, persist-order, durability, journal, snapshot, checkpoint, recovery, persistent-reference, retention, schema, schema-lineage, field-identity, presence, unknown-field, duplicate-field, wire-contract, encoding-profile, canonicalization, framing, migration, Unicode, decode-budget, compatibility, participant, message, logical-operation, invocation-attempt, network-model, partition, failure-detector, suspicion, configuration, epoch, replica, quorum, consistency, convergence, conflict-resolution, consensus, broadcast, Byzantine, lease, fencing, distributed-snapshot, distributed-transaction, coordination, place, topology, topology-snapshot, resource-capability, location-variable, computation-placement, data-placement, affinity, anti-affinity, fault-domain, mobility-boundary, migration-closure, cutover, capability-rebinding, heterogeneous-realization, placement-witness, and assumption limits;
 - documented soundness and bootstrap limits;
 - conformance tests and independent implementation guidance.
