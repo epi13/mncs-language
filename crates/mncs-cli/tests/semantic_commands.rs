@@ -37,6 +37,36 @@ fn semantic_commands_emit_deterministic_machine_json() {
 }
 
 #[test]
+fn compiler_architecture_exposes_the_complete_stage_ladder_and_current_gaps() {
+    let output = binary()
+        .arg("compiler-architecture")
+        .output()
+        .expect("run compiler architecture");
+    assert!(output.status.success());
+    let architecture: Value =
+        serde_json::from_slice(&output.stdout).expect("compiler architecture JSON");
+    assert_eq!(
+        architecture["contract_id"],
+        "mncs:language:compiler-stage-architecture:0.1"
+    );
+    assert_eq!(architecture["stages"].as_array().unwrap().len(), 12);
+    let lexical = architecture["stages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|stage| stage["stage"] == "lexical_analysis")
+        .unwrap();
+    assert_eq!(lexical["availability"], "planned");
+    let hir = architecture["stages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|stage| stage["stage"] == "high_level_ir")
+        .unwrap();
+    assert_eq!(hir["integration"], "compiler_driver");
+}
+
+#[test]
 fn diff_reports_changed_identity_and_invalidated_evidence() {
     let before = example("semantic-foundation/before.mncs.json");
     let after = example("semantic-foundation/after.mncs.json");

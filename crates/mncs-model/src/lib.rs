@@ -8,6 +8,7 @@ mod body;
 mod canonical;
 mod cfg;
 mod compiler;
+mod compiler_architecture;
 mod core;
 mod delta;
 mod evidence;
@@ -36,9 +37,16 @@ pub use compiler::{
     BuildHostIdentity, CompilationEmissions, CompilationEvidenceBundle, CompilationRequest,
     CompilationResult, CompilationStatus, CompilationStudyRequest, CompilationStudyResult,
     CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind, CompilerHostIdentity,
-    CompilerImplementationIdentity, CompilerNodeProfile, CompilerPassIdentity, CrossHostInvariants,
-    ObservationModelRef, PassPipelineIdentity, RelationClaim, RunEnvironmentRef, TargetContractRef,
-    TargetLoweringPlan, TransformationEdge, TransformationStatus, COMPILER_ARTIFACT_SCHEMA_VERSION,
+    CompilerImplementationIdentity, CompilerNodeProfile, CompilerPassExecutionObservation,
+    CompilerPassIdentity, CrossHostInvariants, ObservationModelRef, PassPipelineIdentity,
+    RelationClaim, RunEnvironmentRef, TargetContractRef, TargetLoweringPlan, TransformationEdge,
+    TransformationStatus, COMPILATION_STUDY_OBSERVATION_INTERPRETATION,
+    COMPILATION_STUDY_RESULT_CONTRACT_ID, COMPILER_ARTIFACT_SCHEMA_VERSION,
+};
+pub use compiler_architecture::{
+    CompilerArchitectureContract, CompilerStage, CompilerStageContract, StageAvailability,
+    StageIntegration, COMPILER_STAGE_ARCHITECTURE_CONTRACT_ID,
+    COMPILER_STAGE_ARCHITECTURE_SCHEMA_VERSION,
 };
 pub use core::{
     Assumption, AssumptionConfidence, ContractClause, ContractKind, Effect, EvidenceClaim,

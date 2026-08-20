@@ -13,6 +13,9 @@ use crate::canonical::{canonical_json_value, sha256_hex};
 use crate::{CanonicalForm, HighLevelIr, ObligationRecord, SemanticId, SsaModule};
 
 pub const COMPILER_ARTIFACT_SCHEMA_VERSION: &str = "0.1";
+pub const COMPILATION_STUDY_RESULT_CONTRACT_ID: &str = "mncs:language:compilation-study-result:0.1";
+pub const COMPILATION_STUDY_OBSERVATION_INTERPRETATION: &str =
+    "observation_only_not_assurance_or_conformance";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1181,8 +1184,32 @@ pub struct CrossHostInvariants {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompilerPassExecutionObservation {
+    pub edge_identity: SemanticId,
+    pub pass_identity: SemanticId,
+    pub pass_id: String,
+    pub input_artifact: SemanticId,
+    pub output_artifact: SemanticId,
+    pub status: TransformationStatus,
+}
+
+impl From<&TransformationEdge> for CompilerPassExecutionObservation {
+    fn from(edge: &TransformationEdge) -> Self {
+        Self {
+            edge_identity: edge.identity.clone(),
+            pass_identity: edge.pass.identity.clone(),
+            pass_id: edge.pass.id.clone(),
+            input_artifact: edge.input.identity.clone(),
+            output_artifact: edge.output.identity.clone(),
+            status: edge.status,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompilationStudyResult {
     pub schema_version: String,
+    pub contract_id: String,
     pub identity: SemanticId,
     pub study_request_identity: SemanticId,
     pub compilation_request_identity: SemanticId,
@@ -1193,20 +1220,34 @@ pub struct CompilationStudyResult {
     pub compiler_host_identity: SemanticId,
     pub build_host_identity: SemanticId,
     pub target_identity: Option<SemanticId>,
+    pub compilation_status: CompilationStatus,
+    pub stage_fingerprints: BTreeMap<ArtifactRepresentation, String>,
+    pub pass_executions: Vec<CompilerPassExecutionObservation>,
     pub semantic_fingerprint: Option<String>,
     pub hir_fingerprint: Option<String>,
     pub ssa_fingerprint: Option<String>,
     pub compilation_result_identity: SemanticId,
     pub execution_result_references: Vec<SemanticId>,
     pub diagnostics: Vec<CompilerDiagnostic>,
+    pub unresolved_obligations: Vec<SemanticId>,
     pub unresolved_assumptions: Vec<String>,
     pub invariants: CrossHostInvariants,
+    pub interpretation: String,
 }
 
 impl CompilationStudyResult {
     pub fn seal(&mut self) {
         self.identity = SemanticId(String::new());
         self.identity = identified("compilation-study-result", self);
+    }
+
+    pub fn identity_is_valid(&self) -> bool {
+        let mut material = self.clone();
+        material.identity = SemanticId(String::new());
+        self.contract_id == COMPILATION_STUDY_RESULT_CONTRACT_ID
+            && self.schema_version == COMPILER_ARTIFACT_SCHEMA_VERSION
+            && self.interpretation == COMPILATION_STUDY_OBSERVATION_INTERPRETATION
+            && self.identity == identified("compilation-study-result", &material)
     }
 }
 

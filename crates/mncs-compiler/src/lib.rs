@@ -10,12 +10,14 @@ use std::fmt::Write;
 use mncs_model::{
     ArtifactRepresentation, BuildHostIdentity, CompilationEmissions, CompilationEvidenceBundle,
     CompilationRequest, CompilationResult, CompilationStatus, CompilationStudyRequest,
-    CompilationStudyResult, CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind,
-    CompilerHostIdentity, CompilerImplementationIdentity, CompilerNodeProfile,
-    CompilerPassIdentity, CrossHostInvariants, ObligationStatus, ObservationModelRef,
-    PassPipelineIdentity, Program, RelationClaim, SemanticId, TargetContractRef,
-    TargetLoweringPlan, TransformationEdge, TransformationStatus, COMPILER_ARTIFACT_SCHEMA_VERSION,
-    SSA_SCHEMA_VERSION,
+    CompilationStudyResult, CompilerArchitectureContract, CompilerArtifactRef, CompilerDiagnostic,
+    CompilerDiagnosticKind, CompilerHostIdentity, CompilerImplementationIdentity,
+    CompilerNodeProfile, CompilerPassExecutionObservation, CompilerPassIdentity, CompilerStage,
+    CompilerStageContract, CrossHostInvariants, ObligationStatus, ObservationModelRef,
+    PassPipelineIdentity, Program, RelationClaim, SemanticId, StageAvailability, StageIntegration,
+    TargetContractRef, TargetLoweringPlan, TransformationEdge, TransformationStatus,
+    COMPILATION_STUDY_OBSERVATION_INTERPRETATION, COMPILATION_STUDY_RESULT_CONTRACT_ID,
+    COMPILER_ARTIFACT_SCHEMA_VERSION, SSA_SCHEMA_VERSION,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -400,23 +402,39 @@ impl ReferenceCompiler {
         }
         unresolved_assumptions.sort();
         unresolved_assumptions.dedup();
-        let semantic_fingerprint = result
+        let stage_fingerprints = result
             .artifacts
             .iter()
-            .find(|artifact| artifact.representation == ArtifactRepresentation::Semantic)
-            .map(|artifact| artifact.fingerprint.clone());
-        let hir_fingerprint = result
-            .artifacts
-            .iter()
-            .find(|artifact| artifact.representation == ArtifactRepresentation::Hir)
-            .map(|artifact| artifact.fingerprint.clone());
-        let ssa_fingerprint = result
-            .artifacts
-            .iter()
-            .find(|artifact| artifact.representation == ArtifactRepresentation::Ssa)
-            .map(|artifact| artifact.fingerprint.clone());
+            .map(|artifact| (artifact.representation, artifact.fingerprint.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let semantic_fingerprint = stage_fingerprints
+            .get(&ArtifactRepresentation::Semantic)
+            .cloned();
+        let hir_fingerprint = stage_fingerprints
+            .get(&ArtifactRepresentation::Hir)
+            .cloned();
+        let ssa_fingerprint = stage_fingerprints
+            .get(&ArtifactRepresentation::Ssa)
+            .cloned();
+        let pass_executions = result
+            .evidence
+            .as_ref()
+            .map(|evidence| {
+                evidence
+                    .transformation_edges
+                    .iter()
+                    .map(CompilerPassExecutionObservation::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let unresolved_obligations = result
+            .evidence
+            .as_ref()
+            .map(|evidence| evidence.unresolved_obligations.clone())
+            .unwrap_or_default();
         let mut study_result = CompilationStudyResult {
             schema_version: COMPILER_ARTIFACT_SCHEMA_VERSION.to_owned(),
+            contract_id: COMPILATION_STUDY_RESULT_CONTRACT_ID.to_owned(),
             identity: SemanticId(String::new()),
             study_request_identity: study.identity.clone(),
             compilation_request_identity: request.identity.clone(),
@@ -430,12 +448,16 @@ impl ReferenceCompiler {
             compiler_host_identity: request.compiler_host.identity,
             build_host_identity: request.build_host.identity,
             target_identity: request.target.map(|target| target.identity),
+            compilation_status: result.status,
+            stage_fingerprints,
+            pass_executions,
             semantic_fingerprint,
             hir_fingerprint,
             ssa_fingerprint,
             compilation_result_identity: result.identity,
             execution_result_references: study.execution_result_references,
             diagnostics: result.diagnostics,
+            unresolved_obligations,
             unresolved_assumptions,
             invariants: CrossHostInvariants {
                 expected_equal: vec![
@@ -452,6 +474,7 @@ impl ReferenceCompiler {
                     "compilation_result_identity".to_owned(),
                 ],
             },
+            interpretation: COMPILATION_STUDY_OBSERVATION_INTERPRETATION.to_owned(),
         };
         study_result.seal();
         study_result
@@ -546,6 +569,147 @@ pub fn reference_pipeline() -> PassPipelineIdentity {
             ),
         ],
     )
+}
+
+pub fn reference_compiler_architecture() -> CompilerArchitectureContract {
+    use CompilerStage as Stage;
+    use StageAvailability as Availability;
+    use StageIntegration as Integration;
+
+    CompilerArchitectureContract::new(vec![
+        CompilerStageContract {
+            stage: Stage::SourceIntentRepresentation,
+            availability: Availability::BootstrapOnly,
+            integration: Integration::ExternalBootstrap,
+            input_contracts: vec!["semantic JSON transport artifact".to_owned()],
+            output_contracts: vec!["mncs-model Program".to_owned()],
+            deterministic_output_required: true,
+            owner: "mncs-language source representation contract".to_owned(),
+            decisions: vec!["semantic JSON is transport, not final source syntax".to_owned()],
+            blockers: vec!["artifact-kind and source-envelope contract".to_owned()],
+        },
+        CompilerStageContract {
+            stage: Stage::LexicalAnalysis,
+            availability: Availability::Planned,
+            integration: Integration::NotIntegrated,
+            input_contracts: vec!["source artifact".to_owned()],
+            output_contracts: vec!["token stream with source spans".to_owned()],
+            deterministic_output_required: true,
+            owner: "mncs-language lexical contract".to_owned(),
+            decisions: Vec::new(),
+            blockers: vec!["surface representation selection".to_owned()],
+        },
+        CompilerStageContract {
+            stage: Stage::Parsing,
+            availability: Availability::BootstrapOnly,
+            integration: Integration::ExternalBootstrap,
+            input_contracts: vec!["JSON bytes via serde_json".to_owned()],
+            output_contracts: vec!["mncs-model Program".to_owned()],
+            deterministic_output_required: true,
+            owner: "mncs-language parser contract".to_owned(),
+            decisions: vec!["current parse is a bootstrap transport decode".to_owned()],
+            blockers: vec!["CST and recovery diagnostic contracts".to_owned()],
+        },
+        CompilerStageContract {
+            stage: Stage::ConcreteSyntaxTree,
+            availability: Availability::Planned,
+            integration: Integration::NotIntegrated,
+            input_contracts: vec!["token stream".to_owned()],
+            output_contracts: vec!["lossless CST".to_owned()],
+            deterministic_output_required: true,
+            owner: "mncs-language source representation contract".to_owned(),
+            decisions: Vec::new(),
+            blockers: vec!["lossless trivia and source-span identity policy".to_owned()],
+        },
+        CompilerStageContract {
+            stage: Stage::AbstractSyntaxTree,
+            availability: Availability::Planned,
+            integration: Integration::NotIntegrated,
+            input_contracts: vec!["lossless CST".to_owned()],
+            output_contracts: vec!["representation-neutral AST".to_owned()],
+            deterministic_output_required: true,
+            owner: "mncs-language elaboration contract".to_owned(),
+            decisions: Vec::new(),
+            blockers: vec!["syntax identity versus semantic identity boundary".to_owned()],
+        },
+        CompilerStageContract {
+            stage: Stage::SemanticGraphConstruction,
+            availability: Availability::Experimental,
+            integration: Integration::LanguageLibrary,
+            input_contracts: vec!["validated mncs-model Program".to_owned()],
+            output_contracts: vec!["SemanticGraph 0.2".to_owned()],
+            deterministic_output_required: true,
+            owner: "mncs-model semantic graph".to_owned(),
+            decisions: vec!["graph is content-addressed and relationship-first".to_owned()],
+            blockers: vec!["driver integration after AST/elaboration contract".to_owned()],
+        },
+        CompilerStageContract {
+            stage: Stage::IdentityResolution,
+            availability: Availability::Experimental,
+            integration: Integration::LanguageLibrary,
+            input_contracts: vec!["semantic entities and relationships".to_owned()],
+            output_contracts: vec!["SemanticIdentities 0.2".to_owned()],
+            deterministic_output_required: true,
+            owner: "mncs-model identity system".to_owned(),
+            decisions: vec!["semantic identity is distinct from file identity".to_owned()],
+            blockers: vec!["scope and binding contract from RFC 0035".to_owned()],
+        },
+        CompilerStageContract {
+            stage: Stage::TypeAndContractAnalysis,
+            availability: Availability::Partial,
+            integration: Integration::CompilerDriver,
+            input_contracts: vec!["mncs-model Program".to_owned()],
+            output_contracts: vec!["ValidationReport".to_owned()],
+            deterministic_output_required: true,
+            owner: "mncs-model validation and obligation contracts".to_owned(),
+            decisions: vec!["invalid semantics cannot reach HIR".to_owned()],
+            blockers: vec!["general type, inference, and contract calculus".to_owned()],
+        },
+        CompilerStageContract {
+            stage: Stage::HighLevelIr,
+            availability: Availability::Experimental,
+            integration: Integration::CompilerDriver,
+            input_contracts: vec!["canonical semantic artifact".to_owned()],
+            output_contracts: vec!["HighLevelIr 0.3".to_owned()],
+            deterministic_output_required: true,
+            owner: "mncs-model HIR contract".to_owned(),
+            decisions: vec!["effects, obligations, and provenance remain explicit".to_owned()],
+            blockers: vec!["complete semantic coverage".to_owned()],
+        },
+        CompilerStageContract {
+            stage: Stage::VerificationPasses,
+            availability: Availability::Partial,
+            integration: Integration::CompilerDriver,
+            input_contracts: vec!["HIR and canonical SSA".to_owned()],
+            output_contracts: vec!["TransformationEdge and unresolved obligations".to_owned()],
+            deterministic_output_required: true,
+            owner: "mncs-language pass and evidence contracts".to_owned(),
+            decisions: vec!["UNKNOWN never authorizes stronger lowering".to_owned()],
+            blockers: vec!["translation validation and independent checkers".to_owned()],
+        },
+        CompilerStageContract {
+            stage: Stage::LoweringBackendGeneration,
+            availability: Availability::Partial,
+            integration: Integration::CompilerDriver,
+            input_contracts: vec!["selected SSA and target contract".to_owned()],
+            output_contracts: vec!["TargetLoweringPlan".to_owned()],
+            deterministic_output_required: true,
+            owner: "mncs-language backend adapter contract".to_owned(),
+            decisions: vec!["unevidenced target facts remain UNKNOWN".to_owned()],
+            blockers: vec!["portable backend adapter and target legality validator".to_owned()],
+        },
+        CompilerStageContract {
+            stage: Stage::ExecutableArtifact,
+            availability: Availability::Planned,
+            integration: Integration::NotIntegrated,
+            input_contracts: vec!["validated backend artifact and linker derivation".to_owned()],
+            output_contracts: vec!["ExecutableArtifact and compilation evidence".to_owned()],
+            deterministic_output_required: false,
+            owner: "mncs-language executable and RFC 0031 derivation contracts".to_owned(),
+            decisions: Vec::new(),
+            blockers: vec!["phase C3 portable backend".to_owned()],
+        },
+    ])
 }
 
 pub fn native_host_identities() -> (CompilerHostIdentity, BuildHostIdentity) {
@@ -851,5 +1015,60 @@ mod tests {
             .diagnostics
             .iter()
             .any(|item| item.kind == CompilerDiagnosticKind::UnavailableBackendCapability));
+    }
+
+    #[test]
+    fn architecture_contract_covers_every_logical_stage_without_hiding_gaps() {
+        let architecture = reference_compiler_architecture();
+        assert!(architecture.validate().is_empty());
+        assert_eq!(architecture.stages.len(), CompilerStage::ORDERED.len());
+        let lexical = architecture
+            .stages
+            .iter()
+            .find(|stage| stage.stage == CompilerStage::LexicalAnalysis)
+            .unwrap();
+        assert_eq!(lexical.availability, StageAvailability::Planned);
+        assert_eq!(lexical.integration, StageIntegration::NotIntegrated);
+        let hir = architecture
+            .stages
+            .iter()
+            .find(|stage| stage.stage == CompilerStage::HighLevelIr)
+            .unwrap();
+        assert_eq!(hir.integration, StageIntegration::CompilerDriver);
+        let executable = architecture
+            .stages
+            .iter()
+            .find(|stage| stage.stage == CompilerStage::ExecutableArtifact)
+            .unwrap();
+        assert_eq!(executable.availability, StageAvailability::Planned);
+    }
+
+    #[test]
+    fn study_result_is_a_language_owned_observation_with_pass_records() {
+        let compiler = ReferenceCompiler::default();
+        let program = program("compiler-study-contract");
+        let request = compiler.request_for_program(&program, emissions(), None);
+        let study =
+            CompilationStudyRequest::new(native_node_profile("test-node"), request, Vec::new());
+        let result = compiler.run_study(study, &program);
+        assert!(result.identity_is_valid());
+        assert_eq!(result.contract_id, COMPILATION_STUDY_RESULT_CONTRACT_ID);
+        assert_eq!(
+            result.interpretation,
+            COMPILATION_STUDY_OBSERVATION_INTERPRETATION
+        );
+        assert!(result
+            .stage_fingerprints
+            .contains_key(&ArtifactRepresentation::Semantic));
+        assert!(result
+            .pass_executions
+            .iter()
+            .any(|pass| pass.pass_id == "lower-semantic-to-hir"));
+        assert!(!result.unresolved_obligations.is_empty());
+
+        let mut laundered = result;
+        laundered.interpretation = "conformant".to_owned();
+        laundered.seal();
+        assert!(!laundered.identity_is_valid());
     }
 }
