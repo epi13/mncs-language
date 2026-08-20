@@ -112,7 +112,7 @@ Current design work:
 - keep dynamic values existentially typed and witness-bearing rather than introducing an unchecked `Any`;
 - distinguish logical, view, representation, storage, and serialization observations;
 - make representation-sensitive observations such as layout, size, alignment, field order, tag encoding,
-  and addressability explicit so they narrow the realization freedom visibly;
+  and addressability explicit so they narrow realization freedom visibly;
 - represent hard representation requirements separately from preferences and target-dependent facts;
 - model candidate representation realizations with validity, constructor-distinction, decode,
   observation-preservation, target-applicability, and evidence obligations;
@@ -447,6 +447,71 @@ functional behavior agrees while one candidate fails the required crash relation
 should compare undo-journal, redo-WAL, and copy-on-write realizations and reject any faster candidate that
 violates a protected persistence relation.
 
+## Active cross-cutting track — serialization, canonical encoding, schemas, wire contracts, and data evolution
+
+[RFC 0027](rfcs/0027-machine-native-serialization-canonical-encoding-schema-wire-contract-data-evolution-semantics.md)
+establishes serialization as an explicit relation among logical values/types, schemas, wire contracts,
+encoding/canonicalization profiles, framed representations, and migrations rather than reducing data
+interchange to an ambient `encode(value) -> bytes` convention.
+
+Current design work:
+
+- separate logical value/type, semantic schema, wire schema/contract, encoding profile, canonical profile,
+  framing, and encoded artifact identities;
+- model encode/decode as potentially partial relations and distinguish value round-trip, raw byte
+  round-trip, canonical round-trip, and cross-version round-trip claims;
+- distinguish malformed, well-formed, format-valid, schema-valid, and contract-valid inputs so parser
+  success cannot silently establish semantic validity;
+- require canonical encoding claims to name an explicit profile/version and keep canonical byte identity
+  separate from semantic identity;
+- distinguish raw-encoding, canonical-encoding, schema, and semantic-projection digests so a bare content
+  hash cannot fabricate an identity class;
+- keep exact-byte signing scope separate from signing a canonical semantic encoding under RFC 0025;
+- make duplicate-key/field behavior explicit and reject implementation-dependent interpretation in strict
+  profiles;
+- separate field/variant semantic identity, wire identity, display name, aliases, deprecation, and reserved
+  historical tombstones; retired identifiers may not silently acquire new meaning;
+- distinguish `Absent`, `Present(Default)`, and `Present(Null)` unless a declared wire contract intentionally
+  collapses them;
+- represent unknown data explicitly and distinguish `RejectUnknown`, `IgnoreUnknown`, `PreserveUnknown`,
+  and preserve-but-do-not-authorize behavior;
+- distinguish reading newer data from preserving/re-emitting newer data, including bridges that parse
+  successfully while losing unknown information;
+- support explicit open/closed record and variant semantics rather than assuming all schemas are extensible;
+- model compatibility directionally and distinguish wire readability, semantic compatibility,
+  unknown-preservation, rewrite preservation, and action-relative store/forward/display/execute authority;
+- model writer-schema/reader-schema resolution explicitly where formats depend on schema resolution;
+- represent schema evolution as a graph of typed migrations rather than a scalar `version++`, including
+  rename/replace/split/merge/add/remove/deprecate/reserve/widen/narrow/refine deltas;
+- distinguish total, partial, lossless, lossy, reversible, and refining migrations and make migration losses
+  machine-readable;
+- require migration-path coherence evidence where multiple supported paths should reach equivalent target
+  semantics, and require direct migration optimizations to preserve the declared historical relation;
+- treat mixed-version data populations and rolling coexistence as normal rather than assuming lockstep upgrades;
+- preserve RFC 0021 numeric conversion obligations, RFC 0023 temporal meaning, and RFC 0024 information-flow
+  labels/observer channels across serialization;
+- keep serialization, compression, encryption/authentication, framing, and transport as separate transforms;
+- expose bounded decoder depth/size/element authority and keep decode-budget exhaustion distinct from
+  malformed input under RFC 0022;
+- support whole-buffer, streaming, zero-copy, event, and projection decoders as competing realizations with
+  explicit validation coverage;
+- preserve schema/wire/canonical/migration identities through HIR/SSA/backend lowering and foreign codec
+  boundaries; and
+- allow Forge to search text, tagged binary, deterministic CBOR-like, protobuf-like, Avro-like, fixed-layout,
+  zero-copy, and custom generated realizations while mandatory round-trip/canonical/compatibility/migration
+  relations remain protected.
+
+The first implementation pilot should remain bounded: versioned schema/version/field/reserved-field,
+wire-contract/encoding/canonical-profile, presence/unknown/duplicate-policy, migration/compatibility/
+round-trip/counterexample/delta artifacts; value and canonical round-trip fixtures; legal-but-noncanonical
+bytes; safe rename versus illegal field-ID reuse; explicit absence/default distinction; unknown-field
+forwarding and a lossy bridge; backward-only compatibility; wire-compatible but semantically narrowed
+schemas; a migration diamond with coherent and incoherent paths; canonical-digest scope; one RFC 0021
+numeric conversion case; bounded decode exhaustion; projection decode coverage; and RFC 0018 policies that
+separate storing/forwarding an unknown future artifact from executing it. The first Forge study should
+compare several wire realizations and reject any faster/smaller candidate that violates a protected
+canonicality, unknown-preservation, presence, numeric, compatibility, or migration relation.
+
 ## 0.1 — Executable semantic model
 
 **Goal:** demonstrate that MNCS relationships can be represented and mechanically checked before a source grammar exists.
@@ -682,10 +747,22 @@ A 1.0 designation would indicate a coherent research language and toolchain, not
 - at least one RFC 0020 relation study where crash-free functional behavior agrees while a required crash relation fails;
 - at least one Forge persistence-realization study comparing multiple journal/copy-on-write strategies and rejecting a faster candidate that violates a protected durability, isolation, persist-order, or recovery relation;
 - at least one bounded crash-testing result that remains explicitly bounded instead of being upgraded to universal crash-safety evidence;
+- a versioned serialization/schema model that distinguishes logical values/types, schemas, schema versions/lineage, wire contracts, encoding profiles, canonical profiles, framing, and encoded artifacts;
+- a versioned data-evolution model with stable field/variant identities, reserved historical identities, explicit presence, open/closed structure, aliases/deprecation, typed migrations, migration losses, and compatibility envelopes;
+- a versioned serialization relation family distinguishing value/raw-byte/canonical/cross-version round trips, directional wire readability, semantic compatibility, unknown-field preservation, rewrite-without-loss, migration refinement, and migration-path coherence;
+- at least one encoding study where two legal byte encodings decode to one semantic value while only one is canonical, plus one canonical re-encode/digest study proving raw byte identity and canonical semantic encoding identity remain distinct;
+- at least one schema-identity study where a rename preserves a field identity while reuse of a retired field/wire identity is mechanically rejected;
+- at least one presence study proving `Absent != Present(Default)` when that distinction is logically observable;
+- at least one unknown-field study where an older reader preserves a future field without understanding it, plus one readable format bridge that fails forward round-trip preservation by losing the unknown field;
+- at least one directional compatibility study where old-writer/new-reader succeeds while the reverse relation fails, and one schema pair that remains wire-readable while semantic compatibility is refuted by a concrete counterexample;
+- at least one migration graph/diamond study establishing or refuting path coherence explicitly and preserving losses/projections as machine-readable artifacts;
+- at least one numeric serialization study carrying RFC 0021 conversion obligations through the wire boundary;
+- at least one bounded decoder study where resource/budget exhaustion remains distinct from malformed input and one projection-decode study that cannot authorize whole-message validation;
+- at least one Forge serialization-realization study comparing multiple wire formats/profiles and rejecting a faster/smaller candidate that violates a protected canonicality, presence, unknown-preservation, numeric, compatibility, or migration relation;
 - conservative and traceable backend-promise emission;
 - bounded unsafe and foreign-function interfaces;
 - a versioned recursive diagnostic and refinement protocol;
 - isolated candidate transformations and explicit promotion policy;
-- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, clock, temporal-validity, scheduling, information-flow, observer, reclassification, side-channel, principal, identity, credential, delegation, trust-domain, federation, revocation, cryptographic-algorithm, freshness, attestation, persistent-state, transaction, failure-model, persistence-domain, persist-order, durability, journal, snapshot, checkpoint, recovery, persistent-reference, retention, and assumption limits;
+- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, clock, temporal-validity, scheduling, information-flow, observer, reclassification, side-channel, principal, identity, credential, delegation, trust-domain, federation, revocation, cryptographic-algorithm, freshness, attestation, persistent-state, transaction, failure-model, persistence-domain, persist-order, durability, journal, snapshot, checkpoint, recovery, persistent-reference, retention, schema, schema-lineage, field-identity, presence, unknown-field, duplicate-field, wire-contract, encoding-profile, canonicalization, framing, migration, Unicode, decode-budget, compatibility, and assumption limits;
 - documented soundness and bootstrap limits;
 - conformance tests and independent implementation guidance.
