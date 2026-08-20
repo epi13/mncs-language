@@ -633,6 +633,59 @@ and placement-generated serialization obligations. The first Forge studies shoul
 placement candidates and reject any faster candidate that violates protected numeric, trust, memory,
 fault-domain, security, serialization, distribution, or migration relations.
 
+## Active cross-cutting track — deployment, lifecycle, live upgrade, version coexistence, rollback, and retirement
+
+[RFC 0030](rfcs/0030-machine-native-deployment-lifecycle-live-upgrade-version-coexistence-state-migration-rollback-retirement-semantics.md)
+establishes software lifecycle change as an explicit transition through mixed-version system configurations
+rather than treating deployment as replacement of one version string with another. Endpoint correctness is
+insufficient: allowed intermediate states, coexistence, state migration, version consistency, activation,
+cutover, rollback, finalization, and retirement must be represented and checked.
+
+Current design work:
+
+- distinguish release/artifact version, deployment generation, execution-instance identity, component version,
+  protocol/schema/configuration version, feature state, and lifecycle configuration;
+- distinguish installed, loaded, eligible, active, serving, authoritative, draining, finalized, and retired
+  states rather than collapsing lifecycle into a single `deployed` bit;
+- model `LifecycleTransition` and lifecycle traces with explicit allowed/forbidden intermediate configurations;
+- keep all-old/all-new endpoint validity separate from mixed-version transition validity;
+- represent directional runtime compatibility matrices/envelopes and derive partial-order upgrade dependencies;
+- permit explicit bridge versions/compatibility shims when direct rolling coexistence is unsatisfiable;
+- model update points, quiescence conditions, active-code transition, and request/transaction/session/
+  continuation version consistency without requiring global quiescence;
+- bind lifecycle phases to RFC 0027 typed state migrations and RFC 0026 crash-safe durable migration;
+- represent eager, lazy, background, virtual, dual-read, and dual-write migration as realization families while
+  preserving state authority/read/write semantics explicitly;
+- treat rolling, blue/green, canary, shadow, hot-update, bridge-release, and all-at-once approaches as candidate
+  lifecycle realizations rather than language primitives;
+- model canary/shadow exposure scopes and preserve bounded observations as scoped RFC 0018 evidence;
+- require shadow execution to carry explicit effect authority so non-authoritative output cannot duplicate
+  destructive effects;
+- distinguish code/feature activation, traffic authority, state authority, cutover, finalization, and retirement;
+- make finalization an explicit boundary that can retire compatibility or enable irreversible migration/features;
+- model irreversibility explicitly and surface every rollback path narrowed or destroyed by finalization;
+- model rollback as a separately checked forward transition, keeping code rollback, state rollback, snapshot
+  restore, compensation, and roll-forward repair distinct;
+- keep retirement granular across executable, protocol, schema-reader/writer, state representation, bridge,
+  feature, credential, and migration artifacts and require absence-of-dependency evidence;
+- treat lifecycle orchestration itself as failure-prone persistent/distributed computation with explicit
+  `UNKNOWN` remote-step outcomes, reconciliation, and retry-safety requirements;
+- consume RFC 0028 quorum/membership semantics and RFC 0029 fault-domain placement so rollout batches cannot
+  silently destroy distributed safety or independence;
+- separate untrusted lifecycle-plan synthesis from narrow deterministic checking of compatibility, version
+  consistency, migration, authority, rollback, finalization, retirement, quorum, and topology obligations; and
+- leave rollout latency, resource cost, blast-radius metrics, energy, and Pareto ranking to RFCs 0032–0033.
+
+The first implementation pilot should remain bounded: versioned release/version/deployment-generation,
+lifecycle-configuration/transition/phase, population/compatibility/dependency, update-point/version-consistency,
+state-migration-phase, feature/exposure, finalization/rollback/retirement, witness/counterexample/delta artifacts;
+valid-endpoints-invalid-transition, transactional-version-consistency, generated-upgrade-order, bridge-cycle,
+scoped-canary, shadow-effect-isolation, full-traffic-not-finalized, rollback-loss-after-finalization, code-rollback-
+state-incompatibility, old-session-blocks-retirement, crash-during-migration, unknown-remote-step, and topology/
+quorum rollout fixtures. The first Forge studies should compare all-at-once, rolling, bridge, canary, blue/green,
+and hot-update candidates and reject any easier/faster lifecycle realization whose intermediate states violate a
+protected compatibility, state, authority, version-consistency, quorum, placement, rollback, or retirement relation.
+
 ## 0.1 — Executable semantic model
 
 **Goal:** demonstrate that MNCS relationships can be represented and mechanically checked before a source grammar exists.
@@ -922,10 +975,29 @@ A 1.0 designation would indicate a coherent research language and toolchain, not
 - at least one placement witness produced by an untrusted search mechanism and independently checked by a narrower placement verifier;
 - at least one Forge heterogeneous-placement study comparing multiple valid/invalid candidates and rejecting a faster candidate that violates a protected numeric, trust, memory-access, fault-domain, security, serialization, distribution, or migration relation;
 - at least one bounded placement/migration exploration result that remains explicitly bounded rather than being upgraded to universal placement independence or migration transparency;
+- a versioned lifecycle model distinguishing release/artifact-version, deployment-generation, execution-instance, version-population, protocol/schema/configuration/feature, and lifecycle-configuration identities;
+- explicit lifecycle-state distinctions including installed, loaded, active, serving, authoritative, finalized, and retired states;
+- a versioned lifecycle-transition model with allowed/forbidden intermediate configurations and trace-scoped upgrade claims;
+- directional runtime/version-coexistence compatibility matrices and envelopes plus an independently checkable upgrade-dependency graph;
+- at least one study where all-old and all-new endpoints are valid but a mixed-version rolling transition is mechanically refuted;
+- at least one request, transaction, session, or equivalent version-consistency study where a protected semantic unit remains on one valid version while the surrounding system upgrades;
+- at least one active-update study where a naive in-place transition violates version consistency while pinning, quiescence, or verified continuation migration preserves the declared relation;
+- at least one upgrade-order study where directional compatibility generates a valid partial order and one cyclic dependency is reported unrealizable until a bridge release/compatibility shim is introduced;
+- lifecycle binding to RFC 0027 typed state migrations and RFC 0026 crash-safe migration with explicit old/dual/new authority phases;
+- at least one state-lifecycle study proving code deployment, state migration, full traffic cutover, finalization, and retirement remain distinct;
+- explicit canary/shadow exposure semantics with RFC 0018-scoped evidence and effect authority, including one canary result that cannot be promoted to universal safety and one shadow candidate rejected for ambient authoritative effects;
+- explicit cutover/finalization/irreversibility semantics, including one 100%-traffic state that remains unfinalized and one finalization step that explicitly narrows or destroys a rollback path;
+- a versioned rollback model treating rollback as a separately checked transition, including one case where reinstalling old code is rejected because current authoritative state is incompatible;
+- granular retirement semantics with dependency guards, including one case where an old session/continuation blocks executable retirement after all new traffic has moved to the successor version;
+- persistent/failure-aware lifecycle orchestration with one controller-crash or lost-response case yielding `UNKNOWN` and requiring reconciliation rather than fabricated completion;
+- at least one RFC 0028/RFC 0029 rollout study where a candidate batch is rejected because its temporary population violates quorum, availability, or physical fault-domain requirements;
+- at least one lifecycle witness produced by an untrusted planner and independently checked by a narrower compatibility/version-consistency/migration/rollback/retirement verifier set;
+- at least one Forge lifecycle-realization study comparing all-at-once, rolling, bridge, canary, blue/green, hot-update, or similar candidates and rejecting an easier/faster plan because an intermediate-state, state, authority, version-consistency, quorum, placement, rollback, or retirement relation fails;
+- at least one bounded canary/mixed-version/rollback exploration result that remains explicitly bounded evidence rather than being upgraded to universal lifecycle correctness;
 - conservative and traceable backend-promise emission;
 - bounded unsafe and foreign-function interfaces;
 - a versioned recursive diagnostic and refinement protocol;
 - isolated candidate transformations and explicit promotion policy;
-- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, clock, temporal-validity, scheduling, information-flow, observer, reclassification, side-channel, principal, identity, credential, delegation, trust-domain, federation, revocation, cryptographic-algorithm, freshness, attestation, persistent-state, transaction, failure-model, persistence-domain, persist-order, durability, journal, snapshot, checkpoint, recovery, persistent-reference, retention, schema, schema-lineage, field-identity, presence, unknown-field, duplicate-field, wire-contract, encoding-profile, canonicalization, framing, migration, Unicode, decode-budget, compatibility, participant, message, logical-operation, invocation-attempt, network-model, partition, failure-detector, suspicion, configuration, epoch, replica, quorum, consistency, convergence, conflict-resolution, consensus, broadcast, Byzantine, lease, fencing, distributed-snapshot, distributed-transaction, coordination, place, topology, topology-snapshot, resource-capability, location-variable, computation-placement, data-placement, affinity, anti-affinity, fault-domain, mobility-boundary, migration-closure, cutover, capability-rebinding, heterogeneous-realization, placement-witness, and assumption limits;
+- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, clock, temporal-validity, scheduling, information-flow, observer, reclassification, side-channel, principal, identity, credential, delegation, trust-domain, federation, revocation, cryptographic-algorithm, freshness, attestation, persistent-state, transaction, failure-model, persistence-domain, persist-order, durability, journal, snapshot, checkpoint, recovery, persistent-reference, retention, schema, schema-lineage, field-identity, presence, unknown-field, duplicate-field, wire-contract, encoding-profile, canonicalization, framing, migration, Unicode, decode-budget, compatibility, participant, message, logical-operation, invocation-attempt, network-model, partition, failure-detector, suspicion, configuration, epoch, replica, quorum, consistency, convergence, conflict-resolution, consensus, broadcast, Byzantine, lease, fencing, distributed-snapshot, distributed-transaction, coordination, place, topology, topology-snapshot, resource-capability, location-variable, computation-placement, data-placement, affinity, anti-affinity, fault-domain, mobility-boundary, migration-closure, cutover, capability-rebinding, heterogeneous-realization, placement-witness, release, deployment-generation, lifecycle-configuration, lifecycle-transition, version-population, version-coexistence, update-point, version-consistency, exposure-scope, feature-activation, finalization, irreversibility, rollback, retirement, lifecycle-witness, and assumption limits;
 - documented soundness and bootstrap limits;
 - conformance tests and independent implementation guidance.
