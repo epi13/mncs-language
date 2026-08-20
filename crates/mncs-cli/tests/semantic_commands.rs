@@ -56,7 +56,8 @@ fn compiler_architecture_exposes_the_complete_stage_ladder_and_current_gaps() {
         .iter()
         .find(|stage| stage["stage"] == "lexical_analysis")
         .unwrap();
-    assert_eq!(lexical["availability"], "planned");
+    assert_eq!(lexical["availability"], "experimental");
+    assert_eq!(lexical["integration"], "compiler_driver");
     let hir = architecture["stages"]
         .as_array()
         .unwrap()
@@ -64,6 +65,41 @@ fn compiler_architecture_exposes_the_complete_stage_ladder_and_current_gaps() {
         .find(|stage| stage["stage"] == "high_level_ir")
         .unwrap();
     assert_eq!(hir["integration"], "compiler_driver");
+}
+
+#[test]
+fn source_study_emits_the_front_end_and_hir_stage_chain() {
+    let source = example("source/identity.mncs");
+    let output = binary()
+        .args(["source-study", &source, "--node-id", "cli-source-test"])
+        .output()
+        .expect("run source study");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let study: Value = serde_json::from_slice(&output.stdout).expect("source study JSON");
+    let stages = study["stage_fingerprints"].as_object().unwrap();
+    for stage in [
+        "source",
+        "lexical_tokens",
+        "concrete_syntax_tree",
+        "abstract_syntax_tree",
+        "semantic",
+        "semantic_graph",
+        "identity_map",
+        "validation",
+        "hir",
+        "ssa",
+    ] {
+        assert!(stages.contains_key(stage), "missing {stage}");
+    }
+    assert_eq!(study["pass_executions"][0]["pass_id"], "lex-source");
+    assert_eq!(
+        study["interpretation"],
+        "observation_only_not_assurance_or_conformance"
+    );
 }
 
 #[test]

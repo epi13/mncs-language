@@ -4,7 +4,7 @@
 
 Research and reference implementation for a general-purpose, verification-native programming language built on Machine-Native Complexity Standard (MNCS) principles.
 
-> **Project status:** the 0.1 executable semantic model now has an experimental 0.2 foundation for canonical form, stable semantic identities, graph dependencies, evidence invalidation, recursive artifacts, and authority-aware deltas. The supported 0.3 subset now has CFG-correct executable bodies, typed integer comparison, deterministic HIR, and a small validated 0.4 SSA artifact with body→HIR→SSA provenance and evidence-aware transformation refusal. The first `mncs-compiler` driver connects that existing spine through versioned request/result/evidence contracts, explicit host/build/target/run identities, and deterministic CLI emissions. Versioned, bounded body and independent SSA reference evaluators support cross-layer conformance and finite refactoring studies. Forge development evidence is configured locally; no final grammar, compiler stability, executable backend, native Raspberry Pi result, independent evaluation, universal equivalence, or production suitability is claimed.
+> **Project status:** the compiler now has an experimental source-to-SSA vertical slice for Source Profile 0.1: a content-addressed non-file source envelope, lossless lexer and CST, spanned AST, semantic elaboration, graph and identity construction, validation, HIR, and SSA. The semantic and compiler evidence foundations remain experimental, and only one deliberately narrow pure-function grammar is accepted. Forge can persist and compare the language-owned observations without issuing assurance or conformance verdicts. No final grammar, complete type/contract calculus, executable backend, native Raspberry Pi result, independent evaluation, universal equivalence, or production suitability is claimed.
 
 ## Why this project exists
 
@@ -33,11 +33,11 @@ An MNCS-oriented program should make it possible to answer:
 - `rfcs/` — design proposals that can evolve independently of the specification.
 - `crates/mncs-model/` — the executable semantic model, canonical representation, identities, graph/CFG, evidence manifest, invalidation logic, recursive artifacts, high-level IR, validated SSA artifact, and narrow machine-intent/verifier pilots.
 - `crates/mncs-compiler/` — the evidence-bearing reference compiler driver over the existing semantic, HIR, SSA, obligation, identity, and provenance APIs.
-- `crates/mncs-syntax/` — deterministic, tokenizer-neutral source representation metrics.
+- `crates/mncs-syntax/` — source envelopes, lossless tokens/CST, a bounded spanned AST/parser, and deterministic source-representation metrics.
 - `crates/mncs-cli/` — validation, canonicalization, identity, graph/CFG, evidence, IR, SSA, obligation, verification, comparison, diagnostic, diff, and syntax-tournament commands.
 - `examples/` — semantic manifests, competing source candidates, canonical semantic forms, machine-intent sketches, and semantic patches.
 
-The JSON manifests and source candidates are experimental transport and research representations. They are not yet a selected production grammar.
+Canonical semantic JSON remains an experimental bootstrap transport. Source Profile 0.1 is an executable but intentionally narrow grammar experiment, not a selected production grammar.
 
 The complete logical compiler stage contract, including explicitly missing frontend and executable-backend stages, is available as deterministic machine JSON:
 
@@ -45,7 +45,13 @@ The complete logical compiler stage contract, including explicitly missing front
 cargo run -p mncs-cli -- compiler-architecture
 ```
 
-See [the 2026-08 compiler architecture assessment](docs/compiler-architecture-assessment-2026-08.md) and [RFC 0039](rfcs/0039-machine-native-compiler-stage-and-experiment-contracts.md).
+See [the 2026-08 compiler architecture assessment](docs/compiler-architecture-assessment-2026-08.md), [RFC 0039](rfcs/0039-machine-native-compiler-stage-and-experiment-contracts.md), and [RFC 0040](rfcs/0040-machine-native-source-profile-0.1.md).
+
+Run the source vertical slice and emit its language-owned study record:
+
+```bash
+cargo run -p mncs-cli -- source-study examples/source/identity.mncs --node-id local-source
+```
 
 ## Current semantic objects
 
