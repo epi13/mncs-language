@@ -408,7 +408,7 @@ fn bounded_execution_exhausts_its_model_budget_without_hanging() {
     let baseline = example("execution/bounded-sum-baseline.mncs.json");
     let request = example("execution/bounded-sum-one-request.json");
     let mut request_json: Value =
-        serde_json::from_slice(&std::fs::read(&request).expect("read execution request"))
+        serde_json::from_slice(&std::fs::read(request).expect("read execution request"))
             .expect("request JSON");
     request_json["step_budget"] = 1.into();
     let path =
