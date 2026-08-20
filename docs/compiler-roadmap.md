@@ -34,7 +34,9 @@ The repository now implements the first bounded compiler tranche for the existin
 
 The target-independent compiler artifacts intentionally exclude timestamps, absolute paths, usernames, hostnames, process IDs, and host observations. Compiler request/result and study identities include their derivation context; semantic, HIR, and SSA fingerprints do not.
 
-The stage audit in RFC 0039 now makes the complete logical pipeline machine-readable through `mncs compiler-architecture`. It explicitly reports lexical analysis, CST, AST, and executable generation as planned rather than treating the semantic JSON bootstrap path as their implementation. Compiler study results now expose a language-owned observation contract with per-stage fingerprints, pass execution records, and unresolved obligations for Forge comparison.
+The stage audit in RFC 0039 makes the complete logical pipeline machine-readable through `mncs compiler-architecture`. It reports the Profile 0.1 frontend as experimental and executable generation as planned rather than treating the semantic JSON bootstrap path as frontend implementation. Compiler study results expose a language-owned observation contract with per-stage fingerprints, pass execution records, and unresolved obligations for Forge comparison.
+
+Source Profile 0.1 now implements the first bounded frontend path. `mncs source-study` consumes a content-addressed source envelope, emits lossless tokens/CST and a spanned AST, elaborates one pure-function grammar into the existing semantic model, then reuses the exact semantic→HIR→SSA compiler path. Invalid syntax, unresolved returns, type mismatch, or a laundered envelope identity stop before downstream stages.
 
 ## Ownership boundary
 
@@ -499,15 +501,18 @@ The compiler study is successful when each is either accepted for an explicit re
 
 ## Near-term repository tasks
 
-The first four repository-side tasks below are implemented for the bounded subset. Native Fabric execution and backend work remain ordered follow-ons:
+The repository-side compiler spine and first frontend vertical slice are implemented for the bounded subset. Native Fabric execution and backend work remain ordered follow-ons:
 
 1. **Implemented:** add compiler contract structs and adversarial identity tests to `mncs-model`.
 2. **Implemented:** add the `mncs-compiler` orchestration crate.
 3. **Implemented:** add CLI `compile` artifact-bundle output.
 4. **Implemented:** exercise Linux/Windows hosts and retain the AArch64 shape gate.
 5. **Implemented:** add Fabric-facing node/study request/result schemas and a frozen fixture.
-6. **Pending external execution:** run and compare the first Linux/Windows/Raspberry Pi semantic/HIR/SSA identity study. GitHub-hosted Windows is CI evidence; a native Raspberry Pi run must come from Fabric.
-7. **Pending:** add a replaceable portable backend adapter for a deliberately bounded subset.
-8. **Pending:** introduce the first native backend experiment only after the portable/backend-validation seam is exercised.
+6. **Implemented:** add Source Profile 0.1 envelope, lexer, CST, AST, bounded elaborator, source-to-SSA fixture, and structured recovery diagnostics.
+7. **Implemented in Forge:** persist and compare language-owned compiler experiment records without deriving assurance or conformance.
+8. **Pending:** implement general scope/binding and explicit source contract clauses while keeping syntax breadth bounded.
+9. **Pending external execution:** run and compare the first Linux/Windows/Raspberry Pi source/semantic/HIR/SSA identity study. GitHub-hosted Windows is CI evidence; a native Raspberry Pi run must come from Fabric.
+10. **Pending:** add a replaceable portable backend adapter for a deliberately bounded subset.
+11. **Pending:** introduce the first native backend experiment only after the portable/backend-validation seam is exercised.
 
 This ordering lets the project learn from cross-platform differences before native backend complexity can hide whether a mismatch belongs to semantics, compiler orchestration, target lowering, toolchain, or runtime execution.
