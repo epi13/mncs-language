@@ -175,6 +175,70 @@ two observation profiles; examples where the same subjects satisfy one relation 
 directional refinement case; one RFC 0019 representation-equivalence case; one scoped counterexample;
 and RFC 0018 assurance profiles that refuse to upgrade finite agreement into universal equivalence.
 
+## Active cross-cutting track — numeric semantics, precision, error, and reproducibility
+
+[RFC 0021](rfcs/0021-machine-native-numeric-arithmetic-precision-error-reproducibility-semantics.md)
+separates mathematical quantity, arithmetic operation, numerical contract, representation,
+algorithmic realization, and evidence so numerical meaning is not reduced to primitive machine formats.
+
+Current design work:
+
+- distinguish exact arithmetic, correctly rounded finite arithmetic, bounded approximation, rigorous
+  enclosure, empirical accuracy, and statistical accuracy as different numerical claims;
+- represent mathematical domains separately from binary/decimal/fixed/posit-like and accelerator formats;
+- make rounding, overflow, underflow, exceptional values, conversion, and fused-operation semantics explicit;
+- require algebraic rewrite authority such as reassociation to come from laws valid for the actual domain
+  and observation relation rather than operator spelling;
+- model absolute, relative, ULP, forward, backward, interval, ball, and probabilistic error claims without
+  flattening them into one confidence score;
+- separate bitwise, order, schedule, backend, target, numerical, and statistical reproducibility;
+- decompose fast-math behavior into individual semantic permissions;
+- support mixed precision, exact/compensated accumulation, rigorous interval/ball realization, and
+  alternative number systems as candidate strategies rather than language-wide commitments;
+- expose precision, representation, accumulator, and algorithm choice as bounded Forge search dimensions;
+- connect numeric preservation/refinement to RFC 0020 relation claims and promotion authority to RFC 0018; and
+- preserve exact-real computability/termination questions for RFC 0022 rather than making false totality promises.
+
+The first implementation pilot should remain bounded: a small exact/finite numeric-domain set, explicit
+rounding/overflow contracts, several error models and reproducibility profiles, a reference evaluator,
+reassociation and FMA counterexamples, order-sensitive reduction, one compensated/wider or exact
+accumulation experiment, bounded precision search, RFC 0020 numeric relation claims, and RFC 0018
+policies that distinguish experimental numerical evidence from stronger promotion authority.
+
+## Active cross-cutting track — termination, productivity, progress, liveness, and bounded computation
+
+[RFC 0022](rfcs/0022-machine-native-termination-productivity-progress-liveness-bounded-computation-semantics.md)
+establishes completion/progress semantics that distinguish totality, divergence, productivity,
+local progress, concurrent progress, temporal liveness, fairness, quiescence, stabilization, and
+bounded execution rather than treating all of them as one `terminates` bit.
+
+Current design work:
+
+- preserve `TERMINATES`, `DIVERGES`, and `UNRESOLVED` as distinct scoped conclusions;
+- make `BUDGET_EXHAUSTED` a bounded noncompletion observation that can never by itself prove divergence;
+- distinguish total and explicitly partial computation rather than hiding nontermination inside ordinary values;
+- support structural descent, well-founded measures, ranking functions, lexicographic/multicomponent
+  rankings, size-change certificates, and sized indices as complementary termination-witness families;
+- keep proof-kernel strong normalization separate from ordinary program termination;
+- distinguish may-, must-, and almost-sure termination under nondeterministic/probabilistic execution;
+- model guarded/coinductive productivity for intentionally nonterminating streams and services;
+- distinguish local non-stuck progress from eventual temporal progress;
+- represent deadlock-free, starvation-free, obstruction-free, lock-free, and wait-free concurrent
+  progress as separate claims over RFC 0010 execution models;
+- represent eventuality/leads-to properties with explicit weak/strong fairness and runtime assumptions;
+- reserve quiescence and stabilization for persistent/open systems that need not terminate;
+- distinguish proof step indices from runtime fuel and abstract computation budgets from RFC 0023 clocks/deadlines;
+- make termination/progress/liveness claims proof-relevant, dependency-aware, counterexample-scoped, and
+  compatible with RFC 0018 assurance and RFC 0020 relations; and
+- expose finite execution authority as a safety mechanism for untrusted Forge candidates without laundering
+  successful testing into universal termination evidence.
+
+The first implementation pilot should include versioned termination/ranking/budget/productivity/fairness
+artifacts; structural and ranking-function termination examples; an intentional divergent computation
+that produces only `BUDGET_EXHAUSTED` under fuel; a finite computation that exhausts a small budget but
+returns under a larger one; a productive nonterminating producer; a may-versus-must termination fixture;
+a fairness-dependent liveness model; and RFC 0018 policies separating sandbox authority from promotion.
+
 ## 0.1 — Executable semantic model
 
 **Goal:** demonstrate that MNCS relationships can be represented and mechanically checked before a source grammar exists.
@@ -380,10 +444,14 @@ A 1.0 designation would indicate a coherent research language and toolchain, not
 - at least one demonstrated logical datatype with multiple evidence-bearing representation realizations and an explicit representation-sensitive constraint that narrows the realization envelope;
 - a versioned relation model that distinguishes identity, equality, equivalence, refinement, substitutability, compatibility, abstraction, and bounded agreement with explicit observation/context scope where required;
 - at least one transformation study in which the same subject pair satisfies one declared relation while failing or leaving unresolved another, without collapsing the results into a universal equivalence claim;
+- a versioned numeric model that separates mathematical domains, finite/approximate realizations, rounding/error contracts, reproducibility, and numerical evidence;
+- at least one numeric-realization study where precision/representation/accumulation can vary while a protected numerical relation remains explicit and a numerically invalid faster candidate is rejected;
+- a versioned termination/progress model that distinguishes totality, divergence, productivity, concurrent progress, liveness, fairness dependencies, and bounded execution;
+- at least one bounded-computation study proving mechanically that `BUDGET_EXHAUSTED` leaves termination unresolved rather than implying divergence, alongside one independent positive termination or productivity witness;
 - conservative and traceable backend-promise emission;
 - bounded unsafe and foreign-function interfaces;
 - a versioned recursive diagnostic and refinement protocol;
 - isolated candidate transformations and explicit promotion policy;
-- documented recursion, authority, resource, target, representation, universe, equality, and assumption limits;
+- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, and assumption limits;
 - documented soundness and bootstrap limits;
 - conformance tests and independent implementation guidance.
