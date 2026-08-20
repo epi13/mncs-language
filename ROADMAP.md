@@ -512,6 +512,66 @@ separate storing/forwarding an unknown future artifact from executing it. The fi
 compare several wire realizations and reject any faster/smaller candidate that violates a protected
 canonicality, unknown-preservation, presence, numeric, compatibility, or migration relation.
 
+## Active cross-cutting track — distribution, messaging, partial failure, consistency, replication, and agreement
+
+[RFC 0028](rfcs/0028-machine-native-distribution-messaging-partial-failure-consistency-replication-consensus-failure-detector-semantics.md)
+establishes distribution as explicit semantics over participants, messages, remote-operation knowledge,
+network/failure models, replica histories, consistency, convergence, quorum, agreement, coordination, and
+global state rather than treating remote execution as an ordinary local call with latency.
+
+Current design work:
+
+- distinguish participant, principal, process, replica, logical operation, invocation attempt, message,
+  configuration, and observer identities;
+- model message lifecycle stages such as send, receive, delivery, application, persistence, acknowledgement,
+  and sender observation separately so no stage fabricates the next;
+- distinguish at-most/at-least-once delivery from exactly-once logical or durable effect, preserving retry,
+  idempotency, and durable deduplication as different mechanisms;
+- preserve observer-relative `OUTCOME_UNKNOWN` when a remote effect may have occurred but its response is lost;
+- make synchronous, asynchronous, and partially synchronous network assumptions explicit and treat FLP-style
+  impossibility boundaries as obligation generators rather than hidden implementation assumptions;
+- distinguish crash, omission, communication partition, suspicion, and Byzantine fault models;
+- model failure detectors as evidence-producing mechanisms with explicit completeness/accuracy/network
+  assumptions so timeout observations never silently become failure facts;
+- distinguish reliable, causal, total-order, atomic, and Byzantine reliable broadcast relations;
+- scope membership, leader, quorum, consensus, and replicated-state claims to explicit configuration epochs;
+- model fencing epochs and leases as bounded distributed authority, reusing RFC 0023 clocks and RFC 0025
+  principal/authority semantics;
+- represent quorum systems as subset predicates with independently checkable intersection obligations rather
+  than inferring safety from replica counts;
+- distinguish linearizability, sequential consistency, causal consistency, session guarantees, and eventual
+  convergence through RFC 0020 relation claims;
+- keep convergence distinct from invariant preservation and make conflict-resolution policy part of logical
+  data semantics rather than replication housekeeping;
+- support state- and operation-based CRDT realization families with machine-checkable merge/commutativity laws;
+- use CALM-style monotonicity and invariant-confluence reasoning to generate coordination requirements from
+  semantics rather than requiring programmers to choose consensus first;
+- interpret CAP only through explicit consistency, availability, operation, and partition predicates;
+- model consensus as agreement/validity/safety/liveness semantics while treating Paxos/Raft/Viewstamped and
+  related protocols as realization families;
+- keep consensus safety and liveness separate, with liveness evidence scoped to synchrony, failure-detector,
+  quorum, fairness, or randomization assumptions;
+- distinguish authenticated participant identity from honesty under Byzantine models and keep fault thresholds
+  scoped to configuration, authentication, network, quorum, and independence assumptions;
+- represent distributed snapshots as consistent global cuts distinct from RFC 0026 durable snapshots;
+- distinguish local transactions, distributed atomic commit, blocking 2PC-style realizations, consensus-backed
+  commit, sagas, and compensation; compensation may restore a declared business relation without erasing history;
+- compose RFC 0026 local durability into explicit replicated/distributed durability and acknowledgement claims;
+- preserve distribution obligations through HIR/SSA/backend lowering and expose distribution deltas to Forge;
+- expose quorum, consistency-history, failure-model, CRDT-law, coordination, reconfiguration, fencing,
+  distributed-snapshot, and atomic-commit checks as narrow micro-verifier opportunities; and
+- leave physical placement, topology, locality, mobility, and heterogeneous node assignment primarily to RFC 0029.
+
+The first implementation pilot should remain bounded: versioned participant/configuration/epoch, channel/message,
+logical-operation/attempt, network-model/failure-observation/failure-detector, replica/quorum, consistency,
+consensus, coordination-requirement, counterexample, and distribution-delta artifacts; `Sent != Applied`,
+applied-but-caller-unknown, retry/deduplication, timeout-versus-suspicion, FLP-boundary, valid/invalid quorum,
+convergent-versus-linearizable, session-guarantee, CRDT merge-law, convergence-versus-invariant, coordination
+necessity, stale-leader fencing, distributed-snapshot, 2PC safety-versus-liveness, and saga-compensation fixtures.
+The first Forge studies should demonstrate both a coordination-free realization selected when algebra/invariants
+permit it and a globally constrained operation that either generates coordination or is reported unrealizable
+under the requested partition/availability model.
+
 ## 0.1 — Executable semantic model
 
 **Goal:** demonstrate that MNCS relationships can be represented and mechanically checked before a source grammar exists.
@@ -759,10 +819,28 @@ A 1.0 designation would indicate a coherent research language and toolchain, not
 - at least one numeric serialization study carrying RFC 0021 conversion obligations through the wire boundary;
 - at least one bounded decoder study where resource/budget exhaustion remains distinct from malformed input and one projection-decode study that cannot authorize whole-message validation;
 - at least one Forge serialization-realization study comparing multiple wire formats/profiles and rejecting a faster/smaller candidate that violates a protected canonicality, presence, unknown-preservation, numeric, compatibility, or migration relation;
+- a versioned distributed-execution model distinguishing participant, principal/process/replica, logical operation, invocation attempt, message, configuration/epoch, and observer identities;
+- a versioned network/failure model distinguishing synchronous/asynchronous/partially synchronous assumptions, communication failures, partitions, crash/omission faults, failure suspicion, and Byzantine/authenticated-Byzantine behavior;
+- explicit message lifecycle, delivery, ordering, retry, deduplication, and exactly-once logical-effect semantics so `Sent`, `Received`, `Applied`, `Persisted`, and `Acknowledged` cannot be conflated;
+- at least one remote-outcome study where the receiver establishes `Applied` while the caller remains `OUTCOME_UNKNOWN` after response loss;
+- at least one failure-detector study where a timeout produces only a scoped suspicion and a later observation clears suspicion without rewriting the historical timeout into a false failure fact;
+- at least one consensus study that refuses universal deterministic termination under the fully asynchronous one-crash model while preserving a separate safety claim, plus one stronger assumption profile with a scoped liveness witness;
+- a versioned consistency relation family distinguishing linearizability, sequential consistency, causal consistency, session guarantees, and eventual convergence;
+- at least one consistency study proving `Convergent != Linearizable` and at least one session-guarantee study over temporarily stale replicas;
+- a versioned quorum model with explicit configuration scope and independently checkable intersection evidence, including one valid and one refuted quorum configuration;
+- at least one CRDT/convergent-replica study with a checked merge/commutativity witness and one case where replicas converge while an application invariant is refuted;
+- a versioned coordination-requirement model that can use monotonicity and invariant-confluence evidence to distinguish coordination-free regions from regions that require coordination;
+- at least one Forge study where a coordination-free realization is selected because the protected semantics permit it, and one study where the requested invariant/partition behavior generates coordination or an explicit unrealizability result;
+- a versioned membership/reconfiguration/leadership model with configuration epochs and fencing semantics, including one stale-leader write rejected by a newer fencing epoch;
+- at least one distributed-snapshot study distinguishing a consistent global cut from an inconsistent arbitrary cut without relying on simultaneous physical timestamps;
+- a versioned distributed-transaction model distinguishing local transactions, distributed atomic commit, blocking two-phase-commit-style realization, consensus-backed commit, saga, and compensation;
+- at least one distributed-commit study where safety remains protected while liveness blocks after a coordinator failure, and one compensation study that restores a declared business relation without claiming historical rollback;
+- at least one Byzantine/fault-threshold claim whose meaning is explicitly scoped to configuration, network, authentication, quorum, and independence assumptions;
+- at least one bounded partition/failure exploration result that remains explicitly bounded evidence rather than being upgraded to universal distributed correctness;
 - conservative and traceable backend-promise emission;
 - bounded unsafe and foreign-function interfaces;
 - a versioned recursive diagnostic and refinement protocol;
 - isolated candidate transformations and explicit promotion policy;
-- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, clock, temporal-validity, scheduling, information-flow, observer, reclassification, side-channel, principal, identity, credential, delegation, trust-domain, federation, revocation, cryptographic-algorithm, freshness, attestation, persistent-state, transaction, failure-model, persistence-domain, persist-order, durability, journal, snapshot, checkpoint, recovery, persistent-reference, retention, schema, schema-lineage, field-identity, presence, unknown-field, duplicate-field, wire-contract, encoding-profile, canonicalization, framing, migration, Unicode, decode-budget, compatibility, and assumption limits;
+- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, clock, temporal-validity, scheduling, information-flow, observer, reclassification, side-channel, principal, identity, credential, delegation, trust-domain, federation, revocation, cryptographic-algorithm, freshness, attestation, persistent-state, transaction, failure-model, persistence-domain, persist-order, durability, journal, snapshot, checkpoint, recovery, persistent-reference, retention, schema, schema-lineage, field-identity, presence, unknown-field, duplicate-field, wire-contract, encoding-profile, canonicalization, framing, migration, Unicode, decode-budget, compatibility, participant, message, logical-operation, invocation-attempt, network-model, partition, failure-detector, suspicion, configuration, epoch, replica, quorum, consistency, convergence, conflict-resolution, consensus, broadcast, Byzantine, lease, fencing, distributed-snapshot, distributed-transaction, coordination, and assumption limits;
 - documented soundness and bootstrap limits;
 - conformance tests and independent implementation guidance.
