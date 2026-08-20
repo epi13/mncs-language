@@ -4,7 +4,7 @@
 
 Research and reference implementation for a general-purpose, verification-native programming language built on Machine-Native Complexity Standard (MNCS) principles.
 
-> **Project status:** the 0.1 executable semantic model now has an experimental 0.2 foundation for canonical form, stable semantic identities, graph dependencies, evidence invalidation, recursive artifacts, and authority-aware deltas. The supported 0.3 subset now has CFG-correct executable bodies, typed integer comparison, deterministic HIR, and a small validated 0.4 SSA artifact with body→HIR→SSA provenance and evidence-aware transformation refusal. Versioned, deterministic, bounded body and independent SSA reference evaluators now support cross-layer conformance and finite refactoring studies. Forge development evidence is configured locally; no final grammar, compiler stability, production backend, independent evaluation, universal equivalence, or production suitability is claimed.
+> **Project status:** the 0.1 executable semantic model now has an experimental 0.2 foundation for canonical form, stable semantic identities, graph dependencies, evidence invalidation, recursive artifacts, and authority-aware deltas. The supported 0.3 subset now has CFG-correct executable bodies, typed integer comparison, deterministic HIR, and a small validated 0.4 SSA artifact with body→HIR→SSA provenance and evidence-aware transformation refusal. The first `mncs-compiler` driver connects that existing spine through versioned request/result/evidence contracts, explicit host/build/target/run identities, and deterministic CLI emissions. Versioned, bounded body and independent SSA reference evaluators support cross-layer conformance and finite refactoring studies. Forge development evidence is configured locally; no final grammar, compiler stability, executable backend, native Raspberry Pi result, independent evaluation, universal equivalence, or production suitability is claimed.
 
 ## Why this project exists
 
@@ -32,6 +32,7 @@ An MNCS-oriented program should make it possible to answer:
 - `spec/` — early normative semantic and representation documents.
 - `rfcs/` — design proposals that can evolve independently of the specification.
 - `crates/mncs-model/` — the executable semantic model, canonical representation, identities, graph/CFG, evidence manifest, invalidation logic, recursive artifacts, high-level IR, validated SSA artifact, and narrow machine-intent/verifier pilots.
+- `crates/mncs-compiler/` — the evidence-bearing reference compiler driver over the existing semantic, HIR, SSA, obligation, identity, and provenance APIs.
 - `crates/mncs-syntax/` — deterministic, tokenizer-neutral source representation metrics.
 - `crates/mncs-cli/` — validation, canonicalization, identity, graph/CFG, evidence, IR, SSA, obligation, verification, comparison, diagnostic, diff, and syntax-tournament commands.
 - `examples/` — semantic manifests, competing source candidates, canonical semantic forms, machine-intent sketches, and semantic patches.
@@ -115,11 +116,17 @@ cargo run -p mncs-cli -- compare-execution \
   examples/execution/bounded-range-baseline.mncs.json \
   examples/execution/bounded-range-equivalent-refactor.mncs.json \
   examples/execution/bounded-range-corpus.json
+cargo run -p mncs-cli -- compile \
+  examples/compiler-study/bounded-sum.mncs.json \
+  --emit semantic,hir,ssa,evidence
+cargo run -p mncs-cli -- compiler-study \
+  examples/compiler-study/bounded-sum.mncs.json \
+  --node-id local-linux
 ```
 
 The local contract-expression change changes the contract and function fingerprints and marks the dependent evidence stale. Canonicalization sorts set-like declarations while preserving ordered inputs and outputs. `execute` is a research interpreter for validated executable bodies and `execute-ssa` independently interprets the lowered SSA artifact; both have finite step budgets, bounded traces, conservative effects, and explicit unsupported/runtime-failure/budget-exhausted outcomes. `check-lowering-execution` compares the two reference paths over a corpus. These reports are finite behavioral evidence, not universal equivalence, compiler correctness, or backend validation.
 
-The IR command emits a deterministic, inspectable projection with state regions, capability uses, failure blocks, generated obligations, semantic-to-IR traceability, and transformation provenance. `body` includes a deterministic CFG projection; `ssa` emits the experimental validated block-parameter SSA artifact. Executable-body manifests lower symbolic operations directly; `verifier-request` and `verify-result` exchange identity- and dependency-bound JSON artifacts. `verify` exercises the pure local verifier; `diagnose` emits a conservative backward slice when graph construction is available and a dependency-only slice for invalid input. Candidate evaluation remains isolated and does not promote or rewrite the trusted baseline.
+The IR command emits a deterministic, inspectable projection with state regions, capability uses, failure blocks, generated obligations, semantic-to-IR traceability, and transformation provenance. `body` includes a deterministic CFG projection; `ssa` emits the experimental validated block-parameter SSA artifact. `compile` reuses those exact implementations and emits a structured compiler result plus an evidence bundle whose transformation edges bind exact artifact and pass identities. `compiler-study` keeps node/environment observations separate from the semantic, HIR, and SSA fingerprints expected to agree across compatible hosts. Executable-body manifests lower symbolic operations directly; `verifier-request` and `verify-result` exchange identity- and dependency-bound JSON artifacts. `verify` exercises the pure local verifier; `diagnose` emits a conservative backward slice when graph construction is available and a dependency-only slice for invalid input. Candidate evaluation remains isolated and does not promote or rewrite the trusted baseline.
 
 ## Forge development harness
 

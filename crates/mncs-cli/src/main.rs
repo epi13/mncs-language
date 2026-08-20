@@ -1,11 +1,19 @@
-use std::{env, fs, path::Path, process::ExitCode};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    env, fs,
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
+use mncs_compiler::{native_node_profile, ReferenceCompiler};
 use mncs_model::{
-    compare_body_and_ssa, compare_execution, execute_ssa, execute_with_policy, CandidateEvaluation,
-    CausalSlice, ComparisonStatus, Confidence, DeterministicVerifier, DiagnosticCategory,
-    DiagnosticObligation, EvidenceFreshness, EvidenceManifest, EvidenceState, ExecutionComparison,
-    ExecutionCorpus, ExecutionRequest, ExecutionStatus, FunctionBody, LoweringExecutionComparison,
-    LoweringExecutionStatus, ObligationStatus, Program, SemanticDiff, SemanticId,
+    compare_body_and_ssa, compare_execution, execute_ssa, execute_with_policy,
+    ArtifactRepresentation, CandidateEvaluation, CausalSlice, ComparisonStatus, CompilationResult,
+    CompilationStatus, CompilationStudyRequest, Confidence, DeterministicVerifier,
+    DiagnosticCategory, DiagnosticObligation, EvidenceFreshness, EvidenceManifest, EvidenceState,
+    ExecutionComparison, ExecutionCorpus, ExecutionRequest, ExecutionStatus, FunctionBody,
+    LoweringExecutionComparison, LoweringExecutionStatus, ObligationStatus, Program, SemanticDiff,
+    SemanticId, TargetContractRef,
 };
 use mncs_syntax::{analyze, SourceMetrics};
 use serde::{Deserialize, Serialize};
@@ -46,6 +54,8 @@ fn main() -> ExitCode {
         "execute-ssa" => ssa_execution_command(args),
         "compare-execution" => execution_compare_command(args),
         "check-lowering-execution" => lowering_execution_command(args),
+        "compile" => compile_command(args),
+        "compiler-study" => compiler_study_command(args),
         "diff" => two_manifest_command(args, diff),
         "compare" => two_manifest_command(args, compare),
         "slice" => slice_command(args),
@@ -522,6 +532,237 @@ where
             LoweringExecutionStatus::InvalidInput => ExitCode::from(2),
         }
     }
+}
+
+#[derive(Debug)]
+struct CompileOptions {
+    program_path: String,
+    emit: BTreeSet<ArtifactRepresentation>,
+    output_dir: Option<PathBuf>,
+    target: Option<TargetContractRef>,
+}
+
+fn compile_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let options = match parse_compile_options(args) {
+        Ok(options) => options,
+        Err(message) => {
+            eprintln!("error: {message}");
+            print_usage();
+            return ExitCode::from(2);
+        }
+    };
+    let program = match read_program_unvalidated(&options.program_path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let compiler = ReferenceCompiler::default();
+    let request = compiler.request_for_program(&program, options.emit, options.target);
+    let result = compiler.compile(request, &program);
+    if let Some(output_dir) = &options.output_dir {
+        if let Err(error) = write_compilation_outputs(output_dir, &result) {
+            eprintln!(
+                "error: unable to write compiler artifacts to {:?}: {error}",
+                output_dir
+            );
+            return ExitCode::from(2);
+        }
+    }
+    let status = result.status;
+    if !print_json(&result) {
+        ExitCode::from(2)
+    } else if status == CompilationStatus::Failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+fn compiler_study_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let Some(program_path) = args.next() else {
+        eprintln!("error: compiler-study requires a semantic program path");
+        print_usage();
+        return ExitCode::from(2);
+    };
+    let mut node_identity = "local-node".to_owned();
+    let mut target_name = None;
+    while let Some(option) = args.next() {
+        match option.as_str() {
+            "--node-id" => {
+                let Some(value) = args.next() else {
+                    eprintln!("error: --node-id requires a value");
+                    return ExitCode::from(2);
+                };
+                node_identity = value;
+            }
+            "--target" => {
+                let Some(value) = args.next() else {
+                    eprintln!("error: --target requires a target-contract candidate");
+                    return ExitCode::from(2);
+                };
+                target_name = Some(value);
+            }
+            other => {
+                eprintln!("error: unknown compiler-study option {other:?}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let program = match read_program_unvalidated(&program_path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let compiler = ReferenceCompiler::default();
+    let target = target_name.map(unevidenced_target);
+    let mut emit = [
+        ArtifactRepresentation::Semantic,
+        ArtifactRepresentation::Hir,
+        ArtifactRepresentation::Ssa,
+        ArtifactRepresentation::EvidenceBundle,
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>();
+    if target.is_some() {
+        emit.insert(ArtifactRepresentation::TargetLoweringPlan);
+    }
+    let request = compiler.request_for_program(&program, emit, target);
+    let study =
+        CompilationStudyRequest::new(native_node_profile(node_identity), request, Vec::new());
+    let result = compiler.run_study(study, &program);
+    let failed = result.diagnostics.iter().any(|diagnostic| {
+        diagnostic.kind == mncs_model::CompilerDiagnosticKind::SemanticInvalidity
+    });
+    if !print_json(&result) {
+        ExitCode::from(2)
+    } else if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+fn parse_compile_options<I>(args: I) -> Result<CompileOptions, String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let program_path = args
+        .next()
+        .ok_or_else(|| "compile requires a semantic program path".to_owned())?;
+    let mut emit = [
+        ArtifactRepresentation::Semantic,
+        ArtifactRepresentation::Hir,
+        ArtifactRepresentation::Ssa,
+        ArtifactRepresentation::EvidenceBundle,
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>();
+    let mut output_dir = None;
+    let mut target = None;
+    while let Some(option) = args.next() {
+        match option.as_str() {
+            "--emit" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--emit requires a comma-separated value".to_owned())?;
+                emit = parse_emit(&value)?;
+            }
+            "--output-dir" => {
+                output_dir = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "--output-dir requires a path".to_owned())?,
+                ));
+            }
+            "--target" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--target requires a target-contract candidate".to_owned())?;
+                target = Some(unevidenced_target(value));
+            }
+            other => return Err(format!("unknown compile option {other:?}")),
+        }
+    }
+    if emit.contains(&ArtifactRepresentation::TargetLoweringPlan) && target.is_none() {
+        return Err("target-plan emission requires --target".to_owned());
+    }
+    Ok(CompileOptions {
+        program_path,
+        emit,
+        output_dir,
+        target,
+    })
+}
+
+fn parse_emit(value: &str) -> Result<BTreeSet<ArtifactRepresentation>, String> {
+    let mut emit = BTreeSet::new();
+    for name in value.split(',') {
+        let representation = match name.trim() {
+            "semantic" => ArtifactRepresentation::Semantic,
+            "hir" => ArtifactRepresentation::Hir,
+            "ssa" => ArtifactRepresentation::Ssa,
+            "evidence" => ArtifactRepresentation::EvidenceBundle,
+            "target-plan" => ArtifactRepresentation::TargetLoweringPlan,
+            "" => return Err("--emit contains an empty representation".to_owned()),
+            other => return Err(format!("unsupported emitted representation {other:?}")),
+        };
+        emit.insert(representation);
+    }
+    if emit.is_empty() {
+        return Err("--emit must request at least one representation".to_owned());
+    }
+    Ok(emit)
+}
+
+fn unevidenced_target(candidate: impl Into<String>) -> TargetContractRef {
+    TargetContractRef::new(
+        candidate,
+        BTreeMap::new(),
+        Vec::new(),
+        vec!["target name is a candidate identifier, not target evidence".to_owned()],
+    )
+}
+
+fn read_program_unvalidated(path: &str) -> Result<Program, ExitCode> {
+    let input = read_source(path)?;
+    Program::from_json(&input).map_err(|error| {
+        eprintln!("error: invalid semantic manifest: {error}");
+        ExitCode::from(2)
+    })
+}
+
+fn write_compilation_outputs(
+    output_dir: &Path,
+    result: &CompilationResult,
+) -> Result<(), std::io::Error> {
+    fs::create_dir_all(output_dir)?;
+    write_pretty_json(output_dir.join("result.json"), result)?;
+    if let Some(semantic) = &result.emissions.semantic {
+        write_pretty_json(output_dir.join("semantic.json"), semantic)?;
+    }
+    if let Some(hir) = &result.emissions.hir {
+        write_pretty_json(output_dir.join("hir.json"), hir)?;
+    }
+    if let Some(ssa) = &result.emissions.ssa {
+        write_pretty_json(output_dir.join("ssa.json"), ssa)?;
+    }
+    if let Some(plan) = &result.emissions.target_lowering_plan {
+        write_pretty_json(output_dir.join("target-plan.json"), plan)?;
+    }
+    if let Some(evidence) = &result.evidence {
+        write_pretty_json(output_dir.join("evidence.json"), evidence)?;
+    }
+    Ok(())
+}
+
+fn write_pretty_json(path: PathBuf, value: &impl Serialize) -> Result<(), std::io::Error> {
+    let bytes = serde_json::to_vec_pretty(value).map_err(std::io::Error::other)?;
+    fs::write(path, bytes)
 }
 
 fn read_program_for_execution(path: &str) -> Result<Program, ExitCode> {
@@ -1033,6 +1274,8 @@ fn print_usage() {
     eprintln!("  mncs execute-ssa <program.json> <execution-request.json>");
     eprintln!("  mncs compare-execution <baseline.json> <candidate.json> <corpus.json>");
     eprintln!("  mncs check-lowering-execution <program.json> <corpus.json>");
+    eprintln!("  mncs compile <program.json> [--emit semantic,hir,ssa,evidence,target-plan] [--output-dir DIR] [--target TARGET]");
+    eprintln!("  mncs compiler-study <program.json> [--node-id NODE] [--target TARGET]");
     eprintln!("  mncs diff <before.json> <after.json>");
     eprintln!("  mncs compare <before.json> <after.json>");
     eprintln!("  mncs slice <manifest.json> <semantic-identity>");

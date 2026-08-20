@@ -1,0 +1,855 @@
+//! Orchestration for the existing MNCS semantic -> HIR -> SSA compiler spine.
+//!
+//! The compiler driver owns sequencing and evidence assembly. The semantic,
+//! HIR, SSA, obligation, and provenance implementations remain in
+//! `mncs-model`.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write;
+
+use mncs_model::{
+    ArtifactRepresentation, BuildHostIdentity, CompilationEmissions, CompilationEvidenceBundle,
+    CompilationRequest, CompilationResult, CompilationStatus, CompilationStudyRequest,
+    CompilationStudyResult, CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind,
+    CompilerHostIdentity, CompilerImplementationIdentity, CompilerNodeProfile,
+    CompilerPassIdentity, CrossHostInvariants, ObligationStatus, ObservationModelRef,
+    PassPipelineIdentity, Program, RelationClaim, SemanticId, TargetContractRef,
+    TargetLoweringPlan, TransformationEdge, TransformationStatus, COMPILER_ARTIFACT_SCHEMA_VERSION,
+    SSA_SCHEMA_VERSION,
+};
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+
+pub const REFERENCE_LANGUAGE_PROFILE: &str = "mncs:language-profile:research-0.1";
+pub const REFERENCE_COMPILER_NAME: &str = "mncs-reference-compiler";
+pub const REFERENCE_PIPELINE_NAME: &str = "mncs-semantic-hir-ssa";
+
+#[derive(Debug, Clone)]
+pub struct ReferenceCompiler {
+    pub identity: CompilerImplementationIdentity,
+    pub pipeline: PassPipelineIdentity,
+}
+
+impl Default for ReferenceCompiler {
+    fn default() -> Self {
+        Self {
+            identity: reference_compiler_identity(),
+            pipeline: reference_pipeline(),
+        }
+    }
+}
+
+impl ReferenceCompiler {
+    pub fn request_for_program(
+        &self,
+        program: &Program,
+        emit: BTreeSet<ArtifactRepresentation>,
+        target: Option<TargetContractRef>,
+    ) -> CompilationRequest {
+        let semantic = program
+            .canonical_form()
+            .expect("a parsed semantic program is canonicalizable");
+        let input = CompilerArtifactRef::new(
+            ArtifactRepresentation::Semantic,
+            semantic.schema_version,
+            semantic.fingerprint,
+        );
+        let (compiler_host, build_host) = native_host_identities();
+        CompilationRequest::new(
+            input,
+            SemanticId(REFERENCE_LANGUAGE_PROFILE.to_owned()),
+            emit,
+            self.identity.clone(),
+            compiler_host,
+            build_host,
+            target,
+            None,
+            self.pipeline.clone(),
+            Vec::new(),
+            None,
+            None,
+        )
+    }
+
+    pub fn compile(&self, request: CompilationRequest, program: &Program) -> CompilationResult {
+        let mut diagnostics = request.validate();
+        if request.compiler != self.identity || request.pipeline != self.pipeline {
+            diagnostics.push(CompilerDiagnostic::new(
+                "CMP201",
+                CompilerDiagnosticKind::InvalidRequest,
+                "request compiler or pass pipeline does not match this compiler driver",
+            ));
+        }
+        if !diagnostics.is_empty() {
+            return failed_result(&request, diagnostics);
+        }
+
+        let semantic = match program.canonical_form() {
+            Ok(semantic) => semantic,
+            Err(error) => {
+                diagnostics.push(CompilerDiagnostic::new(
+                    "CMP202",
+                    CompilerDiagnosticKind::InternalCompilerDefect,
+                    error.to_string(),
+                ));
+                return failed_result(&request, diagnostics);
+            }
+        };
+        let semantic_ref = CompilerArtifactRef::new(
+            ArtifactRepresentation::Semantic,
+            semantic.schema_version.clone(),
+            semantic.fingerprint.clone(),
+        );
+        if request.input != semantic_ref {
+            let mut diagnostic = CompilerDiagnostic::new(
+                "CMP203",
+                CompilerDiagnosticKind::InvalidRequest,
+                "request input identity does not match the supplied semantic program",
+            );
+            diagnostic.related_artifacts =
+                vec![request.input.identity.clone(), semantic_ref.identity];
+            diagnostics.push(diagnostic);
+            return failed_result(&request, diagnostics);
+        }
+
+        let validation = program.validate();
+        if !validation.valid {
+            diagnostics.extend(
+                validation
+                    .errors
+                    .into_iter()
+                    .map(|error| CompilerDiagnostic {
+                        code: error.code,
+                        kind: CompilerDiagnosticKind::SemanticInvalidity,
+                        path: Some(error.path),
+                        message: error.message,
+                        related_artifacts: vec![request.input.identity.clone()],
+                        obligations: Vec::new(),
+                    }),
+            );
+            return failed_result(&request, diagnostics);
+        }
+
+        let hir = match program.lower_to_ir() {
+            Ok(hir) => hir,
+            Err(error) => {
+                diagnostics.push(CompilerDiagnostic::new(
+                    "CMP204",
+                    CompilerDiagnosticKind::InternalCompilerDefect,
+                    format!("validated semantic input failed HIR lowering: {error}"),
+                ));
+                return failed_result(&request, diagnostics);
+            }
+        };
+        let hir_fingerprint = hir.fingerprint().expect("HIR is serializable");
+        let hir_ref = CompilerArtifactRef::new(
+            ArtifactRepresentation::Hir,
+            hir.schema_version.clone(),
+            hir_fingerprint,
+        );
+
+        let ssa = match program.lower_to_ssa() {
+            Ok(ssa) => ssa,
+            Err(error) => {
+                diagnostics.push(CompilerDiagnostic::new(
+                    "CMP205",
+                    CompilerDiagnosticKind::InternalCompilerDefect,
+                    format!("validated semantic input failed SSA lowering: {error}"),
+                ));
+                return failed_result(&request, diagnostics);
+            }
+        };
+        let ssa_fingerprint = ssa.fingerprint().expect("SSA is serializable");
+        let ssa_ref = CompilerArtifactRef::new(
+            ArtifactRepresentation::Ssa,
+            SSA_SCHEMA_VERSION,
+            ssa_fingerprint.clone(),
+        );
+        let selected_ssa_ref = CompilerArtifactRef::new(
+            ArtifactRepresentation::SelectedSsa,
+            SSA_SCHEMA_VERSION,
+            ssa_fingerprint,
+        );
+
+        let unresolved_obligations = ssa
+            .obligations
+            .iter()
+            .filter(|obligation| obligation.status == ObligationStatus::Unknown)
+            .map(|obligation| obligation.identity.clone())
+            .collect::<Vec<_>>();
+        let failed_obligations = ssa
+            .obligations
+            .iter()
+            .filter(|obligation| obligation.status == ObligationStatus::Fail)
+            .map(|obligation| obligation.identity.clone())
+            .collect::<Vec<_>>();
+        let lowering_status = if !failed_obligations.is_empty() {
+            TransformationStatus::Fail
+        } else if !unresolved_obligations.is_empty() {
+            TransformationStatus::Unknown
+        } else {
+            TransformationStatus::Pass
+        };
+
+        for obligation in &unresolved_obligations {
+            let mut diagnostic = CompilerDiagnostic::new(
+                "CMP301",
+                CompilerDiagnosticKind::UnresolvedObligation,
+                "compilation retained an unresolved obligation and its conservative fallback",
+            );
+            diagnostic.obligations.push(obligation.clone());
+            diagnostics.push(diagnostic);
+        }
+        for obligation in &failed_obligations {
+            let mut diagnostic = CompilerDiagnostic::new(
+                "CMP302",
+                CompilerDiagnosticKind::FailedTransformationRelation,
+                "a required compilation obligation failed",
+            );
+            diagnostic.obligations.push(obligation.clone());
+            diagnostics.push(diagnostic);
+        }
+
+        let semantic_to_hir = TransformationEdge::new(
+            semantic_ref.clone(),
+            hir_ref.clone(),
+            self.pipeline.passes[0].clone(),
+            request.assumptions.clone(),
+            ssa.obligations
+                .iter()
+                .map(|obligation| obligation.identity.clone())
+                .collect(),
+            Vec::new(),
+            lowering_status,
+            hir.transformations
+                .iter()
+                .map(|record| record.identity.clone())
+                .collect(),
+        );
+        let hir_to_ssa = TransformationEdge::new(
+            hir_ref.clone(),
+            ssa_ref.clone(),
+            self.pipeline.passes[1].clone(),
+            Vec::new(),
+            ssa.obligations
+                .iter()
+                .map(|obligation| obligation.identity.clone())
+                .collect(),
+            Vec::new(),
+            lowering_status,
+            ssa.transformations
+                .iter()
+                .map(|record| record.identity.clone())
+                .collect(),
+        );
+        // The first selection is deliberately conservative: selected SSA is
+        // byte-for-byte canonical SSA, so UNKNOWN has not authorized a rewrite.
+        let select_ssa = TransformationEdge::new(
+            ssa_ref.clone(),
+            selected_ssa_ref.clone(),
+            self.pipeline.passes[2].clone(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            TransformationStatus::Pass,
+            Vec::new(),
+        );
+
+        let mut artifacts = vec![
+            semantic_ref.clone(),
+            hir_ref.clone(),
+            ssa_ref,
+            selected_ssa_ref.clone(),
+        ];
+        let mut edges = vec![semantic_to_hir, hir_to_ssa, select_ssa];
+        let target_lowering_plan = request.target.clone().map(|target| {
+            let plan = TargetLoweringPlan::with_unknown_facts(
+                selected_ssa_ref.clone(),
+                target,
+                request.backend.clone(),
+                vec![
+                    "data-layout evidence".to_owned(),
+                    "ABI and calling-convention evidence".to_owned(),
+                    "integer and trap mapping evidence".to_owned(),
+                ],
+            );
+            let plan_fingerprint = fingerprint(&plan);
+            let plan_ref = CompilerArtifactRef::new(
+                ArtifactRepresentation::TargetLoweringPlan,
+                COMPILER_ARTIFACT_SCHEMA_VERSION,
+                plan_fingerprint,
+            );
+            let edge = TransformationEdge::new(
+                selected_ssa_ref.clone(),
+                plan_ref.clone(),
+                self.pipeline.passes[3].clone(),
+                plan.assumptions_introduced.clone(),
+                Vec::new(),
+                plan.target.evidence.clone(),
+                TransformationStatus::Unknown,
+                Vec::new(),
+            );
+            artifacts.push(plan_ref);
+            edges.push(edge);
+            diagnostics.push(CompilerDiagnostic::new(
+                "CMP303",
+                CompilerDiagnosticKind::MissingTargetEvidence,
+                "target lowering remains UNKNOWN until layout, ABI, integer, and trap facts are evidenced",
+            ));
+            plan
+        });
+
+        let status = if !failed_obligations.is_empty() {
+            CompilationStatus::Failed
+        } else if !unresolved_obligations.is_empty() || target_lowering_plan.is_some() {
+            CompilationStatus::CompletedWithUnresolvedObligations
+        } else {
+            CompilationStatus::Completed
+        };
+        let mut assumptions = request.assumptions.clone();
+        if let Some(target) = &request.target {
+            assumptions.extend(target.assumptions.clone());
+        }
+        assumptions.sort();
+        assumptions.dedup();
+        let mut bundle = CompilationEvidenceBundle {
+            schema_version: COMPILER_ARTIFACT_SCHEMA_VERSION.to_owned(),
+            identity: SemanticId(String::new()),
+            request_identity: request.identity.clone(),
+            input: semantic_ref,
+            emitted_artifacts: artifacts.clone(),
+            transformation_edges: edges,
+            compiler: request.compiler.clone(),
+            pipeline: request.pipeline.clone(),
+            compiler_host: request.compiler_host.clone(),
+            build_host: request.build_host.clone(),
+            target: request.target.clone(),
+            run_environment: request.run_environment.clone(),
+            target_lowering_plan: target_lowering_plan.clone(),
+            backend: request
+                .backend
+                .as_ref()
+                .map(|configuration| configuration.backend.clone()),
+            obligations: ssa.obligations.clone(),
+            unresolved_obligations,
+            evidence: Vec::new(),
+            assumptions,
+            diagnostics: diagnostics.clone(),
+        };
+        bundle.seal();
+        let integrity = bundle.validate_integrity();
+        if !integrity.is_empty() {
+            diagnostics.extend(integrity);
+            return failed_result(&request, diagnostics);
+        }
+        let evidence_ref = CompilerArtifactRef::new(
+            ArtifactRepresentation::EvidenceBundle,
+            COMPILER_ARTIFACT_SCHEMA_VERSION,
+            fingerprint(&bundle),
+        );
+        artifacts.push(evidence_ref);
+
+        let emissions = CompilationEmissions {
+            semantic: request
+                .emit
+                .contains(&ArtifactRepresentation::Semantic)
+                .then_some(semantic),
+            hir: request
+                .emit
+                .contains(&ArtifactRepresentation::Hir)
+                .then_some(hir),
+            ssa: request
+                .emit
+                .contains(&ArtifactRepresentation::Ssa)
+                .then_some(ssa),
+            target_lowering_plan: request
+                .emit
+                .contains(&ArtifactRepresentation::TargetLoweringPlan)
+                .then_some(target_lowering_plan)
+                .flatten(),
+        };
+        let evidence = request
+            .emit
+            .contains(&ArtifactRepresentation::EvidenceBundle)
+            .then_some(bundle);
+        let mut result = CompilationResult {
+            schema_version: COMPILER_ARTIFACT_SCHEMA_VERSION.to_owned(),
+            identity: SemanticId(String::new()),
+            request_identity: request.identity.clone(),
+            request,
+            status,
+            artifacts,
+            emissions,
+            evidence,
+            diagnostics,
+        };
+        result.seal();
+        result
+    }
+
+    pub fn run_study(
+        &self,
+        study: CompilationStudyRequest,
+        program: &Program,
+    ) -> CompilationStudyResult {
+        let request = study.compilation_request;
+        let result = self.compile(request.clone(), program);
+        let mut unresolved_assumptions = request.assumptions.clone();
+        if let Some(target) = &request.target {
+            unresolved_assumptions.extend(target.assumptions.clone());
+        }
+        unresolved_assumptions.sort();
+        unresolved_assumptions.dedup();
+        let semantic_fingerprint = result
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.representation == ArtifactRepresentation::Semantic)
+            .map(|artifact| artifact.fingerprint.clone());
+        let hir_fingerprint = result
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.representation == ArtifactRepresentation::Hir)
+            .map(|artifact| artifact.fingerprint.clone());
+        let ssa_fingerprint = result
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.representation == ArtifactRepresentation::Ssa)
+            .map(|artifact| artifact.fingerprint.clone());
+        let mut study_result = CompilationStudyResult {
+            schema_version: COMPILER_ARTIFACT_SCHEMA_VERSION.to_owned(),
+            identity: SemanticId(String::new()),
+            study_request_identity: study.identity.clone(),
+            compilation_request_identity: request.identity.clone(),
+            run_identity: SemanticId(format!(
+                "mncs:compiler:study-run:{}",
+                fingerprint(&(&study.identity, &result.identity))
+            )),
+            node: study.node,
+            compiler_identity: request.compiler.identity,
+            pipeline_identity: request.pipeline.identity,
+            compiler_host_identity: request.compiler_host.identity,
+            build_host_identity: request.build_host.identity,
+            target_identity: request.target.map(|target| target.identity),
+            semantic_fingerprint,
+            hir_fingerprint,
+            ssa_fingerprint,
+            compilation_result_identity: result.identity,
+            execution_result_references: study.execution_result_references,
+            diagnostics: result.diagnostics,
+            unresolved_assumptions,
+            invariants: CrossHostInvariants {
+                expected_equal: vec![
+                    "compiler_identity".to_owned(),
+                    "pipeline_identity".to_owned(),
+                    "semantic_fingerprint".to_owned(),
+                    "hir_fingerprint".to_owned(),
+                    "ssa_fingerprint".to_owned(),
+                ],
+                expected_distinct: vec![
+                    "compiler_host_identity".to_owned(),
+                    "build_host_identity".to_owned(),
+                    "compilation_request_identity".to_owned(),
+                    "compilation_result_identity".to_owned(),
+                ],
+            },
+        };
+        study_result.seal();
+        study_result
+    }
+}
+
+pub fn compile(request: CompilationRequest, program: &Program) -> CompilationResult {
+    ReferenceCompiler::default().compile(request, program)
+}
+
+pub fn reference_compiler_identity() -> CompilerImplementationIdentity {
+    CompilerImplementationIdentity::new(REFERENCE_COMPILER_NAME, env!("CARGO_PKG_VERSION"), None)
+}
+
+pub fn reference_pipeline() -> PassPipelineIdentity {
+    let observation = ObservationModelRef::new(
+        "mncs-public-behavior",
+        "0.1",
+        [
+            "return_value",
+            "declared_failure",
+            "external_effect",
+            "authority_use",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
+    );
+    let relation = || RelationClaim {
+        kind: "directional_observational_refinement".to_owned(),
+        observation_model: observation.clone(),
+    };
+    PassPipelineIdentity::new(
+        REFERENCE_PIPELINE_NAME,
+        "0.1",
+        vec![
+            CompilerPassIdentity::new(
+                "lower-semantic-to-hir",
+                "0.1",
+                ArtifactRepresentation::Semantic,
+                ArtifactRepresentation::Hir,
+                relation(),
+                vec!["semantic validation passes".to_owned()],
+                Vec::new(),
+                Vec::new(),
+                vec!["semantic and machine-intent obligations".to_owned()],
+                "mncs-model structural HIR lowering",
+                "reject invalid semantic input",
+            ),
+            CompilerPassIdentity::new(
+                "lower-hir-to-ssa",
+                "0.1",
+                ArtifactRepresentation::Hir,
+                ArtifactRepresentation::Ssa,
+                relation(),
+                vec!["HIR derives from exact semantic input".to_owned()],
+                Vec::new(),
+                Vec::new(),
+                vec!["SSA structural validity".to_owned()],
+                "mncs-model SSA validator",
+                "retain HIR and reject invalid SSA",
+            ),
+            CompilerPassIdentity::new(
+                "select-canonical-ssa",
+                "0.1",
+                ArtifactRepresentation::Ssa,
+                ArtifactRepresentation::SelectedSsa,
+                relation(),
+                vec!["SSA structural validity".to_owned()],
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                "identity fingerprint check",
+                "retain canonical SSA without optimization",
+            ),
+            CompilerPassIdentity::new(
+                "plan-target-lowering",
+                "0.1",
+                ArtifactRepresentation::SelectedSsa,
+                ArtifactRepresentation::TargetLoweringPlan,
+                relation(),
+                vec!["selected SSA is structurally valid".to_owned()],
+                vec![
+                    "data layout".to_owned(),
+                    "ABI and calling convention".to_owned(),
+                    "integer and trap mapping".to_owned(),
+                ],
+                Vec::new(),
+                vec!["target legality".to_owned()],
+                "target contract evidence appraisal",
+                "report UNKNOWN and emit no backend artifact",
+            ),
+        ],
+    )
+}
+
+pub fn native_host_identities() -> (CompilerHostIdentity, BuildHostIdentity) {
+    let architecture = std::env::consts::ARCH;
+    let operating_system = std::env::consts::OS;
+    let environment = native_environment(operating_system);
+    (
+        CompilerHostIdentity::new(architecture, operating_system, environment, BTreeMap::new()),
+        BuildHostIdentity::new(
+            architecture,
+            operating_system,
+            environment,
+            format!("rust-{}", env!("CARGO_PKG_RUST_VERSION")),
+            BTreeMap::new(),
+        ),
+    )
+}
+
+pub fn native_node_profile(node_identity: impl Into<String>) -> CompilerNodeProfile {
+    let operating_system = std::env::consts::OS.to_owned();
+    let architecture = std::env::consts::ARCH.to_owned();
+    CompilerNodeProfile {
+        node_identity: node_identity.into(),
+        architecture,
+        operating_system: operating_system.clone(),
+        environment: native_environment(&operating_system).to_owned(),
+        observations: BTreeMap::new(),
+    }
+}
+
+fn failed_result(
+    request: &CompilationRequest,
+    diagnostics: Vec<CompilerDiagnostic>,
+) -> CompilationResult {
+    let mut result = CompilationResult {
+        schema_version: COMPILER_ARTIFACT_SCHEMA_VERSION.to_owned(),
+        identity: SemanticId(String::new()),
+        request_identity: request.identity.clone(),
+        request: request.clone(),
+        status: CompilationStatus::Failed,
+        artifacts: Vec::new(),
+        emissions: CompilationEmissions::default(),
+        evidence: None,
+        diagnostics,
+    };
+    result.seal();
+    result
+}
+
+fn native_environment(operating_system: &str) -> &'static str {
+    match operating_system {
+        "linux" => "native-linux",
+        "windows" => "native-windows",
+        "macos" => "native-macos",
+        _ => "native-unknown",
+    }
+}
+
+fn fingerprint<T: Serialize>(value: &T) -> String {
+    let bytes = serde_json::to_vec(value).expect("compiler artifact is serializable");
+    let digest = Sha256::digest(bytes);
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        write!(&mut output, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn program(name: &str) -> Program {
+        Program::from_json(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/executable/checked-add.mncs.json"
+        )))
+        .map(|mut program| {
+            name.clone_into(&mut program.module);
+            program
+        })
+        .expect("fixture program")
+    }
+
+    fn emissions() -> BTreeSet<ArtifactRepresentation> {
+        [
+            ArtifactRepresentation::Semantic,
+            ArtifactRepresentation::Hir,
+            ArtifactRepresentation::Ssa,
+            ArtifactRepresentation::EvidenceBundle,
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    #[test]
+    fn compilation_is_deterministic_and_reuses_existing_ir() {
+        let compiler = ReferenceCompiler::default();
+        let program = program("compiler-test");
+        let request = compiler.request_for_program(&program, emissions(), None);
+        let first = compiler.compile(request.clone(), &program);
+        let second = compiler.compile(request, &program);
+        assert_eq!(first, second);
+        assert!(first.identity_is_valid());
+        let round_trip: CompilationResult =
+            serde_json::from_str(&serde_json::to_string(&first).unwrap()).unwrap();
+        assert_eq!(round_trip, first);
+        assert!(round_trip.request.identity_is_valid());
+        let hir = program.lower_to_ir().unwrap();
+        let ssa = program.lower_to_ssa().unwrap();
+        assert_eq!(
+            first.emissions.hir.as_ref().unwrap().fingerprint().unwrap(),
+            hir.fingerprint().unwrap()
+        );
+        assert_eq!(
+            first.emissions.ssa.as_ref().unwrap().fingerprint().unwrap(),
+            ssa.fingerprint().unwrap()
+        );
+    }
+
+    #[test]
+    fn invalid_semantics_never_reach_hir_or_ssa() {
+        let compiler = ReferenceCompiler::default();
+        let program = Program::from_json(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/executable/invalid-body-capability.mncs.json"
+        )))
+        .unwrap();
+        let request = compiler.request_for_program(&program, emissions(), None);
+        let result = compiler.compile(request, &program);
+        assert_eq!(result.status, CompilationStatus::Failed);
+        assert!(result.artifacts.is_empty());
+        assert!(result.emissions.hir.is_none());
+        assert!(result.emissions.ssa.is_none());
+        assert!(result
+            .diagnostics
+            .iter()
+            .all(|item| item.kind == CompilerDiagnosticKind::SemanticInvalidity));
+    }
+
+    #[test]
+    fn unresolved_obligations_are_retained_and_do_not_authorize_rewrites() {
+        let compiler = ReferenceCompiler::default();
+        let program = program("compiler-unresolved");
+        let request = compiler.request_for_program(&program, emissions(), None);
+        let result = compiler.compile(request, &program);
+        assert_eq!(
+            result.status,
+            CompilationStatus::CompletedWithUnresolvedObligations
+        );
+        let evidence = result.evidence.unwrap();
+        assert!(!evidence.unresolved_obligations.is_empty());
+        assert!(evidence
+            .transformation_edges
+            .iter()
+            .any(|edge| edge.status == TransformationStatus::Unknown));
+        let selection = evidence
+            .transformation_edges
+            .iter()
+            .find(|edge| edge.pass.id == "select-canonical-ssa")
+            .unwrap();
+        assert_eq!(selection.status, TransformationStatus::Pass);
+        assert_eq!(selection.input.fingerprint, selection.output.fingerprint);
+
+        let mut laundered = evidence;
+        laundered.unresolved_obligations.clear();
+        laundered.seal();
+        assert!(laundered
+            .validate_integrity()
+            .iter()
+            .any(|diagnostic| diagnostic.code == "CMP103"));
+    }
+
+    #[test]
+    fn host_change_changes_derivation_but_not_semantic_hir_or_ssa() {
+        let compiler = ReferenceCompiler::default();
+        let program = program("compiler-host-invariance");
+        let native_request = compiler.request_for_program(&program, emissions(), None);
+        let (alternate_os, alternate_environment) =
+            if native_request.compiler_host.operating_system == "windows" {
+                ("linux", "native-linux")
+            } else {
+                ("windows", "native-windows")
+            };
+        let alternate_host = CompilerHostIdentity::new(
+            "x86_64",
+            alternate_os,
+            alternate_environment,
+            BTreeMap::new(),
+        );
+        let alternate_request = CompilationRequest::new(
+            native_request.input.clone(),
+            native_request.language_profile.clone(),
+            native_request.emit.clone(),
+            native_request.compiler.clone(),
+            alternate_host,
+            native_request.build_host.clone(),
+            None,
+            None,
+            native_request.pipeline.clone(),
+            Vec::new(),
+            None,
+            None,
+        );
+        let native = compiler.compile(native_request.clone(), &program);
+        let alternate = compiler.compile(alternate_request.clone(), &program);
+        assert_ne!(native_request.identity, alternate_request.identity);
+        assert_ne!(native.identity, alternate.identity);
+        for representation in [
+            ArtifactRepresentation::Semantic,
+            ArtifactRepresentation::Hir,
+            ArtifactRepresentation::Ssa,
+        ] {
+            let left = native
+                .artifacts
+                .iter()
+                .find(|item| item.representation == representation)
+                .unwrap();
+            let right = alternate
+                .artifacts
+                .iter()
+                .find(|item| item.representation == representation)
+                .unwrap();
+            assert_eq!(left, right);
+        }
+    }
+
+    #[test]
+    fn mismatched_input_identity_is_structurally_rejected() {
+        let compiler = ReferenceCompiler::default();
+        let input_program = program("compiler-input-a");
+        let mut request = compiler.request_for_program(&input_program, emissions(), None);
+        let different = program("compiler-input-b");
+        request.input = compiler
+            .request_for_program(&different, emissions(), None)
+            .input;
+        request.identity = CompilationRequest::new(
+            request.input.clone(),
+            request.language_profile.clone(),
+            request.emit.clone(),
+            request.compiler.clone(),
+            request.compiler_host.clone(),
+            request.build_host.clone(),
+            request.target.clone(),
+            request.run_environment.clone(),
+            request.pipeline.clone(),
+            request.assumptions.clone(),
+            request.assurance_profile.clone(),
+            request.backend.clone(),
+        )
+        .identity;
+        let result = compiler.compile(request, &input_program);
+        assert_eq!(result.status, CompilationStatus::Failed);
+        assert!(result.diagnostics.iter().any(|item| item.code == "CMP203"));
+    }
+
+    #[test]
+    fn target_plan_is_unknown_and_preserves_pretarget_fingerprints() {
+        let compiler = ReferenceCompiler::default();
+        let program = program("compiler-target");
+        let baseline = compiler.compile(
+            compiler.request_for_program(&program, emissions(), None),
+            &program,
+        );
+        let target = TargetContractRef::new(
+            "aarch64-unknown-linux-gnu",
+            BTreeMap::new(),
+            Vec::new(),
+            vec!["target triple is a candidate, not evidence".to_owned()],
+        );
+        let mut target_emissions = emissions();
+        target_emissions.insert(ArtifactRepresentation::TargetLoweringPlan);
+        let targeted = compiler.compile(
+            compiler.request_for_program(&program, target_emissions, Some(target)),
+            &program,
+        );
+        for representation in [
+            ArtifactRepresentation::Semantic,
+            ArtifactRepresentation::Hir,
+            ArtifactRepresentation::Ssa,
+        ] {
+            let left = baseline
+                .artifacts
+                .iter()
+                .find(|item| item.representation == representation)
+                .unwrap();
+            let right = targeted
+                .artifacts
+                .iter()
+                .find(|item| item.representation == representation)
+                .unwrap();
+            assert_eq!(left.fingerprint, right.fingerprint);
+        }
+        assert_eq!(
+            targeted.emissions.target_lowering_plan.unwrap().status,
+            TransformationStatus::Unknown
+        );
+        assert!(!targeted
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.representation == ArtifactRepresentation::BackendArtifact));
+        assert!(!targeted
+            .diagnostics
+            .iter()
+            .any(|item| item.kind == CompilerDiagnosticKind::UnavailableBackendCapability));
+    }
+}

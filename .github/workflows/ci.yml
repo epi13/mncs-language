@@ -70,6 +70,8 @@ jobs:
           cargo run -p mncs-cli -- body examples/executable/checked-add.mncs.json
           cargo run -p mncs-cli -- ir examples/executable/checked-add.mncs.json
           cargo run -p mncs-cli -- ssa examples/executable/checked-add.mncs.json
+          cargo run -p mncs-cli -- compile examples/compiler-study/bounded-sum.mncs.json --emit semantic,hir,ssa,evidence
+          cargo run -p mncs-cli -- compiler-study examples/compiler-study/bounded-sum.mncs.json --node-id ci-linux-x86_64
           cargo run -p mncs-cli -- trace examples/executable/checked-add.mncs.json
           cargo run -p mncs-cli -- obligations examples/executable/checked-add.mncs.json
           cargo run -p mncs-cli -- verifier-request examples/executable/checked-add.mncs.json > /tmp/mncs-verifier-requests.json
