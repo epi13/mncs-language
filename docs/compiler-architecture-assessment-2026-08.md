@@ -2,25 +2,25 @@
 
 ## Outcome
 
-The repository has a credible evidence-bearing compiler spine for a bounded semantic subset, not yet a complete language compiler.
+The repository has an evidence-bearing source-to-SSA vertical slice for a bounded language profile, not yet a complete language compiler.
 
-C0–C2 are implemented at the repository boundary: deterministic compiler identities and requests, semantic validation, semantic→HIR→SSA orchestration, transformation edges, unresolved-obligation retention, target-plan uncertainty, Linux/Windows CI, and an AArch64 compile-shape gate. No selected lexer, parser, lossless CST, representation-neutral AST, complete elaborator, portable backend, native backend, linked executable, native Raspberry Pi run, or translation validator exists.
+C0–C2 and the first Profile 0.1 frontend slice are implemented: deterministic source envelopes, lossless tokens/CST, spanned AST, bounded elaboration, semantic graph/identity outputs, semantic→HIR→SSA orchestration, transformation observations, unresolved-obligation retention, target-plan uncertainty, Linux/Windows CI, and an AArch64 compile-shape gate. No broad grammar, complete elaborator or type calculus, portable backend, native backend, linked executable, native Raspberry Pi run, or translation validator exists.
 
 The maturity description is therefore:
 
-> semantic compiler spine with evidence contracts; frontend and executable backend not yet implemented.
+> experimental source-to-SSA compiler slice with evidence contracts; language breadth and executable backend remain unimplemented.
 
 ## Existing compiler stages
 
 | Logical stage | Existing implementation | Maturity |
 | --- | --- | --- |
-| source / intent representation | semantic JSON manifests and experimental source candidates | bootstrap only |
-| lexical analysis | syntax metrics count lexical units but do not emit a compiler token stream | missing |
-| parsing | `serde_json` creates `Program` before compiler invocation | bootstrap external path |
-| CST | none | missing |
-| AST | none distinct from semantic `Program` | missing |
-| semantic graph | `Program::semantic_graph` with typed nodes/edges | experimental library capability |
-| identity resolution | deterministic semantic identity inventory | experimental library capability; not scope/binding resolution |
+| source / intent representation | content-addressed `SourceEnvelope 0.1` with artifact kind, relationships, provenance, origin, and text; semantic JSON bootstrap retained | experimental bounded profile |
+| lexical analysis | lossless Unicode-aware token stream with trivia and structured diagnostics | experimental 0.1 |
+| parsing | bounded pure-function parser with diagnostic recovery | experimental 0.1 |
+| CST | lossless hierarchical token-range tree with exact reconstruction | experimental 0.1 |
+| AST | spanned, trivia-free representation distinct from semantic identity | experimental 0.1 |
+| semantic graph | elaboration followed by `Program::semantic_graph`, emitted in compiler evidence | experimental bounded profile |
+| identity resolution | deterministic semantic identity inventory emitted after graph construction | partial; not general scope/binding resolution |
 | type and contract analysis | structural validation, effect/capability closure, obligation generation | partial |
 | HIR | deterministic 0.3 HIR with trace and provenance | experimental driver stage |
 | verification passes | structural validators, evidence checks, bounded body/SSA comparison | partial; not translation validation |
@@ -50,16 +50,14 @@ The repository already establishes useful foundations:
 
 The next acceleration threshold requires contracts, not syntax volume:
 
-1. A source artifact envelope independent of files, including artifact kind, relationships, provenance, language profile, and execution intent.
-2. Lossless token, source-span, trivia, CST, recovery diagnostic, and source-map identity rules.
-3. A representation-neutral AST and explicit AST→semantic-graph elaboration relation.
-4. Scope, binding, namespace, import, generic, constraint, defaulting, and coherence rules from RFC 0035.
-5. A type/contract calculus beyond the current structural validator.
-6. Semantic-graph and identity-resolution outputs integrated into compilation evidence.
-7. Translation-validation request/result and fallback policy implementations.
-8. Target-contract resolution, portable backend adapter, linker derivation, executable identity, and runtime envelope.
-9. Feature/profile compatibility and migration fixtures across compiler versions.
-10. Forge-native experiment persistence linked to separate assurance and conformance results.
+1. Scope, binding, namespace, import, generic, constraint, defaulting, and coherence rules from RFC 0035.
+2. A type/contract calculus beyond the current explicit-input return check and structural validator.
+3. Cross-artifact relationship resolution and recursive semantic-graph completion for non-program artifacts.
+4. Versioned partial-program/recovery-node and source-map identity rules.
+5. Translation-validation request/result and fallback policy implementations.
+6. Target-contract resolution, portable backend adapter, linker derivation, executable identity, and runtime envelope.
+7. Feature/profile compatibility and migration fixtures across compiler versions.
+8. Assurance and conformance records linked to, but never inferred from, Forge compiler experiments.
 
 ## Undefined language contracts
 
@@ -96,7 +94,7 @@ The highest-risk assumptions are:
 
 ## Implemented assessment response
 
-This development slice adds:
+The first tranche added:
 
 - a versioned, content-addressed 12-stage architecture contract;
 - explicit availability and integration state for every stage;
@@ -105,6 +103,8 @@ This development slice adds:
 - tests for stage completeness, gap disclosure, deterministic identity, and pass/obligation retention;
 - RFC 0039 defining the language/Forge boundary; and
 - a Forge consumer that compares language-owned observations without emitting assurance or conformance verdicts.
+
+The recommended-cycle tranche additionally adds Source Profile 0.1, a source envelope that binds non-file artifact relationships and provenance, a lossless lexer/CST, spanned AST, bounded AST→semantic elaboration, graph/identity/validation artifacts, a source-to-SSA CLI fixture, and Forge experiment persistence through the shared operation registry.
 
 ## Practical roadmap
 
@@ -144,4 +144,4 @@ This development slice adds:
 
 ## Recommended next cycle
 
-Implement the source artifact envelope and lossless frontend contracts before adding grammar breadth. The acceptance fixture should represent at least two non-file artifact relationships, parse one bounded profile through tokens/CST/AST, elaborate to the existing semantic graph, preserve provenance, and demonstrate deterministic identity plus one recovery diagnostic and one rejected identity-laundering case.
+Keep grammar breadth fixed and implement general scope/binding plus explicit contract clauses over the existing AST→semantic boundary. Add negative fixtures for duplicate bindings, unresolved cross-artifact identities, contract/type mismatch, stale provenance, and partial-program recovery. Define the first language-owned feature/profile compatibility record so Forge can detect regressions without deciding conformance.

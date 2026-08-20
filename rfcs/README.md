@@ -54,3 +54,4 @@ RFC acceptance does not imply production stability. The repository remains pre-s
 - [RFC 0037: Machine-Native Observability, Audit, Telemetry, Trace Correlation, Operational Evidence, and Runtime-Verification Semantics](0037-machine-native-observability-audit-telemetry-trace-correlation-operational-evidence-runtime-verification-semantics.md)
 - [RFC 0038: Machine-Native Compiler, Compilation, Refinement, Validation, and Cross-Target Semantics](0038-machine-native-compiler-compilation-refinement-validation-cross-target-semantics.md)
 - [RFC 0039: Machine-Native Compiler Stage and Experiment Contracts](0039-machine-native-compiler-stage-and-experiment-contracts.md)
+- [RFC 0040: Machine-Native Source Profile 0.1](0040-machine-native-source-profile-0.1.md)
