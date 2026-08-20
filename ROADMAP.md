@@ -66,6 +66,32 @@ one automatically generated proof obligation tied to an existing executable or m
 construct. It should include accepted, rejected, and unresolved fixtures before claiming a theorem
 prover or verified compiler.
 
+## Active cross-cutting track — assurance, evidence, trust, and witnesses
+
+[RFC 0018](rfcs/0018-machine-native-assurance-evidence-trust-witness-semantics.md) extends the initial
+contract/evidence model into an action-relative assurance system over explicit support, refutation,
+provenance, assumptions, trust, freshness, independence, conflict, appraisal, and witness structure.
+
+Current design work:
+
+- distinguish `UNSUPPORTED`, `SUPPORTED`, `REFUTED`, and `CONFLICTED` claim dispositions;
+- keep verifier `PASS`, `FAIL`, and `UNKNOWN` distinct from claim disposition and final assurance decisions;
+- preserve alternative assumption-scoped justification paths instead of flattening evidence into one status;
+- model support, refutation, undercutting, supersession, dependency, and invalidation relations;
+- investigate provenance-algebra representations for alternative and jointly required evidence paths;
+- separate raw evidence from appraisal results and relying-policy decisions;
+- scope verifier/appraiser trust by claim class, subject, method, context, role, and validity;
+- represent bounded delegation, revocation, witnesses, transparency commitments, and common-mode dependencies;
+- require independence claims themselves to be evidenced or explicitly assumed;
+- permit explicit Bayesian, belief-function, subjective-opinion, statistical, or other uncertainty models without adopting a universal confidence score;
+- express assurance profiles as predicates over evidence graphs rather than a global assurance ladder; and
+- return action-relative `AUTHORIZED`, `REJECTED`, or `UNRESOLVED` decisions with machine-readable explanation slices.
+
+The first implementation pilot should remain narrow: versioned claim/evidence/assumption/trust/profile
+artifacts, deterministic four-state claim disposition, two action profiles with different assurance
+requirements, one shared-dependency independence refusal, one contradictory-evidence fixture, one
+freshness invalidation case, and one existing promotion or backend promise gated by an assurance decision.
+
 ## 0.1 — Executable semantic model
 
 **Goal:** demonstrate that MNCS relationships can be represented and mechanically checked before a source grammar exists.
@@ -266,6 +292,7 @@ A 1.0 designation would indicate a coherent research language and toolchain, not
 - at least one independently checkable proof path for a language-generated obligation;
 - at least one executable backend;
 - an evidence manifest with verifiable artifacts;
+- a versioned assurance model that preserves support, refutation, conflict, provenance, trust, freshness, independence, and action-relative policy decisions;
 - conservative and traceable backend-promise emission;
 - bounded unsafe and foreign-function interfaces;
 - a versioned recursive diagnostic and refinement protocol;
