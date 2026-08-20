@@ -39,6 +39,14 @@ An MNCS-oriented program should make it possible to answer:
 
 The JSON manifests and source candidates are experimental transport and research representations. They are not yet a selected production grammar.
 
+The complete logical compiler stage contract, including explicitly missing frontend and executable-backend stages, is available as deterministic machine JSON:
+
+```bash
+cargo run -p mncs-cli -- compiler-architecture
+```
+
+See [the 2026-08 compiler architecture assessment](docs/compiler-architecture-assessment-2026-08.md) and [RFC 0039](rfcs/0039-machine-native-compiler-stage-and-experiment-contracts.md).
+
 ## Current semantic objects
 
 The 0.1 model contains:

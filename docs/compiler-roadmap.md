@@ -34,6 +34,8 @@ The repository now implements the first bounded compiler tranche for the existin
 
 The target-independent compiler artifacts intentionally exclude timestamps, absolute paths, usernames, hostnames, process IDs, and host observations. Compiler request/result and study identities include their derivation context; semantic, HIR, and SSA fingerprints do not.
 
+The stage audit in RFC 0039 now makes the complete logical pipeline machine-readable through `mncs compiler-architecture`. It explicitly reports lexical analysis, CST, AST, and executable generation as planned rather than treating the semantic JSON bootstrap path as their implementation. Compiler study results now expose a language-owned observation contract with per-stage fingerprints, pass execution records, and unresolved obligations for Forge comparison.
+
 ## Ownership boundary
 
 ```text
