@@ -12,6 +12,7 @@ Normative terms such as **MUST**, **SHOULD**, and **MAY** indicate intended requ
 - [Source Representations](source-representations.md)
 - [Machine-Intent Expressions](machine-intent-expressions.md)
 - [Verified Intermediate Representation](verified-ir.md)
+- [Compiler Pipeline Contracts](compiler-pipeline.md)
 - [Bounded Reference Execution](reference-execution.md)
 - [Recursive Introspection and Refinement](recursive-refinement.md)
 

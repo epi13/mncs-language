@@ -5,7 +5,7 @@ use std::{
     process::ExitCode,
 };
 
-use mncs_compiler::{native_node_profile, ReferenceCompiler};
+use mncs_compiler::{native_node_profile, reference_compiler_architecture, ReferenceCompiler};
 use mncs_model::{
     compare_body_and_ssa, compare_execution, execute_ssa, execute_with_policy,
     ArtifactRepresentation, CandidateEvaluation, CausalSlice, ComparisonStatus, CompilationResult,
@@ -55,6 +55,17 @@ fn main() -> ExitCode {
         "compare-execution" => execution_compare_command(args),
         "check-lowering-execution" => lowering_execution_command(args),
         "compile" => compile_command(args),
+        "compiler-architecture" => {
+            if args.next().is_some() {
+                eprintln!("error: compiler-architecture does not accept arguments");
+                return ExitCode::from(2);
+            }
+            if print_json(&reference_compiler_architecture()) {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(2)
+            }
+        }
         "compiler-study" => compiler_study_command(args),
         "diff" => two_manifest_command(args, diff),
         "compare" => two_manifest_command(args, compare),
@@ -1275,6 +1286,7 @@ fn print_usage() {
     eprintln!("  mncs compare-execution <baseline.json> <candidate.json> <corpus.json>");
     eprintln!("  mncs check-lowering-execution <program.json> <corpus.json>");
     eprintln!("  mncs compile <program.json> [--emit semantic,hir,ssa,evidence,target-plan] [--output-dir DIR] [--target TARGET]");
+    eprintln!("  mncs compiler-architecture");
     eprintln!("  mncs compiler-study <program.json> [--node-id NODE] [--target TARGET]");
     eprintln!("  mncs diff <before.json> <after.json>");
     eprintln!("  mncs compare <before.json> <after.json>");
