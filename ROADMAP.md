@@ -92,6 +92,46 @@ artifacts, deterministic four-state claim disposition, two action profiles with 
 requirements, one shared-dependency independence refusal, one contradictory-evidence fixture, one
 freshness invalidation case, and one existing promotion or backend promise gated by an assurance decision.
 
+## Active cross-cutting track — values, data, types, and representation realizations
+
+[RFC 0019](rfcs/0019-machine-native-value-data-type-representation-semantics.md) separates logical
+values and logical types from observation interfaces, physical representation realizations, storage,
+and serialized encodings so the language can preserve strong semantics while leaving machine layout
+open to evidence-bearing realization search.
+
+Current design work:
+
+- establish a compact logical data vocabulary around zero, unit, products, sums, records, variants,
+  functions, inductive data, coinductive observation, indexed data, opaque/nominal identities, and
+  existential/dynamic packages;
+- treat constructors and semantic views as logical structure rather than mandatory field/tag layout;
+- preserve an explicit recursive boundary in canonical semantics while allowing surface elaboration to
+  hide fold/unfold details where appropriate;
+- investigate selective union, intersection, and exclusion descriptions without collapsing nominal or
+  generative identity into pure set equality;
+- keep dynamic values existentially typed and witness-bearing rather than introducing an unchecked `Any`;
+- distinguish logical, view, representation, storage, and serialization observations;
+- make representation-sensitive observations such as layout, size, alignment, field order, tag encoding,
+  and addressability explicit so they narrow realization freedom visibly;
+- represent hard representation requirements separately from preferences and target-dependent facts;
+- model candidate representation realizations with validity, constructor-distinction, decode,
+  observation-preservation, target-applicability, and evidence obligations;
+- preserve logical type identity across legal boxing, unboxing, packing, niche encoding, field
+  reordering, AoS/SoA changes, closure conversion, defunctionalization, and similar realization changes;
+- permit unresolved representation variables/holes until a phase genuinely requires a concrete realization;
+- use RFC 0018 assurance profiles to distinguish experimental representation use from stronger promotion;
+- keep allocation, provenance, lifetime, ABI, persistence, serialization, detailed equality, and numeric
+  semantics owned by their respective RFCs rather than folding them into the value ontology; and
+- expose representation choice as a bounded Forge search dimension whose candidates remain untrusted
+  until their semantic and target obligations are discharged.
+
+The first implementation pilot should remain deliberately bounded: a versioned logical datatype schema
+for a small product/sum/record/variant subset, separate logical-type and representation identities,
+two or three representation families, a small representation-requirement vocabulary, one semantic
+view, one niche-encoding validity experiment with conservative fallback, one field-reordering case that
+becomes illegal after an explicit representation observation, bounded differential reference execution,
+and two RFC 0018 assurance policies for experimental versus stronger representation use.
+
 ## 0.1 — Executable semantic model
 
 **Goal:** demonstrate that MNCS relationships can be represented and mechanically checked before a source grammar exists.
@@ -293,6 +333,8 @@ A 1.0 designation would indicate a coherent research language and toolchain, not
 - at least one executable backend;
 - an evidence manifest with verifiable artifacts;
 - a versioned assurance model that preserves support, refutation, conflict, provenance, trust, freshness, independence, and action-relative policy decisions;
+- a versioned logical value/type model that distinguishes logical identity, semantic observation, representation realization, storage, and serialization;
+- at least one demonstrated logical datatype with multiple evidence-bearing representation realizations and an explicit representation-sensitive constraint that narrows the realization envelope;
 - conservative and traceable backend-promise emission;
 - bounded unsafe and foreign-function interfaces;
 - a versioned recursive diagnostic and refinement protocol;
