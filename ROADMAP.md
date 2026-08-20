@@ -239,6 +239,54 @@ that produces only `BUDGET_EXHAUSTED` under fuel; a finite computation that exha
 returns under a larger one; a productive nonterminating producer; a may-versus-must termination fixture;
 a fairness-dependent liveness model; and RFC 0018 policies separating sandbox authority from promotion.
 
+## Active cross-cutting track — time, clocks, deadlines, temporal validity, and real-time realizations
+
+[RFC 0023](rfcs/0023-machine-native-time-clock-deadline-temporal-validity-real-time-semantics.md)
+establishes a temporal model that keeps causal/logical order, physical clock observation, monotonic
+elapsed time, reference/civil time, event/processing time, temporal validity, deadlines, schedules,
+and bounded computation distinct rather than collapsing them into one timestamp primitive.
+
+Current design work:
+
+- require every timestamp/instant observation to identify its clock or temporal domain rather than
+  providing one ambient universal `Timestamp`;
+- preserve causal order from RFC 0010 separately from physical timestamp order and forbid timestamp
+  sorting from fabricating causal relationships;
+- represent physical clock observations with source identity, time scale, synchronization state,
+  resolution, uncertainty, stability/drift information, and evidence where required;
+- distinguish monotonic clocks, synchronized reference clocks, civil representations, logical/vector/
+  hybrid clocks, virtual time, simulation time, replay time, event time, ingestion time, and processing time;
+- represent explicit clock mappings with offset/rate/uncertainty/validity evidence before comparing
+  readings from different clock domains;
+- distinguish instants, durations, temporal intervals, and interval relations with explicit boundary semantics;
+- separate observation/creation/verification time from valid/effective/expiration and knowledge/record time;
+- derive temporal applicability/freshness using validity intervals and clock uncertainty, preserving
+  `UNRESOLVED` when uncertainty overlaps a validity boundary;
+- distinguish deadlines from timeout reaction policies and periods from deadlines, with separate release,
+  minimum-interarrival, jitter, and miss-semantics contracts;
+- support timed-state-machine and metric-temporal constraints, including bounded eventuality and explicit
+  non-Zeno/time-divergence obligations where required;
+- separate logical effect time from physical execution time so schedules can vary within evidenced temporal envelopes;
+- treat schedules as target-specific realizations and support untrusted schedule synthesis followed by
+  narrow schedule-witness verification under explicit execution-time/workload/platform assumptions;
+- consume target/runtime clock and scheduler facts from RFC 0017 and assurance-gate clock, WCET, schedule,
+  synchronization, and freshness claims through RFC 0018;
+- expose clock reads/timers as RFC 0008 effects rather than ambient pure operations;
+- support simulation/replay clocks and event-time frontiers so testing/dataflow systems can preserve
+  temporal semantics without following wall-clock execution rate;
+- treat watermarks/frontiers as epistemic temporal-progress claims rather than clock readings;
+- connect temporal equivalence/refinement/counterexamples to RFC 0020 relation scope; and
+- expose schedule, core assignment, preemption, clock realization, and communication windows as bounded
+  Forge realization dimensions while keeping protected deadlines/jitter/order constraints explicit.
+
+The first implementation pilot should remain bounded: versioned clock-domain/observation/mapping,
+instant/duration/interval, deadline/timeout/period/jitter, timed-constraint, schedule-witness, and
+temporal-relation artifacts; definite versus unresolved ordering under clock uncertainty; monotonic
+versus civil-time separation; deadline-versus-timeout and period-versus-deadline fixtures; a small timed
+state machine; one valid and one invalid schedule witness; two physical schedules preserving one logical
+execution-time contract; a simulation-clock run; and an RFC 0018 freshness example where clock
+uncertainty overlapping expiration produces `UNRESOLVED`.
+
 ## 0.1 — Executable semantic model
 
 **Goal:** demonstrate that MNCS relationships can be represented and mechanically checked before a source grammar exists.
@@ -448,10 +496,13 @@ A 1.0 designation would indicate a coherent research language and toolchain, not
 - at least one numeric-realization study where precision/representation/accumulation can vary while a protected numerical relation remains explicit and a numerically invalid faster candidate is rejected;
 - a versioned termination/progress model that distinguishes totality, divergence, productivity, concurrent progress, liveness, fairness dependencies, and bounded execution;
 - at least one bounded-computation study proving mechanically that `BUDGET_EXHAUSTED` leaves termination unresolved rather than implying divergence, alongside one independent positive termination or productivity witness;
+- a versioned temporal model that distinguishes causal/logical order, physical/monotonic/reference/civil/virtual time, clock uncertainty, instants/durations/intervals, temporal validity, deadlines/timeouts/periods/jitter, logical effect time, and schedule realizations;
+- at least one temporal study where uncertain clock observations make one ordering or freshness claim `UNRESOLVED`, alongside one independently checkable schedule witness that satisfies explicit deadlines under current target/execution-time assumptions;
+- at least one demonstration that two different physical schedules can preserve the same declared logical execution-time contract without implying physical timing identity;
 - conservative and traceable backend-promise emission;
 - bounded unsafe and foreign-function interfaces;
 - a versioned recursive diagnostic and refinement protocol;
 - isolated candidate transformations and explicit promotion policy;
-- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, and assumption limits;
+- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, clock, temporal-validity, scheduling, and assumption limits;
 - documented soundness and bootstrap limits;
 - conformance tests and independent implementation guidance.
