@@ -1,0 +1,69 @@
+name: Compiler platform portability
+
+on:
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "examples/**"
+      - "rfcs/0038-*.md"
+      - "docs/compiler-roadmap.md"
+      - ".github/workflows/compiler-platforms.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "examples/**"
+      - ".github/workflows/compiler-platforms.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  host-portability:
+    name: ${{ matrix.label }} host
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+          - os: windows-latest
+            label: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.79.0
+      - name: Build workspace
+        run: cargo build --workspace
+      - name: Test workspace
+        run: cargo test --workspace
+      - name: Validate canonical fixture
+        run: cargo run -p mncs-cli -- validate examples/account-transfer.mncs.json
+      - name: Emit HIR
+        run: cargo run -p mncs-cli -- ir examples/executable/checked-add.mncs.json
+      - name: Emit SSA
+        run: cargo run -p mncs-cli -- ssa examples/executable/checked-add.mncs.json
+      - name: Check bounded lowering execution
+        run: cargo run -p mncs-cli -- check-lowering-execution examples/execution/bounded-sum-baseline.mncs.json examples/execution/bounded-sum-corpus.json
+
+  aarch64-compile-shape:
+    name: linux-aarch64 compile shape
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.79.0
+          targets: aarch64-unknown-linux-gnu
+      - name: Check workspace for AArch64 Linux
+        run: cargo check --workspace --target aarch64-unknown-linux-gnu
+      - name: Explain native Raspberry Pi gate
+        run: >-
+          echo "This job checks target-shape portability only.
+          Native Raspberry Pi build/execution evidence belongs to the Fabric compiler-study matrix defined by RFC 0038."
