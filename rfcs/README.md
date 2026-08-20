@@ -40,3 +40,4 @@ RFC acceptance does not imply production stability. The repository remains pre-s
 - [RFC 0023: Machine-Native Time, Clock, Deadline, Temporal Validity, and Real-Time Semantics](0023-machine-native-time-clock-deadline-temporal-validity-real-time-semantics.md)
 - [RFC 0024: Machine-Native Information Flow, Confidentiality, Integrity, Declassification, and Side-Channel Semantics](0024-machine-native-information-flow-confidentiality-integrity-declassification-side-channel-semantics.md)
 - [RFC 0025: Machine-Native Principal, Identity, Authentication, Credential, Attestation, and Cryptographic Trust Semantics](0025-machine-native-principal-identity-authentication-credential-attestation-cryptographic-trust-semantics.md)
+- [RFC 0026: Machine-Native Persistent State, Durability, Transaction, Snapshot, Journal, and Crash-Consistency Semantics](0026-machine-native-persistent-state-durability-transaction-snapshot-journal-crash-consistency-semantics.md)
