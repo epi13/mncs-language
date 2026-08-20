@@ -1067,7 +1067,7 @@ mod tests {
         assert!(!result.unresolved_obligations.is_empty());
 
         let mut laundered = result;
-        laundered.interpretation = "conformant".to_owned();
+        "conformant".clone_into(&mut laundered.interpretation);
         laundered.seal();
         assert!(!laundered.identity_is_valid());
     }
