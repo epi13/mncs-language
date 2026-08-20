@@ -37,3 +37,4 @@ RFC acceptance does not imply production stability. The repository remains pre-s
 - [RFC 0020: Machine-Native Identity, Equality, Equivalence, Refinement, Substitutability, and Compatibility Semantics](0020-machine-native-identity-equality-equivalence-refinement-substitutability-compatibility-semantics.md)
 - [RFC 0021: Machine-Native Numeric, Arithmetic, Precision, Error, and Reproducibility Semantics](0021-machine-native-numeric-arithmetic-precision-error-reproducibility-semantics.md)
 - [RFC 0022: Machine-Native Termination, Productivity, Progress, Liveness, and Bounded-Computation Semantics](0022-machine-native-termination-productivity-progress-liveness-bounded-computation-semantics.md)
+- [RFC 0023: Machine-Native Time, Clock, Deadline, Temporal Validity, and Real-Time Semantics](0023-machine-native-time-clock-deadline-temporal-validity-real-time-semantics.md)
