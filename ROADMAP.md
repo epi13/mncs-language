@@ -390,6 +390,63 @@ privilege escalation; caveat accumulation; `UNKNOWN` credential status; rejected
 authentic acceptable and authentic-but-unacceptable attestation cases; stale attestation; agent lineage
 without authority inheritance; and RFC 0018 policies separating verifier, mutation, and promotion authority.
 
+## Active cross-cutting track — persistent state, transactions, durability, and crash recovery
+
+[RFC 0026](rfcs/0026-machine-native-persistent-state-durability-transaction-snapshot-journal-crash-consistency-semantics.md)
+establishes persistent-state semantics that keep logical state, transaction order, visibility, acknowledgement,
+durability, persistence ordering, snapshots, journals, crash states, and recovered state distinct while
+allowing storage mechanisms to remain evidence-bearing realization choices.
+
+Current design work:
+
+- distinguish version-persistent logical data from durable storage so retained old versions do not imply
+  power-loss survival;
+- require durability claims to name explicit failure models and persistence domains rather than a universal
+  `durable` bit;
+- separate RFC 0010 memory visibility/order from persistence visibility/order and represent explicit
+  `PersistBefore` obligations where crash safety depends on write persistence order;
+- decompose ambiguous `commit` semantics into serialization, visibility, durability, acknowledgement, and
+  recovery-inclusion points that may coincide only under an explicit contract;
+- keep concurrency atomicity, failure atomicity, isolation, durability, and application-invariant preservation
+  as separate claims;
+- distinguish snapshot isolation, serializability, strict serializability, opacity, durable linearizability,
+  and buffered durable linearizability rather than treating transactions as one `ACID` profile;
+- treat MVCC, locking, optimistic validation, WAL, undo/redo logging, ARIES-style recovery, copy-on-write,
+  shadow paging, persistent-memory transactions, and log-structured storage as realization families rather
+  than language-level meanings;
+- model recovery journals, logical/physical recovery records, journal positions, checkpoints, snapshots,
+  persistent roots, generations, and point-in-time recovery as explicit state-derivation artifacts;
+- keep recovery journals distinct from event histories and audit logs, checkpoints distinct from snapshots,
+  and snapshots distinct from independent backups;
+- represent crash contracts with normal postconditions, crash conditions, recovery procedures, recovery
+  postconditions, failure models, witnesses, and evidence;
+- permit crash/recovery proof systems in the Crash Hoare Logic / concurrent crash-logic family without
+  forcing one theorem prover into the language core;
+- require recovery itself to remain failure-aware so a crash during recovery does not become an unstated
+  trusted assumption;
+- represent persistent references and durable object identities separately from process virtual addresses,
+  with generation-sensitive validity after rollback/recovery;
+- keep logical deletion separate from physical erasure and expose snapshot/journal retention as potential
+  erasure blockers under RFC 0024;
+- preserve persistence obligations through HIR/SSA/backend lowering so functional equivalence cannot erase
+  flush/order/journal/root-switch obligations;
+- expose persist-order checking, bounded crash-schedule exploration, recovery-relation checking, and
+  transaction-history checking as candidate micro-verifiers whose evidence remains method-scoped;
+- make persistence evidence target-sensitive through RFC 0017 and assurance-gated through RFC 0018;
+- expose durability/crash/recovery deltas to Forge recursive refinement; and
+- leave replicated durability, consensus, partitions, distributed logs, and cross-node transactions to
+  RFC 0028 rather than extending local transaction atomicity over arbitrary remote effects.
+
+The first implementation pilot should remain bounded: versioned state/transaction/failure-model/
+persistence-domain, persist-order, durability/acknowledgement, journal/snapshot/checkpoint/root/generation,
+crash-contract/recovery-result, counterexample, and persistence-delta artifacts; `Visible != Durable` and
+ack-before-durability fixtures; a two-field failure-atomic update; WAL ordering; snapshot-isolation versus
+serializability; a copy-on-write root-switch example; checkpointed replay; a crash-during-recovery case; a
+stale persistent-reference case; a logical-delete-versus-snapshot-erasure case; and an RFC 0020 study where
+functional behavior agrees while one candidate fails the required crash relation. The first Forge study
+should compare undo-journal, redo-WAL, and copy-on-write realizations and reject any faster candidate that
+violates a protected persistence relation.
+
 ## 0.1 — Executable semantic model
 
 **Goal:** demonstrate that MNCS relationships can be represented and mechanically checked before a source grammar exists.
@@ -613,10 +670,22 @@ A 1.0 designation would indicate a coherent research language and toolchain, not
 - at least one delegation study where a narrower child authority is accepted while a broader child authority is mechanically rejected, plus one status case where `UNKNOWN` remains distinct from `GOOD`;
 - at least one attestation study where evidence is authentic and fresh but the measured state is unacceptable, plus one stale-attestation study that cannot establish current state;
 - at least one Forge identity-realization study where a broader or longer-lived credential is rejected in favor of a least-sufficient, short-lived proof-of-possession realization with appropriate current attestation;
+- a versioned persistent-state model that distinguishes logical state/version, transaction intent/attempt/outcome, volatile and persistent realization, snapshot, checkpoint, journal, persistent root/generation, crash state, and recovered state;
+- a versioned durability model that requires explicit failure models and persistence domains and distinguishes memory order/visibility from persistence order/durability;
+- a versioned transaction/recovery model that distinguishes failure atomicity, isolation, serializability, snapshot isolation, visibility, durability, acknowledgement, crash conditions, recovery procedures, and recovered-state relations;
+- at least one persistence study mechanically demonstrating `Visible != Durable` and one profile where acknowledgement-before-durability is rejected because `AckImpliesDurability` is required;
+- at least one persist-order study where ordinary source/memory order is insufficient and an explicit persistence-order witness is required;
+- at least one failure-atomic update where crash exploration permits only old/new logical state and rejects a torn mixture;
+- at least one transaction study where snapshot isolation is established while serializability is refuted without collapsing the two claims;
+- at least one recovery study that remains correct across a crash during recovery, or otherwise provides an independently checkable repeated-recovery convergence witness;
+- at least one snapshot/checkpoint study proving they are distinct semantic objects and one persistent-reference generation study rejecting a stale reference after rollback/recovery;
+- at least one RFC 0020 relation study where crash-free functional behavior agrees while a required crash relation fails;
+- at least one Forge persistence-realization study comparing multiple journal/copy-on-write strategies and rejecting a faster candidate that violates a protected durability, isolation, persist-order, or recovery relation;
+- at least one bounded crash-testing result that remains explicitly bounded instead of being upgraded to universal crash-safety evidence;
 - conservative and traceable backend-promise emission;
 - bounded unsafe and foreign-function interfaces;
 - a versioned recursive diagnostic and refinement protocol;
 - isolated candidate transformations and explicit promotion policy;
-- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, clock, temporal-validity, scheduling, information-flow, observer, reclassification, side-channel, principal, identity, credential, delegation, trust-domain, federation, revocation, cryptographic-algorithm, freshness, attestation, and assumption limits;
+- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, clock, temporal-validity, scheduling, information-flow, observer, reclassification, side-channel, principal, identity, credential, delegation, trust-domain, federation, revocation, cryptographic-algorithm, freshness, attestation, persistent-state, transaction, failure-model, persistence-domain, persist-order, durability, journal, snapshot, checkpoint, recovery, persistent-reference, retention, and assumption limits;
 - documented soundness and bootstrap limits;
 - conformance tests and independent implementation guidance.
