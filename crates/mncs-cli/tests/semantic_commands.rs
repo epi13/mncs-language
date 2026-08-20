@@ -424,3 +424,112 @@ fn bounded_execution_exhausts_its_model_budget_without_hanging() {
     let result: Value = serde_json::from_slice(&output.stdout).expect("execution JSON");
     assert_eq!(result["status"], "budget_exhausted");
 }
+
+#[test]
+fn compile_emits_the_existing_hir_ssa_and_evidence_chain() {
+    let manifest = example("executable/checked-add.mncs.json");
+    let compiled = binary()
+        .args(["compile", &manifest, "--emit", "semantic,hir,ssa,evidence"])
+        .output()
+        .expect("run compiler");
+    assert!(compiled.status.success());
+    let result: Value = serde_json::from_slice(&compiled.stdout).expect("compiler JSON");
+    assert_eq!(result["status"], "completed_with_unresolved_obligations");
+    assert!(!result["evidence"]["unresolved_obligations"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert!(result["evidence"]["transformation_edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|edge| edge["status"] == "UNKNOWN"));
+
+    let direct_hir = binary().args(["ir", &manifest]).output().expect("run HIR");
+    let direct_ssa = binary().args(["ssa", &manifest]).output().expect("run SSA");
+    assert_eq!(
+        result["emissions"]["hir"],
+        serde_json::from_slice::<Value>(&direct_hir.stdout).unwrap()
+    );
+    assert_eq!(
+        result["emissions"]["ssa"],
+        serde_json::from_slice::<Value>(&direct_ssa.stdout).unwrap()
+    );
+}
+
+#[test]
+fn compile_is_deterministic_and_respects_requested_files() {
+    let manifest = example("executable/checked-add.mncs.json");
+    let output_dir =
+        std::env::temp_dir().join(format!("mncs-compiler-output-{}", std::process::id()));
+    let output_path = output_dir.to_string_lossy().into_owned();
+    let first = binary()
+        .args([
+            "compile",
+            &manifest,
+            "--emit",
+            "hir,ssa,evidence",
+            "--output-dir",
+            &output_path,
+        ])
+        .output()
+        .expect("run first compiler invocation");
+    let second = binary()
+        .args(["compile", &manifest, "--emit", "hir,ssa,evidence"])
+        .output()
+        .expect("run second compiler invocation");
+    assert!(first.status.success());
+    assert!(second.status.success());
+    assert_eq!(first.stdout, second.stdout);
+    assert!(output_dir.join("hir.json").is_file());
+    assert!(output_dir.join("ssa.json").is_file());
+    assert!(output_dir.join("evidence.json").is_file());
+    assert!(!output_dir.join("semantic.json").exists());
+    std::fs::remove_dir_all(&output_dir).expect("remove exact temporary compiler output");
+}
+
+#[test]
+fn invalid_compile_is_structured_and_never_emits_ssa() {
+    let manifest = example("executable/invalid-body-capability.mncs.json");
+    let output = binary()
+        .args(["compile", &manifest, "--emit", "hir,ssa,evidence"])
+        .output()
+        .expect("run invalid compiler input");
+    assert_eq!(output.status.code(), Some(1));
+    let result: Value = serde_json::from_slice(&output.stdout).expect("compiler JSON");
+    assert_eq!(result["status"], "failed");
+    assert!(result["artifacts"].as_array().unwrap().is_empty());
+    assert!(result["emissions"]["ssa"].is_null());
+    assert!(result["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|diagnostic| diagnostic["kind"] == "semantic_invalidity"));
+}
+
+#[test]
+fn compiler_study_separates_host_observations_from_portable_fingerprints() {
+    let manifest = example("execution/bounded-sum-baseline.mncs.json");
+    let output = binary()
+        .args(["compiler-study", &manifest, "--node-id", "test-node"])
+        .output()
+        .expect("run compiler study");
+    assert!(output.status.success());
+    let study: Value = serde_json::from_slice(&output.stdout).expect("study JSON");
+    assert_eq!(study["node"]["node_identity"], "test-node");
+    assert!(study["run_identity"].is_string());
+    assert!(study["compilation_request_identity"].is_string());
+    for field in ["semantic_fingerprint", "hir_fingerprint", "ssa_fingerprint"] {
+        assert_eq!(study[field].as_str().unwrap().len(), 64);
+        assert!(study["invariants"]["expected_equal"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == field));
+    }
+    assert!(study["invariants"]["expected_distinct"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value == "compilation_request_identity"));
+}

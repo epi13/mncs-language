@@ -49,6 +49,16 @@ jobs:
         run: cargo run -p mncs-cli -- ir examples/executable/checked-add.mncs.json
       - name: Emit SSA
         run: cargo run -p mncs-cli -- ssa examples/executable/checked-add.mncs.json
+      - name: Compile evidence-bearing artifact chain
+        run: >-
+          cargo run -p mncs-cli -- compile
+          examples/compiler-study/bounded-sum.mncs.json
+          --emit semantic,hir,ssa,evidence
+      - name: Emit native compiler-study record
+        run: >-
+          cargo run -p mncs-cli -- compiler-study
+          examples/compiler-study/bounded-sum.mncs.json
+          --node-id ${{ matrix.label }}
       - name: Check bounded lowering execution
         run: cargo run -p mncs-cli -- check-lowering-execution examples/execution/bounded-sum-baseline.mncs.json examples/execution/bounded-sum-corpus.json
 

@@ -1,19 +1,14 @@
 [package]
-name = "mncs-cli"
-description = "Command-line tools for MNCS semantic manifests and syntax experiments"
+name = "mncs-compiler"
+description = "Evidence-bearing compiler driver for the MNCS semantic spine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
-[[bin]]
-name = "mncs"
-path = "src/main.rs"
-
 [dependencies]
-mncs-compiler = { path = "../mncs-compiler" }
 mncs-model = { path = "../mncs-model" }
-mncs-syntax = { path = "../mncs-syntax" }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true

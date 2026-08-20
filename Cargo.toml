@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/mncs-model", "crates/mncs-cli", "crates/mncs-syntax"]
+members = [
+    "crates/mncs-model",
+    "crates/mncs-compiler",
+    "crates/mncs-cli",
+    "crates/mncs-syntax",
+]
 resolver = "2"
 
 [workspace.package]

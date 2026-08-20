@@ -23,6 +23,17 @@ The repository already has more of a compiler spine than the crate layout sugges
 
 The compiler should therefore be built by **connecting and hardening the existing semantic spine**, not by introducing a separate conventional AST/IR stack that becomes a competing definition of the language.
 
+## Implementation status after the first compiler tranche
+
+The repository now implements the first bounded compiler tranche for the existing executable semantic subset:
+
+- **C0 implemented:** `mncs-model` owns versioned compiler request, result, evidence, pass, transformation-edge, host/build/target/run, target-plan, diagnostic, study, and backend-boundary artifacts. Their identities use deterministic serialization and distinct identity domains. Integrity checks reject laundered identities, wrong transformation endpoints, stale backend bindings, omitted target/backend assumptions, and unresolved-obligation references not retained by the bundle.
+- **C1 implemented for the current subset:** `mncs-compiler` validates an exact semantic input and orchestrates the existing `Program::lower_to_ir` and `Program::lower_to_ssa` implementations. `mncs compile` emits deterministic semantic, HIR, SSA, target-plan, and evidence JSON without defining a second HIR or SSA. Invalid semantics do not reach HIR/SSA, and unresolved obligations remain visible with conservative selection.
+- **C2 repository boundary implemented; native study pending:** Linux and Windows CI build/test and run the compiler workflows. The Linux-to-AArch64 job remains a compile-shape check only. `mncs compiler-study` and `examples/compiler-study/bounded-sum.mncs.json` provide the machine-readable Fabric-side interface for native Raspberry Pi execution, but no Raspberry Pi result is claimed in this repository state.
+- **C3 boundary only:** backend identity/configuration/result/evidence and `TargetLoweringPlan` are executable schemas. A named target with missing layout/ABI/integer/trap evidence produces `UNKNOWN` and no backend artifact. No portable or native executable backend is implemented yet.
+
+The target-independent compiler artifacts intentionally exclude timestamps, absolute paths, usernames, hostnames, process IDs, and host observations. Compiler request/result and study identities include their derivation context; semantic, HIR, and SSA fingerprints do not.
+
 ## Ownership boundary
 
 ```text
@@ -486,15 +497,15 @@ The compiler study is successful when each is either accepted for an explicit re
 
 ## Near-term repository tasks
 
-The next implementation PRs after RFC 0038 should be small and ordered:
+The first four repository-side tasks below are implemented for the bounded subset. Native Fabric execution and backend work remain ordered follow-ons:
 
-1. add compiler contract structs and fixtures to `mncs-model`;
-2. add `mncs-compiler` orchestration crate;
-3. add CLI `compile` artifact-bundle output;
-4. make Linux/Windows host testing mandatory and add AArch64 shape checking;
-5. add Fabric node-profile/result schemas;
-6. run the first Linux/Windows/Raspberry Pi semantic/HIR/SSA identity study;
-7. add portable backend adapter;
-8. only then introduce the first native backend experiment.
+1. **Implemented:** add compiler contract structs and adversarial identity tests to `mncs-model`.
+2. **Implemented:** add the `mncs-compiler` orchestration crate.
+3. **Implemented:** add CLI `compile` artifact-bundle output.
+4. **Implemented:** exercise Linux/Windows hosts and retain the AArch64 shape gate.
+5. **Implemented:** add Fabric-facing node/study request/result schemas and a frozen fixture.
+6. **Pending external execution:** run and compare the first Linux/Windows/Raspberry Pi semantic/HIR/SSA identity study. GitHub-hosted Windows is CI evidence; a native Raspberry Pi run must come from Fabric.
+7. **Pending:** add a replaceable portable backend adapter for a deliberately bounded subset.
+8. **Pending:** introduce the first native backend experiment only after the portable/backend-validation seam is exercised.
 
 This ordering lets the project learn from cross-platform differences before native backend complexity can hide whether a mismatch belongs to semantics, compiler orchestration, target lowering, toolchain, or runtime execution.

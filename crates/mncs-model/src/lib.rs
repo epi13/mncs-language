@@ -7,6 +7,7 @@
 mod body;
 mod canonical;
 mod cfg;
+mod compiler;
 mod core;
 mod delta;
 mod evidence;
@@ -30,6 +31,15 @@ pub use body::{
 };
 pub use canonical::{CanonicalError, CanonicalForm, CANONICAL_SCHEMA_VERSION};
 pub use cfg::{Cfg, CfgBlock, CFG_SCHEMA_VERSION};
+pub use compiler::{
+    ArtifactRepresentation, BackendConfiguration, BackendEvidence, BackendIdentity, BackendResult,
+    BuildHostIdentity, CompilationEmissions, CompilationEvidenceBundle, CompilationRequest,
+    CompilationResult, CompilationStatus, CompilationStudyRequest, CompilationStudyResult,
+    CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind, CompilerHostIdentity,
+    CompilerImplementationIdentity, CompilerNodeProfile, CompilerPassIdentity, CrossHostInvariants,
+    ObservationModelRef, PassPipelineIdentity, RelationClaim, RunEnvironmentRef, TargetContractRef,
+    TargetLoweringPlan, TransformationEdge, TransformationStatus, COMPILER_ARTIFACT_SCHEMA_VERSION,
+};
 pub use core::{
     Assumption, AssumptionConfidence, ContractClause, ContractKind, Effect, EvidenceClaim,
     EvidenceStatus, FailureMode, Function, ParseError, Program, Value, SUPPORTED_SCHEMA_VERSION,
@@ -56,7 +66,7 @@ pub use identity::{
 pub use ir::{
     CapabilityUse, FailurePathKind, HighLevelIr, IrBlock, IrError, IrFunction, IrOperation,
     IrOperationKind, IrStateRegion, IrTransition, IrType, IrValue, MachineIntentLinks, PathKind,
-    StateRegionKind, TraceEntry, TraceMap,
+    StateRegionKind, TraceEntry, TraceMap, HIGH_LEVEL_IR_SCHEMA_VERSION,
 };
 pub use machine_intent::{
     AlignmentCapability, ArithmeticIntent, BackendPromise, BackendPromiseDecision, Fact,
