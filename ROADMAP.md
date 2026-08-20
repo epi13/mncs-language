@@ -132,6 +132,49 @@ view, one niche-encoding validity experiment with conservative fallback, one fie
 becomes illegal after an explicit representation observation, bounded differential reference execution,
 and two RFC 0018 assurance policies for experimental versus stronger representation use.
 
+## Active cross-cutting track — identity, equality, equivalence, refinement, and compatibility relations
+
+[RFC 0020](rfcs/0020-machine-native-identity-equality-equivalence-refinement-substitutability-compatibility-semantics.md)
+establishes a typed relation framework so MNCS can state exactly how two values, artifacts, programs,
+representations, components, or realizations are related without collapsing every notion of “same”
+into one equality or verifier bit.
+
+Current design work:
+
+- distinguish identity, definitional equality, propositional equality, structural equality,
+  alpha-equivalence, isomorphism, logical equivalence, behavioral equivalence, refinement,
+  substitutability, compatibility, and sound abstraction;
+- make observation, context, environment, target, quantified-domain, and direction scopes part of
+  relation identity where they affect meaning;
+- represent relation claims as proof-relevant semantic artifacts with explicit subjects, assumptions,
+  witness references, obligations, evidence, and provenance;
+- use logical relations for representation independence and parametric reasoning without making them
+  the only equivalence theory;
+- use simulation, bisimulation, coinduction, and trace relations as candidate witnesses for lowering,
+  stateful, concurrent, reactive, and potentially infinite behavior;
+- treat refinement as directional behavior inclusion so valid implementations may reduce nondeterminism
+  or remove permitted failure behavior without falsely claiming equality;
+- model contextual refinement/substitutability as replacement claims over declared context classes;
+- keep compatibility contract-class specific rather than assuming a single symmetric compatibility relation;
+- define generalized congruence/rewrite rules so substitution is legal only where an operator or context
+  is known to respect the relation;
+- distinguish sound abstract interpretation from exact semantic equality;
+- introduce bounded agreement as an explicit relation so finite execution corpora cannot be laundered
+  into universal equivalence;
+- keep counterexamples relation-scoped so a timing mismatch does not automatically refute a narrower
+  functional relation;
+- preserve relation identities and evidence through composition, invalidation, and Forge relation deltas;
+- use RFC 0018 assurance policies to decide which evidenced relation claims authorize experimentation,
+  lowering, representation use, linking, or candidate promotion; and
+- reserve full-abstraction and stronger secure-compilation relations for boundaries that genuinely need
+  preservation and reflection of contextual distinctions.
+
+The first implementation pilot should remain bounded: versioned `RelationDefinition`, `RelationClaim`,
+`ObservationModel`, `BoundedAgreementReport`, `Counterexample`, and `RelationDelta` artifacts; at least
+two observation profiles; examples where the same subjects satisfy one relation and fail another; one
+directional refinement case; one RFC 0019 representation-equivalence case; one scoped counterexample;
+and RFC 0018 assurance profiles that refuse to upgrade finite agreement into universal equivalence.
+
 ## 0.1 — Executable semantic model
 
 **Goal:** demonstrate that MNCS relationships can be represented and mechanically checked before a source grammar exists.
@@ -335,6 +378,8 @@ A 1.0 designation would indicate a coherent research language and toolchain, not
 - a versioned assurance model that preserves support, refutation, conflict, provenance, trust, freshness, independence, and action-relative policy decisions;
 - a versioned logical value/type model that distinguishes logical identity, semantic observation, representation realization, storage, and serialization;
 - at least one demonstrated logical datatype with multiple evidence-bearing representation realizations and an explicit representation-sensitive constraint that narrows the realization envelope;
+- a versioned relation model that distinguishes identity, equality, equivalence, refinement, substitutability, compatibility, abstraction, and bounded agreement with explicit observation/context scope where required;
+- at least one transformation study in which the same subject pair satisfies one declared relation while failing or leaving unresolved another, without collapsing the results into a universal equivalence claim;
 - conservative and traceable backend-promise emission;
 - bounded unsafe and foreign-function interfaces;
 - a versioned recursive diagnostic and refinement protocol;
