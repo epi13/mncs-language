@@ -34,3 +34,4 @@ RFC acceptance does not imply production stability. The repository remains pre-s
 - [RFC 0017: Machine-Native Runtime, Environment, Target, and Execution-Context Semantics](0017-machine-native-runtime-environment-target-execution-context-semantics.md)
 - [RFC 0018: Machine-Native Assurance Profiles, Evidence Algebra, Trust Policy, and Witness Semantics](0018-machine-native-assurance-evidence-trust-witness-semantics.md)
 - [RFC 0019: Machine-Native Value, Data, Type, and Representation Semantics](0019-machine-native-value-data-type-representation-semantics.md)
+- [RFC 0020: Machine-Native Identity, Equality, Equivalence, Refinement, Substitutability, and Compatibility Semantics](0020-machine-native-identity-equality-equivalence-refinement-substitutability-compatibility-semantics.md)
