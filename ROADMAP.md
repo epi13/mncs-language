@@ -287,6 +287,60 @@ state machine; one valid and one invalid schedule witness; two physical schedule
 execution-time contract; a simulation-clock run; and an RFC 0018 freshness example where clock
 uncertainty overlapping expiration produces `UNRESOLVED`.
 
+## Active cross-cutting track — information flow, confidentiality, integrity, and side-channel semantics
+
+[RFC 0024](rfcs/0024-machine-native-information-flow-confidentiality-integrity-declassification-side-channel-semantics.md)
+establishes information-flow security as explicit policy over permitted influence, permitted
+observation, bounded reclassification, observer/channel models, and evidence rather than reducing
+security to access checks, taint bits, or a universal `secure` flag.
+
+Current design work:
+
+- distinguish access authority from information-flow authority so permission to read/write a resource
+  does not silently authorize dissemination of information derived from it;
+- model confidentiality and integrity as orthogonal policy dimensions with explicit flow ordering and
+  composition rather than one scalar security level;
+- support decentralized/owner-scoped flow policies while leaving principal authentication and credential
+  semantics to RFC 0025;
+- preserve data, control, effect, failure, termination, timing, scheduling, and declared resource influence
+  as potential information channels rather than tracking only explicit assignments;
+- make observer and channel models part of security-claim identity so value-only, termination-sensitive,
+  timing-sensitive, address-trace, scheduler-sensitive, and physical-channel claims cannot be conflated;
+- use RFC 0020 relational/hyperproperty-style claims for noninterference, observational determinism,
+  security refinement, and scoped security counterexamples;
+- model declassification by explicit `what`, `who`, `where`, and `when` dimensions with narrow release
+  functions/relations rather than unchecked secret-to-public casts;
+- model endorsement as a separate integrity reclassification and keep validation evidence distinct from
+  authority to raise integrity;
+- reserve robust declassification, transparent endorsement, and nonmalleable-flow profiles for boundaries
+  where attacker influence and reclassification interact;
+- allow static IFC, dynamic/floating-label IFC, hybrid enforcement, secure multi-execution, isolation,
+  relational verification, and proof-carrying techniques as competing realizations of the same policy;
+- treat side channels as explicit observer channels, decomposing constant-time claims into named branch,
+  address, instruction, size, timing, schedule, resource, or target-specific observation restrictions;
+- forbid encryption, hashing, compression, aggregation, or successful testing from silently granting
+  declassification authority;
+- support metric-scoped quantitative leakage claims without adopting one universal leakage score;
+- preserve security labels, control influence, release events, endorsement events, and observer scope
+  through HIR/SSA/backend lowering where the supported subset allows it;
+- make target/backend/microarchitecture dependencies explicit so stale side-channel evidence invalidates
+  narrowly through RFC 0018 rather than becoming permanent source truth;
+- require machine inference to be conservative: it may strengthen confidentiality, weaken assumed integrity,
+  add observer channels, or add obligations, but may not fabricate downgrade/endorsement authority;
+- expose security relation deltas and counterexamples to Forge recursive refinement; and
+- permit Forge to search algorithms, branch structures, lookup strategies, representations, padding,
+  scheduling, isolation, and other realizations while mandatory security relations remain protected.
+
+The first implementation pilot should remain bounded: versioned flow-label/confidentiality/integrity,
+observer/channel, reclassification, and security-counterexample artifacts; direct and implicit-flow
+rejections; one low-integrity-to-high-integrity rejection; narrow predicate declassification and an
+over-broad/attacker-controlled release rejection; validation-versus-endorsement fixtures; value-only,
+termination-sensitive, and branch/address observer profiles; paired bounded executions that remain
+explicitly empirical; an address-trace comparison between direct lookup and oblivious scan; RFC 0020
+security relation claims where the same subject passes one observer profile and fails another; stale
+target-dependent security evidence; and RFC 0018 policies separating sandbox experimentation from
+stronger security-boundary promotion.
+
 ## 0.1 — Executable semantic model
 
 **Goal:** demonstrate that MNCS relationships can be represented and mechanically checked before a source grammar exists.
@@ -499,10 +553,13 @@ A 1.0 designation would indicate a coherent research language and toolchain, not
 - a versioned temporal model that distinguishes causal/logical order, physical/monotonic/reference/civil/virtual time, clock uncertainty, instants/durations/intervals, temporal validity, deadlines/timeouts/periods/jitter, logical effect time, and schedule realizations;
 - at least one temporal study where uncertain clock observations make one ordering or freshness claim `UNRESOLVED`, alongside one independently checkable schedule witness that satisfies explicit deadlines under current target/execution-time assumptions;
 - at least one demonstration that two different physical schedules can preserve the same declared logical execution-time contract without implying physical timing identity;
+- a versioned information-flow model that distinguishes confidentiality, integrity, flow ordering, observer/channel scope, noninterference families, bounded declassification/endorsement, and target-sensitive side-channel claims;
+- at least one information-flow study where the same program satisfies a narrow observer relation while failing a broader termination/timing/address/scheduler-sensitive relation, without collapsing either result into a universal security bit;
+- at least one explicit declassification/endorsement study proving that validation or successful execution cannot fabricate downgrade/endorsement authority, plus one Forge candidate rejected for violating a protected security relation despite otherwise valid functional behavior;
 - conservative and traceable backend-promise emission;
 - bounded unsafe and foreign-function interfaces;
 - a versioned recursive diagnostic and refinement protocol;
 - isolated candidate transformations and explicit promotion policy;
-- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, clock, temporal-validity, scheduling, and assumption limits;
+- documented recursion, authority, resource, target, representation, universe, equality, numeric, termination, fairness, clock, temporal-validity, scheduling, information-flow, observer, reclassification, side-channel, and assumption limits;
 - documented soundness and bootstrap limits;
 - conformance tests and independent implementation guidance.
