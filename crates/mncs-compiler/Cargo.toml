@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 mncs-model = { path = "../mncs-model" }
+mncs-syntax = { path = "../mncs-syntax" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

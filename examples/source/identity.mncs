@@ -1,0 +1,8 @@
+mncs 0.1;
+
+// A deliberately narrow source-to-HIR fixture.
+module examples.identity;
+
+fn identity(value: i64) -> (result: i64) {
+    return value;
+}

@@ -4,6 +4,10 @@
 //! HIR, SSA, obligation, and provenance implementations remain in
 //! `mncs-model`.
 
+mod frontend;
+
+pub use frontend::{elaborate_program, SourceFrontEndResult, SourceStudyOutput};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
@@ -24,7 +28,7 @@ use sha2::{Digest, Sha256};
 
 pub const REFERENCE_LANGUAGE_PROFILE: &str = "mncs:language-profile:research-0.1";
 pub const REFERENCE_COMPILER_NAME: &str = "mncs-reference-compiler";
-pub const REFERENCE_PIPELINE_NAME: &str = "mncs-semantic-hir-ssa";
+pub const REFERENCE_PIPELINE_NAME: &str = "mncs-source-semantic-hir-ssa";
 
 #[derive(Debug, Clone)]
 pub struct ReferenceCompiler {
@@ -215,7 +219,7 @@ impl ReferenceCompiler {
         let semantic_to_hir = TransformationEdge::new(
             semantic_ref.clone(),
             hir_ref.clone(),
-            self.pipeline.passes[0].clone(),
+            self.pass("lower-semantic-to-hir"),
             request.assumptions.clone(),
             ssa.obligations
                 .iter()
@@ -231,7 +235,7 @@ impl ReferenceCompiler {
         let hir_to_ssa = TransformationEdge::new(
             hir_ref.clone(),
             ssa_ref.clone(),
-            self.pipeline.passes[1].clone(),
+            self.pass("lower-hir-to-ssa"),
             Vec::new(),
             ssa.obligations
                 .iter()
@@ -249,7 +253,7 @@ impl ReferenceCompiler {
         let select_ssa = TransformationEdge::new(
             ssa_ref.clone(),
             selected_ssa_ref.clone(),
-            self.pipeline.passes[2].clone(),
+            self.pass("select-canonical-ssa"),
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -284,7 +288,7 @@ impl ReferenceCompiler {
             let edge = TransformationEdge::new(
                 selected_ssa_ref.clone(),
                 plan_ref.clone(),
-                self.pipeline.passes[3].clone(),
+                self.pass("plan-target-lowering"),
                 plan.assumptions_introduced.clone(),
                 Vec::new(),
                 plan.target.evidence.clone(),
@@ -479,6 +483,15 @@ impl ReferenceCompiler {
         study_result.seal();
         study_result
     }
+
+    fn pass(&self, id: &str) -> CompilerPassIdentity {
+        self.pipeline
+            .passes
+            .iter()
+            .find(|pass| pass.id == id)
+            .unwrap_or_else(|| panic!("reference pipeline is missing pass {id:?}"))
+            .clone()
+    }
 }
 
 pub fn compile(request: CompilationRequest, program: &Program) -> CompilationResult {
@@ -509,8 +522,99 @@ pub fn reference_pipeline() -> PassPipelineIdentity {
     };
     PassPipelineIdentity::new(
         REFERENCE_PIPELINE_NAME,
-        "0.1",
+        "0.2",
         vec![
+            CompilerPassIdentity::new(
+                "lex-source",
+                "0.1",
+                ArtifactRepresentation::Source,
+                ArtifactRepresentation::LexicalTokens,
+                relation(),
+                vec!["source envelope identity is valid".to_owned()],
+                Vec::new(),
+                Vec::new(),
+                vec!["lossless token reconstruction".to_owned()],
+                "token span and reconstruction checks",
+                "emit structured lexical diagnostics",
+            ),
+            CompilerPassIdentity::new(
+                "parse-source-to-cst",
+                "0.1",
+                ArtifactRepresentation::LexicalTokens,
+                ArtifactRepresentation::ConcreteSyntaxTree,
+                relation(),
+                vec!["lexical stream is deterministic".to_owned()],
+                Vec::new(),
+                Vec::new(),
+                vec!["lossless CST reconstruction".to_owned()],
+                "source profile parser",
+                "retain CST and emit recovery diagnostics",
+            ),
+            CompilerPassIdentity::new(
+                "derive-ast",
+                "0.1",
+                ArtifactRepresentation::ConcreteSyntaxTree,
+                ArtifactRepresentation::AbstractSyntaxTree,
+                relation(),
+                vec!["CST satisfies the 0.1 source grammar".to_owned()],
+                Vec::new(),
+                Vec::new(),
+                vec!["AST name and span preservation".to_owned()],
+                "AST projection checks",
+                "emit no AST when parse errors remain",
+            ),
+            CompilerPassIdentity::new(
+                "elaborate-ast-to-semantic",
+                "0.1",
+                ArtifactRepresentation::AbstractSyntaxTree,
+                ArtifactRepresentation::Semantic,
+                relation(),
+                vec!["artifact kind is program".to_owned()],
+                Vec::new(),
+                Vec::new(),
+                vec!["binding and output type agreement".to_owned()],
+                "mncs-model semantic validation",
+                "retain source diagnostics and emit no semantic artifact",
+            ),
+            CompilerPassIdentity::new(
+                "construct-semantic-graph",
+                "0.1",
+                ArtifactRepresentation::Semantic,
+                ArtifactRepresentation::SemanticGraph,
+                relation(),
+                vec!["semantic program validates".to_owned()],
+                Vec::new(),
+                Vec::new(),
+                vec!["graph relationship integrity".to_owned()],
+                "semantic graph construction",
+                "emit no graph for invalid semantics",
+            ),
+            CompilerPassIdentity::new(
+                "resolve-semantic-identities",
+                "0.1",
+                ArtifactRepresentation::SemanticGraph,
+                ArtifactRepresentation::IdentityMap,
+                relation(),
+                vec!["semantic graph exists".to_owned()],
+                Vec::new(),
+                Vec::new(),
+                vec!["content identity reproducibility".to_owned()],
+                "semantic identity reproduction",
+                "emit no identity map for invalid semantics",
+            ),
+            CompilerPassIdentity::new(
+                "analyze-types-and-contracts",
+                "0.1",
+                ArtifactRepresentation::IdentityMap,
+                ArtifactRepresentation::Validation,
+                relation(),
+                vec!["binding identities resolved".to_owned()],
+                Vec::new(),
+                Vec::new(),
+                vec!["body type and contract validity".to_owned()],
+                "mncs-model validation report",
+                "reject invalid semantic input before HIR",
+            ),
             CompilerPassIdentity::new(
                 "lower-semantic-to-hir",
                 "0.1",
@@ -579,74 +683,77 @@ pub fn reference_compiler_architecture() -> CompilerArchitectureContract {
     CompilerArchitectureContract::new(vec![
         CompilerStageContract {
             stage: Stage::SourceIntentRepresentation,
-            availability: Availability::BootstrapOnly,
-            integration: Integration::ExternalBootstrap,
-            input_contracts: vec!["semantic JSON transport artifact".to_owned()],
-            output_contracts: vec!["mncs-model Program".to_owned()],
+            availability: Availability::Experimental,
+            integration: Integration::CompilerDriver,
+            input_contracts: vec!["SourceEnvelope 0.1 for any declared artifact kind".to_owned()],
+            output_contracts: vec!["content-addressed source artifact".to_owned()],
             deterministic_output_required: true,
             owner: "mncs-language source representation contract".to_owned(),
-            decisions: vec!["semantic JSON is transport, not final source syntax".to_owned()],
-            blockers: vec!["artifact-kind and source-envelope contract".to_owned()],
+            decisions: vec![
+                "source origin is explicit and is not assumed to be a file".to_owned(),
+                "the 0.1 executable slice accepts program artifacts only".to_owned(),
+            ],
+            blockers: vec!["elaboration profiles for non-program artifact kinds".to_owned()],
         },
         CompilerStageContract {
             stage: Stage::LexicalAnalysis,
-            availability: Availability::Planned,
-            integration: Integration::NotIntegrated,
-            input_contracts: vec!["source artifact".to_owned()],
-            output_contracts: vec!["token stream with source spans".to_owned()],
+            availability: Availability::Experimental,
+            integration: Integration::CompilerDriver,
+            input_contracts: vec!["SourceEnvelope 0.1".to_owned()],
+            output_contracts: vec!["lossless LexedDocument 0.1 with byte spans".to_owned()],
             deterministic_output_required: true,
             owner: "mncs-language lexical contract".to_owned(),
-            decisions: Vec::new(),
-            blockers: vec!["surface representation selection".to_owned()],
+            decisions: vec!["trivia remains in the token stream".to_owned()],
+            blockers: vec!["complete language token vocabulary".to_owned()],
         },
         CompilerStageContract {
             stage: Stage::Parsing,
-            availability: Availability::BootstrapOnly,
-            integration: Integration::ExternalBootstrap,
-            input_contracts: vec!["JSON bytes via serde_json".to_owned()],
-            output_contracts: vec!["mncs-model Program".to_owned()],
+            availability: Availability::Experimental,
+            integration: Integration::CompilerDriver,
+            input_contracts: vec!["LexedDocument 0.1".to_owned()],
+            output_contracts: vec!["ConcreteSyntaxTree 0.1 and recovery diagnostics".to_owned()],
             deterministic_output_required: true,
             owner: "mncs-language parser contract".to_owned(),
-            decisions: vec!["current parse is a bootstrap transport decode".to_owned()],
-            blockers: vec!["CST and recovery diagnostic contracts".to_owned()],
+            decisions: vec!["accepted 0.1 grammar is intentionally narrow".to_owned()],
+            blockers: vec!["multi-statement and specification grammar".to_owned()],
         },
         CompilerStageContract {
             stage: Stage::ConcreteSyntaxTree,
-            availability: Availability::Planned,
-            integration: Integration::NotIntegrated,
+            availability: Availability::Experimental,
+            integration: Integration::CompilerDriver,
             input_contracts: vec!["token stream".to_owned()],
-            output_contracts: vec!["lossless CST".to_owned()],
+            output_contracts: vec!["lossless CST with hierarchical token ranges".to_owned()],
             deterministic_output_required: true,
             owner: "mncs-language source representation contract".to_owned(),
-            decisions: Vec::new(),
-            blockers: vec!["lossless trivia and source-span identity policy".to_owned()],
+            decisions: vec!["exact source reconstructs from retained tokens".to_owned()],
+            blockers: vec!["stable recovery-node contract".to_owned()],
         },
         CompilerStageContract {
             stage: Stage::AbstractSyntaxTree,
-            availability: Availability::Planned,
-            integration: Integration::NotIntegrated,
+            availability: Availability::Experimental,
+            integration: Integration::CompilerDriver,
             input_contracts: vec!["lossless CST".to_owned()],
-            output_contracts: vec!["representation-neutral AST".to_owned()],
+            output_contracts: vec!["typed-name AST 0.1 with source spans".to_owned()],
             deterministic_output_required: true,
             owner: "mncs-language elaboration contract".to_owned(),
-            decisions: Vec::new(),
-            blockers: vec!["syntax identity versus semantic identity boundary".to_owned()],
+            decisions: vec!["AST identity is not semantic identity".to_owned()],
+            blockers: vec!["complete expression and specification AST".to_owned()],
         },
         CompilerStageContract {
             stage: Stage::SemanticGraphConstruction,
             availability: Availability::Experimental,
-            integration: Integration::LanguageLibrary,
+            integration: Integration::CompilerDriver,
             input_contracts: vec!["validated mncs-model Program".to_owned()],
             output_contracts: vec!["SemanticGraph 0.2".to_owned()],
             deterministic_output_required: true,
             owner: "mncs-model semantic graph".to_owned(),
             decisions: vec!["graph is content-addressed and relationship-first".to_owned()],
-            blockers: vec!["driver integration after AST/elaboration contract".to_owned()],
+            blockers: vec!["recursive cross-artifact graph construction".to_owned()],
         },
         CompilerStageContract {
             stage: Stage::IdentityResolution,
             availability: Availability::Experimental,
-            integration: Integration::LanguageLibrary,
+            integration: Integration::CompilerDriver,
             input_contracts: vec!["semantic entities and relationships".to_owned()],
             output_contracts: vec!["SemanticIdentities 0.2".to_owned()],
             deterministic_output_required: true,
@@ -781,6 +888,7 @@ fn fingerprint<T: Serialize>(value: &T) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mncs_syntax::{SourceArtifactKind, SourceEnvelope};
 
     fn program(name: &str) -> Program {
         Program::from_json(include_str!(concat!(
@@ -803,6 +911,84 @@ mod tests {
         ]
         .into_iter()
         .collect()
+    }
+
+    fn source_envelope() -> SourceEnvelope {
+        SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "examples.identity",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../examples/source/identity.mncs"
+            )),
+        )
+    }
+
+    #[test]
+    fn source_fixture_traverses_every_front_end_stage_into_hir() {
+        let compiler = ReferenceCompiler::default();
+        let output = compiler.run_local_source_study(source_envelope());
+        assert!(
+            output.front_end.is_valid(),
+            "{:#?}",
+            output.front_end.diagnostics
+        );
+        assert_eq!(
+            output.front_end.cst.reconstruct(),
+            output.front_end.envelope.text
+        );
+        let study = output.study.expect("valid source study");
+        assert!(study.identity_is_valid());
+        for representation in [
+            ArtifactRepresentation::Source,
+            ArtifactRepresentation::LexicalTokens,
+            ArtifactRepresentation::ConcreteSyntaxTree,
+            ArtifactRepresentation::AbstractSyntaxTree,
+            ArtifactRepresentation::Semantic,
+            ArtifactRepresentation::SemanticGraph,
+            ArtifactRepresentation::IdentityMap,
+            ArtifactRepresentation::Validation,
+            ArtifactRepresentation::Hir,
+            ArtifactRepresentation::Ssa,
+        ] {
+            assert!(
+                study.stage_fingerprints.contains_key(&representation),
+                "missing {representation:?}"
+            );
+        }
+        let passes = study
+            .pass_executions
+            .iter()
+            .map(|execution| execution.pass_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(passes[0], "lex-source");
+        assert!(passes.contains(&"construct-semantic-graph"));
+        assert!(passes.contains(&"lower-semantic-to-hir"));
+        let hir = output.front_end.program.unwrap().lower_to_ir().unwrap();
+        assert_eq!(hir.functions.len(), 1);
+        assert_eq!(hir.functions[0].inputs.len(), 1);
+    }
+
+    #[test]
+    fn invalid_source_stops_before_semantic_identity_and_hir() {
+        let compiler = ReferenceCompiler::default();
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "invalid.return",
+            "mncs 0.1; module invalid.sample; fn id(value: i64) -> (result: i64) { return missing; }",
+        );
+        let output = compiler.run_local_source_study(envelope);
+        assert!(output.study.is_none());
+        assert!(output.front_end.program.is_none());
+        assert!(output
+            .front_end
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "MNE102"));
+        assert!(output
+            .front_end
+            .artifact(ArtifactRepresentation::Hir)
+            .is_none());
     }
 
     #[test]
@@ -1027,8 +1213,8 @@ mod tests {
             .iter()
             .find(|stage| stage.stage == CompilerStage::LexicalAnalysis)
             .unwrap();
-        assert_eq!(lexical.availability, StageAvailability::Planned);
-        assert_eq!(lexical.integration, StageIntegration::NotIntegrated);
+        assert_eq!(lexical.availability, StageAvailability::Experimental);
+        assert_eq!(lexical.integration, StageIntegration::CompilerDriver);
         let hir = architecture
             .stages
             .iter()

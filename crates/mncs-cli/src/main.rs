@@ -15,7 +15,9 @@ use mncs_model::{
     LoweringExecutionComparison, LoweringExecutionStatus, ObligationStatus, Program, SemanticDiff,
     SemanticId, TargetContractRef,
 };
-use mncs_syntax::{analyze, SourceMetrics};
+use mncs_syntax::{
+    analyze, SourceArtifactKind, SourceEnvelope, SourceMetrics, SourceOrigin, SourceOriginKind,
+};
 use serde::{Deserialize, Serialize};
 
 fn main() -> ExitCode {
@@ -67,6 +69,7 @@ fn main() -> ExitCode {
             }
         }
         "compiler-study" => compiler_study_command(args),
+        "source-study" => source_study_command(args),
         "diff" => two_manifest_command(args, diff),
         "compare" => two_manifest_command(args, compare),
         "slice" => slice_command(args),
@@ -655,6 +658,64 @@ where
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+fn source_study_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let Some(source_path) = args.next() else {
+        eprintln!("error: source-study requires an MNCS source path");
+        return ExitCode::from(2);
+    };
+    let mut node_identity = "local-source-node".to_owned();
+    while let Some(option) = args.next() {
+        match option.as_str() {
+            "--node-id" => {
+                let Some(value) = args.next() else {
+                    eprintln!("error: --node-id requires a value");
+                    return ExitCode::from(2);
+                };
+                node_identity = value;
+            }
+            other => {
+                eprintln!("error: unknown source-study option {other:?}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let source = match read_source(&source_path) {
+        Ok(source) => source,
+        Err(code) => return code,
+    };
+    let envelope = SourceEnvelope::new(
+        SourceArtifactKind::Program,
+        source_path.clone(),
+        SourceOrigin {
+            kind: SourceOriginKind::Path,
+            locator: Some(source_path),
+        },
+        source,
+    );
+    let output =
+        ReferenceCompiler::default().run_source_study(envelope, native_node_profile(node_identity));
+    match output.study {
+        Some(study) => {
+            if print_json(&study) {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(2)
+            }
+        }
+        None => {
+            if print_json(&output.front_end) {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::from(2)
+            }
+        }
     }
 }
 
@@ -1288,6 +1349,7 @@ fn print_usage() {
     eprintln!("  mncs compile <program.json> [--emit semantic,hir,ssa,evidence,target-plan] [--output-dir DIR] [--target TARGET]");
     eprintln!("  mncs compiler-architecture");
     eprintln!("  mncs compiler-study <program.json> [--node-id NODE] [--target TARGET]");
+    eprintln!("  mncs source-study <program.mncs> [--node-id NODE]");
     eprintln!("  mncs diff <before.json> <after.json>");
     eprintln!("  mncs compare <before.json> <after.json>");
     eprintln!("  mncs slice <manifest.json> <semantic-identity>");

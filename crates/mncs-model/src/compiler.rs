@@ -20,7 +20,14 @@ pub const COMPILATION_STUDY_OBSERVATION_INTERPRETATION: &str =
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactRepresentation {
+    Source,
+    LexicalTokens,
+    ConcreteSyntaxTree,
+    AbstractSyntaxTree,
     Semantic,
+    SemanticGraph,
+    IdentityMap,
+    Validation,
     Hir,
     Ssa,
     SelectedSsa,
