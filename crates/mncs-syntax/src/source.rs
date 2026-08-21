@@ -925,6 +925,7 @@ fn is_identifier_continue(value: char) -> bool {
 fn fingerprint<T: Serialize>(value: &T) -> String {
     let bytes = serde_json::to_vec(value).expect("source artifact is serializable");
     let digest = Sha256::digest(bytes);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
     let mut output = String::with_capacity(digest.len() * 2);
     for byte in digest {
         write!(&mut output, "{byte:02x}").expect("writing to a String cannot fail");
@@ -1007,6 +1008,7 @@ mod tests {
 
         assert!(envelope.identity_is_valid());
         assert_eq!(envelope.relationships.len(), 2);
+        envelope.relationships[0].target_identity = "mncs:model:substituted:8".to_owned();
         "mncs:model:substituted:8".clone_into(&mut envelope.relationships[0].target_identity);
         assert!(!envelope.identity_is_valid());
     }
