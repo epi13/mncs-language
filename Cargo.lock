@@ -78,17 +78,31 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "mncs-cli"
 version = "0.1.0"
 dependencies = [
+ "mncs-codegen",
  "mncs-compiler",
  "mncs-model",
  "mncs-syntax",
+ "mncs-translation-check",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "mncs-codegen"
+version = "0.1.0"
+dependencies = [
+ "mncs-model",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
 ]
 
 [[package]]
 name = "mncs-compiler"
 version = "0.1.0"
 dependencies = [
+ "mncs-codegen",
  "mncs-model",
  "mncs-syntax",
  "serde",
@@ -110,6 +124,17 @@ dependencies = [
 name = "mncs-syntax"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "mncs-translation-check"
+version = "0.1.0"
+dependencies = [
+ "mncs-codegen",
+ "mncs-model",
  "serde",
  "serde_json",
  "sha2",

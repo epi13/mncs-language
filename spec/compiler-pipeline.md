@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-This document specifies the current research contract for compiler architecture disclosure and compiler experiment observations. It does not select a surface grammar, backend, executable format, assurance profile, or conformance profile.
+This document specifies the current research contract for compiler architecture disclosure and compiler experiment observations. The portable WASM MVP backend is an experimental research envelope, not a selected production executable format or assurance profile.
 
 ## 2. Logical stage architecture
 

@@ -11,6 +11,7 @@ Normative terms such as **MUST**, **SHOULD**, and **MAY** indicate intended requ
 - [Effects and Capabilities](effects-and-capabilities.md)
 - [Source Representations](source-representations.md)
 - [Source Profile 0.1](source-profile-0.1.md)
+- [Source Profile 0.2](source-profile-0.2.md)
 - [Machine-Intent Expressions](machine-intent-expressions.md)
 - [Verified Intermediate Representation](verified-ir.md)
 - [Compiler Pipeline Contracts](compiler-pipeline.md)

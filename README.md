@@ -4,7 +4,7 @@
 
 Research and reference implementation for a general-purpose, verification-native programming language built on Machine-Native Complexity Standard (MNCS) principles.
 
-> **Project status:** the compiler now has an experimental source-to-SSA vertical slice for Source Profile 0.1: a content-addressed non-file source envelope, lossless lexer and CST, spanned AST, semantic elaboration, graph and identity construction, validation, HIR, and SSA. The semantic and compiler evidence foundations remain experimental, and only one deliberately narrow pure-function grammar is accepted. Forge can persist and compare the language-owned observations without issuing assurance or conformance verdicts. No final grammar, complete type/contract calculus, executable backend, native Raspberry Pi result, independent evaluation, universal equivalence, or production suitability is claimed.
+> **Project status:** the compiler now has an experimental source-to-backend vertical slice. Source Profile 0.1 remains the identity-function grammar. Source Profile 0.2 adds a bounded executable extension: lexical bindings, named contracts, declared capabilities/effects, `if`/`fail`, and checked integer expressions. Selected SSA can lower to a portable WASM MVP artifact when layout, ABI, integer, and trap facts are explicit. Body, SSA, and backend comparison is empirical bounded agreement, not universal equivalence. Translation validators emit PASS/FAIL/UNKNOWN independently of candidate generators. Forge may search isolated compiler candidates but does not decide language correctness. No final grammar, complete type/contract calculus, native backend, Raspberry Pi result, independent evaluation, or production suitability is claimed.
 
 ## Why this project exists
 
@@ -32,9 +32,11 @@ An MNCS-oriented program should make it possible to answer:
 - `spec/` — early normative semantic and representation documents.
 - `rfcs/` — design proposals that can evolve independently of the specification.
 - `crates/mncs-model/` — the executable semantic model, canonical representation, identities, graph/CFG, evidence manifest, invalidation logic, recursive artifacts, high-level IR, validated SSA artifact, and narrow machine-intent/verifier pilots.
-- `crates/mncs-compiler/` — the evidence-bearing reference compiler driver over the existing semantic, HIR, SSA, obligation, identity, and provenance APIs.
+- `crates/mncs-compiler/` — the evidence-bearing reference compiler driver over the existing semantic, HIR, SSA, obligation, identity, provenance, and portable-backend APIs.
+- `crates/mncs-codegen/` — replaceable portable WASM MVP backend adapter and research interpreter.
+- `crates/mncs-translation-check/` — independent PASS/FAIL/UNKNOWN translation validators; generators live in a separate module and do not certify themselves.
 - `crates/mncs-syntax/` — source envelopes, lossless tokens/CST, a bounded spanned AST/parser, and deterministic source-representation metrics.
-- `crates/mncs-cli/` — validation, canonicalization, identity, graph/CFG, evidence, IR, SSA, obligation, verification, comparison, diagnostic, diff, and syntax-tournament commands.
+- `crates/mncs-cli/` — validation, canonicalization, identity, graph/CFG, evidence, IR, SSA, obligation, verification, comparison, diagnostic, diff, compile, backend execution, translation validation, and syntax-tournament commands.
 - `examples/` — semantic manifests, competing source candidates, canonical semantic forms, machine-intent sketches, and semantic patches.
 
 Canonical semantic JSON remains an experimental bootstrap transport. Source Profile 0.1 is an executable but intentionally narrow grammar experiment, not a selected production grammar.
@@ -51,6 +53,11 @@ Run the source vertical slice and emit its language-owned study record:
 
 ```bash
 cargo run -p mncs-cli -- source-study examples/source/identity.mncs --node-id local-source
+cargo run -p mncs-cli -- source-study examples/source/flagship.mncs --node-id local-flagship
+cargo run -p mncs-cli -- compile examples/executable/checked-add.mncs.json --target portable-wasm
+cargo run -p mncs-cli -- execute-backend examples/executable/checked-add.mncs.json examples/execution/checked-add-request.json
+cargo run -p mncs-cli -- check-backend-execution examples/executable/checked-add.mncs.json examples/execution/checked-add-corpus.json
+cargo run -p mncs-cli -- validate-translation checked-elision examples/executable/checked-add.mncs.json examples/execution/checked-add-corpus.json
 ```
 
 ## Current semantic objects

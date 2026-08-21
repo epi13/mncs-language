@@ -22,6 +22,7 @@ mod provenance;
 mod refinement;
 mod ssa;
 mod ssa_execution;
+mod translation;
 mod validation;
 mod verifier;
 
@@ -33,15 +34,18 @@ pub use body::{
 pub use canonical::{CanonicalError, CanonicalForm, CANONICAL_SCHEMA_VERSION};
 pub use cfg::{Cfg, CfgBlock, CFG_SCHEMA_VERSION};
 pub use compiler::{
-    ArtifactRepresentation, BackendConfiguration, BackendEvidence, BackendIdentity, BackendResult,
-    BuildHostIdentity, CompilationEmissions, CompilationEvidenceBundle, CompilationRequest,
-    CompilationResult, CompilationStatus, CompilationStudyRequest, CompilationStudyResult,
-    CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind, CompilerHostIdentity,
-    CompilerImplementationIdentity, CompilerNodeProfile, CompilerPassExecutionObservation,
-    CompilerPassIdentity, CrossHostInvariants, ObservationModelRef, PassPipelineIdentity,
-    RelationClaim, RunEnvironmentRef, TargetContractRef, TargetLoweringPlan, TransformationEdge,
-    TransformationStatus, COMPILATION_STUDY_OBSERVATION_INTERPRETATION,
-    COMPILATION_STUDY_RESULT_CONTRACT_ID, COMPILER_ARTIFACT_SCHEMA_VERSION,
+    ArtifactRepresentation, BackendArtifact, BackendConfiguration, BackendEvidence,
+    BackendIdentity, BackendResult, BuildHostIdentity, CompilationEmissions,
+    CompilationEvidenceBundle, CompilationRequest, CompilationResult, CompilationStatus,
+    CompilationStudyRequest, CompilationStudyResult, CompilerArtifactRef, CompilerDiagnostic,
+    CompilerDiagnosticKind, CompilerHostIdentity, CompilerImplementationIdentity,
+    CompilerNodeProfile, CompilerPassExecutionObservation, CompilerPassIdentity,
+    CrossHostInvariants, ObservationModelRef, PassPipelineIdentity, RelationClaim,
+    RunEnvironmentRef, TargetContractRef, TargetLoweringPlan, TransformationEdge,
+    TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION,
+    COMPILATION_STUDY_OBSERVATION_INTERPRETATION, COMPILATION_STUDY_RESULT_CONTRACT_ID,
+    COMPILER_ARTIFACT_SCHEMA_VERSION, LAYERED_EXECUTION_COMPARISON_INTERPRETATION,
+    PORTABLE_WASM_MVP_BACKEND_NAME, PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET,
 };
 pub use compiler_architecture::{
     CompilerArchitectureContract, CompilerStage, CompilerStageContract, StageAvailability,
@@ -106,6 +110,10 @@ pub use ssa_execution::{
     LoweringExecutionComparison, LoweringExecutionMismatch, LoweringExecutionStatus,
     SsaExecutionResult, SsaExecutionTraceEntry, LOWERING_EXECUTION_COMPARISON_SCHEMA_VERSION,
     SSA_EXECUTION_RESULT_SCHEMA_VERSION,
+};
+pub use translation::{
+    TranslationCounterexample, TranslationJudgement, TranslationValidationResult,
+    TRANSLATION_VALIDATION_CONTRACT_ID, TRANSLATION_VALIDATION_SCHEMA_VERSION,
 };
 pub use validation::{Diagnostic, ValidationReport, ValidationSummary};
 pub use verifier::{

@@ -654,6 +654,7 @@ fn lower_terminator(
     target: impl Fn(&str) -> SemanticId,
 ) -> SsaTerminator {
     match terminator {
+        BodyTerminator::Failure { mode } => SsaTerminator::Failure { mode: mode.clone() },
         BodyTerminator::Return { values: returned } => SsaTerminator::Return {
             values: returned
                 .iter()

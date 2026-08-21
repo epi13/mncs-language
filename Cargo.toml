@@ -2,6 +2,8 @@
 members = [
     "crates/mncs-model",
     "crates/mncs-compiler",
+    "crates/mncs-codegen",
+    "crates/mncs-translation-check",
     "crates/mncs-cli",
     "crates/mncs-syntax",
 ]

@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 
 pub const SOURCE_ENVELOPE_SCHEMA_VERSION: &str = "0.1";
 pub const SOURCE_PROFILE_VERSION: &str = "0.1";
+pub const SOURCE_PROFILE_VERSION_0_2: &str = "0.2";
 pub const LEXICAL_SCHEMA_VERSION: &str = "0.1";
 pub const CST_SCHEMA_VERSION: &str = "0.1";
 pub const AST_SCHEMA_VERSION: &str = "0.1";
@@ -91,16 +92,17 @@ impl SourceEnvelope {
         origin: SourceOrigin,
         text: impl Into<String>,
     ) -> Self {
+        let text = text.into();
         let mut envelope = Self {
             schema_version: SOURCE_ENVELOPE_SCHEMA_VERSION.to_owned(),
             identity: String::new(),
-            language_version: SOURCE_PROFILE_VERSION.to_owned(),
+            language_version: infer_source_profile(&text).to_owned(),
             artifact_kind,
             logical_name: logical_name.into(),
             origin,
             relationships: Vec::new(),
             provenance: SourceProvenance::default(),
-            text: text.into(),
+            text,
         };
         envelope.seal();
         envelope
@@ -140,7 +142,7 @@ impl SourceEnvelope {
 
     pub fn identity_is_valid(&self) -> bool {
         self.schema_version == SOURCE_ENVELOPE_SCHEMA_VERSION
-            && self.language_version == SOURCE_PROFILE_VERSION
+            && source_profile_supported(&self.language_version)
             && !self.logical_name.trim().is_empty()
             && self
                 .relationships
@@ -210,8 +212,29 @@ pub enum TokenKind {
     ModuleKeyword,
     FunctionKeyword,
     ReturnKeyword,
+    LetKeyword,
+    IfKeyword,
+    ElseKeyword,
+    FailKeyword,
+    RequiresKeyword,
+    EnsuresKeyword,
+    AssumesKeyword,
+    EffectKeyword,
+    CapabilityKeyword,
+    AuthorizedKeyword,
     Identifier,
     Version,
+    IntegerLiteral,
+    Plus,
+    Minus,
+    Star,
+    EqEq,
+    NotEq,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    Equal,
     Dot,
     Colon,
     Semicolon,
@@ -348,6 +371,84 @@ pub struct AstParameter {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AstBody {
     pub returned_value: SpannedText,
+    #[serde(default)]
+    pub statements: Vec<AstStmt>,
+    pub span: SourceSpan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AstBinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AstExpr {
+    Name(SpannedText),
+    Integer {
+        text: SpannedText,
+        value: i128,
+    },
+    Binary {
+        op: AstBinaryOp,
+        left: Box<AstExpr>,
+        right: Box<AstExpr>,
+        span: SourceSpan,
+    },
+}
+
+impl AstExpr {
+    pub fn span(&self) -> SourceSpan {
+        match self {
+            Self::Name(name) | Self::Integer { text: name, .. } => name.span,
+            Self::Binary { span, .. } => *span,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AstStmt {
+    Let {
+        name: SpannedText,
+        value_type: SpannedText,
+        value: AstExpr,
+        span: SourceSpan,
+    },
+    If {
+        condition: AstExpr,
+        then_body: Vec<AstStmt>,
+        else_body: Vec<AstStmt>,
+        span: SourceSpan,
+    },
+    Fail {
+        mode: SpannedText,
+        span: SourceSpan,
+    },
+    Return {
+        value: SpannedText,
+        span: SourceSpan,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AstClause {
+    pub kind: SpannedText,
+    pub name: SpannedText,
+    pub span: SourceSpan,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AstEffect {
+    pub kind: SpannedText,
+    pub capability: SpannedText,
     pub span: SourceSpan,
 }
 
@@ -356,6 +457,12 @@ pub struct AstFunction {
     pub name: SpannedText,
     pub inputs: Vec<AstParameter>,
     pub outputs: Vec<AstParameter>,
+    #[serde(default)]
+    pub contracts: Vec<AstClause>,
+    #[serde(default)]
+    pub effects: Vec<AstEffect>,
+    #[serde(default)]
+    pub capabilities: Vec<SpannedText>,
     pub body: AstBody,
     pub span: SourceSpan,
 }
@@ -463,6 +570,18 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
         } else if source[start..].starts_with("->") {
             offset += 2;
             TokenKind::Arrow
+        } else if source[start..].starts_with("==") {
+            offset += 2;
+            TokenKind::EqEq
+        } else if source[start..].starts_with("!=") {
+            offset += 2;
+            TokenKind::NotEq
+        } else if source[start..].starts_with("<=") {
+            offset += 2;
+            TokenKind::Le
+        } else if source[start..].starts_with(">=") {
+            offset += 2;
+            TokenKind::Ge
         } else if is_identifier_start(current) {
             offset += current.len_utf8();
             while offset < source.len()
@@ -482,19 +601,37 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                 "module" => TokenKind::ModuleKeyword,
                 "fn" => TokenKind::FunctionKeyword,
                 "return" => TokenKind::ReturnKeyword,
+                "let" => TokenKind::LetKeyword,
+                "if" => TokenKind::IfKeyword,
+                "else" => TokenKind::ElseKeyword,
+                "fail" => TokenKind::FailKeyword,
+                "requires" => TokenKind::RequiresKeyword,
+                "ensures" => TokenKind::EnsuresKeyword,
+                "assumes" => TokenKind::AssumesKeyword,
+                "effect" => TokenKind::EffectKeyword,
+                "capability" => TokenKind::CapabilityKeyword,
+                "authorized_by" => TokenKind::AuthorizedKeyword,
                 _ => TokenKind::Identifier,
             }
         } else if current.is_ascii_digit() {
             offset += current.len_utf8();
+            let mut dotted = false;
             while offset < source.len()
                 && source[offset..]
                     .chars()
                     .next()
                     .is_some_and(|value| value.is_ascii_digit() || value == '.')
             {
+                if source[offset..].starts_with('.') {
+                    dotted = true;
+                }
                 offset += 1;
             }
-            TokenKind::Version
+            if dotted {
+                TokenKind::Version
+            } else {
+                TokenKind::IntegerLiteral
+            }
         } else {
             offset += current.len_utf8();
             match current {
@@ -506,6 +643,12 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                 ')' => TokenKind::RightParen,
                 '{' => TokenKind::LeftBrace,
                 '}' => TokenKind::RightBrace,
+                '+' => TokenKind::Plus,
+                '-' => TokenKind::Minus,
+                '*' => TokenKind::Star,
+                '<' => TokenKind::Lt,
+                '>' => TokenKind::Gt,
+                '=' => TokenKind::Equal,
                 _ => {
                     diagnostics.push(SourceDiagnostic {
                         code: "MNL002".to_owned(),
@@ -584,6 +727,7 @@ struct Parser<'a> {
     significant: Vec<usize>,
     cursor: usize,
     diagnostics: Vec<SourceDiagnostic>,
+    profile: String,
 }
 
 impl<'a> Parser<'a> {
@@ -598,6 +742,7 @@ impl<'a> Parser<'a> {
                 .collect(),
             cursor: 0,
             diagnostics: Vec::new(),
+            profile: SOURCE_PROFILE_VERSION.to_owned(),
         }
     }
 
@@ -605,6 +750,9 @@ impl<'a> Parser<'a> {
         let header_start = self.current_token_index();
         let header_keyword = self.expect(TokenKind::MncsKeyword, "MNP001", "expected MNCS header");
         let version = self.spanned(TokenKind::Version, "MNP002", "expected language version");
+        if let Some(version) = &version {
+            self.profile = version.text.clone();
+        }
         self.expect(
             TokenKind::Semicolon,
             "MNP003",
@@ -697,34 +845,48 @@ impl<'a> Parser<'a> {
         let (input_node, inputs) = self.parameter_list("input");
         self.expect(TokenKind::Arrow, "MNP012", "expected '->' before outputs");
         let (output_node, outputs) = self.parameter_list("output");
+        let (contracts, effects, capabilities) = if self.profile == SOURCE_PROFILE_VERSION_0_2 {
+            self.clauses()
+        } else {
+            (Vec::new(), Vec::new(), Vec::new())
+        };
         let block_start = self.current_token_index();
         self.expect(TokenKind::LeftBrace, "MNP013", "expected function body");
-        let return_start = self.current_token_index();
-        self.expect(
-            TokenKind::ReturnKeyword,
-            "MNP014",
-            "expected explicit return",
-        );
-        let returned_value = self.spanned(
-            TokenKind::Identifier,
-            "MNP015",
-            "expected returned value name",
-        );
-        self.expect(TokenKind::Semicolon, "MNP016", "expected ';' after return");
-        let return_end = self.previous_token_index(return_start);
-        let return_node = self.node(
-            CstKind::ReturnStatement,
-            return_start,
-            return_end,
-            Vec::new(),
-        );
+        let (statements, returned_value, block_children) =
+            if self.profile == SOURCE_PROFILE_VERSION_0_2 {
+                self.statements_until_return()
+            } else {
+                let return_start = self.current_token_index();
+                self.expect(
+                    TokenKind::ReturnKeyword,
+                    "MNP014",
+                    "expected explicit return",
+                );
+                let returned_value = self.spanned(
+                    TokenKind::Identifier,
+                    "MNP015",
+                    "expected returned value name",
+                );
+                self.expect(TokenKind::Semicolon, "MNP016", "expected ';' after return");
+                let return_end = self.previous_token_index(return_start);
+                (
+                    Vec::new(),
+                    returned_value,
+                    vec![self.node(
+                        CstKind::ReturnStatement,
+                        return_start,
+                        return_end,
+                        Vec::new(),
+                    )],
+                )
+            };
         self.expect(
             TokenKind::RightBrace,
             "MNP017",
             "expected '}' after function body",
         );
         let end = self.previous_token_index(start);
-        let block_node = self.node(CstKind::Block, block_start, end, vec![return_node]);
+        let block_node = self.node(CstKind::Block, block_start, end, block_children);
         let body_span = block_node.span;
         let function_node = self.node(
             CstKind::FunctionDeclaration,
@@ -737,8 +899,12 @@ impl<'a> Parser<'a> {
                 name,
                 inputs,
                 outputs,
+                contracts,
+                effects,
+                capabilities,
                 body: AstBody {
                     returned_value,
+                    statements,
                     span: body_span,
                 },
                 span: function_node.span,
@@ -746,6 +912,294 @@ impl<'a> Parser<'a> {
             _ => None,
         };
         (function_node, function)
+    }
+
+    fn clauses(&mut self) -> (Vec<AstClause>, Vec<AstEffect>, Vec<SpannedText>) {
+        let mut contracts = Vec::new();
+        let mut effects = Vec::new();
+        let mut capabilities = Vec::new();
+        loop {
+            match self.current_kind() {
+                Some(
+                    TokenKind::RequiresKeyword
+                    | TokenKind::EnsuresKeyword
+                    | TokenKind::AssumesKeyword,
+                ) => {
+                    let start = self.current_token_index();
+                    let kind =
+                        self.spanned(self.current_kind().unwrap(), "MNP040", "expected clause");
+                    let name =
+                        self.spanned(TokenKind::Identifier, "MNP041", "expected clause name");
+                    if let (Some(kind), Some(name)) = (kind, name) {
+                        let span = SourceSpan::covering(&self.envelope.text, kind.span, name.span);
+                        contracts.push(AstClause { kind, name, span });
+                    }
+                    let _ = start;
+                }
+                Some(TokenKind::CapabilityKeyword) => {
+                    self.cursor += 1;
+                    if let Some(name) =
+                        self.spanned(TokenKind::Identifier, "MNP042", "expected capability name")
+                    {
+                        capabilities.push(name);
+                    }
+                }
+                Some(TokenKind::EffectKeyword) => {
+                    let start = self.current_token_index();
+                    self.cursor += 1;
+                    let kind =
+                        self.spanned(TokenKind::Identifier, "MNP043", "expected effect kind");
+                    self.expect(
+                        TokenKind::AuthorizedKeyword,
+                        "MNP044",
+                        "expected 'authorized_by' after effect",
+                    );
+                    let capability = self.spanned(
+                        TokenKind::Identifier,
+                        "MNP045",
+                        "expected authorizing capability",
+                    );
+                    if let (Some(kind), Some(capability)) = (kind, capability) {
+                        effects.push(AstEffect {
+                            span: SourceSpan::covering(
+                                &self.envelope.text,
+                                kind.span,
+                                capability.span,
+                            ),
+                            kind,
+                            capability,
+                        });
+                    }
+                    let _ = start;
+                }
+                _ => break,
+            }
+        }
+        (contracts, effects, capabilities)
+    }
+
+    fn statements_until_return(&mut self) -> (Vec<AstStmt>, Option<SpannedText>, Vec<CstNode>) {
+        let mut statements = Vec::new();
+        let mut children = Vec::new();
+        let mut returned = None;
+        while self.current_kind() != Some(TokenKind::RightBrace)
+            && self.current_kind() != Some(TokenKind::ReturnKeyword)
+            && self.cursor < self.significant.len()
+        {
+            let (node, stmt) = self.statement();
+            children.push(node);
+            if let Some(stmt) = stmt {
+                statements.push(stmt);
+            }
+        }
+        if self.current_kind() == Some(TokenKind::ReturnKeyword) {
+            let return_start = self.current_token_index();
+            self.cursor += 1;
+            returned = self.spanned(
+                TokenKind::Identifier,
+                "MNP015",
+                "expected returned value name",
+            );
+            self.expect(TokenKind::Semicolon, "MNP016", "expected ';' after return");
+            let return_end = self.previous_token_index(return_start);
+            children.push(self.node(
+                CstKind::ReturnStatement,
+                return_start,
+                return_end,
+                Vec::new(),
+            ));
+        } else {
+            self.error(
+                "MNP014",
+                "expected explicit return",
+                vec![TokenKind::ReturnKeyword],
+            );
+        }
+        (statements, returned, children)
+    }
+
+    fn statement(&mut self) -> (CstNode, Option<AstStmt>) {
+        let start = self.current_token_index();
+        match self.current_kind() {
+            Some(TokenKind::LetKeyword) => {
+                self.cursor += 1;
+                let name = self.spanned(TokenKind::Identifier, "MNP050", "expected binding name");
+                self.expect(
+                    TokenKind::Colon,
+                    "MNP051",
+                    "expected ':' after binding name",
+                );
+                let value_type =
+                    self.spanned(TokenKind::Identifier, "MNP052", "expected binding type");
+                // '=' is colon-like; accept identifier after a dummy skip if '=' unknown
+                self.expect(
+                    TokenKind::Equal,
+                    "MNP053",
+                    "expected '=' after binding type",
+                );
+                let value = self.expression();
+                self.expect(TokenKind::Semicolon, "MNP054", "expected ';' after let");
+                let end = self.previous_token_index(start);
+                let node = self.node(CstKind::Block, start, end, Vec::new());
+                let stmt = match (name, value_type, value) {
+                    (Some(name), Some(value_type), Some(value)) => Some(AstStmt::Let {
+                        span: SourceSpan::covering(&self.envelope.text, name.span, value.span()),
+                        name,
+                        value_type,
+                        value,
+                    }),
+                    _ => None,
+                };
+                (node, stmt)
+            }
+            Some(TokenKind::IfKeyword) => {
+                self.cursor += 1;
+                let condition = self.expression();
+                self.expect(TokenKind::LeftBrace, "MNP055", "expected '{' after if");
+                let mut then_body = Vec::new();
+                while self.current_kind() != Some(TokenKind::RightBrace)
+                    && self.cursor < self.significant.len()
+                {
+                    let (_, stmt) = self.statement();
+                    if let Some(stmt) = stmt {
+                        then_body.push(stmt);
+                    }
+                }
+                self.expect(
+                    TokenKind::RightBrace,
+                    "MNP056",
+                    "expected '}' after if body",
+                );
+                let mut else_body = Vec::new();
+                if self.current_kind() == Some(TokenKind::ElseKeyword) {
+                    self.cursor += 1;
+                    self.expect(TokenKind::LeftBrace, "MNP057", "expected '{' after else");
+                    while self.current_kind() != Some(TokenKind::RightBrace)
+                        && self.cursor < self.significant.len()
+                    {
+                        let (_, stmt) = self.statement();
+                        if let Some(stmt) = stmt {
+                            else_body.push(stmt);
+                        }
+                    }
+                    self.expect(TokenKind::RightBrace, "MNP058", "expected '}' after else");
+                }
+                let end = self.previous_token_index(start);
+                let node = self.node(CstKind::Block, start, end, Vec::new());
+                (
+                    node,
+                    condition.map(|condition| AstStmt::If {
+                        span: condition.span(),
+                        condition,
+                        then_body,
+                        else_body,
+                    }),
+                )
+            }
+            Some(TokenKind::FailKeyword) => {
+                self.cursor += 1;
+                let mode = self.spanned(TokenKind::Identifier, "MNP059", "expected failure mode");
+                self.expect(TokenKind::Semicolon, "MNP060", "expected ';' after fail");
+                let end = self.previous_token_index(start);
+                let node = self.node(CstKind::Block, start, end, Vec::new());
+                (
+                    node,
+                    mode.map(|mode| AstStmt::Fail {
+                        span: mode.span,
+                        mode,
+                    }),
+                )
+            }
+            Some(TokenKind::ReturnKeyword) => {
+                self.cursor += 1;
+                let value = self.spanned(
+                    TokenKind::Identifier,
+                    "MNP015",
+                    "expected returned value name",
+                );
+                self.expect(TokenKind::Semicolon, "MNP016", "expected ';' after return");
+                let end = self.previous_token_index(start);
+                let node = self.node(CstKind::ReturnStatement, start, end, Vec::new());
+                (
+                    node,
+                    value.map(|value| AstStmt::Return {
+                        span: value.span,
+                        value,
+                    }),
+                )
+            }
+            _ => {
+                self.error(
+                    "MNP061",
+                    "expected let, if, fail, or return",
+                    vec![
+                        TokenKind::LetKeyword,
+                        TokenKind::IfKeyword,
+                        TokenKind::FailKeyword,
+                        TokenKind::ReturnKeyword,
+                    ],
+                );
+                if self.cursor < self.significant.len() {
+                    self.cursor += 1;
+                }
+                let end = self.previous_token_index(start);
+                (self.node(CstKind::Block, start, end, Vec::new()), None)
+            }
+        }
+    }
+
+    fn expression(&mut self) -> Option<AstExpr> {
+        let left = self.primary()?;
+        let op = match self.current_kind() {
+            Some(TokenKind::Plus) => Some(AstBinaryOp::Add),
+            Some(TokenKind::Minus) => Some(AstBinaryOp::Sub),
+            Some(TokenKind::Star) => Some(AstBinaryOp::Mul),
+            Some(TokenKind::EqEq) => Some(AstBinaryOp::Eq),
+            Some(TokenKind::NotEq) => Some(AstBinaryOp::Ne),
+            Some(TokenKind::Lt) => Some(AstBinaryOp::Lt),
+            Some(TokenKind::Le) => Some(AstBinaryOp::Le),
+            Some(TokenKind::Gt) => Some(AstBinaryOp::Gt),
+            Some(TokenKind::Ge) => Some(AstBinaryOp::Ge),
+            _ => None,
+        };
+        if let Some(op) = op {
+            self.cursor += 1;
+            let right = self.primary()?;
+            let span = SourceSpan::covering(&self.envelope.text, left.span(), right.span());
+            Some(AstExpr::Binary {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+                span,
+            })
+        } else {
+            Some(left)
+        }
+    }
+
+    fn primary(&mut self) -> Option<AstExpr> {
+        match self.current_kind() {
+            Some(TokenKind::Identifier) => self
+                .spanned(TokenKind::Identifier, "MNP062", "expected expression")
+                .map(AstExpr::Name),
+            Some(TokenKind::IntegerLiteral) => {
+                let text = self.spanned(
+                    TokenKind::IntegerLiteral,
+                    "MNP063",
+                    "expected integer literal",
+                )?;
+                let value = text.text.parse().unwrap_or(0);
+                Some(AstExpr::Integer { text, value })
+            }
+            _ => {
+                self.error(
+                    "MNP064",
+                    "expected name or integer literal",
+                    vec![TokenKind::Identifier, TokenKind::IntegerLiteral],
+                );
+                None
+            }
+        }
     }
 
     fn parameter_list(&mut self, role: &str) -> (CstNode, Vec<AstParameter>) {
@@ -922,10 +1376,24 @@ fn is_identifier_continue(value: char) -> bool {
     value == '_' || value.is_alphanumeric()
 }
 
+pub fn source_profile_supported(version: &str) -> bool {
+    version == SOURCE_PROFILE_VERSION || version == SOURCE_PROFILE_VERSION_0_2
+}
+
+fn infer_source_profile(text: &str) -> &'static str {
+    let header = text.lines().find(|line| {
+        let trimmed = line.trim_start();
+        !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with("/*")
+    });
+    match header {
+        Some(line) if line.trim_start().starts_with("mncs 0.2") => SOURCE_PROFILE_VERSION_0_2,
+        _ => SOURCE_PROFILE_VERSION,
+    }
+}
+
 fn fingerprint<T: Serialize>(value: &T) -> String {
     let bytes = serde_json::to_vec(value).expect("source artifact is serializable");
     let digest = Sha256::digest(bytes);
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
     let mut output = String::with_capacity(digest.len() * 2);
     for byte in digest {
         write!(&mut output, "{byte:02x}").expect("writing to a String cannot fail");

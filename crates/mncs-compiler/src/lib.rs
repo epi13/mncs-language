@@ -11,17 +11,21 @@ pub use frontend::{elaborate_program, SourceFrontEndResult, SourceStudyOutput};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
+use mncs_codegen::{
+    lower_selected_ssa, portable_wasm_backend_configuration, portable_wasm_plan,
+    target_is_portable_wasm,
+};
 use mncs_model::{
-    ArtifactRepresentation, BuildHostIdentity, CompilationEmissions, CompilationEvidenceBundle,
-    CompilationRequest, CompilationResult, CompilationStatus, CompilationStudyRequest,
-    CompilationStudyResult, CompilerArchitectureContract, CompilerArtifactRef, CompilerDiagnostic,
-    CompilerDiagnosticKind, CompilerHostIdentity, CompilerImplementationIdentity,
-    CompilerNodeProfile, CompilerPassExecutionObservation, CompilerPassIdentity, CompilerStage,
-    CompilerStageContract, CrossHostInvariants, ObligationStatus, ObservationModelRef,
-    PassPipelineIdentity, Program, RelationClaim, SemanticId, StageAvailability, StageIntegration,
-    TargetContractRef, TargetLoweringPlan, TransformationEdge, TransformationStatus,
-    COMPILATION_STUDY_OBSERVATION_INTERPRETATION, COMPILATION_STUDY_RESULT_CONTRACT_ID,
-    COMPILER_ARTIFACT_SCHEMA_VERSION, SSA_SCHEMA_VERSION,
+    ArtifactRepresentation, BackendArtifact, BuildHostIdentity, CompilationEmissions,
+    CompilationEvidenceBundle, CompilationRequest, CompilationResult, CompilationStatus,
+    CompilationStudyRequest, CompilationStudyResult, CompilerArchitectureContract,
+    CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind, CompilerHostIdentity,
+    CompilerImplementationIdentity, CompilerNodeProfile, CompilerPassExecutionObservation,
+    CompilerPassIdentity, CompilerStage, CompilerStageContract, CrossHostInvariants,
+    ObligationStatus, ObservationModelRef, PassPipelineIdentity, Program, RelationClaim,
+    SemanticId, StageAvailability, StageIntegration, TargetContractRef, TargetLoweringPlan,
+    TransformationEdge, TransformationStatus, COMPILATION_STUDY_OBSERVATION_INTERPRETATION,
+    COMPILATION_STUDY_RESULT_CONTRACT_ID, COMPILER_ARTIFACT_SCHEMA_VERSION, SSA_SCHEMA_VERSION,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -61,6 +65,9 @@ impl ReferenceCompiler {
             semantic.fingerprint,
         );
         let (compiler_host, build_host) = native_host_identities();
+        let backend = target.as_ref().and_then(|target| {
+            target_is_portable_wasm(target).then(portable_wasm_backend_configuration)
+        });
         CompilationRequest::new(
             input,
             SemanticId(REFERENCE_LANGUAGE_PROFILE.to_owned()),
@@ -73,7 +80,7 @@ impl ReferenceCompiler {
             self.pipeline.clone(),
             Vec::new(),
             None,
-            None,
+            backend,
         )
     }
 
@@ -268,17 +275,35 @@ impl ReferenceCompiler {
             selected_ssa_ref.clone(),
         ];
         let mut edges = vec![semantic_to_hir, hir_to_ssa, select_ssa];
+        let mut backend_artifact: Option<BackendArtifact> = None;
         let target_lowering_plan = request.target.clone().map(|target| {
-            let plan = TargetLoweringPlan::with_unknown_facts(
-                selected_ssa_ref.clone(),
-                target,
-                request.backend.clone(),
-                vec![
-                    "data-layout evidence".to_owned(),
-                    "ABI and calling-convention evidence".to_owned(),
-                    "integer and trap mapping evidence".to_owned(),
-                ],
-            );
+            let portable = target_is_portable_wasm(&target);
+            let plan = if portable {
+                let template = portable_wasm_plan(selected_ssa_ref.clone());
+                TargetLoweringPlan::with_explicit_facts(
+                    selected_ssa_ref.clone(),
+                    target,
+                    request.backend.clone().or(template.backend),
+                    template.target_layout_assumptions,
+                    template.abi_assumptions,
+                    template.integer_lowering,
+                    template.trap_failure_mapping,
+                    template.linker_requirements,
+                    template.promises_consumed,
+                    TransformationStatus::Pass,
+                )
+            } else {
+                TargetLoweringPlan::with_unknown_facts(
+                    selected_ssa_ref.clone(),
+                    target,
+                    request.backend.clone(),
+                    vec![
+                        "data-layout evidence".to_owned(),
+                        "ABI and calling-convention evidence".to_owned(),
+                        "integer and trap mapping evidence".to_owned(),
+                    ],
+                )
+            };
             let plan_fingerprint = fingerprint(&plan);
             let plan_ref = CompilerArtifactRef::new(
                 ArtifactRepresentation::TargetLoweringPlan,
@@ -292,22 +317,56 @@ impl ReferenceCompiler {
                 plan.assumptions_introduced.clone(),
                 Vec::new(),
                 plan.target.evidence.clone(),
-                TransformationStatus::Unknown,
+                plan.status,
                 Vec::new(),
             );
             artifacts.push(plan_ref);
             edges.push(edge);
-            diagnostics.push(CompilerDiagnostic::new(
-                "CMP303",
-                CompilerDiagnosticKind::MissingTargetEvidence,
-                "target lowering remains UNKNOWN until layout, ABI, integer, and trap facts are evidenced",
-            ));
+            if plan.status != TransformationStatus::Pass {
+                diagnostics.push(CompilerDiagnostic::new(
+                    "CMP303",
+                    CompilerDiagnosticKind::MissingTargetEvidence,
+                    "target lowering remains UNKNOWN until layout, ABI, integer, and trap facts are evidenced",
+                ));
+            }
             plan
         });
+        if let Some(plan) = target_lowering_plan.as_ref() {
+            if plan.status == TransformationStatus::Pass {
+                let lowered = lower_selected_ssa(program, &ssa, selected_ssa_ref.clone(), plan);
+                diagnostics.extend(lowered.diagnostics.clone());
+                if let (Some(artifact), Some(artifact_ref), Some(evidence)) =
+                    (lowered.artifact, lowered.artifact_ref, lowered.evidence)
+                {
+                    let edge = TransformationEdge::new(
+                        selected_ssa_ref.clone(),
+                        artifact_ref.clone(),
+                        self.pass("lower-selected-ssa-to-portable-wasm"),
+                        artifact.assumptions.clone(),
+                        artifact.obligations_generated.clone(),
+                        evidence.evidence.clone(),
+                        lowered.status,
+                        Vec::new(),
+                    );
+                    artifacts.push(artifact_ref);
+                    edges.push(edge);
+                    backend_artifact = Some(artifact);
+                }
+            }
+        }
 
+        let target_unresolved = match &target_lowering_plan {
+            None => false,
+            Some(plan)
+                if plan.status == TransformationStatus::Pass && backend_artifact.is_some() =>
+            {
+                false
+            }
+            Some(_) => true,
+        };
         let status = if !failed_obligations.is_empty() {
             CompilationStatus::Failed
-        } else if !unresolved_obligations.is_empty() || target_lowering_plan.is_some() {
+        } else if !unresolved_obligations.is_empty() || target_unresolved {
             CompilationStatus::CompletedWithUnresolvedObligations
         } else {
             CompilationStatus::Completed
@@ -332,10 +391,15 @@ impl ReferenceCompiler {
             target: request.target.clone(),
             run_environment: request.run_environment.clone(),
             target_lowering_plan: target_lowering_plan.clone(),
-            backend: request
-                .backend
+            backend: backend_artifact
                 .as_ref()
-                .map(|configuration| configuration.backend.clone()),
+                .map(|artifact| artifact.backend.clone())
+                .or_else(|| {
+                    request
+                        .backend
+                        .as_ref()
+                        .map(|configuration| configuration.backend.clone())
+                }),
             obligations: ssa.obligations.clone(),
             unresolved_obligations,
             evidence: Vec::new(),
@@ -372,6 +436,11 @@ impl ReferenceCompiler {
                 .emit
                 .contains(&ArtifactRepresentation::TargetLoweringPlan)
                 .then_some(target_lowering_plan)
+                .flatten(),
+            backend: request
+                .emit
+                .contains(&ArtifactRepresentation::BackendArtifact)
+                .then_some(backend_artifact)
                 .flatten(),
         };
         let evidence = request
@@ -669,7 +738,27 @@ pub fn reference_pipeline() -> PassPipelineIdentity {
                 Vec::new(),
                 vec!["target legality".to_owned()],
                 "target contract evidence appraisal",
-                "report UNKNOWN and emit no backend artifact",
+                "report UNKNOWN and emit no backend artifact when facts are missing",
+            ),
+            CompilerPassIdentity::new(
+                "lower-selected-ssa-to-portable-wasm",
+                "0.1",
+                ArtifactRepresentation::SelectedSsa,
+                ArtifactRepresentation::BackendArtifact,
+                relation(),
+                vec![
+                    "selected SSA is structurally valid".to_owned(),
+                    "target lowering plan is PASS with explicit facts".to_owned(),
+                ],
+                vec![
+                    "portable WASM MVP layout".to_owned(),
+                    "portable WASM MVP ABI".to_owned(),
+                    "integer and trap mapping".to_owned(),
+                ],
+                Vec::new(),
+                vec!["supported integer/control-flow subset".to_owned()],
+                "mncs-codegen portable WASM MVP adapter",
+                "emit UNSUPPORTED/UNKNOWN rather than guessing",
             ),
         ],
     )
@@ -796,25 +885,35 @@ pub fn reference_compiler_architecture() -> CompilerArchitectureContract {
         },
         CompilerStageContract {
             stage: Stage::LoweringBackendGeneration,
-            availability: Availability::Partial,
+            availability: Availability::Experimental,
             integration: Integration::CompilerDriver,
             input_contracts: vec!["selected SSA and target contract".to_owned()],
-            output_contracts: vec!["TargetLoweringPlan".to_owned()],
+            output_contracts: vec!["TargetLoweringPlan and portable WASM MVP backend artifact".to_owned()],
             deterministic_output_required: true,
             owner: "mncs-language backend adapter contract".to_owned(),
-            decisions: vec!["unevidenced target facts remain UNKNOWN".to_owned()],
-            blockers: vec!["portable backend adapter and target legality validator".to_owned()],
+            decisions: vec![
+                "unevidenced target facts remain UNKNOWN".to_owned(),
+                "portable WASM MVP facts are explicit data, not host defaults".to_owned(),
+            ],
+            blockers: vec!["native backends and richer ABI/memory lowering".to_owned()],
         },
         CompilerStageContract {
             stage: Stage::ExecutableArtifact,
-            availability: Availability::Planned,
-            integration: Integration::NotIntegrated,
-            input_contracts: vec!["validated backend artifact and linker derivation".to_owned()],
-            output_contracts: vec!["ExecutableArtifact and compilation evidence".to_owned()],
-            deterministic_output_required: false,
+            availability: Availability::Experimental,
+            integration: Integration::CompilerDriver,
+            input_contracts: vec!["portable WASM MVP backend artifact".to_owned()],
+            output_contracts: vec!["embedded research execution of the emitted WASM subset".to_owned()],
+            deterministic_output_required: true,
             owner: "mncs-language executable and RFC 0031 derivation contracts".to_owned(),
-            decisions: Vec::new(),
-            blockers: vec!["phase C3 portable backend".to_owned()],
+            decisions: vec![
+                "research execution is the mncs-codegen interpreter, not a host wasm CLI".to_owned(),
+                "body/SSA/backend agreement is empirical bounded agreement, not universal equivalence".to_owned(),
+            ],
+            blockers: vec![
+                "native object emission".to_owned(),
+                "linker derivation".to_owned(),
+                "independent translation checker remaining trust".to_owned(),
+            ],
         },
     ])
 }
@@ -924,6 +1023,17 @@ mod tests {
         )
     }
 
+    fn flagship_envelope() -> SourceEnvelope {
+        SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "examples.flagship",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../examples/source/flagship.mncs"
+            )),
+        )
+    }
+
     #[test]
     fn source_fixture_traverses_every_front_end_stage_into_hir() {
         let compiler = ReferenceCompiler::default();
@@ -967,6 +1077,33 @@ mod tests {
         let hir = output.front_end.program.unwrap().lower_to_ir().unwrap();
         assert_eq!(hir.functions.len(), 1);
         assert_eq!(hir.functions[0].inputs.len(), 1);
+    }
+
+    #[test]
+    fn source_profile_0_2_elaborates_bindings_contracts_and_failure() {
+        let compiler = ReferenceCompiler::default();
+        let output = compiler.run_local_source_study(flagship_envelope());
+        assert!(
+            output.front_end.is_valid(),
+            "{:#?}",
+            output.front_end.diagnostics
+        );
+        let program = output.front_end.program.expect("elaborated flagship");
+        let function = &program.functions[0];
+        assert_eq!(function.name, "bounded_step");
+        assert!(function
+            .contracts
+            .iter()
+            .any(|clause| clause.id == "n_within_limit"));
+        assert!(function
+            .capabilities
+            .iter()
+            .any(|capability| capability == "checked_integer"));
+        assert!(function.body.as_ref().unwrap().blocks.len() > 1);
+        let study = output.study.expect("flagship source study");
+        assert!(study
+            .stage_fingerprints
+            .contains_key(&ArtifactRepresentation::Ssa));
     }
 
     #[test]
@@ -1204,6 +1341,42 @@ mod tests {
     }
 
     #[test]
+    fn portable_wasm_target_emits_a_backend_artifact() {
+        let compiler = ReferenceCompiler::default();
+        let program = program("compiler-portable-wasm");
+        let mut emit = emissions();
+        emit.insert(ArtifactRepresentation::TargetLoweringPlan);
+        emit.insert(ArtifactRepresentation::BackendArtifact);
+        let request = compiler.request_for_program(
+            &program,
+            emit,
+            Some(mncs_codegen::portable_wasm_target()),
+        );
+        let result = compiler.compile(request, &program);
+        assert!(
+            result
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.representation == ArtifactRepresentation::BackendArtifact),
+            "{:?}",
+            result.diagnostics
+        );
+        assert_eq!(
+            result
+                .emissions
+                .target_lowering_plan
+                .as_ref()
+                .unwrap()
+                .status,
+            TransformationStatus::Pass
+        );
+        assert_eq!(
+            result.emissions.backend.as_ref().unwrap().status,
+            TransformationStatus::Pass
+        );
+    }
+
+    #[test]
     fn architecture_contract_covers_every_logical_stage_without_hiding_gaps() {
         let architecture = reference_compiler_architecture();
         assert!(architecture.validate().is_empty());
@@ -1226,7 +1399,8 @@ mod tests {
             .iter()
             .find(|stage| stage.stage == CompilerStage::ExecutableArtifact)
             .unwrap();
-        assert_eq!(executable.availability, StageAvailability::Planned);
+        assert_eq!(executable.availability, StageAvailability::Experimental);
+        assert_eq!(executable.integration, StageIntegration::CompilerDriver);
     }
 
     #[test]

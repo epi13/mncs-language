@@ -1,0 +1,30 @@
+{
+  "schema_version": "0.1",
+  "name": "checked-add-bounded",
+  "cases": [
+    {
+      "id": "sum",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "Examples.Executable", "function": "checked_add"},
+        "arguments": [
+          {"integer": {"value": 20, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 22, "type": {"bits": 32, "signed": true}}}
+        ],
+        "step_budget": 64
+      }
+    },
+    {
+      "id": "overflow",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "Examples.Executable", "function": "checked_add"},
+        "arguments": [
+          {"integer": {"value": 2147483647, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 1, "type": {"bits": 32, "signed": true}}}
+        ],
+        "step_budget": 64
+      }
+    }
+  ]
+}

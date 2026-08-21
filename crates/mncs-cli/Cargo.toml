@@ -13,6 +13,8 @@ path = "src/main.rs"
 
 [dependencies]
 mncs-compiler = { path = "../mncs-compiler" }
+mncs-codegen = { path = "../mncs-codegen" }
+mncs-translation-check = { path = "../mncs-translation-check" }
 mncs-model = { path = "../mncs-model" }
 mncs-syntax = { path = "../mncs-syntax" }
 serde.workspace = true

@@ -1,0 +1,53 @@
+{
+  "schema_version": "0.1",
+  "module": "Examples.Executable",
+  "functions": [
+    {
+      "name": "const_add",
+      "inputs": [],
+      "outputs": [{"name": "sum", "type": "i32"}],
+      "contracts": [],
+      "effects": [],
+      "capabilities": [],
+      "assumptions": [],
+      "evidence": [],
+      "failure": "isolated",
+      "body": {
+        "schema_version": "0.2",
+        "entry": "entry",
+        "parameters": [],
+        "blocks": [
+          {
+            "id": "entry",
+            "parameters": [],
+            "operations": [
+              {
+                "id": "two",
+                "kind": {"constant": {"value": 2, "type": {"integer": {"bits": 32, "signed": true}}}},
+                "results": [{"id": "two", "type": {"integer": {"bits": 32, "signed": true}}}]
+              },
+              {
+                "id": "three",
+                "kind": {"constant": {"value": 3, "type": {"integer": {"bits": 32, "signed": true}}}},
+                "results": [{"id": "three", "type": {"integer": {"bits": 32, "signed": true}}}]
+              },
+              {
+                "id": "sum",
+                "kind": {
+                  "integer": {
+                    "operator": "add",
+                    "operand_type": {"bits": 32, "signed": true},
+                    "intent": "wrapping"
+                  }
+                },
+                "operands": ["two", "three"],
+                "results": [{"id": "sum", "type": {"integer": {"bits": 32, "signed": true}}}]
+              }
+            ],
+            "terminator": {"return": {"values": ["sum"]}}
+          }
+        ]
+      }
+    }
+  ]
+}

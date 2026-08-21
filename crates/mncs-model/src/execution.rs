@@ -361,6 +361,14 @@ fn execute_inner(
             "terminator",
         );
         match &block.terminator {
+            BodyTerminator::Failure { mode } => {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    None,
+                    format!("failure terminator reached: {mode:?}"),
+                );
+                return result;
+            }
             BodyTerminator::Return { values: returned } => {
                 result.returned = match returned
                     .iter()

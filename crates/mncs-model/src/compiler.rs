@@ -12,6 +12,13 @@ use serde::{Deserialize, Serialize};
 use crate::canonical::{canonical_json_value, sha256_hex};
 use crate::{CanonicalForm, HighLevelIr, ObligationRecord, SemanticId, SsaModule};
 
+pub const PORTABLE_WASM_MVP_TARGET: &str = "mncs:target:portable-wasm-mvp-0.1";
+pub const PORTABLE_WASM_MVP_BACKEND_NAME: &str = "mncs-portable-wasm-mvp";
+pub const PORTABLE_WASM_MVP_BACKEND_VERSION: &str = "0.1";
+pub const BACKEND_ARTIFACT_SCHEMA_VERSION: &str = "0.1";
+pub const LAYERED_EXECUTION_COMPARISON_INTERPRETATION: &str =
+    "empirical_bounded_agreement_not_universal_equivalence";
+
 pub const COMPILER_ARTIFACT_SCHEMA_VERSION: &str = "0.1";
 pub const COMPILATION_STUDY_RESULT_CONTRACT_ID: &str = "mncs:language:compilation-study-result:0.1";
 pub const COMPILATION_STUDY_OBSERVATION_INTERPRETATION: &str =
@@ -642,6 +649,50 @@ pub struct TargetLoweringPlan {
 }
 
 impl TargetLoweringPlan {
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_explicit_facts(
+        selected_ssa: CompilerArtifactRef,
+        target: TargetContractRef,
+        backend: Option<BackendConfiguration>,
+        target_layout_assumptions: Vec<String>,
+        abi_assumptions: Vec<String>,
+        integer_lowering: BTreeMap<String, String>,
+        trap_failure_mapping: BTreeMap<String, String>,
+        linker_requirements: Vec<String>,
+        promises_consumed: Vec<String>,
+        status: TransformationStatus,
+    ) -> Self {
+        let mut assumptions_introduced = target.assumptions.clone();
+        if let Some(configuration) = &backend {
+            assumptions_introduced.extend(configuration.assumptions.clone());
+        }
+        sort_dedup(&mut assumptions_introduced);
+        let mut layout = target_layout_assumptions;
+        let mut abi = abi_assumptions;
+        let mut linker = linker_requirements;
+        let mut promises = promises_consumed;
+        sort_dedup(&mut layout);
+        sort_dedup(&mut abi);
+        sort_dedup(&mut linker);
+        sort_dedup(&mut promises);
+        let mut plan = Self {
+            identity: SemanticId(String::new()),
+            selected_ssa,
+            target,
+            backend,
+            target_layout_assumptions: layout,
+            abi_assumptions: abi,
+            integer_lowering,
+            trap_failure_mapping,
+            linker_requirements: linker,
+            promises_consumed: promises,
+            assumptions_introduced,
+            status,
+        };
+        plan.identity = identified("target-lowering-plan", &plan.without_identity());
+        plan
+    }
+
     pub fn with_unknown_facts(
         selected_ssa: CompilerArtifactRef,
         target: TargetContractRef,
@@ -786,11 +837,151 @@ impl BackendEvidence {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendArtifact {
+    pub schema_version: String,
+    pub identity: SemanticId,
+    pub backend: BackendIdentity,
+    pub input: CompilerArtifactRef,
+    pub target: TargetContractRef,
+    pub format: String,
+    pub bytes_sha256: String,
+    pub bytes_hex: String,
+    pub exports: Vec<String>,
+    pub assumptions: Vec<String>,
+    pub obligations_generated: Vec<SemanticId>,
+    pub execution_applicability: Vec<String>,
+    pub evidence_dependencies: Vec<SemanticId>,
+    pub unsupported: Vec<String>,
+    pub status: TransformationStatus,
+}
+
+impl BackendArtifact {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        backend: BackendIdentity,
+        input: CompilerArtifactRef,
+        target: TargetContractRef,
+        format: impl Into<String>,
+        bytes: &[u8],
+        mut exports: Vec<String>,
+        mut assumptions: Vec<String>,
+        mut obligations_generated: Vec<SemanticId>,
+        mut execution_applicability: Vec<String>,
+        mut evidence_dependencies: Vec<SemanticId>,
+        mut unsupported: Vec<String>,
+        status: TransformationStatus,
+    ) -> Self {
+        exports.sort();
+        exports.dedup();
+        sort_dedup(&mut assumptions);
+        obligations_generated.sort();
+        obligations_generated.dedup();
+        sort_dedup(&mut execution_applicability);
+        evidence_dependencies.sort();
+        evidence_dependencies.dedup();
+        sort_dedup(&mut unsupported);
+        let bytes_sha256 = sha256_hex(bytes);
+        let bytes_hex = hex_encode(bytes);
+        let mut artifact = Self {
+            schema_version: BACKEND_ARTIFACT_SCHEMA_VERSION.to_owned(),
+            identity: SemanticId(String::new()),
+            backend,
+            input,
+            target,
+            format: format.into(),
+            bytes_sha256,
+            bytes_hex,
+            exports,
+            assumptions,
+            obligations_generated,
+            execution_applicability,
+            evidence_dependencies,
+            unsupported,
+            status,
+        };
+        artifact.identity = identified("backend-artifact", &artifact.without_identity());
+        artifact
+    }
+
+    pub fn wasm_bytes(&self) -> Result<Vec<u8>, String> {
+        hex_decode(&self.bytes_hex)
+    }
+
+    pub fn identity_is_valid(&self) -> bool {
+        self.backend.identity_is_valid()
+            && self.input.identity_is_valid()
+            && self.target.identity_is_valid()
+            && self.bytes_sha256 == sha256_hex(&self.wasm_bytes().unwrap_or_default())
+            && self.identity == identified("backend-artifact", &self.without_identity())
+    }
+
+    fn without_identity(&self) -> BackendArtifactMaterial<'_> {
+        BackendArtifactMaterial {
+            schema_version: &self.schema_version,
+            backend: &self.backend,
+            input: &self.input,
+            target: &self.target,
+            format: &self.format,
+            bytes_sha256: &self.bytes_sha256,
+            bytes_hex: &self.bytes_hex,
+            exports: &self.exports,
+            assumptions: &self.assumptions,
+            obligations_generated: &self.obligations_generated,
+            execution_applicability: &self.execution_applicability,
+            evidence_dependencies: &self.evidence_dependencies,
+            unsupported: &self.unsupported,
+            status: self.status,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct BackendArtifactMaterial<'a> {
+    schema_version: &'a str,
+    backend: &'a BackendIdentity,
+    input: &'a CompilerArtifactRef,
+    target: &'a TargetContractRef,
+    format: &'a str,
+    bytes_sha256: &'a str,
+    bytes_hex: &'a str,
+    exports: &'a [String],
+    assumptions: &'a [String],
+    obligations_generated: &'a [SemanticId],
+    execution_applicability: &'a [String],
+    evidence_dependencies: &'a [SemanticId],
+    unsupported: &'a [String],
+    status: TransformationStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackendResult {
     pub status: TransformationStatus,
-    pub artifact: Option<CompilerArtifactRef>,
+    pub artifact: Option<BackendArtifact>,
+    pub artifact_ref: Option<CompilerArtifactRef>,
     pub evidence: Option<BackendEvidence>,
     pub diagnostics: Vec<CompilerDiagnostic>,
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut hex = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write;
+        write!(&mut hex, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    hex
+}
+
+fn hex_decode(hex: &str) -> Result<Vec<u8>, String> {
+    if hex.len() % 2 != 0 {
+        return Err("backend artifact hex encoding has an odd length".to_owned());
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|index| {
+            u8::from_str_radix(&hex[index..index + 2], 16)
+                .map_err(|_| "backend artifact hex encoding is not hexadecimal".to_owned())
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -989,6 +1180,8 @@ pub struct CompilationEmissions {
     pub hir: Option<HighLevelIr>,
     pub ssa: Option<SsaModule>,
     pub target_lowering_plan: Option<TargetLoweringPlan>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<BackendArtifact>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
