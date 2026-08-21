@@ -833,6 +833,7 @@ fn lower_executable_body(
         }
         let block_ir_identity = ir_identity("body-block", &block_identity, 0);
         match &block.terminator {
+            BodyTerminator::Failure { .. } => {}
             BodyTerminator::Return { values: returned } => {
                 let return_operation = IrOperation {
                     identity: ir_identity("body-return", &block_identity, 0),

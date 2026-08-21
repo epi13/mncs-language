@@ -444,7 +444,8 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                             }
                         }
                     }
-                    crate::BodyTerminator::Return { .. } => {}
+                    crate::BodyTerminator::Return { .. }
+                    | crate::BodyTerminator::Failure { .. } => {}
                 }
             }
         }

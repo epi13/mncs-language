@@ -5,6 +5,10 @@ use std::{
     process::ExitCode,
 };
 
+use mncs_codegen::{
+    compare_body_ssa_and_backend, execute_backend, lower_selected_ssa, portable_wasm_plan,
+    portable_wasm_target, selected_ssa_ref, target_is_portable_wasm,
+};
 use mncs_compiler::{native_node_profile, reference_compiler_architecture, ReferenceCompiler};
 use mncs_model::{
     compare_body_and_ssa, compare_execution, execute_ssa, execute_with_policy,
@@ -17,6 +21,10 @@ use mncs_model::{
 };
 use mncs_syntax::{
     analyze, SourceArtifactKind, SourceEnvelope, SourceMetrics, SourceOrigin, SourceOriginKind,
+};
+use mncs_translation_check::{
+    generate, validate_backend_lowering, validate_branch_simplification, validate_checked_elision,
+    validate_constant_folding, validate_unreachable_removal,
 };
 use serde::{Deserialize, Serialize};
 
@@ -57,6 +65,9 @@ fn main() -> ExitCode {
         "compare-execution" => execution_compare_command(args),
         "check-lowering-execution" => lowering_execution_command(args),
         "compile" => compile_command(args),
+        "execute-backend" => backend_execution_command(args),
+        "check-backend-execution" => backend_compare_command(args),
+        "validate-translation" => validate_translation_command(args),
         "compiler-architecture" => {
             if args.next().is_some() {
                 eprintln!("error: compiler-architecture does not accept arguments");
@@ -645,6 +656,9 @@ where
     if target.is_some() {
         emit.insert(ArtifactRepresentation::TargetLoweringPlan);
     }
+    if target.as_ref().is_some_and(target_is_portable_wasm) {
+        emit.insert(ArtifactRepresentation::BackendArtifact);
+    }
     let request = compiler.request_for_program(&program, emit, target);
     let study =
         CompilationStudyRequest::new(native_node_profile(node_identity), request, Vec::new());
@@ -763,6 +777,13 @@ where
     if emit.contains(&ArtifactRepresentation::TargetLoweringPlan) && target.is_none() {
         return Err("target-plan emission requires --target".to_owned());
     }
+    if emit.contains(&ArtifactRepresentation::BackendArtifact) && target.is_none() {
+        return Err("backend emission requires --target".to_owned());
+    }
+    if target.as_ref().is_some_and(target_is_portable_wasm) {
+        emit.insert(ArtifactRepresentation::TargetLoweringPlan);
+        emit.insert(ArtifactRepresentation::BackendArtifact);
+    }
     Ok(CompileOptions {
         program_path,
         emit,
@@ -780,6 +801,7 @@ fn parse_emit(value: &str) -> Result<BTreeSet<ArtifactRepresentation>, String> {
             "ssa" => ArtifactRepresentation::Ssa,
             "evidence" => ArtifactRepresentation::EvidenceBundle,
             "target-plan" => ArtifactRepresentation::TargetLoweringPlan,
+            "backend" => ArtifactRepresentation::BackendArtifact,
             "" => return Err("--emit contains an empty representation".to_owned()),
             other => return Err(format!("unsupported emitted representation {other:?}")),
         };
@@ -792,6 +814,13 @@ fn parse_emit(value: &str) -> Result<BTreeSet<ArtifactRepresentation>, String> {
 }
 
 fn unevidenced_target(candidate: impl Into<String>) -> TargetContractRef {
+    let candidate = candidate.into();
+    if candidate == "portable-wasm"
+        || candidate == mncs_model::PORTABLE_WASM_MVP_TARGET
+        || candidate == "mncs:target:portable-wasm-mvp-0.1"
+    {
+        return portable_wasm_target();
+    }
     TargetContractRef::new(
         candidate,
         BTreeMap::new(),
@@ -826,10 +855,216 @@ fn write_compilation_outputs(
     if let Some(plan) = &result.emissions.target_lowering_plan {
         write_pretty_json(output_dir.join("target-plan.json"), plan)?;
     }
+    if let Some(backend) = &result.emissions.backend {
+        write_pretty_json(output_dir.join("backend.json"), backend)?;
+    }
     if let Some(evidence) = &result.evidence {
         write_pretty_json(output_dir.join("evidence.json"), evidence)?;
     }
     Ok(())
+}
+
+fn backend_execution_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let Some(program_path) = args.next() else {
+        eprintln!("error: execute-backend requires a program and execution request");
+        return ExitCode::from(2);
+    };
+    let Some(request_path) = args.next() else {
+        eprintln!("error: execute-backend requires an execution request");
+        return ExitCode::from(2);
+    };
+    if args.next().is_some() {
+        eprintln!("error: unexpected additional arguments");
+        return ExitCode::from(2);
+    }
+    let program = match read_program_unvalidated(&program_path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let request = match read_json::<ExecutionRequest>(&request_path) {
+        Ok(request) => request,
+        Err(code) => return code,
+    };
+    let ssa = match program.lower_to_ssa() {
+        Ok(ssa) => ssa,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let selected = selected_ssa_ref(&ssa);
+    let lowered = lower_selected_ssa(
+        &program,
+        &ssa,
+        selected.clone(),
+        &portable_wasm_plan(selected),
+    );
+    let Some(artifact) = lowered.artifact else {
+        eprintln!("error: portable backend lowering did not produce an artifact");
+        let _ = print_json(&lowered);
+        return ExitCode::FAILURE;
+    };
+    let result = execute_backend(&artifact, &request);
+    let status = result.status;
+    if !print_json(&result) {
+        ExitCode::from(2)
+    } else {
+        execution_status_code(status)
+    }
+}
+
+fn backend_compare_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let Some(program_path) = args.next() else {
+        eprintln!("error: check-backend-execution requires a program and corpus");
+        return ExitCode::from(2);
+    };
+    let Some(corpus_path) = args.next() else {
+        eprintln!("error: check-backend-execution requires a corpus");
+        return ExitCode::from(2);
+    };
+    let program = match read_program_unvalidated(&program_path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let corpus = match read_json::<ExecutionCorpus>(&corpus_path) {
+        Ok(corpus) => corpus,
+        Err(code) => return code,
+    };
+    let ssa = match program.lower_to_ssa() {
+        Ok(ssa) => ssa,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let selected = selected_ssa_ref(&ssa);
+    let lowered = lower_selected_ssa(
+        &program,
+        &ssa,
+        selected.clone(),
+        &portable_wasm_plan(selected),
+    );
+    let Some(artifact) = lowered.artifact else {
+        eprintln!("error: portable backend lowering did not produce an artifact");
+        return ExitCode::FAILURE;
+    };
+    let comparison = compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus);
+    let ok = comparison.status == mncs_codegen::LayeredExecutionStatus::ConsistentOverCorpus;
+    if !print_json(&comparison) {
+        ExitCode::from(2)
+    } else if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+fn validate_translation_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let Some(kind) = args.next() else {
+        eprintln!("error: validate-translation requires a transformation kind");
+        return ExitCode::from(2);
+    };
+    let Some(program_path) = args.next() else {
+        eprintln!("error: validate-translation requires a program");
+        return ExitCode::from(2);
+    };
+    let corpus_path = args.next();
+    let program = match read_program_unvalidated(&program_path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let before = match program.lower_to_ssa() {
+        Ok(ssa) => ssa,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let result = match kind.as_str() {
+        "constant-folding" => {
+            validate_constant_folding(&before, &generate::fold_constants(&before))
+        }
+        "unreachable-removal" => {
+            validate_unreachable_removal(&before, &generate::remove_unreachable(&before))
+        }
+        "branch-simplification" => {
+            validate_branch_simplification(&before, &generate::simplify_constant_branches(&before))
+        }
+        "checked-elision" => {
+            let Some(corpus_path) = corpus_path else {
+                eprintln!("error: checked-elision requires a corpus");
+                return ExitCode::from(2);
+            };
+            let corpus = match read_json::<ExecutionCorpus>(&corpus_path) {
+                Ok(corpus) => corpus,
+                Err(code) => return code,
+            };
+            validate_checked_elision(
+                &program,
+                &before,
+                &generate::rewrite_checked_to_wrapping(&before),
+                &corpus,
+            )
+        }
+        "backend-lowering" => {
+            let Some(corpus_path) = corpus_path else {
+                eprintln!("error: backend-lowering requires a corpus");
+                return ExitCode::from(2);
+            };
+            let corpus = match read_json::<ExecutionCorpus>(&corpus_path) {
+                Ok(corpus) => corpus,
+                Err(code) => return code,
+            };
+            let selected = selected_ssa_ref(&before);
+            let artifact = match lower_selected_ssa(
+                &program,
+                &before,
+                selected.clone(),
+                &portable_wasm_plan(selected),
+            )
+            .artifact
+            {
+                Some(artifact) => artifact,
+                None => {
+                    eprintln!("error: portable backend lowering did not produce an artifact");
+                    return ExitCode::FAILURE;
+                }
+            };
+            validate_backend_lowering(&program, &before, &artifact, &corpus)
+        }
+        other => {
+            eprintln!("error: unknown translation kind {other:?}");
+            return ExitCode::from(2);
+        }
+    };
+    let judgement = result.judgement;
+    if !print_json(&result) {
+        ExitCode::from(2)
+    } else if judgement == mncs_model::TranslationJudgement::Fail {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+fn read_json<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, ExitCode> {
+    let input = read_source(path)?;
+    serde_json::from_str(&input).map_err(|error| {
+        eprintln!("error: {error}");
+        ExitCode::from(2)
+    })
 }
 
 fn write_pretty_json(path: PathBuf, value: &impl Serialize) -> Result<(), std::io::Error> {
@@ -1346,7 +1581,10 @@ fn print_usage() {
     eprintln!("  mncs execute-ssa <program.json> <execution-request.json>");
     eprintln!("  mncs compare-execution <baseline.json> <candidate.json> <corpus.json>");
     eprintln!("  mncs check-lowering-execution <program.json> <corpus.json>");
-    eprintln!("  mncs compile <program.json> [--emit semantic,hir,ssa,evidence,target-plan] [--output-dir DIR] [--target TARGET]");
+    eprintln!("  mncs compile <program.json> [--emit semantic,hir,ssa,evidence,target-plan,backend] [--output-dir DIR] [--target TARGET]");
+    eprintln!("  mncs execute-backend <program.json> <execution-request.json>");
+    eprintln!("  mncs check-backend-execution <program.json> <corpus.json>");
+    eprintln!("  mncs validate-translation <kind> <program.json> [corpus.json]");
     eprintln!("  mncs compiler-architecture");
     eprintln!("  mncs compiler-study <program.json> [--node-id NODE] [--target TARGET]");
     eprintln!("  mncs source-study <program.mncs> [--node-id NODE]");

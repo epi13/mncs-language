@@ -1,6 +1,6 @@
 [package]
-name = "mncs-compiler"
-description = "Evidence-bearing compiler driver for the MNCS semantic spine"
+name = "mncs-translation-check"
+description = "Independent PASS/FAIL/UNKNOWN translation validators for MNCS SSA and backend artifacts"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,7 +9,6 @@ rust-version.workspace = true
 
 [dependencies]
 mncs-model = { path = "../mncs-model" }
-mncs-syntax = { path = "../mncs-syntax" }
 mncs-codegen = { path = "../mncs-codegen" }
 serde.workspace = true
 serde_json.workspace = true

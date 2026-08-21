@@ -172,6 +172,7 @@ fn terminator_targets(terminator: &BodyTerminator) -> impl Iterator<Item = &Stri
     let targets = match terminator {
         BodyTerminator::Return { .. } => Vec::new(),
         BodyTerminator::Branch { target, .. } => vec![target],
+        BodyTerminator::Failure { .. } => Vec::new(),
         BodyTerminator::ConditionalBranch {
             then_target,
             else_target,

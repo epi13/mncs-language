@@ -68,6 +68,72 @@ fn compiler_architecture_exposes_the_complete_stage_ladder_and_current_gaps() {
 }
 
 #[test]
+fn portable_backend_and_translation_validation_are_explicitly_bounded() {
+    let program = example("executable/checked-add.mncs.json");
+    let request = example("execution/checked-add-request.json");
+    let executed = binary()
+        .args(["execute-backend", &program, &request])
+        .output()
+        .expect("run execute-backend");
+    assert!(
+        executed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&executed.stderr)
+    );
+    let result: Value = serde_json::from_slice(&executed.stdout).expect("backend result");
+    assert_eq!(result["status"], "returned");
+    assert_eq!(result["returned"][0]["integer"]["value"], 42);
+
+    let compiled = binary()
+        .args(["compile", &program, "--target", "portable-wasm"])
+        .output()
+        .expect("compile portable wasm");
+    assert!(
+        compiled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let compilation: Value = serde_json::from_slice(&compiled.stdout).expect("compile JSON");
+    assert!(compilation["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|artifact| artifact["representation"] == "backend_artifact"));
+
+    let fail = binary()
+        .args([
+            "validate-translation",
+            "checked-elision",
+            &program,
+            &example("execution/checked-add-corpus.json"),
+        ])
+        .output()
+        .expect("validate checked-elision");
+    let judgement: Value = serde_json::from_slice(&fail.stdout).expect("validation JSON");
+    assert_eq!(judgement["judgement"], "FAIL");
+    assert!(judgement["counterexample"].is_object());
+}
+
+#[test]
+fn source_profile_0_2_flagship_reaches_ssa() {
+    let source = example("source/flagship.mncs");
+    let output = binary()
+        .args(["source-study", &source, "--node-id", "flagship-test"])
+        .output()
+        .expect("run flagship source-study");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let study: Value = serde_json::from_slice(&output.stdout).expect("flagship study");
+    assert!(study["stage_fingerprints"]
+        .as_object()
+        .unwrap()
+        .contains_key("ssa"));
+}
+
+#[test]
 fn source_study_emits_the_front_end_and_hir_stage_chain() {
     let source = example("source/identity.mncs");
     let output = binary()

@@ -147,6 +147,9 @@ pub enum BodyTerminator {
         #[serde(default)]
         else_arguments: Vec<String>,
     },
+    Failure {
+        mode: FailureMode,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -742,6 +745,7 @@ fn validate_terminator(
     errors: &mut Vec<Diagnostic>,
 ) {
     match terminator {
+        BodyTerminator::Failure { .. } => {}
         BodyTerminator::Return { values } => {
             check_terminator_values(values, path, available, errors);
         }
