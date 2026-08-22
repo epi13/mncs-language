@@ -1,0 +1,17 @@
+mncs 0.4;
+module examples.profile04.authority_laundering;
+
+fn authorized(value: u64) -> (result: u64)
+    capability retry_authority
+    effect observe authorized_by retry_authority
+{
+    return value;
+}
+
+fn invalid(input: u64) -> (result: u64) {
+    iterate retries up_to 3 carrying state: u64 = input {
+        let observed: u64 = authorized(state);
+        next state = observed;
+    }
+    return state;
+}

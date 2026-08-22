@@ -1,0 +1,9 @@
+mncs 0.4;
+module examples.profile04.invalid_bound_zero;
+
+fn invalid(input: u64) -> (result: u64) {
+    iterate retries up_to 0 carrying state: u64 = input {
+        next state = state;
+    }
+    return state;
+}

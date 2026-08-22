@@ -1,0 +1,6 @@
+mncs 0.4;
+module examples.profile04.recursive_retry;
+
+fn invalid(input: u64) -> (result: u64) {
+    return invalid(input);
+}

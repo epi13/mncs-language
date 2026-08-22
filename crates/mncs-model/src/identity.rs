@@ -37,6 +37,7 @@ pub enum IdentityKind {
     Capability,
     Evidence,
     Body,
+    Iteration,
     Block,
     Operation,
     Value,
@@ -128,6 +129,37 @@ impl Program {
                         &body.canonical_json().expect("canonical executable body"),
                     ),
                 });
+                for iteration in &body.bounded_iterations {
+                    let iteration_identity =
+                        iteration_id(&self.module, &function.name, &iteration.id);
+                    objects.push(IdentityRecord {
+                        identity: iteration_identity.clone(),
+                        kind: IdentityKind::Iteration,
+                        fingerprint: fingerprint_json(
+                            &serde_json::to_string(iteration).expect("bounded iteration"),
+                        ),
+                    });
+                    for obligation_kind in [
+                        "iteration-bound-valid",
+                        "iteration-resource-ceiling",
+                        "iteration-exact-resource-cost",
+                        "iteration-authority-closure",
+                        "iteration-state-preservation",
+                        "iteration-completion-modes",
+                    ] {
+                        objects.push(IdentityRecord {
+                            identity: crate::obligations::body_obligation_id(
+                                obligation_kind,
+                                &iteration_identity,
+                            ),
+                            kind: IdentityKind::Obligation,
+                            fingerprint: fingerprint_json(&format!(
+                                "{obligation_kind}:{}",
+                                iteration_identity.0
+                            )),
+                        });
+                    }
+                }
                 for parameter in &body.parameters {
                     objects.push(IdentityRecord {
                         identity: parameter_id(&self.module, &function.name, &parameter.id),
@@ -476,6 +508,7 @@ fn make_id(kind: IdentityKind, components: &[&str]) -> SemanticId {
         IdentityKind::Capability => "capability",
         IdentityKind::Evidence => "evidence",
         IdentityKind::Body => "body",
+        IdentityKind::Iteration => "iteration",
         IdentityKind::Block => "block",
         IdentityKind::Operation => "operation",
         IdentityKind::Value => "value",
@@ -499,6 +532,10 @@ fn make_id(kind: IdentityKind, components: &[&str]) -> SemanticId {
 
 pub(crate) fn body_id(module: &str, function: &str) -> SemanticId {
     make_id(IdentityKind::Body, &[module, function])
+}
+
+pub(crate) fn iteration_id(module: &str, function: &str, iteration: &str) -> SemanticId {
+    make_id(IdentityKind::Iteration, &[module, function, iteration])
 }
 
 pub(crate) fn block_id(module: &str, function: &str, block: &str) -> SemanticId {

@@ -820,25 +820,17 @@ where
                 .iter()
                 .map(|case_| {
                     let observation = execute_backend(&artifact, &case_.request);
-                    let expectation_met = case_
-                        .expected
-                        .as_ref()
-                        .map(|expected| expected == &observation.returned);
-                    LanguageExperimentCaseObservation {
-                        case_id: case_.id.clone(),
-                        status: observation.status,
-                        returned: observation.returned,
-                        expected: case_.expected.clone(),
-                        expectation_met,
-                        failure_reason: observation.failure.map(|failure| failure.reason),
-                    }
+                    experiment_case_observation(case_, observation)
                 })
                 .collect::<Vec<_>>();
             let invalid = observations.iter().any(|observation| {
                 matches!(
                     observation.status,
                     ExecutionStatus::InvalidRequest | ExecutionStatus::Unsupported
-                )
+                ) || observation.expectation_met == Some(false)
+                    || observation.status_met == Some(false)
+                    || observation.step_bound_met == Some(false)
+                    || observation.effects_met == Some(false)
             });
             if !print_json(&observations) {
                 ExitCode::from(2)
@@ -1097,23 +1089,20 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         .iter()
         .map(|case_| {
             let observation = execute_backend(&artifact, &case_.request);
-            let expectation_met = case_
-                .expected
-                .as_ref()
-                .map(|expected| expected == &observation.returned);
-            LanguageExperimentCaseObservation {
-                case_id: case_.id.clone(),
-                status: observation.status,
-                returned: observation.returned,
-                expected: case_.expected.clone(),
-                expectation_met,
-                failure_reason: observation.failure.map(|failure| failure.reason),
-            }
+            experiment_case_observation(case_, observation)
         })
         .collect();
     let mut unresolved = Vec::new();
     if compilation.status == CompilationStatus::CompletedWithUnresolvedObligations {
-        unresolved.push("compilation retained unresolved obligations".to_owned());
+        let exact_cost_only = study.unresolved_obligations.iter().all(|identity| {
+            ssa.obligations.iter().any(|obligation| {
+                obligation.identity == *identity
+                    && obligation.method == "no-exact-body-cost-evidence"
+            })
+        });
+        if !exact_cost_only {
+            unresolved.push("compilation retained required unresolved obligations".to_owned());
+        }
     }
     let capabilities = backend_capabilities(&options.backend).expect("validated backend");
     let properties = evaluate_execution_properties(&artifact, &prepared.definition.corpus);
@@ -1141,6 +1130,67 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+fn experiment_case_observation(
+    case_: &mncs_model::ExecutionCase,
+    observation: mncs_codegen::BackendExecutionResult,
+) -> LanguageExperimentCaseObservation {
+    let expectation_met = case_
+        .expected
+        .as_ref()
+        .map(|expected| expected == &observation.returned);
+    let status_met = case_
+        .expected_status
+        .map(|expected| expected == observation.status);
+    let step_bound_met = case_
+        .maximum_steps
+        .map(|maximum| observation.steps <= maximum);
+    let expected_effects = case_
+        .expected_effects
+        .iter()
+        .map(|effect| {
+            (
+                effect.kind.clone(),
+                effect.target.clone(),
+                effect.capability.clone(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let actual_effects = observation
+        .effects
+        .iter()
+        .map(|effect| {
+            (
+                effect.kind.clone(),
+                effect.target.clone(),
+                effect.capability.clone(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let effects_met = if case_.expected_effects.is_empty() && !case_.prohibit_unexpected_effects {
+        None
+    } else if case_.prohibit_unexpected_effects {
+        Some(actual_effects == expected_effects)
+    } else {
+        Some(expected_effects.is_subset(&actual_effects))
+    };
+    LanguageExperimentCaseObservation {
+        case_id: case_.id.clone(),
+        status: observation.status,
+        returned: observation.returned,
+        expected: case_.expected.clone(),
+        expectation_met,
+        expected_status: case_.expected_status,
+        status_met,
+        steps: observation.steps,
+        maximum_steps: case_.maximum_steps,
+        step_bound_met,
+        effects: observation.effects,
+        expected_effects: case_.expected_effects.clone(),
+        effects_met,
+        failure_reason: observation.failure.map(|failure| failure.reason),
     }
 }
 
@@ -1303,6 +1353,10 @@ fn write_experiment_outputs(
         &result.realization_plan,
     )?;
     write_pretty_json(output_dir.join("backend-artifact.json"), &result.artifact)?;
+    write_pretty_json(
+        output_dir.join("family-reference.json"),
+        &result.family_reference(),
+    )?;
     write_pretty_json(output_dir.join("result.json"), result)?;
     let bytes = result.artifact.bytes().map_err(std::io::Error::other)?;
     fs::write(

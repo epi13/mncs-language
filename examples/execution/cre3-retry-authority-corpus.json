@@ -1,0 +1,54 @@
+{
+  "schema_version": "0.2",
+  "name": "cre3-bounded-retry-authority-under-uncertainty",
+  "cases": [
+    {
+      "id": "success-first-attempt",
+      "request": {"schema_version":"0.1","target":{"module":"examples.cre3","function":"candidate"},"arguments":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::PASS","discriminant":0}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::PASS","discriminant":0}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::PASS","discriminant":0}}],"step_budget":2048},
+      "expected_status": "returned",
+      "maximum_steps": 20000,
+      "prohibit_unexpected_effects": true,
+      "expected": [{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::RetryResult","variant_identity":"mncs:0.2:finite-variant:examples.cre3::RetryResult::PASS_FIRST","discriminant":0}}]
+    },
+    {
+      "id": "uncertain-then-success",
+      "request": {"schema_version":"0.1","target":{"module":"examples.cre3","function":"candidate"},"arguments":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::UNKNOWN","discriminant":2}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::PASS","discriminant":0}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::FAIL","discriminant":1}}],"step_budget":2048},
+      "expected_status": "returned",
+      "maximum_steps": 20000,
+      "prohibit_unexpected_effects": true,
+      "expected": [{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::RetryResult","variant_identity":"mncs:0.2:finite-variant:examples.cre3::RetryResult::PASS_SECOND","discriminant":1}}]
+    },
+    {
+      "id": "success-at-exact-bound",
+      "request": {"schema_version":"0.1","target":{"module":"examples.cre3","function":"candidate"},"arguments":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::UNKNOWN","discriminant":2}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::UNKNOWN","discriminant":2}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::PASS","discriminant":0}}],"step_budget":2048},
+      "expected_status": "returned",
+      "maximum_steps": 20000,
+      "prohibit_unexpected_effects": true,
+      "expected": [{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::RetryResult","variant_identity":"mncs:0.2:finite-variant:examples.cre3::RetryResult::PASS_THIRD","discriminant":2}}]
+    },
+    {
+      "id": "uncertain-through-exhaustion",
+      "request": {"schema_version":"0.1","target":{"module":"examples.cre3","function":"candidate"},"arguments":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::UNKNOWN","discriminant":2}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::UNKNOWN","discriminant":2}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::UNKNOWN","discriminant":2}}],"step_budget":2048},
+      "expected_status": "returned",
+      "maximum_steps": 20000,
+      "prohibit_unexpected_effects": true,
+      "expected": [{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::RetryResult","variant_identity":"mncs:0.2:finite-variant:examples.cre3::RetryResult::UNKNOWN_EXHAUSTED","discriminant":4}}]
+    },
+    {
+      "id": "terminal-failure-first",
+      "request": {"schema_version":"0.1","target":{"module":"examples.cre3","function":"candidate"},"arguments":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::FAIL","discriminant":1}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::PASS","discriminant":0}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::PASS","discriminant":0}}],"step_budget":2048},
+      "expected_status": "returned",
+      "maximum_steps": 20000,
+      "prohibit_unexpected_effects": true,
+      "expected": [{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::RetryResult","variant_identity":"mncs:0.2:finite-variant:examples.cre3::RetryResult::TERMINAL_FAIL","discriminant":3}}]
+    },
+    {
+      "id": "uncertain-then-terminal-failure",
+      "request": {"schema_version":"0.1","target":{"module":"examples.cre3","function":"candidate"},"arguments":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::UNKNOWN","discriminant":2}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::FAIL","discriminant":1}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre3::Evidence::PASS","discriminant":0}}],"step_budget":2048},
+      "expected_status": "returned",
+      "maximum_steps": 20000,
+      "prohibit_unexpected_effects": true,
+      "expected": [{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre3::RetryResult","variant_identity":"mncs:0.2:finite-variant:examples.cre3::RetryResult::TERMINAL_FAIL","discriminant":3}}]
+    }
+  ]
+}

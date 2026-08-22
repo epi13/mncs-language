@@ -381,8 +381,8 @@ pub fn compare_body_and_ssa(
     let mut matching_cases = 0;
     let mut mismatching_cases = 0;
     let mut unsupported_case = false;
-    let mut invalid_case =
-        corpus.schema_version != crate::EXECUTION_CORPUS_SCHEMA_VERSION || corpus.cases.is_empty();
+    let mut invalid_case = !crate::execution_corpus_schema_supported(&corpus.schema_version)
+        || corpus.cases.is_empty();
     for case_ in &corpus.cases {
         invalid_case |= case_.id.trim().is_empty();
         let body = execute_with_policy(program, &case_.request);

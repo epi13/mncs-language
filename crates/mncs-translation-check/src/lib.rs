@@ -585,11 +585,19 @@ mod tests {
                     id: "sum".to_owned(),
                     request: request(20, 22),
                     expected: None,
+                    expected_status: None,
+                    maximum_steps: None,
+                    expected_effects: Vec::new(),
+                    prohibit_unexpected_effects: false,
                 },
                 ExecutionCase {
                     id: "overflow".to_owned(),
                     request: request(i128::from(i32::MAX), 1),
                     expected: None,
+                    expected_status: None,
+                    maximum_steps: None,
+                    expected_effects: Vec::new(),
+                    prohibit_unexpected_effects: false,
                 },
             ],
         }
@@ -689,6 +697,10 @@ mod tests {
                 id: "small".to_owned(),
                 request: request(1, 2),
                 expected: None,
+                expected_status: None,
+                maximum_steps: None,
+                expected_effects: Vec::new(),
+                prohibit_unexpected_effects: false,
             }],
         };
         let unknown = validate_checked_elision(&program, &before, &after, &no_overflow);

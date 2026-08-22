@@ -105,6 +105,12 @@ pub struct WasmTrap {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WasmExecution {
+    pub returned: Vec<ExecutionValue>,
+    pub steps: u64,
+}
+
 pub fn encode_module(module: &WasmModule) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&WASM_MAGIC);
@@ -233,7 +239,7 @@ pub fn execute_function(
     name: &str,
     arguments: &[ExecutionValue],
     step_budget: u64,
-) -> Result<Vec<ExecutionValue>, WasmTrap> {
+) -> Result<WasmExecution, WasmTrap> {
     let function_index = module
         .functions
         .iter()
@@ -266,12 +272,13 @@ pub fn execute_function(
         &mut steps,
         0,
     )?;
-    function
+    let returned = function
         .results
         .iter()
         .zip(returned)
         .map(|(ty, value)| local_to_value(value, *ty))
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(WasmExecution { returned, steps })
 }
 
 fn execute_raw(

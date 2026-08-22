@@ -7,6 +7,7 @@ pub const SOURCE_ENVELOPE_SCHEMA_VERSION: &str = "0.1";
 pub const SOURCE_PROFILE_VERSION: &str = "0.1";
 pub const SOURCE_PROFILE_VERSION_0_2: &str = "0.2";
 pub const SOURCE_PROFILE_VERSION_0_3: &str = "0.3";
+pub const SOURCE_PROFILE_VERSION_0_4: &str = "0.4";
 pub const LEXICAL_SCHEMA_VERSION: &str = "0.1";
 pub const CST_SCHEMA_VERSION: &str = "0.1";
 pub const AST_SCHEMA_VERSION: &str = "0.1";
@@ -225,6 +226,11 @@ pub enum TokenKind {
     AuthorizedKeyword,
     EnumKeyword,
     MatchKeyword,
+    IterateKeyword,
+    UpToKeyword,
+    CarryingKeyword,
+    NextKeyword,
+    WhileKeyword,
     TrueKeyword,
     FalseKeyword,
     Identifier,
@@ -330,6 +336,7 @@ pub enum CstKind {
     Parameter,
     Block,
     ReturnStatement,
+    BoundedIteration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -473,6 +480,18 @@ pub enum AstStmt {
     },
     Return {
         value: AstExpr,
+        span: SourceSpan,
+    },
+    BoundedIteration {
+        name: SpannedText,
+        bound: SpannedText,
+        bound_value: i128,
+        state: SpannedText,
+        state_type: SpannedText,
+        initial: Box<AstExpr>,
+        body: Vec<AstStmt>,
+        next_state: SpannedText,
+        next_value: Box<AstExpr>,
         span: SourceSpan,
     },
 }
@@ -664,6 +683,11 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                 "authorized_by" => TokenKind::AuthorizedKeyword,
                 "enum" => TokenKind::EnumKeyword,
                 "match" => TokenKind::MatchKeyword,
+                "iterate" => TokenKind::IterateKeyword,
+                "up_to" => TokenKind::UpToKeyword,
+                "carrying" => TokenKind::CarryingKeyword,
+                "next" => TokenKind::NextKeyword,
+                "while" => TokenKind::WhileKeyword,
                 "true" => TokenKind::TrueKeyword,
                 "false" => TokenKind::FalseKeyword,
                 _ => TokenKind::Identifier,
@@ -838,8 +862,10 @@ impl<'a> Parser<'a> {
 
         let mut finite_types = Vec::new();
         let mut finite_type_nodes = Vec::new();
-        while self.profile == SOURCE_PROFILE_VERSION_0_3
-            && self.current_kind() == Some(TokenKind::EnumKeyword)
+        while matches!(
+            self.profile.as_str(),
+            SOURCE_PROFILE_VERSION_0_3 | SOURCE_PROFILE_VERSION_0_4
+        ) && self.current_kind() == Some(TokenKind::EnumKeyword)
         {
             let (node, finite_type) = self.finite_type();
             finite_type_nodes.push(node);
@@ -967,7 +993,7 @@ impl<'a> Parser<'a> {
         let (output_node, outputs) = self.parameter_list("output");
         let (contracts, effects, capabilities) = if matches!(
             self.profile.as_str(),
-            SOURCE_PROFILE_VERSION_0_2 | SOURCE_PROFILE_VERSION_0_3
+            SOURCE_PROFILE_VERSION_0_2 | SOURCE_PROFILE_VERSION_0_3 | SOURCE_PROFILE_VERSION_0_4
         ) {
             self.clauses()
         } else {
@@ -977,7 +1003,7 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::LeftBrace, "MNP013", "expected function body");
         let (statements, returned_value, block_children) = if matches!(
             self.profile.as_str(),
-            SOURCE_PROFILE_VERSION_0_2 | SOURCE_PROFILE_VERSION_0_3
+            SOURCE_PROFILE_VERSION_0_2 | SOURCE_PROFILE_VERSION_0_3 | SOURCE_PROFILE_VERSION_0_4
         ) {
             self.statements_until_return()
         } else {
@@ -1122,7 +1148,10 @@ impl<'a> Parser<'a> {
         if self.current_kind() == Some(TokenKind::ReturnKeyword) {
             let return_start = self.current_token_index();
             self.cursor += 1;
-            returned = if self.profile == SOURCE_PROFILE_VERSION_0_3 {
+            returned = if matches!(
+                self.profile.as_str(),
+                SOURCE_PROFILE_VERSION_0_3 | SOURCE_PROFILE_VERSION_0_4
+            ) {
                 self.expression()
             } else {
                 self.spanned(
@@ -1244,7 +1273,10 @@ impl<'a> Parser<'a> {
             }
             Some(TokenKind::ReturnKeyword) => {
                 self.cursor += 1;
-                let value = if self.profile == SOURCE_PROFILE_VERSION_0_3 {
+                let value = if matches!(
+                    self.profile.as_str(),
+                    SOURCE_PROFILE_VERSION_0_3 | SOURCE_PROFILE_VERSION_0_4
+                ) {
                     self.expression()
                 } else {
                     self.spanned(
@@ -1265,15 +1297,27 @@ impl<'a> Parser<'a> {
                     }),
                 )
             }
+            Some(TokenKind::IterateKeyword) => self.bounded_iteration_statement(start),
+            Some(TokenKind::WhileKeyword) => {
+                self.error(
+                    "MNP106",
+                    "unbounded 'while' iteration is unsupported; Profile 0.4 requires 'iterate ... up_to <literal>'",
+                    vec![TokenKind::IterateKeyword],
+                );
+                self.cursor += 1;
+                let end = self.previous_token_index(start);
+                (self.node(CstKind::Block, start, end, Vec::new()), None)
+            }
             _ => {
                 self.error(
                     "MNP061",
-                    "expected let, if, fail, or return",
+                    "expected let, if, fail, return, or bounded iteration",
                     vec![
                         TokenKind::LetKeyword,
                         TokenKind::IfKeyword,
                         TokenKind::FailKeyword,
                         TokenKind::ReturnKeyword,
+                        TokenKind::IterateKeyword,
                     ],
                 );
                 if self.cursor < self.significant.len() {
@@ -1283,6 +1327,134 @@ impl<'a> Parser<'a> {
                 (self.node(CstKind::Block, start, end, Vec::new()), None)
             }
         }
+    }
+
+    fn bounded_iteration_statement(&mut self, start: usize) -> (CstNode, Option<AstStmt>) {
+        if self.profile != SOURCE_PROFILE_VERSION_0_4 {
+            self.error(
+                "MNP090",
+                "bounded iteration requires Source Profile 0.4",
+                Vec::new(),
+            );
+        }
+        self.expect(TokenKind::IterateKeyword, "MNP091", "expected 'iterate'");
+        let name = self.spanned(
+            TokenKind::Identifier,
+            "MNP092",
+            "expected iteration identity",
+        );
+        self.expect(TokenKind::UpToKeyword, "MNP093", "expected 'up_to'");
+        let bound = self.spanned(
+            TokenKind::IntegerLiteral,
+            "MNP094",
+            "expected a literal iteration bound",
+        );
+        let bound_value = bound
+            .as_ref()
+            .and_then(|bound| bound.text.parse::<i128>().ok());
+        self.expect(
+            TokenKind::CarryingKeyword,
+            "MNP095",
+            "expected 'carrying' after iteration bound",
+        );
+        let state = self.spanned(
+            TokenKind::Identifier,
+            "MNP096",
+            "expected carried state name",
+        );
+        self.expect(
+            TokenKind::Colon,
+            "MNP097",
+            "expected ':' after carried state",
+        );
+        let state_type = self.spanned(
+            TokenKind::Identifier,
+            "MNP098",
+            "expected carried state type",
+        );
+        self.expect(
+            TokenKind::Equal,
+            "MNP099",
+            "expected '=' before initial carried state",
+        );
+        let initial = self.expression();
+        self.expect(
+            TokenKind::LeftBrace,
+            "MNP100",
+            "expected '{' before iteration body",
+        );
+        let mut body = Vec::new();
+        while !matches!(
+            self.current_kind(),
+            Some(TokenKind::NextKeyword | TokenKind::RightBrace) | None
+        ) {
+            let (_, statement) = self.statement();
+            if let Some(statement) = statement {
+                body.push(statement);
+            }
+        }
+        self.expect(
+            TokenKind::NextKeyword,
+            "MNP101",
+            "iteration body must end with an explicit 'next' transition",
+        );
+        let next_state = self.spanned(
+            TokenKind::Identifier,
+            "MNP102",
+            "expected carried state after 'next'",
+        );
+        self.expect(
+            TokenKind::Equal,
+            "MNP103",
+            "expected '=' in iteration state transition",
+        );
+        let next_value = self.expression();
+        self.expect(
+            TokenKind::Semicolon,
+            "MNP104",
+            "expected ';' after iteration state transition",
+        );
+        self.expect(
+            TokenKind::RightBrace,
+            "MNP105",
+            "expected '}' after iteration body",
+        );
+        let end = self.previous_token_index(start);
+        let node = self.node(CstKind::BoundedIteration, start, end, Vec::new());
+        let statement = match (
+            name,
+            bound,
+            bound_value,
+            state,
+            state_type,
+            initial,
+            next_state,
+            next_value,
+        ) {
+            (
+                Some(name),
+                Some(bound),
+                Some(bound_value),
+                Some(state),
+                Some(state_type),
+                Some(initial),
+                Some(next_state),
+                Some(next_value),
+            ) => Some(AstStmt::BoundedIteration {
+                name,
+                bound,
+                bound_value,
+                state,
+                state_type,
+                initial: Box::new(initial),
+                body,
+                next_state,
+                next_value: Box::new(next_value),
+                span: node.span,
+            }),
+            _ => None,
+        };
+        (node, statement)
     }
 
     fn expression(&mut self) -> Option<AstExpr> {
@@ -1576,7 +1748,22 @@ impl<'a> Parser<'a> {
     }
 
     fn current_kind(&self) -> Option<TokenKind> {
-        self.current_token().map(|token| token.kind)
+        self.current_token().map(|token| {
+            if self.profile != SOURCE_PROFILE_VERSION_0_4
+                && matches!(
+                    token.kind,
+                    TokenKind::IterateKeyword
+                        | TokenKind::UpToKeyword
+                        | TokenKind::CarryingKeyword
+                        | TokenKind::NextKeyword
+                        | TokenKind::WhileKeyword
+                )
+            {
+                TokenKind::Identifier
+            } else {
+                token.kind
+            }
+        })
     }
 
     fn current_token_index(&self) -> usize {
@@ -1644,7 +1831,10 @@ fn is_identifier_continue(value: char) -> bool {
 pub fn source_profile_supported(version: &str) -> bool {
     matches!(
         version,
-        SOURCE_PROFILE_VERSION | SOURCE_PROFILE_VERSION_0_2 | SOURCE_PROFILE_VERSION_0_3
+        SOURCE_PROFILE_VERSION
+            | SOURCE_PROFILE_VERSION_0_2
+            | SOURCE_PROFILE_VERSION_0_3
+            | SOURCE_PROFILE_VERSION_0_4
     )
 }
 
@@ -1654,6 +1844,7 @@ fn infer_source_profile(text: &str) -> &'static str {
         !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with("/*")
     });
     match header {
+        Some(line) if line.trim_start().starts_with("mncs 0.4") => SOURCE_PROFILE_VERSION_0_4,
         Some(line) if line.trim_start().starts_with("mncs 0.3") => SOURCE_PROFILE_VERSION_0_3,
         Some(line) if line.trim_start().starts_with("mncs 0.2") => SOURCE_PROFILE_VERSION_0_2,
         _ => SOURCE_PROFILE_VERSION,

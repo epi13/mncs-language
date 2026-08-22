@@ -18,9 +18,17 @@ use crate::{
 pub const EXECUTION_REQUEST_SCHEMA_VERSION: &str = "0.1";
 pub const EXECUTION_RESULT_SCHEMA_VERSION: &str = "0.1";
 pub const EXECUTION_CORPUS_SCHEMA_VERSION: &str = "0.1";
+pub const EXECUTION_CORPUS_SCHEMA_VERSION_0_2: &str = "0.2";
 pub const EXECUTION_COMPARISON_SCHEMA_VERSION: &str = "0.1";
 pub const MAX_EXECUTION_BUDGET: u64 = 1_000_000;
 const MAX_TRACE_ENTRIES: usize = 256;
+
+pub fn execution_corpus_schema_supported(schema_version: &str) -> bool {
+    matches!(
+        schema_version,
+        EXECUTION_CORPUS_SCHEMA_VERSION | EXECUTION_CORPUS_SCHEMA_VERSION_0_2
+    )
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionTarget {
@@ -132,6 +140,25 @@ pub struct ExecutionCase {
     pub request: ExecutionRequest,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected: Option<Vec<ExecutionValue>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_status: Option<ExecutionStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maximum_steps: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expected_effects: Vec<ExpectedEffectObservation>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub prohibit_unexpected_effects: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ExpectedEffectObservation {
+    pub kind: String,
+    pub target: String,
+    pub capability: String,
 }
 
 /// A bounded, exhaustive property check over the supplied finite value set.
@@ -1072,7 +1099,7 @@ pub fn compare(
         }
     }
     let invalid = invalid_case
-        || corpus.schema_version != EXECUTION_CORPUS_SCHEMA_VERSION
+        || !execution_corpus_schema_supported(&corpus.schema_version)
         || corpus.cases.is_empty()
         || corpus.cases.iter().any(|case_| case_.id.trim().is_empty());
     let status = if invalid {
@@ -1217,6 +1244,8 @@ mod tests {
                 schema_version: "0.2".to_owned(),
                 entry: "b".to_owned(),
                 parameters: Vec::new(),
+                cycle_policy: crate::BodyCyclePolicy::Legacy,
+                bounded_iterations: Vec::new(),
                 blocks: Vec::new(),
             },
             &Function {
