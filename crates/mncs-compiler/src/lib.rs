@@ -536,6 +536,11 @@ impl ReferenceCompiler {
             .iter()
             .map(|artifact| (artifact.representation, artifact.fingerprint.clone()))
             .collect::<BTreeMap<_, _>>();
+        let selected_ssa_identity = result
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.representation == ArtifactRepresentation::SelectedSsa)
+            .map(|artifact| artifact.identity.clone());
         let semantic_fingerprint = stage_fingerprints
             .get(&ArtifactRepresentation::Semantic)
             .cloned();
@@ -587,6 +592,7 @@ impl ReferenceCompiler {
                 .target_lowering_plan
                 .as_ref()
                 .map(|plan| plan.identity.clone()),
+            selected_ssa_identity,
             backend_artifact_identity: result
                 .emissions
                 .backend
@@ -1585,6 +1591,17 @@ mod tests {
             .iter()
             .any(|pass| pass.pass_id == "lower-semantic-to-hir"));
         assert!(!result.unresolved_obligations.is_empty());
+        let family_reference = result.family_reference();
+        assert_eq!(family_reference.producer, "mncs-language");
+        assert_eq!(family_reference.stable_id, result.identity.0);
+        assert_eq!(family_reference.content_digest.len(), 64);
+        assert_eq!(
+            family_reference.compiler.selected_ssa_identity,
+            result.selected_ssa_identity
+        );
+        assert!(family_reference
+            .authority_boundary
+            .contains("does not certify experiment success"));
 
         let mut laundered = result;
         "conformant".clone_into(&mut laundered.interpretation);

@@ -739,3 +739,28 @@ fn compiler_study_separates_host_observations_from_portable_fingerprints() {
         .iter()
         .any(|value| value == "compilation_request_identity"));
 }
+
+#[test]
+fn compiler_study_exposes_a_family_record_reference_without_claiming_success() {
+    let manifest = example("execution/bounded-sum-baseline.mncs.json");
+    let output = binary()
+        .args([
+            "compiler-study",
+            &manifest,
+            "--node-id",
+            "test-node",
+            "--family-reference",
+        ])
+        .output()
+        .expect("run compiler family reference");
+    assert!(output.status.success());
+    let reference: Value = serde_json::from_slice(&output.stdout).expect("family reference JSON");
+    assert_eq!(reference["producer"], "mncs-language");
+    assert_eq!(reference["recordKind"], "CompilationStudyResult");
+    assert_eq!(reference["contentDigest"].as_str().unwrap().len(), 64);
+    assert!(reference["compiler"]["selectedSsaIdentity"].is_string());
+    assert!(reference["authorityBoundary"]
+        .as_str()
+        .unwrap()
+        .contains("does not certify experiment success"));
+}

@@ -23,6 +23,8 @@ pub const LAYERED_EXECUTION_COMPARISON_INTERPRETATION: &str =
 
 pub const COMPILER_ARTIFACT_SCHEMA_VERSION: &str = "0.1";
 pub const COMPILATION_STUDY_RESULT_CONTRACT_ID: &str = "mncs:language:compilation-study-result:0.1";
+pub const FAMILY_COMPILER_REFERENCE_SCHEMA_VERSION: &str =
+    "mncs-language.family-compiler-reference.v0.1";
 pub const COMPILATION_STUDY_OBSERVATION_INTERPRETATION: &str =
     "observation_only_not_assurance_or_conformance";
 
@@ -1656,6 +1658,8 @@ pub struct CompilationStudyResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub realization_plan_identity: Option<SemanticId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_ssa_identity: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend_artifact_identity: Option<SemanticId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend_artifact_kind: Option<String>,
@@ -1674,6 +1678,49 @@ pub struct CompilationStudyResult {
     pub interpretation: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FamilyArtifactReference {
+    pub identity: String,
+    pub kind: String,
+    pub digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FamilyCompilerObservation {
+    pub study_request_identity: SemanticId,
+    pub compilation_request_identity: SemanticId,
+    pub run_identity: SemanticId,
+    pub compiler_identity: SemanticId,
+    pub pipeline_identity: SemanticId,
+    pub selected_ssa_identity: Option<SemanticId>,
+    pub target_identity: Option<SemanticId>,
+    pub backend_identity: Option<SemanticId>,
+    pub realization_plan_identity: Option<SemanticId>,
+    pub backend_artifact_identity: Option<SemanticId>,
+    pub backend_artifact_kind: Option<String>,
+    pub compilation_status: CompilationStatus,
+    pub stage_fingerprints: BTreeMap<ArtifactRepresentation, String>,
+    pub unresolved_obligations: Vec<SemanticId>,
+    pub unresolved_assumptions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FamilyCompilerReference {
+    pub schema: String,
+    pub producer: String,
+    pub record_kind: String,
+    pub schema_version: String,
+    pub stable_id: String,
+    pub content_digest: String,
+    pub artifact: FamilyArtifactReference,
+    pub scope: BTreeMap<String, String>,
+    pub compiler: FamilyCompilerObservation,
+    pub authority_boundary: String,
+}
+
 impl CompilationStudyResult {
     pub fn seal(&mut self) {
         self.identity = SemanticId(String::new());
@@ -1687,6 +1734,52 @@ impl CompilationStudyResult {
             && self.schema_version == COMPILER_ARTIFACT_SCHEMA_VERSION
             && self.interpretation == COMPILATION_STUDY_OBSERVATION_INTERPRETATION
             && self.identity == identified("compilation-study-result", &material)
+    }
+
+    pub fn family_reference(&self) -> FamilyCompilerReference {
+        let canonical = canonical_json_value(self)
+            .expect("compilation study result is canonical JSON serializable");
+        let content_digest = sha256_hex(canonical.as_bytes());
+        let mut scope = BTreeMap::new();
+        scope.insert("compiler".to_owned(), self.compiler_identity.0.clone());
+        if let Some(backend) = &self.backend_identity {
+            scope.insert("backend".to_owned(), backend.0.clone());
+        }
+        if let Some(target) = &self.target_identity {
+            scope.insert("target".to_owned(), target.0.clone());
+        }
+        FamilyCompilerReference {
+            schema: FAMILY_COMPILER_REFERENCE_SCHEMA_VERSION.to_owned(),
+            producer: "mncs-language".to_owned(),
+            record_kind: "CompilationStudyResult".to_owned(),
+            schema_version: self.schema_version.clone(),
+            stable_id: self.identity.0.clone(),
+            content_digest: content_digest.clone(),
+            artifact: FamilyArtifactReference {
+                identity: self.identity.0.clone(),
+                kind: "compilation-study-result".to_owned(),
+                digest: content_digest,
+            },
+            scope,
+            compiler: FamilyCompilerObservation {
+                study_request_identity: self.study_request_identity.clone(),
+                compilation_request_identity: self.compilation_request_identity.clone(),
+                run_identity: self.run_identity.clone(),
+                compiler_identity: self.compiler_identity.clone(),
+                pipeline_identity: self.pipeline_identity.clone(),
+                selected_ssa_identity: self.selected_ssa_identity.clone(),
+                target_identity: self.target_identity.clone(),
+                backend_identity: self.backend_identity.clone(),
+                realization_plan_identity: self.realization_plan_identity.clone(),
+                backend_artifact_identity: self.backend_artifact_identity.clone(),
+                backend_artifact_kind: self.backend_artifact_kind.clone(),
+                compilation_status: self.compilation_status,
+                stage_fingerprints: self.stage_fingerprints.clone(),
+                unresolved_obligations: self.unresolved_obligations.clone(),
+                unresolved_assumptions: self.unresolved_assumptions.clone(),
+            },
+            authority_boundary: "Compiler evidence only; this reference does not certify experiment success, scientific validity, runtime conformance, or target assurance.".to_owned(),
+        }
     }
 }
 
