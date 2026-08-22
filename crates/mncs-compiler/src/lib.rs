@@ -979,9 +979,9 @@ pub fn reference_compiler_architecture() -> CompilerArchitectureContract {
             decisions: vec![
                 "unevidenced target facts remain UNKNOWN".to_owned(),
                 "adapter target facts are explicit data, not host defaults".to_owned(),
-                "portable WASM and research bytecode use the same adapter boundary".to_owned(),
+                "portable WASM, research bytecode, LLVM IR, C11, and Cranelift use the same adapter boundary".to_owned(),
             ],
-            blockers: vec!["native backends and richer ABI/memory lowering".to_owned()],
+            blockers: vec!["memory/ABI-rich native lowering and additional ISA families".to_owned()],
         },
         CompilerStageContract {
             stage: Stage::ExecutableArtifact,
@@ -998,8 +998,8 @@ pub fn reference_compiler_architecture() -> CompilerArchitectureContract {
                 "body/SSA/backend agreement is empirical bounded agreement, not universal equivalence".to_owned(),
             ],
             blockers: vec![
-                "native object emission".to_owned(),
-                "linker derivation".to_owned(),
+                "cross-ISA native object packaging as a first-class artifact kind".to_owned(),
+                "linker derivation identity beyond external clang/llc observation".to_owned(),
                 "independent translation checker remaining trust".to_owned(),
             ],
         },

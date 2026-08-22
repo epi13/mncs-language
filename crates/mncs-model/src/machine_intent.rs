@@ -246,6 +246,11 @@ impl MachineIntentExpression {
 #[serde(rename_all = "snake_case")]
 pub enum BackendPromise {
     NoOverflow,
+    Alignment,
+    InBounds,
+    NonAliasing,
+    TrappingArithmetic,
+    WrappingArithmetic,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -261,8 +266,16 @@ impl BackendPromiseDecision {
         subject: &SemanticId,
         obligations: &[Obligation],
     ) -> Self {
+        let suffix = match promise {
+            BackendPromise::NoOverflow => "no-overflow",
+            BackendPromise::Alignment => "alignment",
+            BackendPromise::InBounds => "in-bounds",
+            BackendPromise::NonAliasing => "non-aliasing",
+            BackendPromise::TrappingArithmetic => "trapping-arithmetic",
+            BackendPromise::WrappingArithmetic => "wrapping-arithmetic",
+        };
         let required = obligations.iter().find(|obligation| {
-            obligation.subject == *subject && obligation.requirement.0.ends_with("no-overflow")
+            obligation.subject == *subject && obligation.requirement.0.ends_with(suffix)
         });
         let Some(obligation) = required else {
             return Self {

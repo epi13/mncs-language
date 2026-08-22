@@ -2,6 +2,73 @@
 
 This roadmap separates semantic research from final surface-language selection while treating recursive introspection, representation efficiency, machine-intent semantics, proof-carrying semantics, and refinement as cross-cutting requirements.
 
+## Status vocabulary
+
+Use these labels mechanically. Adjacent infrastructure is not completion.
+
+| Label | Meaning |
+| --- | --- |
+| **Implemented / exercised** | Code exists, tests/experiments run, identities retained. |
+| **Implemented but partial** | Real code path exists; envelope, execution, or evidence is incomplete. |
+| **In progress** | Active implementation; acceptance criteria not satisfied. |
+| **Scaffolded / interface exists** | Types, traits, or docs exist without a meaningful lowering/execution. |
+| **Blocked / unresolved** | Known missing evidence, proof, or host capability. |
+| **Planned** | Intended, not started. |
+| **Research-only / RFC-defined** | Design exists; not an executable claim. |
+
+Source Profiles (0.1–0.4 language envelopes) are **not** project roadmap milestones (0.1–0.7). Source Profile 0.4 does not mean roadmap 0.4 is the current completion gate, and a future Source Profile 0.5 would not complete roadmap milestone 0.5.
+
+## Current implementation snapshot (2026-08)
+
+### Language
+
+Source Profiles **0.1–0.4** exist and remain additive. Programs can express modules, functions, contracts/effects/capabilities, scalar integers with wrapping/checked intent, finite enums, exhaustive match, calls with authority closure, and Profile 0.4 bounded iteration (`iterate … up_to N carrying …`, bound 1–32). Next semantic pressure point remains **logical product/record values** (RFC 0019), not physical C/LLVM/WASM layout.
+
+### Compiler
+
+Executable stages: source envelope → CST/AST → semantic program → HIR → SSA → selected SSA → `TargetLoweringPlan` → backend adapter → `BackendArtifact` + evidence. Transformations are identity-bound. Experimental: evidence-gated no-overflow elision, translation validators, backend promises. Missing: general memory/layout, unrestricted loops, proof kernel, production backend.
+
+### Backends
+
+| Realization | Exists | Local execute | External tools | Status |
+| --- | --- | --- | --- | --- |
+| portable WASM MVP | yes | embedded interpreter | no | implemented / exercised |
+| research bytecode | yes | SSA interpreter | no | implemented / exercised |
+| LLVM IR | yes | no in-process interpreter | clang/llc | implemented / exercised |
+| C11 | yes | no in-process interpreter | clang/gcc | implemented / exercised |
+| Cranelift CLIF/JIT | yes | host JIT for the scalar envelope | host ISA mapping | implemented but partial |
+| SPIR-V, PTX, eBPF, extra VMs | no | n/a | n/a | planned |
+
+WASM is one realization. Generic orchestration is adapter-neutral.
+
+### Verification
+
+MNCS verifies capability/effect closure, finite exhaustiveness, bounded-iteration metadata, SSA validation, evidence freshness, and translation validators over finite corpora. `UNKNOWN` remains a first-class outcome (including exact instruction cost). Bounded corpus agreement is not proof.
+
+### Experiments
+
+CRE-1, CRE-2, and CRE-3 run through WASM, research bytecode, LLVM, and C11. Cranelift lowers the same selected SSA; CRE JIT execution is currently withheld on this host's executable-mapping path. See `docs/development-evidence/backend-family-2026-08.md`.
+
+### Forge
+
+Forge may search backend choice, configuration, and pass/backend combinations. It can persist and compare language experiment records. It does **not** decide MNCS semantics, emit missing evidence, or promote a faster candidate that violates protected obligations.
+
+### Family Record / Commons handoff
+
+Language-owned experiment and compiler-study records emit producer-native Family Record references (source/profile, compiler/pipeline, semantic/HIR/SSA/selected-SSA, realization, backend/artifact, corpus, validator, status, unresolved obligations). Broader Commons/Fabric ingestion remains ecosystem-owned.
+
+### Immediate next work
+
+1. Logical product/record values as Source Profile 0.5 (not roadmap 0.5).
+2. Cranelift multi-function/host-mapping execution without claiming WASM semantics.
+3. Evidence-gated LLVM `nsw`/`nuw` emission with independent checkers (cases A–D exist; promotion does not).
+4. Proof-carrying lowering pilot for one backend promise.
+5. Observe–localize–propose–verify–compare–promote cycle with retained rejected candidates under independent evidence.
+
+## 0.1–0.7 milestone reconciliation
+
+Roadmap **0.5 has not been reached.**
+
 ## Active cross-cutting track — source representations
 
 The project now maintains an experimental syntax laboratory before committing to a grammar.
@@ -688,6 +755,8 @@ protected compatibility, state, authority, version-consistency, quorum, placemen
 
 ## 0.1 — Executable semantic model
 
+**Status: Implemented / exercised.** Acceptance items below are satisfied by `mncs-model` validation, diagnostics, fixtures, and CI. This is the executable semantic foundation, not a source language.
+
 **Goal:** demonstrate that MNCS relationships can be represented and mechanically checked before a source grammar exists.
 
 Acceptance criteria:
@@ -702,6 +771,8 @@ Acceptance criteria:
 - run formatting, linting, tests, example validation, and syntax measurements in CI.
 
 ## 0.2 — Semantic graph, identity, and recursive artifacts
+
+**Status: Implemented but partial.** Identities, graph, evidence manifests, slices, patches, and promotion records exist. Causal slices are conservative; promotion is an explicit record, not automatic mutation.
 
 Initial executable foundation delivered in the Rust model and CLI:
 
@@ -742,6 +813,8 @@ The first executable subset of these artifacts is in `mncs-model::refinement` an
 
 ## 0.3 — High-level MNCS IR
 
+**Status: Implemented but partial.** Deterministic HIR, bodies, CFG, obligations, and traceability exist for the supported subset. Complete lowering correctness is not claimed.
+
 Early executable foundation now present for the supported 0.1 manifest subset:
 
 - deterministic `0.3` high-level IR serialization and SHA-256 fingerprints;
@@ -775,6 +848,8 @@ foundation, including deterministic identities, validation, and body→HIR→SSA
 - preserve proof-object and assumption identities through HIR traceability where the supported subset allows it.
 
 ## 0.4 — Verified SSA and micro-debugging
+
+**Status: Implemented but partial.** Validated block-parameter SSA, body/SSA reference execution, and evidence-gated no-overflow elision exist. This is not verified compiler correctness, memory SSA, or a completed backend.
 
 Initial bounded foundation now present:
 
@@ -832,24 +907,30 @@ does not establish universal equivalence, production runtime behavior, or compil
 
 ## 0.5 — Backend and bounded recursive-refinement experiment
 
-- lower a constrained subset to LLVM IR, Cranelift IR, or WebAssembly;
-- emit optimization attributes only from verified facts;
-- demonstrate wrapping, checked, saturating, trapping, and widening integer operations;
-- record why backend no-overflow, in-bounds, alignment, non-aliasing, or relaxation promises are emitted or withheld;
-- produce an executable and evidence manifest together;
-- compare generated output with equivalent Rust or Zig implementations;
-- bind target-specific realizations to compiler, backend, feature, ABI, and pass-pipeline identities;
-- document all backend-introduced assumptions;
-- complete one bounded observe–localize–propose–verify–compare–promote cycle;
-- require independent evidence before automatic candidate promotion;
-- retain an auditable record of accepted and rejected candidate transformations;
-- test proof-carrying lowering for one narrowly defined backend promise; and
-- keep proof search outside the trusted kernel even when Forge orchestrates it.
+**Status: In progress. Not complete.** Do not mark 0.5 done because WASM, LLVM, C11, and Cranelift adapters exist.
+
+| Acceptance item | Status |
+| --- | --- |
+| constrained subset to LLVM IR, Cranelift IR, or WASM | **Implemented / exercised** (WASM, LLVM IR, Cranelift CLIF; C11 extra) |
+| optimization attributes only from verified facts | **Implemented but partial** (LLVM `nsw` withheld without current PASS; overflow intrinsics are conservative) |
+| wrapping, checked, saturating, trapping, widening integers | **Implemented but partial** (wrapping/checked/trapping exercised; saturating/widening still unsupported) |
+| record why no-overflow/in-bounds/alignment/non-aliasing/relaxation promises are emitted or withheld | **Implemented but partial** (no-overflow withhold/emit decision exists; alignment/in-bounds/non-aliasing are interface-only) |
+| executable + evidence manifest together | **Implemented / exercised** for adapter artifacts; native packaging is external clang/llc |
+| compare generated output with equivalent Rust or Zig | **Planned** |
+| bind realizations to compiler/backend/feature/ABI/pass identities | **Implemented / exercised** |
+| document backend-introduced assumptions | **Implemented / exercised** |
+| one bounded observe–localize–propose–verify–compare–promote cycle | **Implemented but partial** (cross-backend CRE compare exists; independent promotion authority does not) |
+| independent evidence before automatic promotion | **Implemented / exercised** as a negative: Forge cannot promote |
+| auditable accepted/rejected transformation history | **Implemented but partial** (elision decisions and experiment FAIL records retained) |
+| proof-carrying lowering for one backend promise | **Planned** |
+| untrusted proof search / narrow trusted checking | **Research-only / RFC-defined** (Forge remains untrusted search) |
 
 The body and SSA reference evaluators are study oracles and finite conformance tools, not substitutes
-for the proof kernel or a production backend.
+for the proof kernel or a production backend. Roadmap 0.5 remains incomplete.
 
 ## 0.6 — Surface-language and self-description experiments
+
+**Status: Planned / research-only**, with a syntax laboratory already exercising tournaments. Grammar selection is deliberately deferred.
 
 - expand the syntax tournament to a representative corpus;
 - implement parsers and canonical formatters for at least two competing source candidates;
@@ -863,6 +944,8 @@ for the proof kernel or a production backend.
 - select a grammar only after semantic coverage and repairability are demonstrated.
 
 ## 0.7 — Target realizations and optimization regions
+
+**Status: Planned.** Host triples and LLVM/Cranelift target facts exist so x86-64/AArch64 can be realizations, not language variants. SIMD regions, Pareto selection, and stale-after-toolchain-change proofs are not implemented.
 
 - bind portable reference semantics to at least two target-specific realizations;
 - implement explicit target dispatch and conservative fallback;

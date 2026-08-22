@@ -6,9 +6,9 @@ use std::{
 };
 
 use mncs_codegen::{
-    backend_adapter, backend_capabilities, backend_names, compare_body_ssa_and_backend,
-    execute_backend, lower_selected_ssa, portable_wasm_plan, selected_ssa_ref, target_for_backend,
-    target_is_portable_wasm,
+    backend_adapter, backend_capabilities, backend_family_matrix, backend_names,
+    compare_body_ssa_and_backend, execute_backend, lower_selected_ssa, portable_wasm_plan,
+    selected_ssa_ref, target_for_backend, target_is_portable_wasm,
 };
 use mncs_compiler::{native_node_profile, reference_compiler_architecture, ReferenceCompiler};
 use mncs_model::{
@@ -765,7 +765,7 @@ where
 {
     let mut args = args.into_iter();
     let Some(action) = args.next() else {
-        eprintln!("error: experiment requires plan, run, execute, inspect, or compare");
+        eprintln!("error: experiment requires plan, run, execute, inspect, compare, or matrix");
         return ExitCode::from(2);
     };
     match action.as_str() {
@@ -858,6 +858,17 @@ where
                 ExitCode::SUCCESS
             } else {
                 ExitCode::FAILURE
+            }
+        }
+        "matrix" => {
+            if args.next().is_some() {
+                eprintln!("error: experiment matrix does not accept arguments");
+                return ExitCode::from(2);
+            }
+            if print_json(&backend_family_matrix()) {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(2)
             }
         }
         "compare" => {
@@ -2287,6 +2298,7 @@ fn print_usage() {
     eprintln!("  mncs experiment execute <backend-artifact.json> <corpus.json>");
     eprintln!("  mncs experiment inspect <result.json>");
     eprintln!("  mncs experiment compare <left-result.json> <right-result.json>");
+    eprintln!("  mncs experiment matrix");
     eprintln!("  mncs diff <before.json> <after.json>");
     eprintln!("  mncs compare <before.json> <after.json>");
     eprintln!("  mncs slice <manifest.json> <semantic-identity>");
