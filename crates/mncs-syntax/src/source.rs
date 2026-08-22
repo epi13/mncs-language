@@ -751,7 +751,7 @@ impl<'a> Parser<'a> {
         let header_keyword = self.expect(TokenKind::MncsKeyword, "MNP001", "expected MNCS header");
         let version = self.spanned(TokenKind::Version, "MNP002", "expected language version");
         if let Some(version) = &version {
-            self.profile = version.text.clone();
+            self.profile.clone_from(&version.text);
         }
         self.expect(
             TokenKind::Semicolon,
@@ -1476,7 +1476,6 @@ mod tests {
 
         assert!(envelope.identity_is_valid());
         assert_eq!(envelope.relationships.len(), 2);
-        envelope.relationships[0].target_identity = "mncs:model:substituted:8".to_owned();
         "mncs:model:substituted:8".clone_into(&mut envelope.relationships[0].target_identity);
         assert!(!envelope.identity_is_valid());
     }
