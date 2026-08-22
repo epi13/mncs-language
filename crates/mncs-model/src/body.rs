@@ -9,13 +9,62 @@ use crate::{
 };
 
 pub const EXECUTABLE_BODY_SCHEMA_VERSION: &str = "0.2";
+pub const SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND: u32 = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FunctionBody {
     pub schema_version: String,
     pub entry: String,
     pub parameters: Vec<BodyParameter>,
+    #[serde(default, skip_serializing_if = "BodyCyclePolicy::is_legacy")]
+    pub cycle_policy: BodyCyclePolicy,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bounded_iterations: Vec<BodyBoundedIteration>,
     pub blocks: Vec<BodyBlock>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BodyCyclePolicy {
+    #[default]
+    Legacy,
+    BoundedIterationOnly,
+}
+
+impl BodyCyclePolicy {
+    pub(crate) fn is_legacy(&self) -> bool {
+        *self == Self::Legacy
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BodyBoundedIteration {
+    pub id: String,
+    pub bound: u32,
+    pub state_name: String,
+    pub state_type: BodyType,
+    pub initial_value: String,
+    pub header_state: String,
+    pub header_counter: String,
+    pub preheader: String,
+    pub header: String,
+    pub body_entry: String,
+    pub backedge: String,
+    pub exit: String,
+    pub exit_state: String,
+    pub body_blocks: Vec<String>,
+    pub callees: Vec<SemanticId>,
+    pub required_capabilities: Vec<String>,
+    pub completion_modes: Vec<BoundedIterationCompletion>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BoundedIterationCompletion {
+    EarlyReturn,
+    Exhausted,
+    Failure,
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -320,6 +369,7 @@ impl FunctionBody {
                 "unreachable body blocks are not supported by this executable subset",
             ));
         }
+        validate_bounded_iterations(self, function, function_path, &cfg, errors);
 
         let mut operation_ids = BTreeSet::new();
         let mut definitions = BTreeMap::<String, (Option<String>, BodyType)>::new();
@@ -435,6 +485,19 @@ impl FunctionBody {
 
     fn canonicalized(&self) -> Self {
         let mut canonical = self.clone();
+        canonical
+            .bounded_iterations
+            .sort_by(|left, right| left.id.cmp(&right.id));
+        for iteration in &mut canonical.bounded_iterations {
+            iteration.body_blocks.sort();
+            iteration.body_blocks.dedup();
+            iteration.callees.sort();
+            iteration.callees.dedup();
+            iteration.required_capabilities.sort();
+            iteration.required_capabilities.dedup();
+            iteration.completion_modes.sort();
+            iteration.completion_modes.dedup();
+        }
         for block in &mut canonical.blocks {
             for operation in &mut block.operations {
                 operation.contracts.sort();
@@ -466,6 +529,138 @@ impl FunctionBody {
             }
         }
         canonical
+    }
+}
+
+fn validate_bounded_iterations(
+    body: &FunctionBody,
+    function: &Function,
+    function_path: &str,
+    cfg: &crate::Cfg,
+    errors: &mut Vec<Diagnostic>,
+) {
+    let mut ids = BTreeSet::new();
+    let declared_backedges = body
+        .bounded_iterations
+        .iter()
+        .map(|iteration| (iteration.backedge.clone(), iteration.header.clone()))
+        .collect::<BTreeSet<_>>();
+    if body.cycle_policy == BodyCyclePolicy::BoundedIterationOnly {
+        for block in &cfg.blocks {
+            for target in &block.successors {
+                if cfg.dominates(target, &block.id)
+                    && !declared_backedges.contains(&(block.id.clone(), target.clone()))
+                {
+                    errors.push(body_diagnostic(
+                        "MNB060",
+                        format!("{function_path}.body.blocks.{}.terminator", block.id),
+                        "cyclic control flow requires an exact bounded-iteration backedge",
+                    ));
+                }
+            }
+        }
+    }
+    for (index, iteration) in body.bounded_iterations.iter().enumerate() {
+        let path = format!("{function_path}.body.bounded_iterations[{index}]");
+        if iteration.id.trim().is_empty() || !ids.insert(iteration.id.clone()) {
+            errors.push(body_diagnostic(
+                "MNB061",
+                format!("{path}.id"),
+                "bounded iteration identities must be non-empty and unique per function",
+            ));
+        }
+        if !(1..=SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND).contains(&iteration.bound) {
+            errors.push(body_diagnostic(
+                "MNB062",
+                format!("{path}.bound"),
+                format!(
+                    "bounded iteration count must be between 1 and {}",
+                    SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND
+                ),
+            ));
+        }
+        let blocks = [
+            &iteration.preheader,
+            &iteration.header,
+            &iteration.body_entry,
+            &iteration.backedge,
+            &iteration.exit,
+        ];
+        if blocks.iter().any(|id| cfg.block(id).is_none()) {
+            errors.push(body_diagnostic(
+                "MNB063",
+                path.clone(),
+                "bounded iteration references a missing control-flow region block",
+            ));
+            continue;
+        }
+        let header = body
+            .blocks
+            .iter()
+            .find(|block| block.id == iteration.header);
+        let exit = body.blocks.iter().find(|block| block.id == iteration.exit);
+        let Some(header) = header else { continue };
+        let Some(exit) = exit else { continue };
+        if header.parameters.len() != 2
+            || header.parameters[0].id != iteration.header_state
+            || header.parameters[0].ty != iteration.state_type
+            || header.parameters[1].id != iteration.header_counter
+            || header.parameters[1].ty
+                != BodyType::Integer(IntegerType {
+                    bits: 64,
+                    signed: false,
+                })
+            || exit.parameters.len() != 1
+            || exit.parameters[0].id != iteration.exit_state
+            || exit.parameters[0].ty != iteration.state_type
+        {
+            errors.push(body_diagnostic(
+                "MNB064",
+                path.clone(),
+                "bounded iteration carried state/counter parameters are malformed",
+            ));
+        }
+        if !cfg
+            .block(&iteration.backedge)
+            .is_some_and(|block| block.successors == vec![iteration.header.clone()])
+        {
+            errors.push(body_diagnostic(
+                "MNB065",
+                path.clone(),
+                "bounded iteration lost its declared backedge",
+            ));
+        }
+        let required = iteration
+            .required_capabilities
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let declared = function
+            .capabilities
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if !required.is_subset(&declared) {
+            errors.push(body_diagnostic(
+                "MNB066",
+                path.clone(),
+                "bounded iteration cannot expand authority across attempts",
+            ));
+        }
+        let modes = iteration
+            .completion_modes
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        if !modes.contains(&BoundedIterationCompletion::Exhausted)
+            || !modes.contains(&BoundedIterationCompletion::EarlyReturn)
+        {
+            errors.push(body_diagnostic(
+                "MNB067",
+                path,
+                "bounded iteration must retain early-return and exhaustion completion modes",
+            ));
+        }
     }
 }
 
@@ -1143,6 +1338,8 @@ pub(crate) mod tests {
                     signed: true,
                 }),
             }],
+            cycle_policy: BodyCyclePolicy::Legacy,
+            bounded_iterations: Vec::new(),
             blocks: vec![BodyBlock {
                 id: "entry".to_owned(),
                 parameters: Vec::new(),

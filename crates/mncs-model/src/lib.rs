@@ -28,9 +28,10 @@ mod validation;
 mod verifier;
 
 pub use body::{
-    BodyBlock, BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator, BodyType,
-    BodyValue, FunctionBody, LoweringEnvelope, MachineIntentSpec, PortabilityEnvelope,
-    PortabilityTarget, RealizationClass, EXECUTABLE_BODY_SCHEMA_VERSION,
+    BodyBlock, BodyBoundedIteration, BodyCyclePolicy, BodyOperation, BodyOperationKind,
+    BodyParameter, BodyTerminator, BodyType, BodyValue, BoundedIterationCompletion, FunctionBody,
+    LoweringEnvelope, MachineIntentSpec, PortabilityEnvelope, PortabilityTarget, RealizationClass,
+    EXECUTABLE_BODY_SCHEMA_VERSION, SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
 };
 pub use canonical::{CanonicalError, CanonicalForm, CANONICAL_SCHEMA_VERSION};
 pub use cfg::{Cfg, CfgBlock, CFG_SCHEMA_VERSION};
@@ -67,19 +68,21 @@ pub use evidence::{
     EvidenceFreshness, EvidenceManifest, EvidenceRecord, EvidenceState, EvidenceStatusReport,
 };
 pub use execution::{
-    compare as compare_execution, execute, execute_with_policy, ComparisonStatus,
-    EffectExecutionPolicy, ExecutionCase, ExecutionComparison, ExecutionCorpus,
+    compare as compare_execution, execute, execute_with_policy, execution_corpus_schema_supported,
+    ComparisonStatus, EffectExecutionPolicy, ExecutionCase, ExecutionComparison, ExecutionCorpus,
     ExecutionEffectEvent, ExecutionFailure, ExecutionPolicy, ExecutionProperty, ExecutionRequest,
     ExecutionResult, ExecutionStatus, ExecutionSubject, ExecutionTarget, ExecutionTraceEntry,
-    ExecutionValue, EXECUTION_COMPARISON_SCHEMA_VERSION, EXECUTION_CORPUS_SCHEMA_VERSION,
+    ExecutionValue, ExpectedEffectObservation, EXECUTION_COMPARISON_SCHEMA_VERSION,
+    EXECUTION_CORPUS_SCHEMA_VERSION, EXECUTION_CORPUS_SCHEMA_VERSION_0_2,
     EXECUTION_REQUEST_SCHEMA_VERSION, EXECUTION_RESULT_SCHEMA_VERSION, MAX_EXECUTION_BUDGET,
 };
 pub use experiment::{
-    LanguageExperimentCaseObservation, LanguageExperimentComparison, LanguageExperimentDefinition,
+    FamilyExperimentObservation, FamilyExperimentReference, LanguageExperimentCaseObservation,
+    LanguageExperimentComparison, LanguageExperimentDefinition,
     LanguageExperimentPropertyObservation, LanguageExperimentResult, LanguageExperimentStatus,
-    ValidatorRequirement, LANGUAGE_EXPERIMENT_DEFINITION_CONTRACT_ID,
-    LANGUAGE_EXPERIMENT_INTERPRETATION, LANGUAGE_EXPERIMENT_RESULT_CONTRACT_ID,
-    LANGUAGE_EXPERIMENT_SCHEMA_VERSION,
+    ValidatorRequirement, FAMILY_EXPERIMENT_REFERENCE_SCHEMA_VERSION,
+    LANGUAGE_EXPERIMENT_DEFINITION_CONTRACT_ID, LANGUAGE_EXPERIMENT_INTERPRETATION,
+    LANGUAGE_EXPERIMENT_RESULT_CONTRACT_ID, LANGUAGE_EXPERIMENT_SCHEMA_VERSION,
 };
 pub use graph::{
     EdgeKind, GraphEdge, GraphError, GraphNode, InvalidationReason, InvalidationReport,
@@ -90,9 +93,9 @@ pub use identity::{
     SemanticDiff, SemanticId, SemanticIdentities,
 };
 pub use ir::{
-    CapabilityUse, FailurePathKind, HighLevelIr, IrBlock, IrError, IrFunction, IrOperation,
-    IrOperationKind, IrStateRegion, IrTransition, IrType, IrValue, MachineIntentLinks, PathKind,
-    StateRegionKind, TraceEntry, TraceMap, HIGH_LEVEL_IR_SCHEMA_VERSION,
+    CapabilityUse, FailurePathKind, HighLevelIr, IrBlock, IrBoundedIteration, IrError, IrFunction,
+    IrOperation, IrOperationKind, IrStateRegion, IrTransition, IrType, IrValue, MachineIntentLinks,
+    PathKind, StateRegionKind, TraceEntry, TraceMap, HIGH_LEVEL_IR_SCHEMA_VERSION,
 };
 pub use machine_intent::{
     AlignmentCapability, ArithmeticIntent, BackendPromise, BackendPromiseDecision, Fact,
@@ -115,9 +118,9 @@ pub use refinement::{
     RepairProposal, ResourceLimits, SemanticChange, SemanticPatch, VerificationPlan,
 };
 pub use ssa::{
-    SsaBlock, SsaDiagnostic, SsaError, SsaFunction, SsaInstruction, SsaInstructionKind, SsaModule,
-    SsaTerminator, SsaTraceEntry, SsaTraceMap, SsaTransformationDecision, SsaValidationReport,
-    SsaValue, SSA_SCHEMA_VERSION,
+    SsaBlock, SsaBoundedIteration, SsaDiagnostic, SsaError, SsaFunction, SsaInstruction,
+    SsaInstructionKind, SsaModule, SsaTerminator, SsaTraceEntry, SsaTraceMap,
+    SsaTransformationDecision, SsaValidationReport, SsaValue, SSA_SCHEMA_VERSION,
 };
 pub use ssa_execution::{
     compare_body_and_ssa, execute_ssa, execute_ssa_module, LoweringDivergenceContext,

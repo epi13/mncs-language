@@ -1,0 +1,8 @@
+mncs 0.4;
+module examples.profile04.unbounded;
+
+fn invalid(input: u64) -> (result: u64) {
+    while input {
+    }
+    return input;
+}

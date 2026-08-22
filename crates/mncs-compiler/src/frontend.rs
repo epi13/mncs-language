@@ -2,19 +2,20 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mncs_model::{
     finite_type_id, finite_variant_id, function_id, ArithmeticIntent, ArtifactRepresentation,
-    BodyBlock, BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator, BodyType,
-    BodyValue, CompilationStatus, CompilationStudyRequest, CompilationStudyResult,
-    CompilerArtifactRef, CompilerNodeProfile, CompilerPassExecutionObservation, ContractClause,
-    ContractKind, Effect, FailureMode, FiniteType, FiniteVariant, Function, FunctionBody,
-    IntegerType, Program, SemanticGraph, SemanticId, SemanticIdentities, TransformationEdge,
-    TransformationStatus, ValidationReport, Value, EXECUTABLE_BODY_SCHEMA_VERSION,
-    SUPPORTED_SCHEMA_VERSION,
+    BodyBlock, BodyBoundedIteration, BodyCyclePolicy, BodyOperation, BodyOperationKind,
+    BodyParameter, BodyTerminator, BodyType, BodyValue, BoundedIterationCompletion,
+    CompilationStatus, CompilationStudyRequest, CompilationStudyResult, CompilerArtifactRef,
+    CompilerNodeProfile, CompilerPassExecutionObservation, ContractClause, ContractKind, Effect,
+    FailureMode, FiniteType, FiniteVariant, Function, FunctionBody, IntegerType, Program,
+    SemanticGraph, SemanticId, SemanticIdentities, TransformationEdge, TransformationStatus,
+    ValidationReport, Value, EXECUTABLE_BODY_SCHEMA_VERSION,
+    SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND, SUPPORTED_SCHEMA_VERSION,
 };
 use mncs_syntax::{
     parse, AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstStmt, ConcreteSyntaxTree,
     DiagnosticSeverity, DiagnosticStage, LexedDocument, ParseOutput, SourceArtifactKind,
     SourceDiagnostic, SourceEnvelope, SourceSpan, AST_SCHEMA_VERSION, CST_SCHEMA_VERSION,
-    LEXICAL_SCHEMA_VERSION, SOURCE_ENVELOPE_SCHEMA_VERSION,
+    LEXICAL_SCHEMA_VERSION, SOURCE_ENVELOPE_SCHEMA_VERSION, SOURCE_PROFILE_VERSION_0_4,
 };
 use serde::Serialize;
 
@@ -523,7 +524,7 @@ fn elaborate_function(
             &mut diagnostics,
         );
     }
-    let blocks = if function.body.statements.is_empty()
+    let (blocks, bounded_iterations) = if function.body.statements.is_empty()
         && matches!(function.body.returned_value, AstExpr::Name(_))
     {
         let AstExpr::Name(returned_name) = &function.body.returned_value else {
@@ -539,14 +540,17 @@ fn elaborate_function(
                 ));
             }
         }
-        vec![BodyBlock {
-            id: "entry".to_owned(),
-            parameters: Vec::new(),
-            operations: Vec::new(),
-            terminator: BodyTerminator::Return {
-                values: vec![returned_name.text.clone()],
-            },
-        }]
+        (
+            vec![BodyBlock {
+                id: "entry".to_owned(),
+                parameters: Vec::new(),
+                operations: Vec::new(),
+                terminator: BodyTerminator::Return {
+                    values: vec![returned_name.text.clone()],
+                },
+            }],
+            Vec::new(),
+        )
     } else {
         let mut builder = BodyBuilder::new(
             output_type.clone(),
@@ -567,7 +571,7 @@ fn elaborate_function(
                 &mut diagnostics,
             );
         }
-        builder.blocks
+        (builder.blocks, builder.bounded_iterations)
     };
     if !diagnostics.is_empty() {
         return Err(diagnostics);
@@ -593,6 +597,12 @@ fn elaborate_function(
             schema_version: EXECUTABLE_BODY_SCHEMA_VERSION.to_owned(),
             entry: "entry".to_owned(),
             parameters,
+            cycle_policy: if ast.language_version.text == SOURCE_PROFILE_VERSION_0_4 {
+                BodyCyclePolicy::BoundedIterationOnly
+            } else {
+                BodyCyclePolicy::Legacy
+            },
+            bounded_iterations,
             blocks,
         }),
     })
@@ -704,7 +714,7 @@ fn reject_recursive_calls(
         if recursive {
             diagnostics.push(elaboration_diagnostic(
                 "MNE130",
-                "Source Profile 0.3 rejects recursive call cycles; calls must be acyclic",
+                "Source Profiles 0.3 and 0.4 reject recursive call cycles; calls must be acyclic",
                 function.name.span,
             ));
         }
@@ -724,6 +734,18 @@ fn calls_in_statement(statement: &AstStmt, calls: &mut BTreeSet<String>) {
             for statement in then_body.iter().chain(else_body) {
                 calls_in_statement(statement, calls);
             }
+        }
+        AstStmt::BoundedIteration {
+            initial,
+            body,
+            next_value,
+            ..
+        } => {
+            calls_in_expr(initial, calls);
+            for statement in body {
+                calls_in_statement(statement, calls);
+            }
+            calls_in_expr(next_value, calls);
         }
         AstStmt::Fail { .. } => {}
     }
@@ -826,6 +848,7 @@ impl BindingEnv {
 
 struct BodyBuilder<'a> {
     blocks: Vec<BodyBlock>,
+    bounded_iterations: Vec<BodyBoundedIteration>,
     current: usize,
     next_value: usize,
     next_block: usize,
@@ -833,6 +856,7 @@ struct BodyBuilder<'a> {
     function: String,
     finite_types: &'a BTreeMap<String, FiniteType>,
     signatures: &'a BTreeMap<String, FunctionSignature>,
+    in_iteration: bool,
 }
 
 impl<'a> BodyBuilder<'a> {
@@ -849,6 +873,7 @@ impl<'a> BodyBuilder<'a> {
                 operations: Vec::new(),
                 terminator: BodyTerminator::Return { values: Vec::new() },
             }],
+            bounded_iterations: Vec::new(),
             current: 0,
             next_value: 0,
             next_block: 0,
@@ -856,6 +881,7 @@ impl<'a> BodyBuilder<'a> {
             function,
             finite_types,
             signatures,
+            in_iteration: false,
         }
     }
 
@@ -967,6 +993,9 @@ impl<'a> BodyBuilder<'a> {
                 env.pop();
                 self.current = self.index_of(&join_id);
             }
+            AstStmt::BoundedIteration { .. } => {
+                self.elaborate_bounded_iteration(statement, env, diagnostics);
+            }
             AstStmt::Fail { mode, span } => {
                 let failure = match mode.text.as_str() {
                     "isolated" => FailureMode::Isolated,
@@ -1000,6 +1029,331 @@ impl<'a> BodyBuilder<'a> {
                 }
             }
         }
+    }
+
+    fn elaborate_bounded_iteration(
+        &mut self,
+        statement: &AstStmt,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) {
+        let AstStmt::BoundedIteration {
+            name,
+            bound,
+            bound_value,
+            state,
+            state_type,
+            initial,
+            body,
+            next_state,
+            next_value,
+            span,
+        } = statement
+        else {
+            unreachable!("bounded iteration helper requires iteration statement")
+        };
+        if self.in_iteration {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE147",
+                "Source Profile 0.4 does not permit nested bounded iterations",
+                *span,
+            ));
+            return;
+        }
+        let Ok(bound_u32) = u32::try_from(*bound_value) else {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE142",
+                "iteration bound must be a positive Profile 0.4 integer literal",
+                bound.span,
+            ));
+            return;
+        };
+        if !(1..=SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND).contains(&bound_u32) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE142",
+                &format!(
+                    "iteration bound must be between 1 and {} in Source Profile 0.4",
+                    SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND
+                ),
+                bound.span,
+            ));
+            return;
+        }
+        if self
+            .bounded_iterations
+            .iter()
+            .any(|iteration| iteration.id == name.text)
+        {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE146",
+                "iteration identity is duplicated in this function",
+                name.span,
+            ));
+            return;
+        }
+        let carried_type = profile_type(
+            &state_type.text,
+            state_type.span,
+            self.finite_types,
+            diagnostics,
+        );
+        let Some(initial_value) =
+            self.elaborate_expr(initial, Some(&carried_type), env, diagnostics)
+        else {
+            return;
+        };
+        if initial_value.ty != carried_type {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE144",
+                "initial iteration state does not preserve the declared carried type",
+                initial.span(),
+            ));
+            return;
+        }
+        let preheader = self.blocks[self.current].id.clone();
+        let counter_type = BodyType::Integer(IntegerType {
+            bits: 64,
+            signed: false,
+        });
+        let bound_id = self.new_value("iteration_bound");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: bound_id.clone(),
+            kind: BodyOperationKind::Constant {
+                value: i128::from(bound_u32),
+                ty: counter_type.clone(),
+            },
+            operands: Vec::new(),
+            results: vec![BodyValue {
+                id: bound_id.clone(),
+                ty: counter_type.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        let header = self.new_block();
+        let body_entry = self.new_block();
+        let exit = self.new_block();
+        let header_state = self.new_value("iteration_state");
+        let header_counter = self.new_value("iteration_remaining");
+        let header_index = self.index_of(&header);
+        self.blocks[header_index].parameters = vec![
+            BodyValue {
+                id: header_state.clone(),
+                ty: carried_type.clone(),
+            },
+            BodyValue {
+                id: header_counter.clone(),
+                ty: counter_type.clone(),
+            },
+        ];
+        self.blocks[self.current].terminator = BodyTerminator::Branch {
+            target: header.clone(),
+            arguments: vec![initial_value.id.clone(), bound_id],
+        };
+        self.current = header_index;
+        let zero_id = self.new_value("iteration_zero");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: zero_id.clone(),
+            kind: BodyOperationKind::Constant {
+                value: 0,
+                ty: counter_type.clone(),
+            },
+            operands: Vec::new(),
+            results: vec![BodyValue {
+                id: zero_id.clone(),
+                ty: counter_type.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        let has_attempt_id = self.new_value("iteration_has_attempt");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: has_attempt_id.clone(),
+            kind: BodyOperationKind::IntegerCompare {
+                predicate: "gt".to_owned(),
+                operand_type: IntegerType {
+                    bits: 64,
+                    signed: false,
+                },
+            },
+            operands: vec![header_counter.clone(), zero_id],
+            results: vec![BodyValue {
+                id: has_attempt_id.clone(),
+                ty: BodyType::Named("bool".to_owned()),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        let exit_state = self.new_value("iteration_exhausted_state");
+        let exit_index = self.index_of(&exit);
+        self.blocks[exit_index].parameters.push(BodyValue {
+            id: exit_state.clone(),
+            ty: carried_type.clone(),
+        });
+        self.blocks[self.current].terminator = BodyTerminator::ConditionalBranch {
+            condition: has_attempt_id,
+            then_target: body_entry.clone(),
+            then_arguments: Vec::new(),
+            else_target: exit.clone(),
+            else_arguments: vec![header_state.clone()],
+        };
+
+        let blocks_before_body = self.blocks.len();
+        self.current = self.index_of(&body_entry);
+        self.in_iteration = true;
+        env.push();
+        env.bind(
+            state.text.clone(),
+            header_state.clone(),
+            carried_type.clone(),
+            state.span,
+            diagnostics,
+        );
+        self.elaborate_statements(body, env, diagnostics);
+        if !self.block_is_open() {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE148",
+                "iteration continuation is unreachable; every body path terminated",
+                next_value.span(),
+            ));
+            env.pop();
+            self.in_iteration = false;
+            return;
+        }
+        if next_state.text != state.text {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE143",
+                "iteration 'next' transition must update the declared carried state",
+                next_state.span,
+            ));
+        }
+        let Some(next) = self.elaborate_expr(next_value, Some(&carried_type), env, diagnostics)
+        else {
+            env.pop();
+            self.in_iteration = false;
+            return;
+        };
+        if next.ty != carried_type {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE144",
+                "iteration next-state value does not preserve the carried type",
+                next_value.span(),
+            ));
+        }
+        let one_id = self.new_value("iteration_one");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: one_id.clone(),
+            kind: BodyOperationKind::Constant {
+                value: 1,
+                ty: counter_type.clone(),
+            },
+            operands: Vec::new(),
+            results: vec![BodyValue {
+                id: one_id.clone(),
+                ty: counter_type.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        let decremented = self.new_value("iteration_decrement");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: decremented.clone(),
+            kind: BodyOperationKind::Integer {
+                operator: "sub".to_owned(),
+                operand_type: IntegerType {
+                    bits: 64,
+                    signed: false,
+                },
+                intent: ArithmeticIntent::Checked,
+            },
+            operands: vec![header_counter.clone(), one_id],
+            results: vec![BodyValue {
+                id: decremented.clone(),
+                ty: counter_type,
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        let backedge = self.blocks[self.current].id.clone();
+        self.blocks[self.current].terminator = BodyTerminator::Branch {
+            target: header.clone(),
+            arguments: vec![next.id, decremented],
+        };
+        env.pop();
+        self.in_iteration = false;
+        let mut body_blocks = vec![body_entry.clone()];
+        body_blocks.extend(
+            self.blocks[blocks_before_body..]
+                .iter()
+                .map(|block| block.id.clone()),
+        );
+        body_blocks.sort();
+        body_blocks.dedup();
+        let mut callees = BTreeSet::new();
+        let mut required_capabilities = BTreeSet::new();
+        for block in self
+            .blocks
+            .iter()
+            .filter(|block| body_blocks.contains(&block.id))
+        {
+            for operation in &block.operations {
+                if let BodyOperationKind::Call {
+                    function,
+                    required_capabilities: call_capabilities,
+                    ..
+                } = &operation.kind
+                {
+                    callees.insert(function.clone());
+                    required_capabilities.extend(call_capabilities.iter().cloned());
+                }
+            }
+        }
+        self.bounded_iterations.push(BodyBoundedIteration {
+            id: name.text.clone(),
+            bound: bound_u32,
+            state_name: state.text.clone(),
+            state_type: carried_type.clone(),
+            initial_value: initial_value.id,
+            header_state,
+            header_counter,
+            preheader,
+            header,
+            body_entry,
+            backedge,
+            exit: exit.clone(),
+            exit_state: exit_state.clone(),
+            body_blocks,
+            callees: callees.into_iter().collect(),
+            required_capabilities: required_capabilities.into_iter().collect(),
+            completion_modes: vec![
+                BoundedIterationCompletion::EarlyReturn,
+                BoundedIterationCompletion::Exhausted,
+                BoundedIterationCompletion::Failure,
+            ],
+        });
+        self.current = exit_index;
+        env.bind(
+            state.text.clone(),
+            exit_state,
+            carried_type,
+            *span,
+            diagnostics,
+        );
     }
 
     fn elaborate_expr(
@@ -1574,7 +1928,8 @@ fn statement_span(statement: &AstStmt) -> SourceSpan {
         AstStmt::Let { span, .. }
         | AstStmt::If { span, .. }
         | AstStmt::Fail { span, .. }
-        | AstStmt::Return { span, .. } => *span,
+        | AstStmt::Return { span, .. }
+        | AstStmt::BoundedIteration { span, .. } => *span,
     }
 }
 

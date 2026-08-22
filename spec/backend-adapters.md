@@ -145,6 +145,13 @@ Backend evidence MUST preserve, as applicable:
 
 Cross-backend execution agreement MUST be described as bounded agreement or another explicitly scoped relation claim unless stronger evidence exists.
 
+For Profile 0.4, both current capability manifests declare `semantic_bounded_iteration`. The
+selected SSA retains each iteration identity, bound, state type, region blocks, callees,
+capabilities, completion modes, and obligations. Portable WASM realizes the cyclic control flow
+with its private dispatcher loop; research bytecode retains the block-parameter SSA. An adapter may
+choose another private shape, but it MUST NOT erase or invent the selected-SSA bound. A cyclic SSA
+graph without exact bounded-iteration metadata is invalid before adapter dispatch.
+
 ## Forge requirements
 
 Forge MAY search:

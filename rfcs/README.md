@@ -57,3 +57,4 @@ RFC acceptance does not imply production stability. The repository remains pre-s
 - [RFC 0040: Machine-Native Source Profile 0.1](0040-machine-native-source-profile-0.1.md)
 - [RFC 0041: Machine-Native Backend Plurality and Realization Contracts](0041-machine-native-backend-plurality-and-realization-contracts.md)
 - [RFC 0042: Machine-Native Source Profile 0.3 Experiment Bootstrap](0042-machine-native-source-profile-0.3-experiment-bootstrap.md)
+- [RFC 0043: Machine-Native Source Profile 0.4 Bounded Iteration](0043-machine-native-source-profile-0.4-bounded-iteration.md)

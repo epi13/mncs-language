@@ -40,3 +40,9 @@ The bounded body and independent SSA reference evaluators and differential check
 reproducible finite behavioral evidence for declared inputs. Matching cases do not prove universal
 semantic equivalence, formal lowering/compiler correctness, production backend correctness, or
 independent evaluation; shared helpers can still create common-mode defects.
+
+## Not general loops or recursion
+
+Profile 0.4 bounded iteration is a verification-visible finite state transition with a literal
+attempt ceiling. It is not `while`, computed/unbounded iteration, nested iteration, recursion, or a
+claim of exact runtime cost. Runtime budgets remain an independent execution envelope.

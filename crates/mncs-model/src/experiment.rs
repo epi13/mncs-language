@@ -10,8 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::canonical::{canonical_json_value, sha256_hex};
 use crate::{
     BackendArtifact, BackendCapabilityManifest, BackendIdentity, CompilationStudyResult,
-    ExecutionCorpus, ExecutionStatus, ExecutionValue, RealizationRequest, SemanticId,
-    TargetLoweringPlan, TranslationJudgement, TranslationValidationResult,
+    ExecutionCorpus, ExecutionEffectEvent, ExecutionStatus, ExecutionValue,
+    ExpectedEffectObservation, RealizationRequest, SemanticId, TargetLoweringPlan,
+    TranslationJudgement, TranslationValidationResult,
 };
 
 pub const LANGUAGE_EXPERIMENT_SCHEMA_VERSION: &str = "0.1";
@@ -20,6 +21,8 @@ pub const LANGUAGE_EXPERIMENT_DEFINITION_CONTRACT_ID: &str =
 pub const LANGUAGE_EXPERIMENT_RESULT_CONTRACT_ID: &str = "mncs:language:experiment-result:0.1";
 pub const LANGUAGE_EXPERIMENT_INTERPRETATION: &str =
     "bounded_language_observation_not_universal_equivalence_or_conformance";
+pub const FAMILY_EXPERIMENT_REFERENCE_SCHEMA_VERSION: &str =
+    "mncs.family-record.producer-reference.v0.1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -137,6 +140,21 @@ pub struct LanguageExperimentCaseObservation {
     pub expected: Option<Vec<ExecutionValue>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expectation_met: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_status: Option<ExecutionStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_met: Option<bool>,
+    pub steps: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maximum_steps: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_bound_met: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<ExecutionEffectEvent>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expected_effects: Vec<ExpectedEffectObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effects_met: Option<bool>,
     pub failure_reason: Option<String>,
 }
 
@@ -172,6 +190,45 @@ pub struct LanguageExperimentResult {
     pub interpretation: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FamilyExperimentObservation {
+    pub source_artifact_identity: String,
+    pub source_profile: String,
+    pub compiler_identity: SemanticId,
+    pub pipeline_identity: SemanticId,
+    pub semantic_fingerprint: Option<String>,
+    pub hir_fingerprint: Option<String>,
+    pub ssa_fingerprint: Option<String>,
+    pub selected_ssa_identity: Option<SemanticId>,
+    pub realization_request_identity: SemanticId,
+    pub realization_plan_identity: SemanticId,
+    pub backend_identity: SemanticId,
+    pub backend_artifact_identity: SemanticId,
+    pub backend_artifact_kind: String,
+    pub execution_corpus_digest: String,
+    pub validator_identities: Vec<SemanticId>,
+    pub experiment_definition_identity: SemanticId,
+    pub experiment_result_identity: SemanticId,
+    pub status: LanguageExperimentStatus,
+    pub unresolved_obligations: Vec<SemanticId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FamilyExperimentReference {
+    pub schema: String,
+    pub producer: String,
+    pub record_kind: String,
+    pub schema_version: String,
+    pub stable_id: String,
+    pub content_digest: String,
+    pub artifact: crate::FamilyArtifactReference,
+    pub scope: BTreeMap<String, String>,
+    pub experiment: FamilyExperimentObservation,
+    pub authority_boundary: String,
+}
+
 impl LanguageExperimentResult {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -202,6 +259,11 @@ impl LanguageExperimentResult {
             || cases
                 .iter()
                 .any(|case_| case_.expectation_met == Some(false))
+            || cases.iter().any(|case_| case_.status_met == Some(false))
+            || cases
+                .iter()
+                .any(|case_| case_.step_bound_met == Some(false))
+            || cases.iter().any(|case_| case_.effects_met == Some(false))
             || properties.iter().any(|property| !property.passed);
         let has_unknown = !unresolved_reasons.is_empty()
             || translation_validations
@@ -268,6 +330,77 @@ impl LanguageExperimentResult {
                 .all(TranslationValidationResult::identity_is_valid)
             && self.identity == experiment_identity("result", &material)
     }
+
+    pub fn family_reference(&self) -> FamilyExperimentReference {
+        let canonical = canonical_json_value(self)
+            .expect("language experiment result is canonical JSON serializable");
+        let content_digest = sha256_hex(canonical.as_bytes());
+        let corpus = canonical_json_value(&self.definition.corpus)
+            .expect("execution corpus is canonical JSON serializable");
+        let mut validator_identities = self
+            .definition
+            .validators
+            .iter()
+            .map(|validator| {
+                let material = format!(
+                    "{}:{}:{}:{}",
+                    validator.relation,
+                    validator.validator_profile,
+                    validator.required,
+                    validator.allow_unknown
+                );
+                SemanticId(format!(
+                    "mncs:language:validator:{}",
+                    sha256_hex(material.as_bytes())
+                ))
+            })
+            .collect::<Vec<_>>();
+        validator_identities.sort();
+        let mut scope = BTreeMap::from([
+            (
+                "source_profile".to_owned(),
+                self.definition.source_profile.clone(),
+            ),
+            ("backend".to_owned(), self.backend.identity.0.clone()),
+        ]);
+        scope.insert("experiment".to_owned(), self.definition_identity.0.clone());
+        FamilyExperimentReference {
+            schema: FAMILY_EXPERIMENT_REFERENCE_SCHEMA_VERSION.to_owned(),
+            producer: "mncs-language".to_owned(),
+            record_kind: "LanguageExperimentResult".to_owned(),
+            schema_version: self.schema_version.clone(),
+            stable_id: self.identity.0.clone(),
+            content_digest: content_digest.clone(),
+            artifact: crate::FamilyArtifactReference {
+                identity: self.identity.0.clone(),
+                kind: "language-experiment-result".to_owned(),
+                digest: content_digest,
+            },
+            scope,
+            experiment: FamilyExperimentObservation {
+                source_artifact_identity: self.definition.source_artifact_identity.clone(),
+                source_profile: self.definition.source_profile.clone(),
+                compiler_identity: self.compiler_study.compiler_identity.clone(),
+                pipeline_identity: self.compiler_study.pipeline_identity.clone(),
+                semantic_fingerprint: self.compiler_study.semantic_fingerprint.clone(),
+                hir_fingerprint: self.compiler_study.hir_fingerprint.clone(),
+                ssa_fingerprint: self.compiler_study.ssa_fingerprint.clone(),
+                selected_ssa_identity: self.compiler_study.selected_ssa_identity.clone(),
+                realization_request_identity: self.definition.realization.identity.clone(),
+                realization_plan_identity: self.realization_plan.identity.clone(),
+                backend_identity: self.backend.identity.clone(),
+                backend_artifact_identity: self.artifact.identity.clone(),
+                backend_artifact_kind: self.artifact.artifact_kind.clone(),
+                execution_corpus_digest: sha256_hex(corpus.as_bytes()),
+                validator_identities,
+                experiment_definition_identity: self.definition_identity.clone(),
+                experiment_result_identity: self.identity.clone(),
+                status: self.status,
+                unresolved_obligations: self.compiler_study.unresolved_obligations.clone(),
+            },
+            authority_boundary: "Observational language-owned bounded result only; this reference does not claim universal equivalence, conformance, independent evaluation, target assurance, or production fitness.".to_owned(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -302,12 +435,36 @@ impl LanguageExperimentComparison {
         let left_cases = left
             .cases
             .iter()
-            .map(|case_| (&case_.case_id, (&case_.status, &case_.returned)))
+            .map(|case_| {
+                (
+                    &case_.case_id,
+                    (
+                        &case_.status,
+                        &case_.returned,
+                        case_.expectation_met,
+                        case_.status_met,
+                        case_.step_bound_met,
+                        case_.effects_met,
+                    ),
+                )
+            })
             .collect::<BTreeMap<_, _>>();
         let right_cases = right
             .cases
             .iter()
-            .map(|case_| (&case_.case_id, (&case_.status, &case_.returned)))
+            .map(|case_| {
+                (
+                    &case_.case_id,
+                    (
+                        &case_.status,
+                        &case_.returned,
+                        case_.expectation_met,
+                        case_.status_met,
+                        case_.step_bound_met,
+                        case_.effects_met,
+                    ),
+                )
+            })
             .collect::<BTreeMap<_, _>>();
         let left_properties = left
             .properties

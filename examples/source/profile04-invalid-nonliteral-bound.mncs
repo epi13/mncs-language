@@ -1,0 +1,9 @@
+mncs 0.4;
+module examples.profile04.invalid_nonliteral_bound;
+
+fn invalid(input: u64, limit: u64) -> (result: u64) {
+    iterate retries up_to limit carrying state: u64 = input {
+        next state = state;
+    }
+    return state;
+}

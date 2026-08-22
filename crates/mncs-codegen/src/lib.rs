@@ -151,10 +151,15 @@ pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
             .into_iter()
             .map(str::to_owned)
             .collect(),
-        ["checked_integer", "wrapping_integer", "explicit_failure"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect(),
+        [
+            "checked_integer",
+            "wrapping_integer",
+            "explicit_failure",
+            "semantic_bounded_iteration",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
         [
             "memory",
             "effects",
@@ -203,6 +208,10 @@ pub fn portable_wasm_target() -> TargetContractRef {
                 "trap".to_owned(),
                 "failure terminators and checked overflow map to wasm unreachable".to_owned(),
             ),
+            (
+                "bounded-iteration".to_owned(),
+                "language-owned bounded SSA backedges use the private dispatcher loop; iteration metadata remains selected-SSA-bound".to_owned(),
+            ),
         ]),
         vec![SemanticId(
             "mncs:target-evidence:portable-wasm-mvp-0.1:declared-research-contract".to_owned(),
@@ -222,6 +231,7 @@ pub fn portable_wasm_plan(selected_ssa: CompilerArtifactRef) -> TargetLoweringPl
         vec![
             "scalar two's-complement integers".to_owned(),
             "no aggregate or pointer layout".to_owned(),
+            "bounded iteration metadata remains in the selected SSA identity".to_owned(),
         ],
         vec![
             "wasm function parameters and a single result".to_owned(),
@@ -295,6 +305,7 @@ pub fn research_bytecode_capabilities() -> BackendCapabilityManifest {
             "wrapping_integer",
             "explicit_failure",
             "bounded_control_flow",
+            "semantic_bounded_iteration",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -337,6 +348,10 @@ pub fn research_bytecode_target() -> TargetContractRef {
             (
                 "runtime".to_owned(),
                 "bounded MNCS SSA interpreter".to_owned(),
+            ),
+            (
+                "bounded-iteration".to_owned(),
+                "preserve language-owned bounded iteration regions and backedges".to_owned(),
             ),
         ]),
         vec![SemanticId(
@@ -656,6 +671,8 @@ pub struct BackendExecutionResult {
     pub artifact_identity: Option<SemanticId>,
     pub artifact_sha256: Option<String>,
     pub returned: Vec<ExecutionValue>,
+    pub steps: u64,
+    pub effects: Vec<mncs_model::ExecutionEffectEvent>,
     pub failure: Option<ExecutionFailure>,
 }
 
@@ -714,6 +731,8 @@ fn execute_portable_wasm(
         artifact_identity: Some(artifact.identity.clone()),
         artifact_sha256: Some(artifact.bytes_sha256.clone()),
         returned: Vec::new(),
+        steps: 0,
+        effects: Vec::new(),
         failure: None,
     };
     if !artifact.identity_is_valid() {
@@ -775,16 +794,17 @@ fn execute_portable_wasm(
         &request.arguments,
         request.step_budget,
     ) {
-        Ok(returned) => {
+        Ok(outcome) => {
+            result.steps = outcome.steps;
             let returned = if let Some(contract) = value_contract {
                 contract
                     .outputs
                     .iter()
-                    .zip(returned)
+                    .zip(outcome.returned)
                     .map(|(contract, value)| backend_output_value(contract, value))
                     .collect::<Result<Vec<_>, _>>()
             } else {
-                Ok(returned)
+                Ok(outcome.returned)
             };
             match returned {
                 Ok(returned) => {
@@ -921,6 +941,8 @@ fn execute_research_bytecode(
         artifact_identity: Some(artifact.identity.clone()),
         artifact_sha256: Some(artifact.bytes_sha256.clone()),
         returned: Vec::new(),
+        steps: 0,
+        effects: Vec::new(),
         failure: None,
     };
     if !artifact.identity_is_valid()
@@ -956,6 +978,8 @@ fn execute_research_bytecode(
     let observation = execute_ssa_module(&payload.program, &payload.ssa, request);
     result.status = observation.status;
     result.returned = observation.returned;
+    result.steps = observation.steps;
+    result.effects = observation.effects;
     result.failure = observation.failure;
     result
 }
@@ -973,6 +997,8 @@ pub fn execute_backend(
             artifact_identity: Some(artifact.identity.clone()),
             artifact_sha256: Some(artifact.bytes_sha256.clone()),
             returned: Vec::new(),
+            steps: 0,
+            effects: Vec::new(),
             failure: Some(ExecutionFailure {
                 identity: Some(artifact.identity.clone()),
                 reason: "no registered adapter can execute this backend artifact".to_owned(),
@@ -1339,11 +1365,19 @@ mod tests {
                     id: "sum".to_owned(),
                     request: request(20, 22),
                     expected: None,
+                    expected_status: None,
+                    maximum_steps: None,
+                    expected_effects: Vec::new(),
+                    prohibit_unexpected_effects: false,
                 },
                 ExecutionCase {
                     id: "overflow".to_owned(),
                     request: request(i128::from(i32::MAX), 1),
                     expected: None,
+                    expected_status: None,
+                    maximum_steps: None,
+                    expected_effects: Vec::new(),
+                    prohibit_unexpected_effects: false,
                 },
             ],
         };

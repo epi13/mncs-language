@@ -9,9 +9,10 @@ use crate::identity::{
     parameter_id, program_id,
 };
 use crate::{
-    AlignmentCapability, BodyOperation, BodyOperationKind, BodyTerminator, BodyType, ContractKind,
-    FailureMode, Function, GraphError, HighLevelIrNode, MachineIntentExpression, ObligationRecord,
-    Program, SemanticId, TargetIdentity, TransformationRecord, ValidationReport,
+    AlignmentCapability, BodyCyclePolicy, BodyOperation, BodyOperationKind, BodyTerminator,
+    BodyType, ContractKind, FailureMode, Function, GraphError, HighLevelIrNode,
+    MachineIntentExpression, ObligationRecord, Program, SemanticId, TargetIdentity,
+    TransformationRecord, ValidationReport,
 };
 
 pub const HIGH_LEVEL_IR_SCHEMA_VERSION: &str = "0.3";
@@ -158,12 +159,33 @@ pub struct IrFunction {
     pub semantic_identity: SemanticId,
     pub inputs: Vec<IrValue>,
     pub outputs: Vec<IrValue>,
+    #[serde(default, skip_serializing_if = "BodyCyclePolicy::is_legacy")]
+    pub cycle_policy: BodyCyclePolicy,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bounded_iterations: Vec<IrBoundedIteration>,
     pub blocks: Vec<IrBlock>,
     pub transitions: Vec<IrTransition>,
     pub contracts: Vec<SemanticId>,
     pub assumptions: Vec<SemanticId>,
     pub capabilities: Vec<SemanticId>,
     pub failure: FailureMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IrBoundedIteration {
+    pub identity: SemanticId,
+    pub bound: u32,
+    pub state_type: IrType,
+    pub preheader: SemanticId,
+    pub header: SemanticId,
+    pub body_entry: SemanticId,
+    pub backedge: SemanticId,
+    pub exit: SemanticId,
+    pub body_blocks: Vec<SemanticId>,
+    pub callees: Vec<SemanticId>,
+    pub required_capabilities: Vec<SemanticId>,
+    pub completion_modes: Vec<crate::BoundedIterationCompletion>,
+    pub obligations: Vec<SemanticId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -511,6 +533,8 @@ impl Program {
                 semantic_identity: semantic_function,
                 inputs,
                 outputs,
+                cycle_policy: BodyCyclePolicy::Legacy,
+                bounded_iterations: Vec::new(),
                 blocks,
                 transitions,
                 contracts,
@@ -1011,12 +1035,63 @@ fn lower_executable_body(
         });
         blocks.push(fatal);
     }
+    let bounded_iterations = body
+        .bounded_iterations
+        .iter()
+        .map(|iteration| {
+            let identity =
+                crate::identity::iteration_id(&program.module, &function.name, &iteration.id);
+            let block_identity = |block: &str| {
+                ir_identity(
+                    "body-block",
+                    &body.block_identity(&program.module, &function.name, block),
+                    0,
+                )
+            };
+            let obligations = [
+                "iteration-bound-valid",
+                "iteration-resource-ceiling",
+                "iteration-exact-resource-cost",
+                "iteration-authority-closure",
+                "iteration-state-preservation",
+                "iteration-completion-modes",
+            ]
+            .into_iter()
+            .map(|kind| crate::obligations::body_obligation_id(kind, &identity))
+            .collect();
+            IrBoundedIteration {
+                identity,
+                bound: iteration.bound,
+                state_type: ir_type(&iteration.state_type),
+                preheader: block_identity(&iteration.preheader),
+                header: block_identity(&iteration.header),
+                body_entry: block_identity(&iteration.body_entry),
+                backedge: block_identity(&iteration.backedge),
+                exit: block_identity(&iteration.exit),
+                body_blocks: iteration
+                    .body_blocks
+                    .iter()
+                    .map(|block| block_identity(block))
+                    .collect(),
+                callees: iteration.callees.clone(),
+                required_capabilities: iteration
+                    .required_capabilities
+                    .iter()
+                    .map(|capability| capability_id(&program.module, &function.name, capability))
+                    .collect(),
+                completion_modes: iteration.completion_modes.clone(),
+                obligations,
+            }
+        })
+        .collect();
     (
         IrFunction {
             identity: ir_identity("function", &semantic_function, 0),
             semantic_identity: semantic_function,
             inputs,
             outputs,
+            cycle_policy: body.cycle_policy,
+            bounded_iterations,
             blocks,
             transitions,
             contracts,

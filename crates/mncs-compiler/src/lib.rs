@@ -1226,6 +1226,60 @@ mod tests {
     }
 
     #[test]
+    fn source_profile_04_executes_minimum_and_maximum_accepted_bounds() {
+        let compiler = ReferenceCompiler::default();
+        for bound in [1, mncs_model::SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND] {
+            let source = format!(
+                "mncs 0.4; module profile.bounds{bound}; \
+                 fn candidate(input: i64) -> (result: i64) {{ \
+                   iterate attempts up_to {bound} carrying current: i64 = input {{ \
+                     next current = current; \
+                   }} \
+                   return input; \
+                 }}"
+            );
+            let front_end = compiler.front_end(SourceEnvelope::inline(
+                SourceArtifactKind::Program,
+                format!("profile.bounds{bound}"),
+                source,
+            ));
+            assert!(
+                front_end.is_valid(),
+                "bound {bound}: {:#?}",
+                front_end.diagnostics
+            );
+            let program = front_end.program.expect("bounded program");
+            let iteration = &program.functions[0]
+                .body
+                .as_ref()
+                .expect("body")
+                .bounded_iterations[0];
+            assert_eq!(iteration.bound, bound);
+            let request = mncs_model::ExecutionRequest {
+                schema_version: mncs_model::EXECUTION_REQUEST_SCHEMA_VERSION.to_owned(),
+                target: mncs_model::ExecutionTarget {
+                    module: program.module.clone(),
+                    function: "candidate".to_owned(),
+                },
+                arguments: vec![mncs_model::ExecutionValue::Integer {
+                    value: 7,
+                    ty: mncs_model::IntegerType {
+                        bits: 64,
+                        signed: true,
+                    },
+                }],
+                step_budget: 10_000,
+                policy: mncs_model::ExecutionPolicy::default(),
+            };
+            let body = mncs_model::execute_with_policy(&program, &request);
+            let ssa = mncs_model::execute_ssa(&program, &request);
+            assert_eq!(body.status, mncs_model::ExecutionStatus::Returned);
+            assert_eq!(ssa.status, mncs_model::ExecutionStatus::Returned);
+            assert_eq!(body.returned, ssa.returned);
+        }
+    }
+
+    #[test]
     fn source_profile_0_2_elaborates_bindings_contracts_and_failure() {
         let compiler = ReferenceCompiler::default();
         let output = compiler.run_local_source_study(flagship_envelope());

@@ -107,19 +107,103 @@ impl Program {
                 });
             }
             if let Some(body) = &function.body {
+                for iteration in &body.bounded_iterations {
+                    let subject =
+                        crate::identity::iteration_id(&self.module, &function.name, &iteration.id);
+                    let mut dependencies = vec![function_identity.clone(), subject.clone()];
+                    dependencies.extend(iteration.callees.iter().cloned());
+                    dependencies.extend(
+                        iteration.required_capabilities.iter().map(|capability| {
+                            capability_id(&self.module, &function.name, capability)
+                        }),
+                    );
+                    dependencies.extend(iteration.body_blocks.iter().map(|block| {
+                        crate::identity::block_id(&self.module, &function.name, block)
+                    }));
+                    dependencies.sort();
+                    dependencies.dedup();
+                    for (kind, status, method, fallback) in [
+                        (
+                            "iteration-bound-valid",
+                            ObligationStatus::Pass,
+                            "language-profile-0.4-bound-check",
+                            None,
+                        ),
+                        (
+                            "iteration-resource-ceiling",
+                            ObligationStatus::Pass,
+                            "language-static-iteration-ceiling",
+                            None,
+                        ),
+                        (
+                            "iteration-exact-resource-cost",
+                            ObligationStatus::Unknown,
+                            "no-exact-body-cost-evidence",
+                            Some("retain the declared iteration ceiling and runtime budget"),
+                        ),
+                        (
+                            "iteration-authority-closure",
+                            ObligationStatus::Pass,
+                            "language-iteration-authority-closure",
+                            None,
+                        ),
+                        (
+                            "iteration-state-preservation",
+                            ObligationStatus::Pass,
+                            "language-iteration-state-type-check",
+                            None,
+                        ),
+                        (
+                            "iteration-completion-modes",
+                            ObligationStatus::Pass,
+                            "language-iteration-completion-check",
+                            None,
+                        ),
+                    ] {
+                        obligations.push(ObligationRecord {
+                            schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                            identity: body_obligation_id(kind, &subject),
+                            subject: subject.clone(),
+                            requirement: requirement_id(kind, &subject),
+                            status,
+                            method: method.to_owned(),
+                            assumptions: Vec::new(),
+                            dependencies: dependencies.clone(),
+                            freshness: if status == ObligationStatus::Unknown {
+                                EvidenceFreshness::Unknown
+                            } else {
+                                EvidenceFreshness::Current
+                            },
+                            fallback: fallback.map(str::to_owned),
+                        });
+                    }
+                }
                 for block in &body.blocks {
                     for operation in &block.operations {
                         let subject = operation.identity(&self.module, &function.name, &block.id);
                         match &operation.kind {
                             BodyOperationKind::Integer { intent, .. } => {
+                                let bounded_counter_step =
+                                    body.bounded_iterations.iter().any(|iteration| {
+                                        iteration.backedge == block.id
+                                            && operation.id.starts_with("iteration_decrement")
+                                    });
                                 let requirement = requirement_id("integer-overflow", &subject);
                                 obligations.push(ObligationRecord {
                                     schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
                                     identity: body_obligation_id("integer-overflow", &subject),
                                     subject: subject.clone(),
                                     requirement,
-                                    status: ObligationStatus::Unknown,
-                                    method: format!("symbolic-{intent:?}"),
+                                    status: if bounded_counter_step {
+                                        ObligationStatus::Pass
+                                    } else {
+                                        ObligationStatus::Unknown
+                                    },
+                                    method: if bounded_counter_step {
+                                        "language-bounded-iteration-counter-decrement".to_owned()
+                                    } else {
+                                        format!("symbolic-{intent:?}")
+                                    },
                                     assumptions: function
                                         .assumptions
                                         .iter()
@@ -128,11 +212,15 @@ impl Program {
                                         })
                                         .collect(),
                                     dependencies: vec![function_identity.clone(), subject],
-                                    freshness: EvidenceFreshness::Unknown,
-                                    fallback: Some(
+                                    freshness: if bounded_counter_step {
+                                        EvidenceFreshness::Current
+                                    } else {
+                                        EvidenceFreshness::Unknown
+                                    },
+                                    fallback: (!bounded_counter_step).then(|| {
                                         "retain explicit arithmetic behavior or insert a runtime check"
-                                            .to_owned(),
-                                    ),
+                                            .to_owned()
+                                    }),
                                 });
                             }
                             BodyOperationKind::Effect { effect, .. } => {

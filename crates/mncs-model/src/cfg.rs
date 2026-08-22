@@ -197,6 +197,8 @@ mod tests {
                 name: "condition".to_owned(),
                 ty: BodyType::Named("bool".to_owned()),
             }],
+            cycle_policy: crate::BodyCyclePolicy::Legacy,
+            bounded_iterations: Vec::new(),
             blocks: vec![
                 BodyBlock {
                     id: "entry".to_owned(),

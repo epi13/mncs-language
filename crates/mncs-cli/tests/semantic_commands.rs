@@ -867,3 +867,169 @@ fn profile_03_rejects_non_exhaustive_matches_and_authority_laundering() {
             .any(|diagnostic| diagnostic["code"] == code));
     }
 }
+
+#[test]
+fn cre3_profile_04_runs_typed_bounded_observations_through_both_backends() {
+    let source = example("source/cre3-retry-authority.mncs");
+    let corpus = example("execution/cre3-retry-authority-corpus.json");
+    let mut results = Vec::new();
+    for backend in ["mncs-portable-wasm-mvp", "mncs-research-bytecode"] {
+        let output = binary()
+            .args([
+                "experiment",
+                "run",
+                &source,
+                "--backend",
+                backend,
+                "--corpus",
+                &corpus,
+            ])
+            .output()
+            .expect("run CRE-3 candidate");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).expect("CRE-3 result JSON");
+        let typed: mncs_model::LanguageExperimentResult =
+            serde_json::from_slice(&output.stdout).expect("typed CRE-3 result");
+        let family = typed.family_reference();
+        assert_eq!(family.producer, "mncs-language");
+        assert_eq!(family.stable_id, typed.identity.0);
+        assert_eq!(family.experiment.experiment_result_identity, typed.identity);
+        assert!(family
+            .authority_boundary
+            .contains("does not claim universal equivalence"));
+        assert_eq!(result["status"], "PASS");
+        assert!(result["compiler_study"]["unresolved_obligations"]
+            .as_array()
+            .is_some_and(|items| items.len() == 1));
+        assert!(result["cases"].as_array().unwrap().iter().all(|case_| {
+            case_["expectation_met"] == true
+                && case_["status_met"] == true
+                && case_["step_bound_met"] == true
+                && case_["effects_met"] == true
+        }));
+        results.push(result);
+    }
+    assert_eq!(
+        results[0]["compiler_study"]["semantic_fingerprint"],
+        results[1]["compiler_study"]["semantic_fingerprint"]
+    );
+    assert_eq!(
+        results[0]["compiler_study"]["hir_fingerprint"],
+        results[1]["compiler_study"]["hir_fingerprint"]
+    );
+    assert_eq!(
+        results[0]["compiler_study"]["ssa_fingerprint"],
+        results[1]["compiler_study"]["ssa_fingerprint"]
+    );
+    assert_ne!(results[0]["backend"], results[1]["backend"]);
+    assert_ne!(
+        results[0]["artifact"]["identity"],
+        results[1]["artifact"]["identity"]
+    );
+}
+
+#[test]
+fn cre3_body_ssa_and_each_backend_agree_over_the_typed_corpus() {
+    let source = std::fs::read_to_string(example("source/cre3-retry-authority.mncs"))
+        .expect("read CRE-3 source");
+    let envelope = mncs_syntax::SourceEnvelope::inline(
+        mncs_syntax::SourceArtifactKind::Program,
+        "examples.cre3.layered-execution",
+        source,
+    );
+    let front_end = mncs_compiler::ReferenceCompiler::default().front_end(envelope);
+    assert!(front_end.is_valid(), "{:#?}", front_end.diagnostics);
+    let program = front_end.program.expect("elaborated CRE-3 program");
+    let ssa = program.lower_to_ssa().expect("selected CRE-3 SSA");
+    let corpus: mncs_model::ExecutionCorpus = serde_json::from_slice(
+        &std::fs::read(example("execution/cre3-retry-authority-corpus.json"))
+            .expect("read CRE-3 corpus"),
+    )
+    .expect("typed CRE-3 corpus");
+    let body_ssa = mncs_model::compare_body_and_ssa(&program, &corpus);
+    assert_eq!(
+        body_ssa.status,
+        mncs_model::LoweringExecutionStatus::ConsistentOverCorpus
+    );
+    assert_eq!(body_ssa.matching_cases, corpus.cases.len());
+    let selected = mncs_codegen::selected_ssa_ref(&ssa);
+
+    for backend_name in ["mncs-portable-wasm-mvp", "mncs-research-bytecode"] {
+        let adapter = mncs_codegen::backend_adapter(backend_name).expect("backend adapter");
+        let plan = adapter.plan(selected.clone());
+        let artifact = adapter
+            .lower(&program, &ssa, selected.clone(), &plan)
+            .artifact
+            .expect("backend artifact");
+        let comparison =
+            mncs_codegen::compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus);
+        assert_eq!(
+            comparison.status,
+            mncs_codegen::LayeredExecutionStatus::ConsistentOverCorpus,
+            "{backend_name}: {comparison:#?}"
+        );
+        assert_eq!(comparison.matching_cases, corpus.cases.len());
+        assert_eq!(comparison.mismatching_cases, 0);
+    }
+}
+
+#[test]
+fn cre3_mutants_retain_bounded_counterexamples() {
+    let corpus = example("execution/cre3-retry-authority-corpus.json");
+    for source in [
+        "source/cre3-retry-authority-wrong-unknown.mncs",
+        "source/cre3-retry-authority-wrong-bound.mncs",
+    ] {
+        let source = example(source);
+        let output = binary()
+            .args([
+                "experiment",
+                "run",
+                &source,
+                "--backend",
+                "mncs-research-bytecode",
+                "--corpus",
+                &corpus,
+            ])
+            .output()
+            .expect("run CRE-3 mutant");
+        assert_eq!(output.status.code(), Some(1));
+        let result: Value = serde_json::from_slice(&output.stdout).expect("mutant result JSON");
+        assert_eq!(result["status"], "FAIL");
+        assert!(result["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|case_| case_["expectation_met"] == false));
+    }
+}
+
+#[test]
+fn profile_04_rejects_unbounded_malformed_and_authority_expanding_iteration() {
+    for (fixture, code) in [
+        ("source/profile04-unbounded-while.mncs", "MNP106"),
+        ("source/profile04-invalid-bound-zero.mncs", "MNE142"),
+        ("source/profile04-invalid-bound-too-large.mncs", "MNE142"),
+        ("source/profile04-invalid-nonliteral-bound.mncs", "MNP094"),
+        ("source/profile04-invalid-carried-state.mncs", "MNE144"),
+        ("source/profile04-authority-laundering.mncs", "MNE134"),
+        ("source/profile04-recursive-retry.mncs", "MNE130"),
+    ] {
+        let source = example(fixture);
+        let output = binary()
+            .args(["source-study", &source])
+            .output()
+            .expect("run negative Source Profile 0.4 fixture");
+        assert_eq!(output.status.code(), Some(1));
+        let result: Value = serde_json::from_slice(&output.stdout).expect("front-end JSON");
+        assert!(result["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == code));
+    }
+}

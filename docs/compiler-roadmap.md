@@ -39,6 +39,14 @@ The stage audit in RFC 0039 makes the complete logical pipeline machine-readable
 
 Source Profile 0.1 remains the identity-function grammar. Source Profile 0.2 elaborates lexical bindings, named `requires`/`ensures`/`assumes` clauses, declared capabilities, capability-authorized effects, `if`/`fail`, exact `bool`/integer types, and checked integer expressions. Source Profile 0.3 adds nominal finite declarations/constructors, exhaustive expression-valued `match`, boolean literals, nested and directly returned expressions, and acyclic intra-module calls. Call operations retain exact callee identity, effects, and caller capability uses through semantic bodies, HIR, SSA, obligations, both adapters, and traces. Ambiguous or unresolved bindings, recursion, arity/type mismatches, non-exhaustive or duplicate arms, and authority laundering are explicit errors. The elaborator does not invent capability authority.
 
+Source Profile 0.4 adds one structured bounded state transition with a versioned 1–32 literal
+ceiling. Iteration identity, carried state, region/backedge, callees, authority, completion modes,
+and bound/resource/state obligations survive semantic graph, HIR, selected SSA, both adapters, and
+typed execution observations. Profile 0.4's additive cycle policy rejects arbitrary cyclic body/SSA
+graphs without silently redefining legacy semantic fixtures. CRE-3 now executes through both
+adapters; exact instruction cost remains an explicit UNKNOWN separate from the known attempt
+ceiling.
+
 ## Ownership boundary
 
 ```text

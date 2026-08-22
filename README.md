@@ -4,7 +4,7 @@
 
 Research and reference implementation for a general-purpose, verification-native programming language built on Machine-Native Complexity Standard (MNCS) principles.
 
-> **Project status:** the compiler now has an experimental source-to-backend vertical slice. Source Profile 0.1 remains the identity-function grammar; 0.2 adds bounded integer/boolean bodies; and 0.3 adds nominal finite types, exhaustive `match`, expression returns/nesting, and non-recursive authority-closed intra-module calls. Selected SSA is realized through a backend-neutral adapter boundary. The current adapters are portable WASM MVP and an executable canonical research-bytecode format. Body, SSA, and backend comparison is empirical bounded agreement, not universal equivalence. Translation validators emit PASS/FAIL/UNKNOWN independently of candidate generators. Forge may coordinate and compare experiments but does not decide language correctness. No final grammar, complete type/contract calculus, native backend, Raspberry Pi result, independent evaluation, or production suitability is claimed.
+> **Project status:** the compiler now has an experimental source-to-plural-backends vertical slice. Source Profiles 0.1–0.3 retain their established worlds; Profile 0.4 adds structured, typed, semantically bounded iteration with a versioned 1–32 attempt envelope, explicit carried state, authority closure, obligations, and bounded CFG/SSA backedges. CRE-3 executes three-attempt retry under `UNKNOWN` through portable WASM and research bytecode. Body, SSA, and backend comparison is empirical bounded agreement, not universal equivalence. Exact instruction cost remains `UNKNOWN`, and no final grammar, complete type/contract calculus, general loop/recursion, native backend, independent evaluation, or production suitability is claimed.
 
 ## Why this project exists
 
@@ -88,6 +88,29 @@ cargo run -p mncs-cli -- experiment run examples/source/cre1-evidence-combine.mn
 The corpus checks all nine finite input pairs plus commutativity, associativity, idempotence,
 neutrality, absorption, and UNKNOWN preservation. The deliberately wrong source fixture exits with
 `FAIL` and retains exact counterexamples. See [Source Profile 0.3](docs/source-profile-0.3.md).
+
+Run CRE-3 through both backend adapters and compare its frozen bounded observations:
+
+```bash
+cargo run -p mncs-cli -- experiment run examples/source/cre3-retry-authority.mncs \
+  --backend mncs-portable-wasm-mvp \
+  --corpus examples/execution/cre3-retry-authority-corpus.json \
+  --output-dir target/cre3-wasm
+cargo run -p mncs-cli -- experiment run examples/source/cre3-retry-authority.mncs \
+  --backend mncs-research-bytecode \
+  --corpus examples/execution/cre3-retry-authority-corpus.json \
+  --output-dir target/cre3-bytecode
+cargo run -p mncs-cli -- experiment compare \
+  target/cre3-wasm/result.json target/cre3-bytecode/result.json
+```
+
+The Profile 0.4 form is a bounded state transition, not `while`: its bound, carried state,
+calls/capabilities, completion modes, and obligations remain visible in semantic, HIR, and SSA
+artifacts. The typed corpus checks expected status/value, a backend-specific step ceiling, and the
+absence of unexpected effects. See [Source Profile 0.4](docs/source-profile-0.4.md) and [RFC
+0043](rfcs/0043-machine-native-source-profile-0.4-bounded-iteration.md). The exact local commands,
+fingerprints, Joern comparison, compatibility checks, and scoped non-claims are recorded in the
+[Profile 0.4 development evidence](docs/development-evidence/source-profile-0.4-bounded-iteration-cre3-2026-08.md).
 
 `experiment execute BACKEND_ARTIFACT CORPUS` executes an already frozen artifact without recompiling it, which is the narrow runtime boundary for Fabric packaging. `experiment inspect RESULT` verifies all content identities before reporting the bounded observation. See [the language experiment contract](docs/language-experiment-contract.md) and [backend adapter specification](spec/backend-adapters.md).
 

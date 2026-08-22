@@ -124,8 +124,29 @@ pub struct SsaFunction {
     pub semantic_identity: SemanticId,
     pub inputs: Vec<SsaValue>,
     pub outputs: Vec<SsaValue>,
+    #[serde(default, skip_serializing_if = "crate::BodyCyclePolicy::is_legacy")]
+    pub cycle_policy: crate::BodyCyclePolicy,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bounded_iterations: Vec<SsaBoundedIteration>,
     pub blocks: Vec<SsaBlock>,
     pub failure: FailureMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SsaBoundedIteration {
+    pub identity: SemanticId,
+    pub bound: u32,
+    pub state_type: IrType,
+    pub preheader: SemanticId,
+    pub header: SemanticId,
+    pub body_entry: SemanticId,
+    pub backedge: SemanticId,
+    pub exit: SemanticId,
+    pub body_blocks: Vec<SemanticId>,
+    pub callees: Vec<SemanticId>,
+    pub required_capabilities: Vec<SemanticId>,
+    pub completion_modes: Vec<crate::BoundedIterationCompletion>,
+    pub obligations: Vec<SemanticId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -425,6 +446,8 @@ fn declaration_function(
         semantic_identity: semantic_function.clone(),
         inputs,
         outputs: Vec::new(),
+        cycle_policy: crate::BodyCyclePolicy::Legacy,
+        bounded_iterations: Vec::new(),
         blocks: vec![SsaBlock {
             identity: block_identity,
             semantic_identity: None,
@@ -663,12 +686,56 @@ fn lower_body(
         },
         failure_target: None,
     });
+    let bounded_iterations = body
+        .bounded_iterations
+        .iter()
+        .map(|iteration| {
+            let identity =
+                crate::identity::iteration_id(&program.module, &function.name, &iteration.id);
+            let block_identity = |block: &str| {
+                ssa_identity(
+                    "block",
+                    &body.block_identity(&program.module, &function.name, block),
+                    0,
+                )
+            };
+            let hir_iteration = hir_function
+                .bounded_iterations
+                .iter()
+                .find(|candidate| candidate.identity == identity);
+            SsaBoundedIteration {
+                identity,
+                bound: iteration.bound,
+                state_type: body_type(&iteration.state_type),
+                preheader: block_identity(&iteration.preheader),
+                header: block_identity(&iteration.header),
+                body_entry: block_identity(&iteration.body_entry),
+                backedge: block_identity(&iteration.backedge),
+                exit: block_identity(&iteration.exit),
+                body_blocks: iteration
+                    .body_blocks
+                    .iter()
+                    .map(|block| block_identity(block))
+                    .collect(),
+                callees: iteration.callees.clone(),
+                required_capabilities: hir_iteration
+                    .map(|iteration| iteration.required_capabilities.clone())
+                    .unwrap_or_default(),
+                completion_modes: iteration.completion_modes.clone(),
+                obligations: hir_iteration
+                    .map(|iteration| iteration.obligations.clone())
+                    .unwrap_or_default(),
+            }
+        })
+        .collect();
     (
         SsaFunction {
             identity: function_identity,
             semantic_identity: semantic_function,
             inputs,
             outputs,
+            cycle_policy: body.cycle_policy,
+            bounded_iterations,
             blocks,
             failure: function.failure.clone(),
         },
@@ -784,6 +851,106 @@ fn validate_function(
         }
     }
     let dominators = dominators(entry.as_ref(), &reachable, &successors);
+    let declared_backedges = function
+        .bounded_iterations
+        .iter()
+        .map(|iteration| (iteration.backedge.clone(), iteration.header.clone()))
+        .collect::<BTreeSet<_>>();
+    if function.cycle_policy == crate::BodyCyclePolicy::BoundedIterationOnly {
+        for (from, targets) in &successors {
+            for target in targets {
+                if dominators.get(from).is_some_and(|set| set.contains(target))
+                    && !declared_backedges.contains(&(from.clone(), target.clone()))
+                {
+                    errors.push(diagnostic(
+                        "SSA018",
+                        path,
+                        "SSA cycle is not an exact semantically bounded iteration backedge",
+                    ));
+                }
+            }
+        }
+    }
+    for iteration in &function.bounded_iterations {
+        if !(1..=crate::SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND).contains(&iteration.bound) {
+            errors.push(diagnostic(
+                "SSA019",
+                path,
+                "SSA bounded iteration has an invalid Profile 0.4 ceiling",
+            ));
+        }
+        if [
+            &iteration.preheader,
+            &iteration.header,
+            &iteration.body_entry,
+            &iteration.backedge,
+            &iteration.exit,
+        ]
+        .iter()
+        .any(|block| !block_ids.contains(*block))
+        {
+            errors.push(diagnostic(
+                "SSA020",
+                path,
+                "SSA bounded iteration references a missing region block",
+            ));
+            continue;
+        }
+        let header = function
+            .blocks
+            .iter()
+            .find(|block| block.identity == iteration.header);
+        if !header.is_some_and(|block| {
+            block.parameters.len() == 2
+                && block.parameters[0].ty == iteration.state_type
+                && block.parameters[1].ty == IrType::Named("u64".to_owned())
+        }) {
+            errors.push(diagnostic(
+                "SSA021",
+                path,
+                "SSA bounded iteration carried state/counter shape is malformed",
+            ));
+        }
+        let mut callees = BTreeSet::new();
+        let mut capabilities = BTreeSet::new();
+        for block in function
+            .blocks
+            .iter()
+            .filter(|block| iteration.body_blocks.contains(&block.identity))
+        {
+            for instruction in &block.instructions {
+                if let SsaInstructionKind::Call {
+                    function: callee,
+                    required_capabilities,
+                } = &instruction.kind
+                {
+                    callees.insert(callee.clone());
+                    capabilities.extend(required_capabilities.iter().cloned());
+                }
+            }
+        }
+        if callees != iteration.callees.iter().cloned().collect()
+            || capabilities != iteration.required_capabilities.iter().cloned().collect()
+        {
+            errors.push(diagnostic(
+                "SSA022",
+                path,
+                "SSA bounded iteration lost exact call/authority closure",
+            ));
+        }
+        if iteration.obligations.len() != 6
+            || iteration
+                .obligations
+                .iter()
+                .any(|obligation| !obligations.iter().any(|item| item.identity == *obligation))
+        {
+            errors.push(diagnostic(
+                "SSA023",
+                path,
+                "SSA bounded iteration lost its bound/resource/authority/state/completion obligations",
+            ));
+        }
+    }
     let mut definitions = BTreeMap::<SemanticId, (Option<SemanticId>, IrType)>::new();
     for value in &function.inputs {
         if definitions
@@ -1333,5 +1500,24 @@ mod tests {
         let report = ssa.validate();
         assert!(!report.valid);
         assert!(report.errors.iter().any(|error| error.code == "SSA006"));
+    }
+
+    #[test]
+    fn ssa_validation_rejects_an_unbounded_cycle_without_iteration_metadata() {
+        let mut program = executable_program();
+        program.functions[0]
+            .body
+            .as_mut()
+            .expect("body")
+            .cycle_policy = crate::BodyCyclePolicy::BoundedIterationOnly;
+        let mut ssa = program.lower_to_ssa().expect("SSA");
+        let entry = ssa.functions[0].blocks[0].identity.clone();
+        ssa.functions[0].blocks[0].terminator = SsaTerminator::Branch {
+            target: entry,
+            arguments: Vec::new(),
+        };
+        let report = ssa.validate();
+        assert!(!report.valid);
+        assert!(report.errors.iter().any(|error| error.code == "SSA018"));
     }
 }

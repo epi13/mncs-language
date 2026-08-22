@@ -2,7 +2,8 @@
 
 ## Outcome
 
-The repository has an evidence-bearing source-to-two-backends vertical slice for a bounded language profile, not yet a complete language compiler.
+The repository has an evidence-bearing source-to-two-backends vertical slice for additive bounded
+language profiles through Profile 0.4, not yet a complete language compiler.
 
 C0–C3 and the Profile 0.1/0.2 frontend slices are implemented experimentally: deterministic source envelopes, lossless tokens/CST, spanned AST, bounded typed elaboration, semantic graph/identity outputs, semantic→HIR→SSA orchestration, transformation observations, unresolved-obligation retention, target-plan uncertainty, backend capability/realization contracts, portable WASM and research-bytecode adapters, translation validators, Linux/Windows CI, and an AArch64 compile-shape gate. No broad grammar, complete type/contract calculus, native backend, linked executable, native Raspberry Pi run, or independent validator exists.
 
@@ -21,10 +22,10 @@ The maturity description is therefore:
 | AST | spanned, trivia-free representation distinct from semantic identity | experimental 0.1 |
 | semantic graph | elaboration followed by `Program::semantic_graph`, emitted in compiler evidence | experimental bounded profile |
 | identity resolution | deterministic semantic identity inventory emitted after graph construction | partial; not general scope/binding resolution |
-| type and contract analysis | exact bounded bool/integer checking, structural validation, effect/capability closure, obligation generation | partial |
-| HIR | deterministic 0.3 HIR with trace and provenance | experimental driver stage |
+| type and contract analysis | exact bounded bool/integer/finite checking, bounded-iteration state preservation, effect/capability closure, obligation generation | partial |
+| HIR | deterministic HIR with trace/provenance and bounded-iteration regions | experimental driver stage |
 | verification passes | structural validators, evidence checks, independent-generator translation checks, bounded body/SSA/backend comparison | partial; validators share residual model/runtime trust |
-| lowering / backend | canonical SSA selection, capability manifests, realization request/plan, portable WASM and research-bytecode adapters | experimental plural boundary |
+| lowering / backend | canonical SSA selection with validated bounded backedges, capability manifests, realization request/plan, portable WASM and research-bytecode adapters | experimental plural boundary |
 | executable artifact | typed WASM/bytecode artifacts and adapter-owned bounded reference execution | experimental; no native/linked artifact |
 
 Run `mncs compiler-architecture` for the versioned machine-readable statement.
@@ -144,4 +145,6 @@ The subsequent tranches add Source Profile 0.1/0.2, bounded exact type checking,
 
 ## Recommended next cycle
 
-Keep grammar breadth fixed and implement general scope/binding plus explicit contract clauses over the existing AST→semantic boundary. Add negative fixtures for duplicate bindings, unresolved cross-artifact identities, contract/type mismatch, stale provenance, and partial-program recovery. Define the first language-owned feature/profile compatibility record so Forge can detect regressions without deciding conformance.
+Keep iteration closed and add genuine semantic product/record types so upcoming state/provenance CREs
+can carry structured values without JSON-shaped syntax sugar. Preserve stable field identities and
+backend-neutral lowering. General scope/import and richer contract work remain separate priorities.

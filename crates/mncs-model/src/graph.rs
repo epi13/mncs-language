@@ -16,6 +16,9 @@ pub enum EdgeKind {
     ContainsFiniteVariant,
     ContainsFunction,
     ContainsBody,
+    ContainsIteration,
+    IterationContainsBlock,
+    CarriesValue,
     ContainsBlock,
     ContainsOperation,
     ContainsValue,
@@ -536,6 +539,76 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                     }
                     crate::BodyTerminator::Return { .. }
                     | crate::BodyTerminator::Failure { .. } => {}
+                }
+            }
+            for iteration in &body.bounded_iterations {
+                let iteration_identity =
+                    crate::identity::iteration_id(&program.module, &function.name, &iteration.id);
+                edges.push(GraphEdge {
+                    from: body_identity.clone(),
+                    to: iteration_identity.clone(),
+                    kind: EdgeKind::ContainsIteration,
+                });
+                let mut region_blocks = vec![
+                    iteration.preheader.clone(),
+                    iteration.header.clone(),
+                    iteration.body_entry.clone(),
+                    iteration.backedge.clone(),
+                    iteration.exit.clone(),
+                ];
+                region_blocks.extend(iteration.body_blocks.clone());
+                region_blocks.sort();
+                region_blocks.dedup();
+                for block in region_blocks {
+                    edges.push(GraphEdge {
+                        from: iteration_identity.clone(),
+                        to: crate::identity::block_id(&program.module, &function.name, &block),
+                        kind: EdgeKind::IterationContainsBlock,
+                    });
+                }
+                for carried in [
+                    &iteration.initial_value,
+                    &iteration.header_state,
+                    &iteration.exit_state,
+                ] {
+                    if let Some(value) = values.get(carried) {
+                        edges.push(GraphEdge {
+                            from: iteration_identity.clone(),
+                            to: value.clone(),
+                            kind: EdgeKind::CarriesValue,
+                        });
+                    }
+                }
+                for callee in &iteration.callees {
+                    edges.push(GraphEdge {
+                        from: iteration_identity.clone(),
+                        to: callee.clone(),
+                        kind: EdgeKind::Calls,
+                    });
+                }
+                for capability in &iteration.required_capabilities {
+                    edges.push(GraphEdge {
+                        from: iteration_identity.clone(),
+                        to: capability_id(&program.module, &function.name, capability),
+                        kind: EdgeKind::UsesCapability,
+                    });
+                }
+                for obligation_kind in [
+                    "iteration-bound-valid",
+                    "iteration-resource-ceiling",
+                    "iteration-exact-resource-cost",
+                    "iteration-authority-closure",
+                    "iteration-state-preservation",
+                    "iteration-completion-modes",
+                ] {
+                    edges.push(GraphEdge {
+                        from: iteration_identity.clone(),
+                        to: crate::obligations::body_obligation_id(
+                            obligation_kind,
+                            &iteration_identity,
+                        ),
+                        kind: EdgeKind::RequiresObligation,
+                    });
                 }
             }
         }
