@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 pub const SOURCE_ENVELOPE_SCHEMA_VERSION: &str = "0.1";
 pub const SOURCE_PROFILE_VERSION: &str = "0.1";
 pub const SOURCE_PROFILE_VERSION_0_2: &str = "0.2";
+pub const SOURCE_PROFILE_VERSION_0_3: &str = "0.3";
 pub const LEXICAL_SCHEMA_VERSION: &str = "0.1";
 pub const CST_SCHEMA_VERSION: &str = "0.1";
 pub const AST_SCHEMA_VERSION: &str = "0.1";
@@ -222,6 +223,10 @@ pub enum TokenKind {
     EffectKeyword,
     CapabilityKeyword,
     AuthorizedKeyword,
+    EnumKeyword,
+    MatchKeyword,
+    TrueKeyword,
+    FalseKeyword,
     Identifier,
     Version,
     IntegerLiteral,
@@ -244,6 +249,7 @@ pub enum TokenKind {
     LeftBrace,
     RightBrace,
     Arrow,
+    FatArrow,
     Unknown,
 }
 
@@ -318,6 +324,8 @@ pub enum CstKind {
     Header,
     ModuleDeclaration,
     FunctionDeclaration,
+    FiniteTypeDeclaration,
+    FiniteVariant,
     ParameterList,
     Parameter,
     Block,
@@ -370,7 +378,7 @@ pub struct AstParameter {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AstBody {
-    pub returned_value: SpannedText,
+    pub returned_value: AstExpr,
     #[serde(default)]
     pub statements: Vec<AstStmt>,
     pub span: SourceSpan,
@@ -397,6 +405,25 @@ pub enum AstExpr {
         text: SpannedText,
         value: i128,
     },
+    Boolean {
+        text: SpannedText,
+        value: bool,
+    },
+    FiniteVariant {
+        type_name: SpannedText,
+        variant: SpannedText,
+        span: SourceSpan,
+    },
+    Call {
+        function: SpannedText,
+        arguments: Vec<AstExpr>,
+        span: SourceSpan,
+    },
+    Match {
+        value: Box<AstExpr>,
+        arms: Vec<AstMatchArm>,
+        span: SourceSpan,
+    },
     Binary {
         op: AstBinaryOp,
         left: Box<AstExpr>,
@@ -408,10 +435,22 @@ pub enum AstExpr {
 impl AstExpr {
     pub fn span(&self) -> SourceSpan {
         match self {
-            Self::Name(name) | Self::Integer { text: name, .. } => name.span,
-            Self::Binary { span, .. } => *span,
+            Self::Name(name)
+            | Self::Integer { text: name, .. }
+            | Self::Boolean { text: name, .. } => name.span,
+            Self::FiniteVariant { span, .. }
+            | Self::Call { span, .. }
+            | Self::Match { span, .. }
+            | Self::Binary { span, .. } => *span,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AstMatchArm {
+    pub variant: SpannedText,
+    pub value: AstExpr,
+    pub span: SourceSpan,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -433,7 +472,7 @@ pub enum AstStmt {
         span: SourceSpan,
     },
     Return {
-        value: SpannedText,
+        value: AstExpr,
         span: SourceSpan,
     },
 }
@@ -468,11 +507,20 @@ pub struct AstFunction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AstFiniteType {
+    pub name: SpannedText,
+    pub variants: Vec<SpannedText>,
+    pub span: SourceSpan,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AbstractSyntaxTree {
     pub schema_version: String,
     pub source_identity: String,
     pub language_version: SpannedText,
     pub module: SpannedText,
+    #[serde(default)]
+    pub finite_types: Vec<AstFiniteType>,
     pub functions: Vec<AstFunction>,
     pub span: SourceSpan,
 }
@@ -570,6 +618,9 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
         } else if source[start..].starts_with("->") {
             offset += 2;
             TokenKind::Arrow
+        } else if source[start..].starts_with("=>") {
+            offset += 2;
+            TokenKind::FatArrow
         } else if source[start..].starts_with("==") {
             offset += 2;
             TokenKind::EqEq
@@ -611,6 +662,10 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                 "effect" => TokenKind::EffectKeyword,
                 "capability" => TokenKind::CapabilityKeyword,
                 "authorized_by" => TokenKind::AuthorizedKeyword,
+                "enum" => TokenKind::EnumKeyword,
+                "match" => TokenKind::MatchKeyword,
+                "true" => TokenKind::TrueKeyword,
+                "false" => TokenKind::FalseKeyword,
                 _ => TokenKind::Identifier,
             }
         } else if current.is_ascii_digit() {
@@ -781,6 +836,17 @@ impl<'a> Parser<'a> {
             Vec::new(),
         );
 
+        let mut finite_types = Vec::new();
+        let mut finite_type_nodes = Vec::new();
+        while self.profile == SOURCE_PROFILE_VERSION_0_3
+            && self.current_kind() == Some(TokenKind::EnumKeyword)
+        {
+            let (node, finite_type) = self.finite_type();
+            finite_type_nodes.push(node);
+            if let Some(finite_type) = finite_type {
+                finite_types.push(finite_type);
+            }
+        }
         let mut functions = Vec::new();
         let mut function_nodes = Vec::new();
         while self.current_kind() == Some(TokenKind::FunctionKeyword) {
@@ -807,6 +873,7 @@ impl<'a> Parser<'a> {
 
         let source_span = SourceSpan::at(&self.envelope.text, 0, self.envelope.text.len());
         let mut children = vec![header, module_node];
+        children.extend(finite_type_nodes);
         children.extend(function_nodes);
         let root = CstNode {
             kind: CstKind::Document,
@@ -829,6 +896,7 @@ impl<'a> Parser<'a> {
                     source_identity: self.envelope.identity.clone(),
                     language_version,
                     module,
+                    finite_types,
                     functions,
                     span: source_span,
                 })
@@ -838,6 +906,58 @@ impl<'a> Parser<'a> {
         (cst, ast)
     }
 
+    fn finite_type(&mut self) -> (CstNode, Option<AstFiniteType>) {
+        let start = self.current_token_index();
+        self.expect(TokenKind::EnumKeyword, "MNP070", "expected 'enum'");
+        let name = self.spanned(TokenKind::Identifier, "MNP071", "expected finite type name");
+        self.expect(
+            TokenKind::LeftBrace,
+            "MNP072",
+            "expected '{' after finite type name",
+        );
+        let mut variants = Vec::new();
+        let mut children = Vec::new();
+        while self.current_kind() == Some(TokenKind::Identifier) {
+            let variant_start = self.current_token_index();
+            if let Some(variant) =
+                self.spanned(TokenKind::Identifier, "MNP073", "expected variant name")
+            {
+                variants.push(variant);
+            }
+            let variant_end = self.previous_token_index(variant_start);
+            children.push(self.node(
+                CstKind::FiniteVariant,
+                variant_start,
+                variant_end,
+                Vec::new(),
+            ));
+            if self.current_kind() != Some(TokenKind::Comma) {
+                break;
+            }
+            self.cursor += 1;
+        }
+        self.expect(
+            TokenKind::RightBrace,
+            "MNP074",
+            "expected '}' after finite variants",
+        );
+        let end = self.previous_token_index(start);
+        let node = self.node(CstKind::FiniteTypeDeclaration, start, end, children);
+        if variants.is_empty() {
+            self.error(
+                "MNP075",
+                "finite type requires at least one variant",
+                vec![TokenKind::Identifier],
+            );
+        }
+        let finite_type = name.map(|name| AstFiniteType {
+            name,
+            variants,
+            span: node.span,
+        });
+        (node, finite_type)
+    }
+
     fn function(&mut self) -> (CstNode, Option<AstFunction>) {
         let start = self.current_token_index();
         self.expect(TokenKind::FunctionKeyword, "MNP010", "expected 'fn'");
@@ -845,41 +965,48 @@ impl<'a> Parser<'a> {
         let (input_node, inputs) = self.parameter_list("input");
         self.expect(TokenKind::Arrow, "MNP012", "expected '->' before outputs");
         let (output_node, outputs) = self.parameter_list("output");
-        let (contracts, effects, capabilities) = if self.profile == SOURCE_PROFILE_VERSION_0_2 {
+        let (contracts, effects, capabilities) = if matches!(
+            self.profile.as_str(),
+            SOURCE_PROFILE_VERSION_0_2 | SOURCE_PROFILE_VERSION_0_3
+        ) {
             self.clauses()
         } else {
             (Vec::new(), Vec::new(), Vec::new())
         };
         let block_start = self.current_token_index();
         self.expect(TokenKind::LeftBrace, "MNP013", "expected function body");
-        let (statements, returned_value, block_children) =
-            if self.profile == SOURCE_PROFILE_VERSION_0_2 {
-                self.statements_until_return()
-            } else {
-                let return_start = self.current_token_index();
-                self.expect(
-                    TokenKind::ReturnKeyword,
-                    "MNP014",
-                    "expected explicit return",
-                );
-                let returned_value = self.spanned(
+        let (statements, returned_value, block_children) = if matches!(
+            self.profile.as_str(),
+            SOURCE_PROFILE_VERSION_0_2 | SOURCE_PROFILE_VERSION_0_3
+        ) {
+            self.statements_until_return()
+        } else {
+            let return_start = self.current_token_index();
+            self.expect(
+                TokenKind::ReturnKeyword,
+                "MNP014",
+                "expected explicit return",
+            );
+            let returned_value = self
+                .spanned(
                     TokenKind::Identifier,
                     "MNP015",
                     "expected returned value name",
-                );
-                self.expect(TokenKind::Semicolon, "MNP016", "expected ';' after return");
-                let return_end = self.previous_token_index(return_start);
-                (
-                    Vec::new(),
-                    returned_value,
-                    vec![self.node(
-                        CstKind::ReturnStatement,
-                        return_start,
-                        return_end,
-                        Vec::new(),
-                    )],
                 )
-            };
+                .map(AstExpr::Name);
+            self.expect(TokenKind::Semicolon, "MNP016", "expected ';' after return");
+            let return_end = self.previous_token_index(return_start);
+            (
+                Vec::new(),
+                returned_value,
+                vec![self.node(
+                    CstKind::ReturnStatement,
+                    return_start,
+                    return_end,
+                    Vec::new(),
+                )],
+            )
+        };
         self.expect(
             TokenKind::RightBrace,
             "MNP017",
@@ -978,7 +1105,7 @@ impl<'a> Parser<'a> {
         (contracts, effects, capabilities)
     }
 
-    fn statements_until_return(&mut self) -> (Vec<AstStmt>, Option<SpannedText>, Vec<CstNode>) {
+    fn statements_until_return(&mut self) -> (Vec<AstStmt>, Option<AstExpr>, Vec<CstNode>) {
         let mut statements = Vec::new();
         let mut children = Vec::new();
         let mut returned = None;
@@ -995,11 +1122,16 @@ impl<'a> Parser<'a> {
         if self.current_kind() == Some(TokenKind::ReturnKeyword) {
             let return_start = self.current_token_index();
             self.cursor += 1;
-            returned = self.spanned(
-                TokenKind::Identifier,
-                "MNP015",
-                "expected returned value name",
-            );
+            returned = if self.profile == SOURCE_PROFILE_VERSION_0_3 {
+                self.expression()
+            } else {
+                self.spanned(
+                    TokenKind::Identifier,
+                    "MNP015",
+                    "expected returned value name",
+                )
+                .map(AstExpr::Name)
+            };
             self.expect(TokenKind::Semicolon, "MNP016", "expected ';' after return");
             let return_end = self.previous_token_index(return_start);
             children.push(self.node(
@@ -1112,18 +1244,23 @@ impl<'a> Parser<'a> {
             }
             Some(TokenKind::ReturnKeyword) => {
                 self.cursor += 1;
-                let value = self.spanned(
-                    TokenKind::Identifier,
-                    "MNP015",
-                    "expected returned value name",
-                );
+                let value = if self.profile == SOURCE_PROFILE_VERSION_0_3 {
+                    self.expression()
+                } else {
+                    self.spanned(
+                        TokenKind::Identifier,
+                        "MNP015",
+                        "expected returned value name",
+                    )
+                    .map(AstExpr::Name)
+                };
                 self.expect(TokenKind::Semicolon, "MNP016", "expected ';' after return");
                 let end = self.previous_token_index(start);
                 let node = self.node(CstKind::ReturnStatement, start, end, Vec::new());
                 (
                     node,
                     value.map(|value| AstStmt::Return {
-                        span: value.span,
+                        span: value.span(),
                         value,
                     }),
                 )
@@ -1149,39 +1286,74 @@ impl<'a> Parser<'a> {
     }
 
     fn expression(&mut self) -> Option<AstExpr> {
-        let left = self.primary()?;
-        let op = match self.current_kind() {
-            Some(TokenKind::Plus) => Some(AstBinaryOp::Add),
-            Some(TokenKind::Minus) => Some(AstBinaryOp::Sub),
-            Some(TokenKind::Star) => Some(AstBinaryOp::Mul),
-            Some(TokenKind::EqEq) => Some(AstBinaryOp::Eq),
-            Some(TokenKind::NotEq) => Some(AstBinaryOp::Ne),
-            Some(TokenKind::Lt) => Some(AstBinaryOp::Lt),
-            Some(TokenKind::Le) => Some(AstBinaryOp::Le),
-            Some(TokenKind::Gt) => Some(AstBinaryOp::Gt),
-            Some(TokenKind::Ge) => Some(AstBinaryOp::Ge),
-            _ => None,
-        };
-        if let Some(op) = op {
+        self.binary_expression(0)
+    }
+
+    fn binary_expression(&mut self, minimum_precedence: u8) -> Option<AstExpr> {
+        let mut left = self.primary()?;
+        while let Some((op, precedence)) = binary_operator(self.current_kind()) {
+            if precedence < minimum_precedence {
+                break;
+            }
             self.cursor += 1;
-            let right = self.primary()?;
+            let right = self.binary_expression(precedence + 1)?;
             let span = SourceSpan::covering(&self.envelope.text, left.span(), right.span());
-            Some(AstExpr::Binary {
+            left = AstExpr::Binary {
                 op,
                 left: Box::new(left),
                 right: Box::new(right),
                 span,
-            })
-        } else {
-            Some(left)
+            };
         }
+        Some(left)
     }
 
     fn primary(&mut self) -> Option<AstExpr> {
         match self.current_kind() {
-            Some(TokenKind::Identifier) => self
-                .spanned(TokenKind::Identifier, "MNP062", "expected expression")
-                .map(AstExpr::Name),
+            Some(TokenKind::Identifier) => {
+                let name = self.spanned(TokenKind::Identifier, "MNP062", "expected expression")?;
+                if self.current_kind() == Some(TokenKind::Dot) {
+                    self.cursor += 1;
+                    let variant = self.spanned(
+                        TokenKind::Identifier,
+                        "MNP065",
+                        "expected finite variant after '.'",
+                    )?;
+                    let span = SourceSpan::covering(&self.envelope.text, name.span, variant.span);
+                    Some(AstExpr::FiniteVariant {
+                        type_name: name,
+                        variant,
+                        span,
+                    })
+                } else if self.current_kind() == Some(TokenKind::LeftParen) {
+                    self.cursor += 1;
+                    let mut arguments = Vec::new();
+                    while self.current_kind() != Some(TokenKind::RightParen)
+                        && self.cursor < self.significant.len()
+                    {
+                        arguments.push(self.expression()?);
+                        if self.current_kind() != Some(TokenKind::Comma) {
+                            break;
+                        }
+                        self.cursor += 1;
+                    }
+                    let end = self
+                        .expect(
+                            TokenKind::RightParen,
+                            "MNP066",
+                            "expected ')' after call arguments",
+                        )
+                        .and_then(|index| self.tokens.get(index))
+                        .map_or(name.span, |token| token.span);
+                    Some(AstExpr::Call {
+                        function: name.clone(),
+                        arguments,
+                        span: SourceSpan::covering(&self.envelope.text, name.span, end),
+                    })
+                } else {
+                    Some(AstExpr::Name(name))
+                }
+            }
             Some(TokenKind::IntegerLiteral) => {
                 let text = self.spanned(
                     TokenKind::IntegerLiteral,
@@ -1191,15 +1363,93 @@ impl<'a> Parser<'a> {
                 let value = text.text.parse().unwrap_or(0);
                 Some(AstExpr::Integer { text, value })
             }
+            Some(TokenKind::TrueKeyword | TokenKind::FalseKeyword) => {
+                let kind = self.current_kind().expect("matched keyword");
+                let text = self.spanned(kind, "MNP067", "expected boolean literal")?;
+                Some(AstExpr::Boolean {
+                    value: kind == TokenKind::TrueKeyword,
+                    text,
+                })
+            }
+            Some(TokenKind::LeftParen) => {
+                self.cursor += 1;
+                let value = self.expression();
+                self.expect(
+                    TokenKind::RightParen,
+                    "MNP068",
+                    "expected ')' after nested expression",
+                );
+                value
+            }
+            Some(TokenKind::MatchKeyword) => self.match_expression(),
             _ => {
                 self.error(
                     "MNP064",
-                    "expected name or integer literal",
-                    vec![TokenKind::Identifier, TokenKind::IntegerLiteral],
+                    "expected expression",
+                    vec![
+                        TokenKind::Identifier,
+                        TokenKind::IntegerLiteral,
+                        TokenKind::TrueKeyword,
+                        TokenKind::FalseKeyword,
+                        TokenKind::LeftParen,
+                        TokenKind::MatchKeyword,
+                    ],
                 );
                 None
             }
         }
+    }
+
+    fn match_expression(&mut self) -> Option<AstExpr> {
+        let start = self.current_token_index();
+        self.expect(TokenKind::MatchKeyword, "MNP080", "expected 'match'");
+        let value = self.expression()?;
+        self.expect(
+            TokenKind::LeftBrace,
+            "MNP081",
+            "expected '{' after match value",
+        );
+        let mut arms = Vec::new();
+        while self.current_kind() == Some(TokenKind::Identifier) {
+            let variant =
+                self.spanned(TokenKind::Identifier, "MNP082", "expected match variant")?;
+            self.expect(
+                TokenKind::FatArrow,
+                "MNP083",
+                "expected '=>' after match variant",
+            );
+            let arm_value = self.expression()?;
+            let span = SourceSpan::covering(&self.envelope.text, variant.span, arm_value.span());
+            arms.push(AstMatchArm {
+                variant,
+                value: arm_value,
+                span,
+            });
+            if self.current_kind() != Some(TokenKind::Comma) {
+                break;
+            }
+            self.cursor += 1;
+        }
+        self.expect(
+            TokenKind::RightBrace,
+            "MNP084",
+            "expected '}' after match arms",
+        );
+        let end = self.previous_token_index(start);
+        let span = SourceSpan::covering(
+            &self.envelope.text,
+            self.tokens
+                .get(start)
+                .map_or(value.span(), |token| token.span),
+            self.tokens
+                .get(end)
+                .map_or(value.span(), |token| token.span),
+        );
+        Some(AstExpr::Match {
+            value: Box::new(value),
+            arms,
+            span,
+        })
     }
 
     fn parameter_list(&mut self, role: &str) -> (CstNode, Vec<AstParameter>) {
@@ -1372,12 +1622,30 @@ fn is_identifier_start(value: char) -> bool {
     value == '_' || value.is_alphabetic()
 }
 
+fn binary_operator(kind: Option<TokenKind>) -> Option<(AstBinaryOp, u8)> {
+    Some(match kind? {
+        TokenKind::EqEq => (AstBinaryOp::Eq, 1),
+        TokenKind::NotEq => (AstBinaryOp::Ne, 1),
+        TokenKind::Lt => (AstBinaryOp::Lt, 2),
+        TokenKind::Le => (AstBinaryOp::Le, 2),
+        TokenKind::Gt => (AstBinaryOp::Gt, 2),
+        TokenKind::Ge => (AstBinaryOp::Ge, 2),
+        TokenKind::Plus => (AstBinaryOp::Add, 3),
+        TokenKind::Minus => (AstBinaryOp::Sub, 3),
+        TokenKind::Star => (AstBinaryOp::Mul, 4),
+        _ => return None,
+    })
+}
+
 fn is_identifier_continue(value: char) -> bool {
     value == '_' || value.is_alphanumeric()
 }
 
 pub fn source_profile_supported(version: &str) -> bool {
-    version == SOURCE_PROFILE_VERSION || version == SOURCE_PROFILE_VERSION_0_2
+    matches!(
+        version,
+        SOURCE_PROFILE_VERSION | SOURCE_PROFILE_VERSION_0_2 | SOURCE_PROFILE_VERSION_0_3
+    )
 }
 
 fn infer_source_profile(text: &str) -> &'static str {
@@ -1386,6 +1654,7 @@ fn infer_source_profile(text: &str) -> &'static str {
         !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with("/*")
     });
     match header {
+        Some(line) if line.trim_start().starts_with("mncs 0.3") => SOURCE_PROFILE_VERSION_0_3,
         Some(line) if line.trim_start().starts_with("mncs 0.2") => SOURCE_PROFILE_VERSION_0_2,
         _ => SOURCE_PROFILE_VERSION,
     }
@@ -1434,7 +1703,7 @@ mod tests {
         assert_eq!(ast.module.text, "example.identity");
         assert_eq!(ast.functions[0].name.text, "identity");
         assert_eq!(ast.functions[0].inputs[0].value_type.text, "i64");
-        let span = ast.functions[0].body.returned_value.span;
+        let span = ast.functions[0].body.returned_value.span();
         assert_eq!(&fixture().text[span.start..span.end], "value");
     }
 

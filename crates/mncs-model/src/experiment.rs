@@ -133,6 +133,21 @@ pub struct LanguageExperimentCaseObservation {
     pub case_id: String,
     pub status: ExecutionStatus,
     pub returned: Vec<ExecutionValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected: Option<Vec<ExecutionValue>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expectation_met: Option<bool>,
+    pub failure_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LanguageExperimentPropertyObservation {
+    pub property_id: String,
+    pub law: String,
+    pub passed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counterexample: Option<Vec<ExecutionValue>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
 }
 
@@ -150,6 +165,8 @@ pub struct LanguageExperimentResult {
     pub artifact: BackendArtifact,
     pub translation_validations: Vec<TranslationValidationResult>,
     pub cases: Vec<LanguageExperimentCaseObservation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub properties: Vec<LanguageExperimentPropertyObservation>,
     pub status: LanguageExperimentStatus,
     pub unresolved_reasons: Vec<String>,
     pub interpretation: String,
@@ -165,10 +182,12 @@ impl LanguageExperimentResult {
         artifact: BackendArtifact,
         mut translation_validations: Vec<TranslationValidationResult>,
         mut cases: Vec<LanguageExperimentCaseObservation>,
+        mut properties: Vec<LanguageExperimentPropertyObservation>,
         mut unresolved_reasons: Vec<String>,
     ) -> Self {
         translation_validations.sort_by(|left, right| left.identity.cmp(&right.identity));
         cases.sort_by(|left, right| left.case_id.cmp(&right.case_id));
+        properties.sort_by(|left, right| left.property_id.cmp(&right.property_id));
         unresolved_reasons.sort();
         unresolved_reasons.dedup();
         let has_failure = translation_validations
@@ -179,7 +198,11 @@ impl LanguageExperimentResult {
                     case_.status,
                     ExecutionStatus::InvalidRequest | ExecutionStatus::Unsupported
                 )
-            });
+            })
+            || cases
+                .iter()
+                .any(|case_| case_.expectation_met == Some(false))
+            || properties.iter().any(|property| !property.passed);
         let has_unknown = !unresolved_reasons.is_empty()
             || translation_validations
                 .iter()
@@ -205,6 +228,7 @@ impl LanguageExperimentResult {
             artifact,
             translation_validations,
             cases,
+            properties,
             status,
             unresolved_reasons,
             interpretation: LANGUAGE_EXPERIMENT_INTERPRETATION.to_owned(),
@@ -285,7 +309,18 @@ impl LanguageExperimentComparison {
             .iter()
             .map(|case_| (&case_.case_id, (&case_.status, &case_.returned)))
             .collect::<BTreeMap<_, _>>();
-        let bounded_behavior_agrees = left_cases == right_cases;
+        let left_properties = left
+            .properties
+            .iter()
+            .map(|property| (&property.property_id, property.passed))
+            .collect::<BTreeMap<_, _>>();
+        let right_properties = right
+            .properties
+            .iter()
+            .map(|property| (&property.property_id, property.passed))
+            .collect::<BTreeMap<_, _>>();
+        let bounded_behavior_agrees =
+            left_cases == right_cases && left_properties == right_properties;
         let earliest_divergence = [
             ("source", same_source),
             ("semantic", same_semantics),

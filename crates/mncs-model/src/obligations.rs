@@ -183,7 +183,54 @@ impl Program {
                                     ),
                                 });
                             }
-                            BodyOperationKind::IntegerCompare { .. } => {}
+                            BodyOperationKind::Call {
+                                function: callee,
+                                required_capabilities,
+                                effects,
+                                ..
+                            } => {
+                                let authorized = required_capabilities
+                                    .iter()
+                                    .all(|capability| function.capabilities.contains(capability))
+                                    && effects.iter().all(|effect| {
+                                        function.effects.iter().any(|caller_effect| {
+                                            caller_effect.kind == effect.kind
+                                                && caller_effect.capability == effect.capability
+                                        })
+                                    });
+                                let mut dependencies = vec![
+                                    function_identity.clone(),
+                                    callee.clone(),
+                                    subject.clone(),
+                                ];
+                                dependencies.extend(required_capabilities.iter().map(
+                                    |capability| {
+                                        capability_id(&self.module, &function.name, capability)
+                                    },
+                                ));
+                                obligations.push(ObligationRecord {
+                                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                    identity: body_obligation_id(
+                                        "call-authority-closure",
+                                        &subject,
+                                    ),
+                                    subject,
+                                    requirement: requirement_id("call-authority-closure", callee),
+                                    status: if authorized {
+                                        ObligationStatus::Pass
+                                    } else {
+                                        ObligationStatus::Fail
+                                    },
+                                    method: "language-call-authority-closure".to_owned(),
+                                    assumptions: Vec::new(),
+                                    dependencies,
+                                    freshness: EvidenceFreshness::Current,
+                                    fallback: None,
+                                });
+                            }
+                            BodyOperationKind::IntegerCompare { .. }
+                            | BodyOperationKind::FiniteConstruct { .. }
+                            | BodyOperationKind::FiniteIsVariant { .. } => {}
                             BodyOperationKind::Constant { .. } => {}
                         }
                         if let Some(machine_intent) = &operation.machine_intent {

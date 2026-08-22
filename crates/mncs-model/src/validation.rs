@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Program, Value, SUPPORTED_SCHEMA_VERSION};
+use crate::{finite_type_id, finite_variant_id, Program, Value, SUPPORTED_SCHEMA_VERSION};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ValidationReport {
@@ -59,6 +59,64 @@ impl Program {
             "MNCS003",
             &mut errors,
         );
+
+        let mut finite_type_names = BTreeSet::new();
+        for (type_index, finite_type) in self.finite_types.iter().enumerate() {
+            let type_path = format!("finite_types[{type_index}]");
+            if finite_type.name.trim().is_empty()
+                || !finite_type_names.insert(finite_type.name.as_str())
+            {
+                errors.push(diagnostic(
+                    "MNCS014",
+                    format!("{type_path}.name"),
+                    "finite type names must be non-empty and unique",
+                ));
+            }
+            if finite_type.identity != finite_type_id(&self.module, &finite_type.name) {
+                errors.push(diagnostic(
+                    "MNCS015",
+                    format!("{type_path}.identity"),
+                    "finite type identity does not match its nominal module/name identity",
+                ));
+            }
+            if finite_type.variants.is_empty() {
+                errors.push(diagnostic(
+                    "MNCS016",
+                    format!("{type_path}.variants"),
+                    "finite types require at least one variant",
+                ));
+            }
+            let mut variant_names = BTreeSet::new();
+            let mut discriminants = BTreeSet::new();
+            for (variant_index, variant) in finite_type.variants.iter().enumerate() {
+                let variant_path = format!("{type_path}.variants[{variant_index}]");
+                if variant.name.trim().is_empty() || !variant_names.insert(variant.name.as_str()) {
+                    errors.push(diagnostic(
+                        "MNCS017",
+                        format!("{variant_path}.name"),
+                        "finite variant names must be non-empty and unique within their type",
+                    ));
+                }
+                if !discriminants.insert(variant.discriminant)
+                    || variant.discriminant != variant_index as u32
+                {
+                    errors.push(diagnostic(
+                        "MNCS018",
+                        format!("{variant_path}.discriminant"),
+                        "finite variant discriminants must be unique and canonical declaration ordinals",
+                    ));
+                }
+                if variant.identity
+                    != finite_variant_id(&self.module, &finite_type.name, &variant.name)
+                {
+                    errors.push(diagnostic(
+                        "MNCS019",
+                        format!("{variant_path}.identity"),
+                        "finite variant identity does not match its nominal identity",
+                    ));
+                }
+            }
+        }
 
         let mut function_names = BTreeSet::new();
         for (function_index, function) in self.functions.iter().enumerate() {
@@ -278,6 +336,7 @@ pub(crate) mod tests {
         Program {
             schema_version: SUPPORTED_SCHEMA_VERSION.to_owned(),
             module: "Banking.Transfer".to_owned(),
+            finite_types: vec![],
             assumptions: vec![Assumption {
                 id: "storage_durability".to_owned(),
                 statement: "committed writes survive process termination".to_owned(),

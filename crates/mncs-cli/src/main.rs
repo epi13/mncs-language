@@ -16,11 +16,11 @@ use mncs_model::{
     ArtifactRepresentation, CandidateEvaluation, CausalSlice, ComparisonStatus, CompilationResult,
     CompilationStatus, CompilationStudyRequest, Confidence, DeterministicVerifier,
     DiagnosticCategory, DiagnosticObligation, EvidenceFreshness, EvidenceManifest, EvidenceState,
-    ExecutionComparison, ExecutionCorpus, ExecutionRequest, ExecutionStatus, FunctionBody,
-    LanguageExperimentCaseObservation, LanguageExperimentComparison, LanguageExperimentDefinition,
-    LanguageExperimentResult, LoweringExecutionComparison, LoweringExecutionStatus,
-    ObligationStatus, Program, RealizationRequest, SemanticDiff, SemanticId, TargetContractRef,
-    ValidatorRequirement,
+    ExecutionComparison, ExecutionCorpus, ExecutionProperty, ExecutionRequest, ExecutionStatus,
+    ExecutionValue, FunctionBody, LanguageExperimentCaseObservation, LanguageExperimentComparison,
+    LanguageExperimentDefinition, LanguageExperimentPropertyObservation, LanguageExperimentResult,
+    LoweringExecutionComparison, LoweringExecutionStatus, ObligationStatus, Program,
+    RealizationRequest, SemanticDiff, SemanticId, TargetContractRef, ValidatorRequirement,
 };
 use mncs_syntax::{
     analyze, SourceArtifactKind, SourceEnvelope, SourceMetrics, SourceOrigin, SourceOriginKind,
@@ -820,10 +820,16 @@ where
                 .iter()
                 .map(|case_| {
                     let observation = execute_backend(&artifact, &case_.request);
+                    let expectation_met = case_
+                        .expected
+                        .as_ref()
+                        .map(|expected| expected == &observation.returned);
                     LanguageExperimentCaseObservation {
                         case_id: case_.id.clone(),
                         status: observation.status,
                         returned: observation.returned,
+                        expected: case_.expected.clone(),
+                        expectation_met,
                         failure_reason: observation.failure.map(|failure| failure.reason),
                     }
                 })
@@ -1091,10 +1097,16 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         .iter()
         .map(|case_| {
             let observation = execute_backend(&artifact, &case_.request);
+            let expectation_met = case_
+                .expected
+                .as_ref()
+                .map(|expected| expected == &observation.returned);
             LanguageExperimentCaseObservation {
                 case_id: case_.id.clone(),
                 status: observation.status,
                 returned: observation.returned,
+                expected: case_.expected.clone(),
+                expectation_met,
                 failure_reason: observation.failure.map(|failure| failure.reason),
             }
         })
@@ -1104,6 +1116,7 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         unresolved.push("compilation retained unresolved obligations".to_owned());
     }
     let capabilities = backend_capabilities(&options.backend).expect("validated backend");
+    let properties = evaluate_execution_properties(&artifact, &prepared.definition.corpus);
     let result = LanguageExperimentResult::new(
         prepared.definition,
         study,
@@ -1112,6 +1125,7 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         artifact,
         vec![validation],
         cases,
+        properties,
         unresolved,
     );
     if let Some(output_dir) = &options.output_dir {
@@ -1127,6 +1141,150 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+fn evaluate_execution_properties(
+    artifact: &mncs_model::BackendArtifact,
+    corpus: &ExecutionCorpus,
+) -> Vec<LanguageExperimentPropertyObservation> {
+    let Some(template) = corpus.cases.first().map(|case_| case_.request.clone()) else {
+        return Vec::new();
+    };
+    corpus
+        .properties
+        .iter()
+        .map(|property| evaluate_execution_property(artifact, &template, property))
+        .collect()
+}
+
+fn evaluate_execution_property(
+    artifact: &mncs_model::BackendArtifact,
+    template: &ExecutionRequest,
+    property: &ExecutionProperty,
+) -> LanguageExperimentPropertyObservation {
+    let run = |arguments: Vec<ExecutionValue>| -> Result<Vec<ExecutionValue>, String> {
+        let mut request = template.clone();
+        request.arguments = arguments;
+        let result = execute_backend(artifact, &request);
+        if result.status == ExecutionStatus::Returned {
+            Ok(result.returned)
+        } else {
+            Err(result
+                .failure
+                .map(|failure| failure.reason)
+                .unwrap_or_else(|| format!("execution ended with {:?}", result.status)))
+        }
+    };
+    let binary =
+        |left: &ExecutionValue, right: &ExecutionValue| -> Result<ExecutionValue, String> {
+            let returned = run(vec![left.clone(), right.clone()])?;
+            if returned.len() == 1 {
+                Ok(returned[0].clone())
+            } else {
+                Err("property target must return exactly one value".to_owned())
+            }
+        };
+    let mut counterexample = None;
+    let mut failure_reason = None;
+    let mut check = |condition: bool, values: Vec<ExecutionValue>, reason: &str| {
+        if !condition && counterexample.is_none() {
+            counterexample = Some(values);
+            failure_reason = Some(reason.to_owned());
+        }
+    };
+    match property.law.as_str() {
+        "commutative" => {
+            for left in &property.values {
+                for right in &property.values {
+                    match (binary(left, right), binary(right, left)) {
+                        (Ok(forward), Ok(reverse)) => check(
+                            forward == reverse,
+                            vec![left.clone(), right.clone()],
+                            "f(a,b) != f(b,a)",
+                        ),
+                        (Err(reason), _) | (_, Err(reason)) => {
+                            check(false, vec![left.clone(), right.clone()], &reason)
+                        }
+                    }
+                }
+            }
+        }
+        "associative" => {
+            for left in &property.values {
+                for middle in &property.values {
+                    for right in &property.values {
+                        let outcome = binary(left, middle)
+                            .and_then(|first| binary(&first, right))
+                            .and_then(|lhs| {
+                                binary(middle, right)
+                                    .and_then(|second| binary(left, &second))
+                                    .map(|rhs| (lhs, rhs))
+                            });
+                        match outcome {
+                            Ok((lhs, rhs)) => check(
+                                lhs == rhs,
+                                vec![left.clone(), middle.clone(), right.clone()],
+                                "f(f(a,b),c) != f(a,f(b,c))",
+                            ),
+                            Err(reason) => check(
+                                false,
+                                vec![left.clone(), middle.clone(), right.clone()],
+                                &reason,
+                            ),
+                        }
+                    }
+                }
+            }
+        }
+        "idempotent" => {
+            for value in &property.values {
+                match binary(value, value) {
+                    Ok(returned) => check(returned == *value, vec![value.clone()], "f(a,a) != a"),
+                    Err(reason) => check(false, vec![value.clone()], &reason),
+                }
+            }
+        }
+        "neutral" | "absorbing" | "preserved" => {
+            let Some(distinguished) = property.distinguished.as_ref() else {
+                check(false, Vec::new(), "this law requires a distinguished value");
+                return LanguageExperimentPropertyObservation {
+                    property_id: property.id.clone(),
+                    law: property.law.clone(),
+                    passed: false,
+                    counterexample,
+                    failure_reason,
+                };
+            };
+            for value in &property.values {
+                if property.exclusions.contains(value) {
+                    continue;
+                }
+                let expected = if property.law == "neutral" {
+                    value
+                } else {
+                    distinguished
+                };
+                match (binary(distinguished, value), binary(value, distinguished)) {
+                    (Ok(left), Ok(right)) => check(
+                        left == *expected && right == *expected,
+                        vec![value.clone()],
+                        "distinguished-value law failed on the left or right",
+                    ),
+                    (Err(reason), _) | (_, Err(reason)) => {
+                        check(false, vec![value.clone()], &reason)
+                    }
+                }
+            }
+        }
+        _ => check(false, Vec::new(), "unknown bounded execution property law"),
+    }
+    LanguageExperimentPropertyObservation {
+        property_id: property.id.clone(),
+        law: property.law.clone(),
+        passed: counterexample.is_none(),
+        counterexample,
+        failure_reason,
     }
 }
 
@@ -1169,6 +1327,7 @@ struct ExperimentInspection {
     backend_artifact_kind: String,
     status: mncs_model::LanguageExperimentStatus,
     case_count: usize,
+    property_count: usize,
     validation_judgements: Vec<mncs_model::TranslationJudgement>,
     interpretation: String,
 }
@@ -1190,6 +1349,7 @@ impl From<&LanguageExperimentResult> for ExperimentInspection {
             backend_artifact_kind: result.artifact.artifact_kind.clone(),
             status: result.status,
             case_count: result.cases.len(),
+            property_count: result.properties.len(),
             validation_judgements: result
                 .translation_validations
                 .iter()

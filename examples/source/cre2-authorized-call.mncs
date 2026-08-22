@@ -1,0 +1,20 @@
+mncs 0.3;
+
+// CRE-2 positive gate: the caller explicitly carries the callee's authority.
+module examples.cre2;
+
+enum Decision { ACCEPT, REJECT }
+
+fn record(decision: Decision) -> (result: Decision)
+    capability audit_log
+    effect append authorized_by audit_log
+{
+    return decision;
+}
+
+fn authorized(decision: Decision) -> (result: Decision)
+    capability audit_log
+    effect append authorized_by audit_log
+{
+    return record(decision);
+}

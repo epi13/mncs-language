@@ -1,0 +1,29 @@
+{
+  "schema_version": "mncs-language.cre-blocker.v0.1",
+  "concept_experiment": "CRE-3-retry-authority-under-uncertain-failure",
+  "source_profile": "0.3",
+  "status": "BLOCKED_BY_MISSING_LANGUAGE_CONSTRUCT",
+  "required_semantics": {
+    "construct": "explicitly_bounded_iteration",
+    "bound_must_be_semantic": true,
+    "authority_must_not_expand_across_attempts": true,
+    "uncertain_failure_must_remain_distinct": true,
+    "execution_budget_must_remain_enforced": true
+  },
+  "current_profile_can_express": [
+    "finite attempt outcomes",
+    "exhaustive outcome branching",
+    "authority-closed intra-module calls"
+  ],
+  "current_profile_cannot_express": [
+    "a source-level retry sequence with an explicit statically visible attempt bound",
+    "per-attempt state evolution without hand-unrolling a fixed number of calls"
+  ],
+  "rejected_shortcuts": [
+    "unrestricted while loop",
+    "backend-only loop semantics",
+    "recursive retry disguised as iteration",
+    "claiming hand-unrolled calls reconstruct bounded retry semantics"
+  ],
+  "next_pressure_test": "Design one bounded iteration form whose bound and authority/resource obligations survive semantic IR, SSA, both adapters, and bounded execution."
+}

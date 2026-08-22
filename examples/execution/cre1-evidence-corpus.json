@@ -1,0 +1,59 @@
+{
+  "schema_version": "0.1",
+  "name": "cre1-evidence-exhaustive-finite-domain",
+  "cases": [
+    {
+      "id": "pass-pass",
+      "request": {"schema_version":"0.1","target":{"module":"examples.cre1","function":"candidate"},"arguments":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::PASS","discriminant":0}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::PASS","discriminant":0}}],"step_budget":256},
+      "expected": [{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::PASS","discriminant":0}}]
+    },
+    {
+      "id": "pass-fail",
+      "request": {"schema_version":"0.1","target":{"module":"examples.cre1","function":"candidate"},"arguments":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::PASS","discriminant":0}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}}],"step_budget":256},
+      "expected": [{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}}]
+    },
+    {
+      "id": "pass-unknown",
+      "request": {"schema_version":"0.1","target":{"module":"examples.cre1","function":"candidate"},"arguments":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::PASS","discriminant":0}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}}],"step_budget":256},
+      "expected": [{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}}]
+    },
+    {
+      "id": "fail-pass",
+      "request": {"schema_version":"0.1","target":{"module":"examples.cre1","function":"candidate"},"arguments":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::PASS","discriminant":0}}],"step_budget":256},
+      "expected": [{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}}]
+    },
+    {
+      "id": "fail-fail",
+      "request": {"schema_version":"0.1","target":{"module":"examples.cre1","function":"candidate"},"arguments":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}}],"step_budget":256},
+      "expected": [{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}}]
+    },
+    {
+      "id": "fail-unknown",
+      "request": {"schema_version":"0.1","target":{"module":"examples.cre1","function":"candidate"},"arguments":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}}],"step_budget":256},
+      "expected": [{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}}]
+    },
+    {
+      "id": "unknown-pass",
+      "request": {"schema_version":"0.1","target":{"module":"examples.cre1","function":"candidate"},"arguments":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::PASS","discriminant":0}}],"step_budget":256},
+      "expected": [{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}}]
+    },
+    {
+      "id": "unknown-fail",
+      "request": {"schema_version":"0.1","target":{"module":"examples.cre1","function":"candidate"},"arguments":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}}],"step_budget":256},
+      "expected": [{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}}]
+    },
+    {
+      "id": "unknown-unknown",
+      "request": {"schema_version":"0.1","target":{"module":"examples.cre1","function":"candidate"},"arguments":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}}],"step_budget":256},
+      "expected": [{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}}]
+    }
+  ],
+  "properties": [
+    {"id":"commutativity","law":"commutative","values":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::PASS","discriminant":0}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}}]},
+    {"id":"associativity","law":"associative","values":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::PASS","discriminant":0}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}}]},
+    {"id":"idempotence","law":"idempotent","values":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::PASS","discriminant":0}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}}]},
+    {"id":"pass-neutral","law":"neutral","values":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::PASS","discriminant":0}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}}],"distinguished":{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::PASS","discriminant":0}}},
+    {"id":"fail-absorbing","law":"absorbing","values":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::PASS","discriminant":0}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}}],"distinguished":{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}}},
+    {"id":"unknown-preservation","law":"preserved","values":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::PASS","discriminant":0}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}},{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}}],"distinguished":{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":2}},"exclusions":[{"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::FAIL","discriminant":1}}]}
+  ]
+}

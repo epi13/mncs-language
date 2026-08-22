@@ -1,0 +1,8 @@
+mncs 0.3;
+
+// Negative fixture: Profile 0.3 has an explicit acyclic call policy.
+module examples.recursive;
+
+fn recurse(value: i32) -> (result: i32) {
+    return recurse(value);
+}

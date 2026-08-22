@@ -19,6 +19,7 @@ pub const HIGH_LEVEL_IR_SCHEMA_VERSION: &str = "0.3";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IrType {
     Named(String),
+    Finite { identity: SemanticId, name: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +86,20 @@ pub enum IrOperationKind {
     IntegerCompare {
         predicate: String,
         operand_type: crate::IntegerType,
+    },
+    FiniteConstruct {
+        type_identity: SemanticId,
+        variant_identity: SemanticId,
+        discriminant: u32,
+    },
+    FiniteIsVariant {
+        type_identity: SemanticId,
+        variant_identity: SemanticId,
+        discriminant: u32,
+    },
+    Call {
+        function: SemanticId,
+        required_capabilities: Vec<SemanticId>,
     },
     ContractCheck {
         kind: ContractKind,
@@ -269,7 +284,7 @@ impl Program {
                 .map(|(index, value)| IrValue {
                     identity: ir_value_identity(&semantic_function, "input", index, &value.name),
                     semantic_identity: None,
-                    ty: IrType::Named(value.value_type.clone()),
+                    ty: ir_type_from_semantic(self, &value.value_type),
                     producer: None,
                 })
                 .collect::<Vec<_>>();
@@ -280,7 +295,7 @@ impl Program {
                 .map(|(index, value)| IrValue {
                     identity: ir_value_identity(&semantic_function, "output", index, &value.name),
                     semantic_identity: None,
-                    ty: IrType::Named(value.value_type.clone()),
+                    ty: ir_type_from_semantic(self, &value.value_type),
                     producer: None,
                 })
                 .collect::<Vec<_>>();
@@ -583,7 +598,7 @@ fn lower_executable_body(
         .map(|(index, value)| IrValue {
             identity: ir_value_identity(&semantic_function, "output", index, &value.name),
             semantic_identity: None,
-            ty: IrType::Named(value.value_type.clone()),
+            ty: ir_type_from_semantic(program, &value.value_type),
             producer: None,
         })
         .collect::<Vec<_>>();
@@ -730,6 +745,76 @@ fn lower_executable_body(
                         Some(machine_intent_links(program, function, block, operation)),
                         None,
                     ),
+                    BodyOperationKind::FiniteConstruct {
+                        type_identity,
+                        variant_identity,
+                        discriminant,
+                    } => (
+                        IrOperationKind::FiniteConstruct {
+                            type_identity: type_identity.clone(),
+                            variant_identity: variant_identity.clone(),
+                            discriminant: *discriminant,
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::FiniteIsVariant {
+                        type_identity,
+                        variant_identity,
+                        discriminant,
+                    } => (
+                        IrOperationKind::FiniteIsVariant {
+                            type_identity: type_identity.clone(),
+                            variant_identity: variant_identity.clone(),
+                            discriminant: *discriminant,
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::Call {
+                        function: callee_identity,
+                        function_name,
+                        required_capabilities,
+                        effects,
+                    } => {
+                        let callee = program
+                            .functions
+                            .iter()
+                            .find(|candidate| candidate.name == *function_name)
+                            .expect("validated call target");
+                        (
+                            IrOperationKind::Call {
+                                function: callee_identity.clone(),
+                                required_capabilities: required_capabilities
+                                    .iter()
+                                    .map(|capability| {
+                                        capability_id(&program.module, &function.name, capability)
+                                    })
+                                    .collect(),
+                            },
+                            effects
+                                .iter()
+                                .map(|effect| declared_effect_identity(program, callee, effect))
+                                .collect(),
+                            required_capabilities
+                                .iter()
+                                .map(|capability| {
+                                    let identity =
+                                        capability_id(&program.module, &function.name, capability);
+                                    CapabilityUse {
+                                        capability: identity.clone(),
+                                        semantic_declaration: Some(identity),
+                                    }
+                                })
+                                .collect(),
+                            None,
+                            None,
+                        )
+                    }
                     BodyOperationKind::Effect { effect, .. } => {
                         let effect_identity = declared_effect_identity(program, function, effect);
                         let capability =
@@ -1014,7 +1099,27 @@ fn trace_entry(
 }
 
 fn ir_type(ty: &BodyType) -> IrType {
-    IrType::Named(ty.semantic_name())
+    match ty {
+        BodyType::Finite { identity, name } => IrType::Finite {
+            identity: identity.clone(),
+            name: name.clone(),
+        },
+        _ => IrType::Named(ty.semantic_name()),
+    }
+}
+
+fn ir_type_from_semantic(program: &Program, name: &str) -> IrType {
+    program
+        .finite_types
+        .iter()
+        .find(|finite_type| finite_type.name == name)
+        .map_or_else(
+            || IrType::Named(name.to_owned()),
+            |finite_type| IrType::Finite {
+                identity: finite_type.identity.clone(),
+                name: finite_type.name.clone(),
+            },
+        )
 }
 
 fn declared_effect_identity(

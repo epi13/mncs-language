@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mncs_model::{
-    ArithmeticIntent, ArtifactRepresentation, BodyBlock, BodyOperation, BodyOperationKind,
-    BodyParameter, BodyTerminator, BodyType, BodyValue, CompilationStatus, CompilationStudyRequest,
-    CompilationStudyResult, CompilerArtifactRef, CompilerNodeProfile,
-    CompilerPassExecutionObservation, ContractClause, ContractKind, Effect, FailureMode, Function,
-    FunctionBody, IntegerType, Program, SemanticGraph, SemanticIdentities, TransformationEdge,
+    finite_type_id, finite_variant_id, function_id, ArithmeticIntent, ArtifactRepresentation,
+    BodyBlock, BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator, BodyType,
+    BodyValue, CompilationStatus, CompilationStudyRequest, CompilationStudyResult,
+    CompilerArtifactRef, CompilerNodeProfile, CompilerPassExecutionObservation, ContractClause,
+    ContractKind, Effect, FailureMode, FiniteType, FiniteVariant, Function, FunctionBody,
+    IntegerType, Program, SemanticGraph, SemanticId, SemanticIdentities, TransformationEdge,
     TransformationStatus, ValidationReport, Value, EXECUTABLE_BODY_SCHEMA_VERSION,
     SUPPORTED_SCHEMA_VERSION,
 };
@@ -309,6 +310,48 @@ impl ReferenceCompiler {
 
 pub fn elaborate_program(ast: &AbstractSyntaxTree) -> Result<Program, Vec<SourceDiagnostic>> {
     let mut diagnostics = Vec::new();
+    let mut finite_types = Vec::new();
+    let mut finite_type_names = BTreeSet::new();
+    for declaration in &ast.finite_types {
+        if !finite_type_names.insert(declaration.name.text.clone()) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE120",
+                "finite type identity is duplicated in this module namespace",
+                declaration.name.span,
+            ));
+            continue;
+        }
+        let mut variant_names = BTreeSet::new();
+        let mut variants = Vec::new();
+        for (discriminant, variant) in declaration.variants.iter().enumerate() {
+            if !variant_names.insert(variant.text.clone()) {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE121",
+                    "finite variant is duplicated and would create an unreachable match arm",
+                    variant.span,
+                ));
+                continue;
+            }
+            variants.push(FiniteVariant {
+                identity: finite_variant_id(
+                    &ast.module.text,
+                    &declaration.name.text,
+                    &variant.text,
+                ),
+                name: variant.text.clone(),
+                discriminant: discriminant as u32,
+            });
+        }
+        finite_types.push(FiniteType {
+            identity: finite_type_id(&ast.module.text, &declaration.name.text),
+            name: declaration.name.text.clone(),
+            variants,
+        });
+    }
+    let finite_types_by_name = finite_types
+        .iter()
+        .map(|finite_type| (finite_type.name.clone(), finite_type.clone()))
+        .collect::<BTreeMap<_, _>>();
     let mut functions = Vec::new();
     let mut names = std::collections::BTreeSet::new();
     for function in &ast.functions {
@@ -320,7 +363,26 @@ pub fn elaborate_program(ast: &AbstractSyntaxTree) -> Result<Program, Vec<Source
             ));
             continue;
         }
-        match elaborate_function(ast, function) {
+    }
+    let signatures = ast
+        .functions
+        .iter()
+        .map(|function| {
+            (
+                function.name.text.clone(),
+                FunctionSignature::from_ast(ast, function, &finite_types_by_name, &mut diagnostics),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    reject_recursive_calls(ast, &signatures, &mut diagnostics);
+    for function in &ast.functions {
+        if functions
+            .iter()
+            .any(|item: &Function| item.name == function.name.text)
+        {
+            continue;
+        }
+        match elaborate_function(ast, function, &finite_types_by_name, &signatures) {
             Ok(elaborated) => functions.push(elaborated),
             Err(mut errors) => diagnostics.append(&mut errors),
         }
@@ -329,6 +391,7 @@ pub fn elaborate_program(ast: &AbstractSyntaxTree) -> Result<Program, Vec<Source
         Ok(Program {
             schema_version: SUPPORTED_SCHEMA_VERSION.to_owned(),
             module: ast.module.text.clone(),
+            finite_types,
             assumptions: Vec::new(),
             functions,
         })
@@ -340,6 +403,8 @@ pub fn elaborate_program(ast: &AbstractSyntaxTree) -> Result<Program, Vec<Source
 fn elaborate_function(
     ast: &AbstractSyntaxTree,
     function: &AstFunction,
+    finite_types: &BTreeMap<String, FiniteType>,
+    signatures: &BTreeMap<String, FunctionSignature>,
 ) -> Result<Function, Vec<SourceDiagnostic>> {
     let mut diagnostics = Vec::new();
     if function.outputs.len() != 1 {
@@ -375,6 +440,7 @@ fn elaborate_function(
             ty: profile_type(
                 &input.value_type.text,
                 input.value_type.span,
+                finite_types,
                 &mut diagnostics,
             ),
         })
@@ -382,6 +448,7 @@ fn elaborate_function(
     let output_type = profile_type(
         &function.outputs[0].value_type.text,
         function.outputs[0].value_type.span,
+        finite_types,
         &mut diagnostics,
     );
     let mut capabilities = function
@@ -456,18 +523,19 @@ fn elaborate_function(
             &mut diagnostics,
         );
     }
-    let blocks = if function.body.statements.is_empty() {
-        let returned = env.resolve(
-            &function.body.returned_value.text,
-            function.body.returned_value.span,
-            &mut diagnostics,
-        );
+    let blocks = if function.body.statements.is_empty()
+        && matches!(function.body.returned_value, AstExpr::Name(_))
+    {
+        let AstExpr::Name(returned_name) = &function.body.returned_value else {
+            unreachable!("guarded above")
+        };
+        let returned = env.resolve(&returned_name.text, returned_name.span, &mut diagnostics);
         if let Some(returned) = returned {
             if returned.ty != output_type {
                 diagnostics.push(elaboration_diagnostic(
                     "MNE103",
                     "returned value type does not match the declared output type",
-                    function.body.returned_value.span,
+                    returned_name.span,
                 ));
             }
         }
@@ -476,20 +544,26 @@ fn elaborate_function(
             parameters: Vec::new(),
             operations: Vec::new(),
             terminator: BodyTerminator::Return {
-                values: vec![function.body.returned_value.text.clone()],
+                values: vec![returned_name.text.clone()],
             },
         }]
     } else {
-        let mut builder = BodyBuilder::new(output_type.clone());
+        let mut builder = BodyBuilder::new(
+            output_type.clone(),
+            function.name.text.clone(),
+            finite_types,
+            signatures,
+        );
         builder.elaborate_statements(&function.body.statements, &mut env, &mut diagnostics);
-        if let Some(returned) = env.resolve(
-            &function.body.returned_value.text,
-            function.body.returned_value.span,
+        if let Some(returned) = builder.elaborate_expr(
+            &function.body.returned_value,
+            Some(&output_type),
+            &mut env,
             &mut diagnostics,
         ) {
             builder.finish_return(
                 returned,
-                function.body.returned_value.span,
+                function.body.returned_value.span(),
                 &mut diagnostics,
             );
         }
@@ -522,6 +596,166 @@ fn elaborate_function(
             blocks,
         }),
     })
+}
+
+#[derive(Clone)]
+struct FunctionSignature {
+    identity: SemanticId,
+    inputs: Vec<BodyType>,
+    output: BodyType,
+    capabilities: Vec<String>,
+    effects: Vec<Effect>,
+}
+
+impl FunctionSignature {
+    fn from_ast(
+        ast: &AbstractSyntaxTree,
+        function: &AstFunction,
+        finite_types: &BTreeMap<String, FiniteType>,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Self {
+        let inputs = function
+            .inputs
+            .iter()
+            .map(|input| {
+                profile_type(
+                    &input.value_type.text,
+                    input.value_type.span,
+                    finite_types,
+                    diagnostics,
+                )
+            })
+            .collect();
+        let output = function.outputs.first().map_or_else(
+            || BodyType::Named("invalid".to_owned()),
+            |output| {
+                profile_type(
+                    &output.value_type.text,
+                    output.value_type.span,
+                    finite_types,
+                    diagnostics,
+                )
+            },
+        );
+        let mut capabilities = function
+            .capabilities
+            .iter()
+            .map(|capability| capability.text.clone())
+            .collect::<Vec<_>>();
+        capabilities.sort();
+        capabilities.dedup();
+        let effects = function
+            .effects
+            .iter()
+            .map(|effect| Effect {
+                kind: effect.kind.text.clone(),
+                target: function.name.text.clone(),
+                capability: effect.capability.text.clone(),
+            })
+            .collect();
+        Self {
+            identity: function_id(&ast.module.text, &function.name.text),
+            inputs,
+            output,
+            capabilities,
+            effects,
+        }
+    }
+}
+
+fn reject_recursive_calls(
+    ast: &AbstractSyntaxTree,
+    signatures: &BTreeMap<String, FunctionSignature>,
+    diagnostics: &mut Vec<SourceDiagnostic>,
+) {
+    let graph = ast
+        .functions
+        .iter()
+        .map(|function| {
+            let mut calls = BTreeSet::new();
+            calls_in_expr(&function.body.returned_value, &mut calls);
+            for statement in &function.body.statements {
+                calls_in_statement(statement, &mut calls);
+            }
+            calls.retain(|callee| signatures.contains_key(callee));
+            (function.name.text.clone(), calls)
+        })
+        .collect::<BTreeMap<_, _>>();
+    for function in &ast.functions {
+        let start = function.name.text.as_str();
+        let mut visiting = vec![(start, vec![start])];
+        let mut recursive = false;
+        while let Some((current, path)) = visiting.pop() {
+            for callee in graph.get(current).into_iter().flatten() {
+                if callee == start {
+                    recursive = true;
+                    break;
+                }
+                if !path.iter().any(|seen| seen == callee) {
+                    let mut next_path = path.clone();
+                    next_path.push(callee);
+                    visiting.push((callee, next_path));
+                }
+            }
+            if recursive {
+                break;
+            }
+        }
+        if recursive {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE130",
+                "Source Profile 0.3 rejects recursive call cycles; calls must be acyclic",
+                function.name.span,
+            ));
+        }
+    }
+}
+
+fn calls_in_statement(statement: &AstStmt, calls: &mut BTreeSet<String>) {
+    match statement {
+        AstStmt::Let { value, .. } | AstStmt::Return { value, .. } => calls_in_expr(value, calls),
+        AstStmt::If {
+            condition,
+            then_body,
+            else_body,
+            ..
+        } => {
+            calls_in_expr(condition, calls);
+            for statement in then_body.iter().chain(else_body) {
+                calls_in_statement(statement, calls);
+            }
+        }
+        AstStmt::Fail { .. } => {}
+    }
+}
+
+fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
+    match expr {
+        AstExpr::Call {
+            function,
+            arguments,
+            ..
+        } => {
+            calls.insert(function.text.clone());
+            for argument in arguments {
+                calls_in_expr(argument, calls);
+            }
+        }
+        AstExpr::Binary { left, right, .. } => {
+            calls_in_expr(left, calls);
+            calls_in_expr(right, calls);
+        }
+        AstExpr::Match { value, arms, .. } => {
+            calls_in_expr(value, calls);
+            for arm in arms {
+                calls_in_expr(&arm.value, calls);
+            }
+        }
+        AstExpr::Name(_)
+        | AstExpr::Integer { .. }
+        | AstExpr::Boolean { .. }
+        | AstExpr::FiniteVariant { .. } => {}
+    }
 }
 
 struct BindingEnv {
@@ -590,16 +824,24 @@ impl BindingEnv {
     }
 }
 
-struct BodyBuilder {
+struct BodyBuilder<'a> {
     blocks: Vec<BodyBlock>,
     current: usize,
     next_value: usize,
     next_block: usize,
     output_type: BodyType,
+    function: String,
+    finite_types: &'a BTreeMap<String, FiniteType>,
+    signatures: &'a BTreeMap<String, FunctionSignature>,
 }
 
-impl BodyBuilder {
-    fn new(output_type: BodyType) -> Self {
+impl<'a> BodyBuilder<'a> {
+    fn new(
+        output_type: BodyType,
+        function: String,
+        finite_types: &'a BTreeMap<String, FiniteType>,
+        signatures: &'a BTreeMap<String, FunctionSignature>,
+    ) -> Self {
         Self {
             blocks: vec![BodyBlock {
                 id: "entry".to_owned(),
@@ -611,6 +853,9 @@ impl BodyBuilder {
             next_value: 0,
             next_block: 0,
             output_type,
+            function,
+            finite_types,
+            signatures,
         }
     }
 
@@ -646,7 +891,12 @@ impl BodyBuilder {
                 value,
                 span,
             } => {
-                let declared = profile_type(&value_type.text, value_type.span, diagnostics);
+                let declared = profile_type(
+                    &value_type.text,
+                    value_type.span,
+                    self.finite_types,
+                    diagnostics,
+                );
                 let Some(produced) = self.elaborate_expr(value, Some(&declared), env, diagnostics)
                 else {
                     return;
@@ -734,7 +984,9 @@ impl BodyBuilder {
                 self.blocks[self.current].terminator = BodyTerminator::Failure { mode: failure };
             }
             AstStmt::Return { value, span } => {
-                if let Some(resolved) = env.resolve(&value.text, *span, diagnostics) {
+                if let Some(resolved) =
+                    self.elaborate_expr(value, Some(&self.output_type.clone()), env, diagnostics)
+                {
                     if resolved.ty != self.output_type {
                         diagnostics.push(elaboration_diagnostic(
                             "MNE103",
@@ -808,6 +1060,342 @@ impl BodyBuilder {
                 });
                 let _ = text;
                 Some(ResolvedBinding { id, ty })
+            }
+            AstExpr::Boolean { value, text: _ } => {
+                let ty = BodyType::Named("bool".to_owned());
+                if expected.is_some_and(|expected| expected != &ty) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE122",
+                        "boolean literal cannot satisfy the required expression type",
+                        expr.span(),
+                    ));
+                }
+                let id = self.new_value("b");
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: id.clone(),
+                    kind: BodyOperationKind::Constant {
+                        value: i128::from(*value),
+                        ty: ty.clone(),
+                    },
+                    operands: Vec::new(),
+                    results: vec![BodyValue {
+                        id: id.clone(),
+                        ty: ty.clone(),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                });
+                Some(ResolvedBinding { id, ty })
+            }
+            AstExpr::FiniteVariant {
+                type_name,
+                variant,
+                span,
+            } => {
+                let Some(finite_type) = self.finite_types.get(&type_name.text).cloned() else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE123",
+                        "finite constructor names an unknown nominal type",
+                        type_name.span,
+                    ));
+                    return None;
+                };
+                let Some(declared_variant) = finite_type
+                    .variants
+                    .iter()
+                    .find(|candidate| candidate.name == variant.text)
+                    .cloned()
+                else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE124",
+                        "finite constructor names an unknown variant",
+                        variant.span,
+                    ));
+                    return None;
+                };
+                let ty = BodyType::Finite {
+                    identity: finite_type.identity.clone(),
+                    name: finite_type.name.clone(),
+                };
+                if expected.is_some_and(|expected| expected != &ty) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE125",
+                        "finite constructor does not have the required nominal type",
+                        *span,
+                    ));
+                }
+                let id = self.new_value("e");
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: id.clone(),
+                    kind: BodyOperationKind::FiniteConstruct {
+                        type_identity: finite_type.identity.clone(),
+                        variant_identity: declared_variant.identity,
+                        discriminant: declared_variant.discriminant,
+                    },
+                    operands: Vec::new(),
+                    results: vec![BodyValue {
+                        id: id.clone(),
+                        ty: ty.clone(),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                });
+                Some(ResolvedBinding { id, ty })
+            }
+            AstExpr::Call {
+                function,
+                arguments,
+                span,
+            } => {
+                let Some(signature) = self.signatures.get(&function.text).cloned() else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE131",
+                        "call target does not resolve to a function in this module",
+                        function.span,
+                    ));
+                    return None;
+                };
+                if arguments.len() != signature.inputs.len() {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE132",
+                        "call argument arity does not match the callee signature",
+                        *span,
+                    ));
+                    return None;
+                }
+                let mut operands = Vec::new();
+                for (source_argument, parameter_type) in arguments.iter().zip(&signature.inputs) {
+                    let argument = self.elaborate_expr(
+                        source_argument,
+                        Some(parameter_type),
+                        env,
+                        diagnostics,
+                    )?;
+                    if &argument.ty != parameter_type {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE133",
+                            "call argument type does not match the callee parameter",
+                            source_argument.span(),
+                        ));
+                    }
+                    operands.push(argument.id);
+                }
+                let caller = self
+                    .signatures
+                    .get(&self.function)
+                    .expect("current function signature");
+                let authority_closed = signature
+                    .capabilities
+                    .iter()
+                    .all(|capability| caller.capabilities.contains(capability))
+                    && signature.effects.iter().all(|callee_effect| {
+                        caller.effects.iter().any(|caller_effect| {
+                            caller_effect.kind == callee_effect.kind
+                                && caller_effect.capability == callee_effect.capability
+                        })
+                    });
+                if !authority_closed {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE134",
+                        "call cannot manufacture or launder the callee's required authority/effects",
+                        *span,
+                    ));
+                    return None;
+                }
+                if expected.is_some_and(|expected| expected != &signature.output) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE135",
+                        "call result does not have the required expression type",
+                        *span,
+                    ));
+                }
+                let id = self.new_value("call");
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: id.clone(),
+                    kind: BodyOperationKind::Call {
+                        function: signature.identity.clone(),
+                        function_name: function.text.clone(),
+                        required_capabilities: signature.capabilities.clone(),
+                        effects: signature.effects.clone(),
+                    },
+                    operands,
+                    results: vec![BodyValue {
+                        id: id.clone(),
+                        ty: signature.output.clone(),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                });
+                Some(ResolvedBinding {
+                    id,
+                    ty: signature.output.clone(),
+                })
+            }
+            AstExpr::Match { value, arms, span } => {
+                let subject = self.elaborate_expr(value, None, env, diagnostics)?;
+                let BodyType::Finite {
+                    identity: type_identity,
+                    name: type_name,
+                } = &subject.ty
+                else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE136",
+                        "match subject must have a declared finite type",
+                        value.span(),
+                    ));
+                    return None;
+                };
+                let finite_type = self
+                    .finite_types
+                    .get(type_name)
+                    .expect("finite body type came from declaration")
+                    .clone();
+                let Some(result_type) = expected.cloned() else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE137",
+                        "match result requires an expected type in Source Profile 0.3",
+                        *span,
+                    ));
+                    return None;
+                };
+                let diagnostic_count = diagnostics.len();
+                let mut seen = BTreeSet::new();
+                let mut resolved_arms = Vec::new();
+                for arm in arms {
+                    let Some(variant) = finite_type
+                        .variants
+                        .iter()
+                        .find(|variant| variant.name == arm.variant.text)
+                    else {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE138",
+                            "match arm names a variant outside the subject's finite type",
+                            arm.variant.span,
+                        ));
+                        continue;
+                    };
+                    if !seen.insert(variant.identity.clone()) {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE139",
+                            "duplicate match arm is unreachable",
+                            arm.variant.span,
+                        ));
+                        continue;
+                    }
+                    resolved_arms.push((variant.clone(), &arm.value));
+                }
+                let missing = finite_type
+                    .variants
+                    .iter()
+                    .filter(|variant| !seen.contains(&variant.identity))
+                    .map(|variant| variant.name.clone())
+                    .collect::<Vec<_>>();
+                if !missing.is_empty() {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE140",
+                        &format!(
+                            "non-exhaustive match; missing variants: {}",
+                            missing.join(", ")
+                        ),
+                        *span,
+                    ));
+                }
+                if diagnostics.len() != diagnostic_count || resolved_arms.is_empty() {
+                    return None;
+                }
+
+                let dispatch_start = self.current;
+                let join_id = self.new_block();
+                let arm_ids = resolved_arms
+                    .iter()
+                    .map(|_| self.new_block())
+                    .collect::<Vec<_>>();
+                let test_ids = (1..resolved_arms.len())
+                    .map(|_| self.new_block())
+                    .collect::<Vec<_>>();
+                let mut dispatch = dispatch_start;
+                for (index, ((variant, _), arm_id)) in
+                    resolved_arms.iter().zip(&arm_ids).enumerate()
+                {
+                    self.current = dispatch;
+                    if index + 1 == resolved_arms.len() {
+                        self.blocks[self.current].terminator = BodyTerminator::Branch {
+                            target: arm_id.clone(),
+                            arguments: Vec::new(),
+                        };
+                    } else {
+                        let condition = self.new_value("match");
+                        self.blocks[self.current].operations.push(BodyOperation {
+                            id: condition.clone(),
+                            kind: BodyOperationKind::FiniteIsVariant {
+                                type_identity: type_identity.clone(),
+                                variant_identity: variant.identity.clone(),
+                                discriminant: variant.discriminant,
+                            },
+                            operands: vec![subject.id.clone()],
+                            results: vec![BodyValue {
+                                id: condition.clone(),
+                                ty: BodyType::Named("bool".to_owned()),
+                            }],
+                            contracts: Vec::new(),
+                            assumptions: Vec::new(),
+                            machine_intent: None,
+                            lowering: None,
+                            portability: None,
+                        });
+                        let next_test = test_ids[index].clone();
+                        self.blocks[self.current].terminator = BodyTerminator::ConditionalBranch {
+                            condition,
+                            then_target: arm_id.clone(),
+                            then_arguments: Vec::new(),
+                            else_target: next_test.clone(),
+                            else_arguments: Vec::new(),
+                        };
+                        dispatch = self.index_of(&next_test);
+                    }
+                }
+                let result_id = self.new_value("match_result");
+                let join_index = self.index_of(&join_id);
+                self.blocks[join_index].parameters.push(BodyValue {
+                    id: result_id.clone(),
+                    ty: result_type.clone(),
+                });
+                for ((_, arm_expr), arm_id) in resolved_arms.iter().zip(&arm_ids) {
+                    self.current = self.index_of(arm_id);
+                    env.push();
+                    if let Some(value) =
+                        self.elaborate_expr(arm_expr, Some(&result_type), env, diagnostics)
+                    {
+                        if value.ty != result_type {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE141",
+                                "match arms must produce the same expected type",
+                                arm_expr.span(),
+                            ));
+                        }
+                        if self.block_is_open() {
+                            self.blocks[self.current].terminator = BodyTerminator::Branch {
+                                target: join_id.clone(),
+                                arguments: vec![value.id],
+                            };
+                        }
+                    }
+                    env.pop();
+                }
+                self.current = join_index;
+                Some(ResolvedBinding {
+                    id: result_id,
+                    ty: result_type,
+                })
             }
             AstExpr::Binary {
                 op, left, right, ..
@@ -950,7 +1538,18 @@ impl BodyBuilder {
     }
 }
 
-fn profile_type(name: &str, span: SourceSpan, diagnostics: &mut Vec<SourceDiagnostic>) -> BodyType {
+fn profile_type(
+    name: &str,
+    span: SourceSpan,
+    finite_types: &BTreeMap<String, FiniteType>,
+    diagnostics: &mut Vec<SourceDiagnostic>,
+) -> BodyType {
+    if let Some(finite_type) = finite_types.get(name) {
+        return BodyType::Finite {
+            identity: finite_type.identity.clone(),
+            name: finite_type.name.clone(),
+        };
+    }
     let ty = BodyType::from_semantic_name(name);
     let supported = matches!(&ty, BodyType::Named(named) if named == "bool")
         || matches!(
@@ -963,7 +1562,7 @@ fn profile_type(name: &str, span: SourceSpan, diagnostics: &mut Vec<SourceDiagno
     if !supported {
         diagnostics.push(elaboration_diagnostic(
             "MNE105",
-            "Source Profile 0.2 supports bool and 8/16/32/64-bit integer types",
+            "source profile supports bool, 8/16/32/64-bit integers, and declared finite types",
             span,
         ));
     }

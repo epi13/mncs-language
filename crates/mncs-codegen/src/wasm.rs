@@ -41,6 +41,7 @@ pub enum Instr {
     End,
     Br(u32),
     Return,
+    Call(u32),
     Drop,
     LocalGet(u32),
     LocalSet(u32),
@@ -233,34 +234,80 @@ pub fn execute_function(
     arguments: &[ExecutionValue],
     step_budget: u64,
 ) -> Result<Vec<ExecutionValue>, WasmTrap> {
-    let function = module
+    let function_index = module
         .functions
         .iter()
-        .find(|function| function.name == name)
+        .position(|function| function.name == name)
         .ok_or_else(|| {
             trap(
                 ExecutionStatus::InvalidRequest,
                 "backend export does not exist",
             )
         })?;
+    let function = &module.functions[function_index];
     if arguments.len() != function.params.len() {
         return Err(trap(
             ExecutionStatus::InvalidRequest,
             "backend argument count does not match the exported function",
         ));
     }
-    let mut locals = vec![0_i64; function.params.len() + function.locals.len()];
-    for (index, (argument, ty)) in arguments.iter().zip(&function.params).enumerate() {
-        locals[index] = value_to_local(argument, *ty)?;
+    let mut steps = 0_u64;
+    let opcode_budget = step_budget.saturating_mul(32).max(1);
+    let raw_arguments = arguments
+        .iter()
+        .zip(&function.params)
+        .map(|(argument, ty)| value_to_local(argument, *ty))
+        .collect::<Result<Vec<_>, _>>()?;
+    let returned = execute_raw(
+        module,
+        function_index,
+        raw_arguments,
+        opcode_budget,
+        &mut steps,
+        0,
+    )?;
+    function
+        .results
+        .iter()
+        .zip(returned)
+        .map(|(ty, value)| local_to_value(value, *ty))
+        .collect()
+}
+
+fn execute_raw(
+    module: &WasmModule,
+    function_index: usize,
+    arguments: Vec<i64>,
+    opcode_budget: u64,
+    steps: &mut u64,
+    depth: usize,
+) -> Result<Vec<i64>, WasmTrap> {
+    if depth > module.functions.len() {
+        return Err(trap(
+            ExecutionStatus::RuntimeFailure,
+            "backend call depth exceeded the acyclic module bound",
+        ));
     }
+    let function = module.functions.get(function_index).ok_or_else(|| {
+        trap(
+            ExecutionStatus::InvalidRequest,
+            "backend call target index is out of range",
+        )
+    })?;
+    if arguments.len() != function.params.len() {
+        return Err(trap(
+            ExecutionStatus::InvalidRequest,
+            "backend call argument count does not match the callee",
+        ));
+    }
+    let mut locals = vec![0_i64; function.params.len() + function.locals.len()];
+    locals[..arguments.len()].copy_from_slice(&arguments);
     let mut stack = Vec::new();
     let mut labels = Vec::new();
     let mut ip = 0usize;
-    let mut steps = 0_u64;
-    let opcode_budget = step_budget.saturating_mul(32).max(1);
     while ip < function.body.len() {
-        steps += 1;
-        if steps > opcode_budget {
+        *steps = steps.saturating_add(1);
+        if *steps > opcode_budget {
             return Err(trap(
                 ExecutionStatus::BudgetExhausted,
                 "backend execution step budget exhausted",
@@ -303,6 +350,33 @@ pub fn execute_function(
                 continue;
             }
             Instr::Return => break,
+            Instr::Call(callee_index) => {
+                let callee = module
+                    .functions
+                    .get(*callee_index as usize)
+                    .ok_or_else(|| {
+                        trap(
+                            ExecutionStatus::InvalidRequest,
+                            "backend call target index is out of range",
+                        )
+                    })?;
+                if stack.len() < callee.params.len() {
+                    return Err(trap(
+                        ExecutionStatus::InvalidRequest,
+                        "backend call operand stack underflow",
+                    ));
+                }
+                let arguments = stack.split_off(stack.len() - callee.params.len());
+                let returned = execute_raw(
+                    module,
+                    *callee_index as usize,
+                    arguments,
+                    opcode_budget,
+                    steps,
+                    depth + 1,
+                )?;
+                stack.extend(returned);
+            }
             Instr::Drop => {
                 pop(&mut stack)?;
             }
@@ -383,12 +457,7 @@ pub fn execute_function(
             "backend function did not leave the declared result count",
         ));
     }
-    function
-        .results
-        .iter()
-        .zip(stack)
-        .map(|(ty, value)| local_to_value(value, *ty))
-        .collect()
+    Ok(stack)
 }
 
 pub fn val_type_for(ty: IntegerType) -> Option<ValType> {
@@ -544,6 +613,7 @@ fn value_to_local(value: &ExecutionValue, ty: ValType) -> Result<i64, WasmTrap> 
         (ExecutionValue::Integer { value, .. }, ValType::I32) => Ok(*value as i32 as i64),
         (ExecutionValue::Integer { value, .. }, ValType::I64) => Ok(*value as i64),
         (ExecutionValue::Boolean { value }, ValType::I32) => Ok(i64::from(*value)),
+        (ExecutionValue::Finite { discriminant, .. }, ValType::I32) => Ok(i64::from(*discriminant)),
         _ => Err(trap(
             ExecutionStatus::InvalidRequest,
             "backend argument does not match the WASM parameter type",
@@ -649,6 +719,10 @@ fn encode_instr(out: &mut Vec<u8>, instr: &Instr) {
             encode_u32(out, *depth);
         }
         Instr::Return => out.push(0x0f),
+        Instr::Call(index) => {
+            out.push(0x10);
+            encode_u32(out, *index);
+        }
         Instr::Drop => out.push(0x1a),
         Instr::LocalGet(index) => {
             out.push(0x20);
@@ -955,6 +1029,11 @@ fn decode_instr(payload: &[u8], cursor: usize) -> Result<(Instr, usize), WasmTra
             Instr::Br(depth)
         }
         0x0f => Instr::Return,
+        0x10 => {
+            let (index, next) = read_u32(payload, cursor)?;
+            cursor = next;
+            Instr::Call(index)
+        }
         0x1a => Instr::Drop,
         0x20 => {
             let (index, next) = read_u32(payload, cursor)?;

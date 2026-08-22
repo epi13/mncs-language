@@ -28,6 +28,8 @@ impl std::fmt::Display for SemanticId {
 #[serde(rename_all = "snake_case")]
 pub enum IdentityKind {
     Program,
+    FiniteType,
+    FiniteVariant,
     Function,
     Contract,
     Assumption,
@@ -83,6 +85,25 @@ impl Program {
             kind: IdentityKind::Program,
             fingerprint: fingerprint_json(&self.canonical_form().expect("canonical form").json),
         });
+
+        for finite_type in &self.finite_types {
+            objects.push(IdentityRecord {
+                identity: finite_type.identity.clone(),
+                kind: IdentityKind::FiniteType,
+                fingerprint: fingerprint_json(
+                    &serde_json::to_string(finite_type).expect("finite type"),
+                ),
+            });
+            for variant in &finite_type.variants {
+                objects.push(IdentityRecord {
+                    identity: variant.identity.clone(),
+                    kind: IdentityKind::FiniteVariant,
+                    fingerprint: fingerprint_json(
+                        &serde_json::to_string(variant).expect("finite variant"),
+                    ),
+                });
+            }
+        }
 
         for assumption in &self.assumptions {
             objects.push(IdentityRecord {
@@ -172,7 +193,15 @@ impl Program {
                                     &operation_identity,
                                 ))
                             }
-                            crate::BodyOperationKind::IntegerCompare { .. } => None,
+                            crate::BodyOperationKind::IntegerCompare { .. }
+                            | crate::BodyOperationKind::FiniteConstruct { .. }
+                            | crate::BodyOperationKind::FiniteIsVariant { .. } => None,
+                            crate::BodyOperationKind::Call { .. } => {
+                                Some(crate::obligations::body_obligation_id(
+                                    "call-authority-closure",
+                                    &operation_identity,
+                                ))
+                            }
                             crate::BodyOperationKind::Effect { .. } => {
                                 Some(crate::obligations::body_obligation_id(
                                     "effect-authorized",
@@ -340,7 +369,15 @@ pub(crate) fn program_id(module: &str) -> SemanticId {
     make_id(IdentityKind::Program, &[module])
 }
 
-pub(crate) fn function_id(module: &str, function: &str) -> SemanticId {
+pub fn finite_type_id(module: &str, name: &str) -> SemanticId {
+    make_id(IdentityKind::FiniteType, &[module, name])
+}
+
+pub fn finite_variant_id(module: &str, type_name: &str, variant: &str) -> SemanticId {
+    make_id(IdentityKind::FiniteVariant, &[module, type_name, variant])
+}
+
+pub fn function_id(module: &str, function: &str) -> SemanticId {
     make_id(IdentityKind::Function, &[module, function])
 }
 
@@ -430,6 +467,8 @@ pub(crate) fn diff_identities(
 fn make_id(kind: IdentityKind, components: &[&str]) -> SemanticId {
     let prefix = match kind {
         IdentityKind::Program => "program",
+        IdentityKind::FiniteType => "finite-type",
+        IdentityKind::FiniteVariant => "finite-variant",
         IdentityKind::Function => "function",
         IdentityKind::Contract => "contract",
         IdentityKind::Assumption => "assumption",

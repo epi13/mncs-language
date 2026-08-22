@@ -55,3 +55,5 @@ RFC acceptance does not imply production stability. The repository remains pre-s
 - [RFC 0038: Machine-Native Compiler, Compilation, Refinement, Validation, and Cross-Target Semantics](0038-machine-native-compiler-compilation-refinement-validation-cross-target-semantics.md)
 - [RFC 0039: Machine-Native Compiler Stage and Experiment Contracts](0039-machine-native-compiler-stage-and-experiment-contracts.md)
 - [RFC 0040: Machine-Native Source Profile 0.1](0040-machine-native-source-profile-0.1.md)
+- [RFC 0041: Machine-Native Backend Plurality and Realization Contracts](0041-machine-native-backend-plurality-and-realization-contracts.md)
+- [RFC 0042: Machine-Native Source Profile 0.3 Experiment Bootstrap](0042-machine-native-source-profile-0.3-experiment-bootstrap.md)

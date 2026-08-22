@@ -66,7 +66,7 @@ pub(crate) fn canonical_json_value<T: serde::Serialize>(
 }
 
 fn canonical_program(program: &Program) -> JsonValue {
-    object([
+    let mut fields = vec![
         (
             "assumptions",
             JsonValue::Array(sorted_assumptions(&program.assumptions)),
@@ -80,7 +80,25 @@ fn canonical_program(program: &Program) -> JsonValue {
             "schema_version",
             JsonValue::String(program.schema_version.clone()),
         ),
-    ])
+    ];
+    // Preserve the established canonical fingerprints for pre-0.3 programs.
+    // A finite declaration is material only when one is present.
+    if !program.finite_types.is_empty() {
+        fields.push((
+            "finite_types",
+            JsonValue::Array(sorted_finite_types(&program.finite_types)),
+        ));
+    }
+    object(fields)
+}
+
+fn sorted_finite_types(types: &[crate::FiniteType]) -> Vec<JsonValue> {
+    let mut types = types.to_vec();
+    types.sort_by(|left, right| left.identity.cmp(&right.identity));
+    types
+        .into_iter()
+        .map(|finite_type| serde_json::to_value(finite_type).expect("finite type is serializable"))
+        .collect()
 }
 
 pub(crate) fn canonical_function(function: &Function) -> JsonValue {
@@ -335,6 +353,7 @@ mod tests {
         Program {
             schema_version: "0.1".to_owned(),
             module: "demo".to_owned(),
+            finite_types: vec![],
             assumptions: vec![],
             functions: vec![Function {
                 name: "f".to_owned(),

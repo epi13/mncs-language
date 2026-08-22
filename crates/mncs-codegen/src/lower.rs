@@ -22,18 +22,25 @@ struct FunctionLayout {
     pc: u32,
     blocks: BTreeMap<SemanticId, u32>,
     block_params: BTreeMap<SemanticId, Vec<SemanticId>>,
+    functions: BTreeMap<SemanticId, u32>,
 }
 
 pub fn lower_module(ssa: &SsaModule, names: &[String]) -> LoweringOutcome {
     let mut functions = Vec::new();
     let mut exports = Vec::new();
     let mut unsupported = Vec::new();
+    let function_indices = ssa
+        .functions
+        .iter()
+        .enumerate()
+        .map(|(index, function)| (function.semantic_identity.clone(), index as u32))
+        .collect::<BTreeMap<_, _>>();
     for (index, function) in ssa.functions.iter().enumerate() {
         let name = names
             .get(index)
             .cloned()
             .unwrap_or_else(|| export_name(&function.semantic_identity));
-        match lower_function(function, name) {
+        match lower_function(function, name, &function_indices) {
             Ok(wasm) => {
                 exports.push(wasm.name.clone());
                 functions.push(wasm);
@@ -53,11 +60,15 @@ pub fn lower_module(ssa: &SsaModule, names: &[String]) -> LoweringOutcome {
     }
 }
 
-fn lower_function(function: &SsaFunction, name: String) -> Result<WasmFunction, String> {
+fn lower_function(
+    function: &SsaFunction,
+    name: String,
+    function_indices: &BTreeMap<SemanticId, u32>,
+) -> Result<WasmFunction, String> {
     if function.outputs.len() != 1 {
         return Err("portable WASM MVP requires exactly one result".to_owned());
     }
-    let layout = layout_function(function)?;
+    let layout = layout_function(function, function_indices)?;
     let result_ty = *layout
         .types
         .get(&function.outputs[0].identity)
@@ -106,7 +117,10 @@ fn lower_function(function: &SsaFunction, name: String) -> Result<WasmFunction, 
     })
 }
 
-fn layout_function(function: &SsaFunction) -> Result<FunctionLayout, String> {
+fn layout_function(
+    function: &SsaFunction,
+    function_indices: &BTreeMap<SemanticId, u32>,
+) -> Result<FunctionLayout, String> {
     let mut values = BTreeMap::new();
     let mut types = BTreeMap::new();
     let mut seen = BTreeSet::new();
@@ -165,6 +179,7 @@ fn layout_function(function: &SsaFunction) -> Result<FunctionLayout, String> {
         pc,
         blocks,
         block_params,
+        functions: function_indices.clone(),
     })
 }
 
@@ -199,6 +214,32 @@ fn lower_instruction(
             body.push(Instr::LocalGet(left));
             body.push(Instr::LocalGet(right));
             body.push(compare_instr(predicate, *operand_type)?);
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::FiniteConstruct { discriminant, .. } => {
+            let dest = dest_local(layout, instruction)?;
+            body.push(Instr::I32Const(*discriminant as i32));
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::FiniteIsVariant { discriminant, .. } => {
+            let dest = dest_local(layout, instruction)?;
+            let value = operand_local(layout, instruction, 0)?;
+            body.push(Instr::LocalGet(value));
+            body.push(Instr::I32Const(*discriminant as i32));
+            body.push(Instr::I32Eq);
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::Call { function, .. } => {
+            let dest = dest_local(layout, instruction)?;
+            for input in &instruction.inputs {
+                body.push(Instr::LocalGet(local(layout, input)?));
+            }
+            let callee = layout
+                .functions
+                .get(function)
+                .copied()
+                .ok_or_else(|| "SSA call target is not in the WASM module".to_owned())?;
+            body.push(Instr::Call(callee));
             body.push(Instr::LocalSet(dest));
         }
         SsaInstructionKind::Effect => {
@@ -612,13 +653,15 @@ fn local(layout: &FunctionLayout, identity: &SemanticId) -> Result<u32, String> 
 }
 
 fn wasm_type(ty: &IrType) -> Result<(ValType, Option<IntegerType>), String> {
-    let IrType::Named(name) = ty;
-    if name == "bool" {
-        return Ok((ValType::I32, None));
-    }
-    match BodyType::from_semantic_name(name) {
-        BodyType::Integer(integer) => Ok((val_type(integer)?, Some(integer))),
-        BodyType::Named(_) => Err(format!("unsupported SSA type {name}")),
+    match ty {
+        IrType::Finite { .. } => Ok((ValType::I32, None)),
+        IrType::Named(name) if name == "bool" => Ok((ValType::I32, None)),
+        IrType::Named(name) => match BodyType::from_semantic_name(name) {
+            BodyType::Integer(integer) => Ok((val_type(integer)?, Some(integer))),
+            BodyType::Named(_) | BodyType::Finite { .. } => {
+                Err(format!("unsupported SSA type {name}"))
+            }
+        },
     }
 }
 

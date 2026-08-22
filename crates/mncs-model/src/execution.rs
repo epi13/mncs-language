@@ -39,6 +39,11 @@ pub enum ExecutionValue {
     Boolean {
         value: bool,
     },
+    Finite {
+        type_identity: SemanticId,
+        variant_identity: SemanticId,
+        discriminant: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -125,6 +130,21 @@ pub struct ExecutionResult {
 pub struct ExecutionCase {
     pub id: String,
     pub request: ExecutionRequest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected: Option<Vec<ExecutionValue>>,
+}
+
+/// A bounded, exhaustive property check over the supplied finite value set.
+/// The language runner interprets the named law; Forge only stores observations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionProperty {
+    pub id: String,
+    pub law: String,
+    pub values: Vec<ExecutionValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distinguished: Option<ExecutionValue>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclusions: Vec<ExecutionValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,6 +152,8 @@ pub struct ExecutionCorpus {
     pub schema_version: String,
     pub name: String,
     pub cases: Vec<ExecutionCase>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub properties: Vec<ExecutionProperty>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -277,14 +299,14 @@ fn execute_inner(
             "execution target function has no executable body",
         );
     };
-    if let Err(reason) = validate_arguments(body, request) {
+    if let Err(reason) = validate_arguments(program, body, request) {
         return ExecutionResult::invalid(request, reason);
     }
 
     let mut result = ExecutionResult::with_program(request, program, function);
     let mut values = BTreeMap::new();
     for (parameter, argument) in body.parameters.iter().zip(&request.arguments) {
-        let Some(argument) = normalize_value(argument, &parameter.ty) else {
+        let Some(argument) = normalize_value(program, argument, &parameter.ty) else {
             return ExecutionResult::invalid(request, "argument could not be normalized");
         };
         values.insert(parameter.id.clone(), argument);
@@ -334,10 +356,12 @@ fn execute_inner(
                 "operation",
             );
             if let Some(stop) = execute_operation(
+                program,
                 operation,
                 &identity,
                 &mut values,
                 &mut result,
+                request,
                 record_effects,
             ) {
                 return stop;
@@ -436,10 +460,12 @@ fn execute_inner(
 }
 
 fn execute_operation(
+    program: &Program,
     operation: &BodyOperation,
     identity: &SemanticId,
     values: &mut BTreeMap<String, ExecutionValue>,
     result: &mut ExecutionResult,
+    request: &ExecutionRequest,
     record_effects: bool,
 ) -> Option<ExecutionResult> {
     match &operation.kind {
@@ -517,6 +543,119 @@ fn execute_operation(
                 ExecutionValue::Boolean { value },
             );
         }
+        BodyOperationKind::FiniteConstruct {
+            type_identity,
+            variant_identity,
+            discriminant,
+        } => {
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Finite {
+                    type_identity: type_identity.clone(),
+                    variant_identity: variant_identity.clone(),
+                    discriminant: *discriminant,
+                },
+            );
+        }
+        BodyOperationKind::FiniteIsVariant {
+            type_identity,
+            variant_identity,
+            discriminant,
+        } => {
+            let Some(ExecutionValue::Finite {
+                type_identity: actual_type,
+                variant_identity: actual_variant,
+                discriminant: actual_discriminant,
+            }) = operation
+                .operands
+                .first()
+                .and_then(|operand| values.get(operand))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "finite variant test operand was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            if actual_type != type_identity
+                || !valid_finite_value(program, actual_type, actual_variant, *actual_discriminant)
+            {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "finite value has an invalid type/variant/discriminant".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Boolean {
+                    value: actual_variant == variant_identity
+                        && actual_discriminant == discriminant,
+                },
+            );
+        }
+        BodyOperationKind::Call { function_name, .. } => {
+            let Some(arguments) = operation
+                .operands
+                .iter()
+                .map(|operand| values.get(operand).cloned())
+                .collect::<Option<Vec<_>>>()
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "call operands were unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let remaining = request.step_budget.saturating_sub(result.steps);
+            if remaining == 0 {
+                result.fail(
+                    ExecutionStatus::BudgetExhausted,
+                    Some(identity.clone()),
+                    "execution step budget exhausted before call".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            let nested_request = ExecutionRequest {
+                schema_version: request.schema_version.clone(),
+                target: ExecutionTarget {
+                    module: request.target.module.clone(),
+                    function: function_name.clone(),
+                },
+                arguments,
+                step_budget: remaining,
+                policy: request.policy.clone(),
+            };
+            let nested = execute_inner(program, &nested_request, record_effects);
+            let trace_offset = result.steps;
+            result.steps = result.steps.saturating_add(nested.steps);
+            result.effects.extend(nested.effects.clone());
+            for mut entry in nested.trace.clone() {
+                entry.step = entry.step.saturating_add(trace_offset);
+                if result.trace.len() < MAX_TRACE_ENTRIES {
+                    result.trace.push(entry);
+                } else {
+                    result.trace_truncated = true;
+                }
+            }
+            if nested.status != ExecutionStatus::Returned {
+                result.status = nested.status;
+                result.failure = nested.failure;
+                return Some(result.clone());
+            }
+            let Some(returned) = nested.returned.first().cloned() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "callee returned no value".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            values.insert(operation.results[0].id.clone(), returned);
+        }
         BodyOperationKind::Effect { effect, capability } => {
             if !record_effects {
                 result.fail(
@@ -550,12 +689,16 @@ pub fn execute_with_policy(program: &Program, request: &ExecutionRequest) -> Exe
     execute(program, request)
 }
 
-fn validate_arguments(body: &FunctionBody, request: &ExecutionRequest) -> Result<(), String> {
+fn validate_arguments(
+    program: &Program,
+    body: &FunctionBody,
+    request: &ExecutionRequest,
+) -> Result<(), String> {
     if body.parameters.len() != request.arguments.len() {
         return Err("argument count does not match executable body parameters".to_owned());
     }
     for (parameter, argument) in body.parameters.iter().zip(&request.arguments) {
-        if !value_matches_type(argument, &parameter.ty) {
+        if !value_matches_type(program, argument, &parameter.ty) {
             return Err(format!(
                 "argument does not match parameter {:?}",
                 parameter.name
@@ -565,7 +708,7 @@ fn validate_arguments(body: &FunctionBody, request: &ExecutionRequest) -> Result
     Ok(())
 }
 
-fn value_matches_type(value: &ExecutionValue, ty: &BodyType) -> bool {
+fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) -> bool {
     match (value, ty) {
         (ExecutionValue::Integer { value, ty: actual }, BodyType::Integer(expected)) => {
             actual == expected && in_range(*value, *expected)
@@ -573,6 +716,17 @@ fn value_matches_type(value: &ExecutionValue, ty: &BodyType) -> bool {
         (ExecutionValue::Boolean { .. }, BodyType::Named(name)) if name == "bool" => true,
         (ExecutionValue::Boolean { .. }, BodyType::Integer(integer)) => {
             integer.bits == 1 && !integer.signed
+        }
+        (
+            ExecutionValue::Finite {
+                type_identity,
+                variant_identity,
+                discriminant,
+            },
+            BodyType::Finite { identity, .. },
+        ) => {
+            type_identity == identity
+                && valid_finite_value(program, type_identity, variant_identity, *discriminant)
         }
         _ => false,
     }
@@ -596,7 +750,11 @@ fn constant_value(value: i128, ty: &BodyType) -> Option<ExecutionValue> {
     }
 }
 
-fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionValue> {
+fn normalize_value(
+    program: &Program,
+    value: &ExecutionValue,
+    ty: &BodyType,
+) -> Option<ExecutionValue> {
     match (value, ty) {
         (ExecutionValue::Integer { value, ty: actual }, BodyType::Integer(expected))
             if actual == expected && in_range(*value, *expected) =>
@@ -618,8 +776,37 @@ fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionVal
         {
             Some(ExecutionValue::Boolean { value: *value })
         }
+        (
+            ExecutionValue::Finite {
+                type_identity,
+                variant_identity,
+                discriminant,
+            },
+            BodyType::Finite { identity, .. },
+        ) if type_identity == identity
+            && valid_finite_value(program, type_identity, variant_identity, *discriminant) =>
+        {
+            Some(value.clone())
+        }
         _ => None,
     }
+}
+
+pub(crate) fn valid_finite_value(
+    program: &Program,
+    type_identity: &SemanticId,
+    variant_identity: &SemanticId,
+    discriminant: u32,
+) -> bool {
+    program
+        .finite_types
+        .iter()
+        .find(|finite_type| &finite_type.identity == type_identity)
+        .is_some_and(|finite_type| {
+            finite_type.variants.iter().any(|variant| {
+                &variant.identity == variant_identity && variant.discriminant == discriminant
+            })
+        })
 }
 
 fn integer_operands(
@@ -1022,6 +1209,7 @@ mod tests {
             &Program {
                 schema_version: "0.1".to_owned(),
                 module: "m".to_owned(),
+                finite_types: Vec::new(),
                 assumptions: Vec::new(),
                 functions: Vec::new(),
             },

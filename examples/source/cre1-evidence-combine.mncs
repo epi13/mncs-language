@@ -1,0 +1,24 @@
+mncs 0.3;
+
+// CRE-1: a finite evidence algebra reconstructed in language-owned source.
+module examples.cre1;
+
+enum Evidence { PASS, FAIL, UNKNOWN }
+
+fn combine(left: Evidence, right: Evidence) -> (result: Evidence) {
+    return match left {
+        PASS => right,
+        FAIL => Evidence.FAIL,
+        UNKNOWN => match right {
+            PASS => Evidence.UNKNOWN,
+            FAIL => Evidence.FAIL,
+            UNKNOWN => Evidence.UNKNOWN,
+        },
+    };
+}
+
+// The experiment targets this wrapper so source-level call semantics are in
+// the executed path rather than merely present in the module.
+fn candidate(left: Evidence, right: Evidence) -> (result: Evidence) {
+    return combine(left, right);
+}

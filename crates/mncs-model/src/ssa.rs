@@ -46,6 +46,20 @@ pub enum SsaInstructionKind {
         predicate: String,
         operand_type: crate::IntegerType,
     },
+    FiniteConstruct {
+        type_identity: SemanticId,
+        variant_identity: SemanticId,
+        discriminant: u32,
+    },
+    FiniteIsVariant {
+        type_identity: SemanticId,
+        variant_identity: SemanticId,
+        discriminant: u32,
+    },
+    Call {
+        function: SemanticId,
+        required_capabilities: Vec<SemanticId>,
+    },
     Effect,
     RuntimeCheck {
         obligation: SemanticId,
@@ -173,6 +187,11 @@ impl SsaModule {
     pub fn validate(&self) -> SsaValidationReport {
         let mut errors = Vec::new();
         let mut function_ids = BTreeSet::new();
+        let semantic_function_ids = self
+            .functions
+            .iter()
+            .map(|function| function.semantic_identity.clone())
+            .collect::<BTreeSet<_>>();
         for (function_index, function) in self.functions.iter().enumerate() {
             let path = format!("functions[{function_index}]");
             if !function_ids.insert(function.identity.clone()) {
@@ -182,7 +201,13 @@ impl SsaModule {
                     "duplicate SSA function identity",
                 ));
             }
-            validate_function(function, &self.obligations, &path, &mut errors);
+            validate_function(
+                function,
+                &semantic_function_ids,
+                &self.obligations,
+                &path,
+                &mut errors,
+            );
         }
         let mut trace_keys = BTreeSet::new();
         for (index, entry) in self.trace.entries.iter().enumerate() {
@@ -325,7 +350,7 @@ impl Program {
         for function in semantic_functions {
             let semantic_function = function_id(&self.module, &function.name);
             let Some(body) = &function.body else {
-                functions.push(declaration_function(function, &semantic_function));
+                functions.push(declaration_function(self, function, &semantic_function));
                 continue;
             };
             let hir_function = ir
@@ -376,7 +401,11 @@ impl Program {
     }
 }
 
-fn declaration_function(function: &Function, semantic_function: &SemanticId) -> SsaFunction {
+fn declaration_function(
+    program: &Program,
+    function: &Function,
+    semantic_function: &SemanticId,
+) -> SsaFunction {
     let identity = ssa_identity("function", semantic_function, 0);
     let inputs = function
         .inputs
@@ -385,7 +414,7 @@ fn declaration_function(function: &Function, semantic_function: &SemanticId) -> 
         .map(|(index, value)| SsaValue {
             identity: ssa_identity("input", semantic_function, index),
             semantic_identity: None,
-            ty: IrType::Named(value.value_type.clone()),
+            ty: ir_type_from_semantic(program, &value.value_type),
             producer: None,
             block: identity.clone(),
         })
@@ -698,6 +727,7 @@ fn lower_terminator(
 
 fn validate_function(
     function: &SsaFunction,
+    semantic_function_ids: &BTreeSet<SemanticId>,
     obligations: &[ObligationRecord],
     path: &str,
     errors: &mut Vec<SsaDiagnostic>,
@@ -855,6 +885,32 @@ fn validate_function(
                     path,
                     "effect SSA instruction has no capability use",
                 ));
+            }
+            if let SsaInstructionKind::Call {
+                function: callee,
+                required_capabilities,
+            } = &instruction.kind
+            {
+                if !semantic_function_ids.contains(callee) {
+                    errors.push(diagnostic(
+                        "SSA016",
+                        path,
+                        "call SSA instruction targets an unknown semantic function identity",
+                    ));
+                }
+                let required = required_capabilities.iter().collect::<BTreeSet<_>>();
+                let used = instruction
+                    .capability_uses
+                    .iter()
+                    .map(|capability_use| &capability_use.capability)
+                    .collect::<BTreeSet<_>>();
+                if required != used {
+                    errors.push(diagnostic(
+                        "SSA017",
+                        path,
+                        "call SSA instruction does not retain exact required capability uses",
+                    ));
+                }
             }
             for output in &instruction.outputs {
                 available.insert(output.identity.clone(), output.ty.clone());
@@ -1035,6 +1091,31 @@ fn ssa_kind(kind: &IrOperationKind) -> SsaInstructionKind {
             predicate: predicate.clone(),
             operand_type: *operand_type,
         },
+        IrOperationKind::FiniteConstruct {
+            type_identity,
+            variant_identity,
+            discriminant,
+        } => SsaInstructionKind::FiniteConstruct {
+            type_identity: type_identity.clone(),
+            variant_identity: variant_identity.clone(),
+            discriminant: *discriminant,
+        },
+        IrOperationKind::FiniteIsVariant {
+            type_identity,
+            variant_identity,
+            discriminant,
+        } => SsaInstructionKind::FiniteIsVariant {
+            type_identity: type_identity.clone(),
+            variant_identity: variant_identity.clone(),
+            discriminant: *discriminant,
+        },
+        IrOperationKind::Call {
+            function,
+            required_capabilities,
+        } => SsaInstructionKind::Call {
+            function: function.clone(),
+            required_capabilities: required_capabilities.clone(),
+        },
         IrOperationKind::Effect => SsaInstructionKind::Effect,
         IrOperationKind::RuntimeCheck {
             obligation,
@@ -1071,6 +1152,35 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
             predicate: predicate.clone(),
             operand_type: *operand_type,
         },
+        BodyOperationKind::FiniteConstruct {
+            type_identity,
+            variant_identity,
+            discriminant,
+        } => SsaInstructionKind::FiniteConstruct {
+            type_identity: type_identity.clone(),
+            variant_identity: variant_identity.clone(),
+            discriminant: *discriminant,
+        },
+        BodyOperationKind::FiniteIsVariant {
+            type_identity,
+            variant_identity,
+            discriminant,
+        } => SsaInstructionKind::FiniteIsVariant {
+            type_identity: type_identity.clone(),
+            variant_identity: variant_identity.clone(),
+            discriminant: *discriminant,
+        },
+        BodyOperationKind::Call {
+            function,
+            required_capabilities,
+            ..
+        } => SsaInstructionKind::Call {
+            function: function.clone(),
+            required_capabilities: required_capabilities
+                .iter()
+                .map(|capability| SemanticId(capability.clone()))
+                .collect(),
+        },
         BodyOperationKind::Effect { .. } => SsaInstructionKind::Effect,
         BodyOperationKind::RuntimeCheck {
             obligation,
@@ -1092,7 +1202,27 @@ fn body_failure(kind: &BodyOperationKind) -> Option<FailureMode> {
 }
 
 fn body_type(ty: &crate::BodyType) -> IrType {
-    IrType::Named(ty.semantic_name())
+    match ty {
+        crate::BodyType::Finite { identity, name } => IrType::Finite {
+            identity: identity.clone(),
+            name: name.clone(),
+        },
+        _ => IrType::Named(ty.semantic_name()),
+    }
+}
+
+fn ir_type_from_semantic(program: &Program, name: &str) -> IrType {
+    program
+        .finite_types
+        .iter()
+        .find(|finite_type| finite_type.name == name)
+        .map_or_else(
+            || IrType::Named(name.to_owned()),
+            |finite_type| IrType::Finite {
+                identity: finite_type.identity.clone(),
+                name: finite_type.name.clone(),
+            },
+        )
 }
 
 fn ssa_identity(kind: &str, subject: &SemanticId, ordinal: usize) -> SemanticId {
