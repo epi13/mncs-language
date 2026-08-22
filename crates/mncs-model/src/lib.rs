@@ -41,12 +41,14 @@ pub use compiler::{
     CompilationStudyRequest, CompilationStudyResult, CompilerArtifactRef, CompilerDiagnostic,
     CompilerDiagnosticKind, CompilerHostIdentity, CompilerImplementationIdentity,
     CompilerNodeProfile, CompilerPassExecutionObservation, CompilerPassIdentity,
-    CrossHostInvariants, ObservationModelRef, PassPipelineIdentity, RealizationRequest,
+    CrossHostInvariants, FamilyArtifactReference, FamilyCompilerObservation,
+    FamilyCompilerReference, ObservationModelRef, PassPipelineIdentity, RealizationRequest,
     RelationClaim, RunEnvironmentRef, TargetContractRef, TargetLoweringPlan, TransformationEdge,
     TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION, BACKEND_CAPABILITY_SCHEMA_VERSION,
     COMPILATION_STUDY_OBSERVATION_INTERPRETATION, COMPILATION_STUDY_RESULT_CONTRACT_ID,
-    COMPILER_ARTIFACT_SCHEMA_VERSION, LAYERED_EXECUTION_COMPARISON_INTERPRETATION,
-    PORTABLE_WASM_MVP_BACKEND_NAME, PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET,
+    COMPILER_ARTIFACT_SCHEMA_VERSION, FAMILY_COMPILER_REFERENCE_SCHEMA_VERSION,
+    LAYERED_EXECUTION_COMPARISON_INTERPRETATION, PORTABLE_WASM_MVP_BACKEND_NAME,
+    PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET,
     REALIZATION_REQUEST_SCHEMA_VERSION,
 };
 pub use compiler_architecture::{

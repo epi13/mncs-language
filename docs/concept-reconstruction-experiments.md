@@ -1,6 +1,16 @@
 # Concept Reconstruction Experiments
 
-Status: architecture proposal / non-normative
+Status: bootstrap compiler reference implemented / non-normative authority
+
+## Implemented Family Record compiler reference
+
+`CompilationStudyResult::family_reference` exposes
+`mncs-language.family-compiler-reference.v0.1`. It binds compiler/pipeline identities,
+semantic/HIR/SSA/selected-SSA stage fingerprints, request/run identity, target, backend,
+realization plan, backend artifact, unresolved obligations, and compilation status. The language
+profile remains part of the compilation request and target/backend realization remains separate.
+`mncs compiler-study ... --family-reference` emits the native reference for Control/Commons
+attachment; it is backend-neutral and makes no experiment-success claim.
 
 ## Purpose
 

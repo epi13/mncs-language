@@ -621,6 +621,7 @@ where
     };
     let mut node_identity = "local-node".to_owned();
     let mut target_name = None;
+    let mut family_reference = false;
     while let Some(option) = args.next() {
         match option.as_str() {
             "--node-id" => {
@@ -637,6 +638,7 @@ where
                 };
                 target_name = Some(value);
             }
+            "--family-reference" => family_reference = true,
             other => {
                 eprintln!("error: unknown compiler-study option {other:?}");
                 return ExitCode::from(2);
@@ -670,7 +672,12 @@ where
     let failed = result.diagnostics.iter().any(|diagnostic| {
         diagnostic.kind == mncs_model::CompilerDiagnosticKind::SemanticInvalidity
     });
-    if !print_json(&result) {
+    let printed = if family_reference {
+        print_json(&result.family_reference())
+    } else {
+        print_json(&result)
+    };
+    if !printed {
         ExitCode::from(2)
     } else if failed {
         ExitCode::FAILURE
@@ -2059,7 +2066,7 @@ fn print_usage() {
     eprintln!("  mncs check-backend-execution <program.json> <corpus.json>");
     eprintln!("  mncs validate-translation <kind> <program.json> [corpus.json]");
     eprintln!("  mncs compiler-architecture");
-    eprintln!("  mncs compiler-study <program.json> [--node-id NODE] [--target TARGET]");
+    eprintln!("  mncs compiler-study <program.json> [--node-id NODE] [--target TARGET] [--family-reference]");
     eprintln!("  mncs source-study <program.mncs> [--node-id NODE]");
     eprintln!("  mncs experiment plan <program.mncs> --backend BACKEND --corpus CORPUS [--output-dir DIR]");
     eprintln!("  mncs experiment run <program.mncs> --backend BACKEND --corpus CORPUS [--output-dir DIR] [--node-id NODE]");
