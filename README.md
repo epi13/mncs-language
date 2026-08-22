@@ -4,7 +4,7 @@
 
 Research and reference implementation for a general-purpose, verification-native programming language built on Machine-Native Complexity Standard (MNCS) principles.
 
-> **Project status:** the compiler now has an experimental source-to-backend vertical slice. Source Profile 0.1 remains the identity-function grammar. Source Profile 0.2 adds a bounded executable extension: lexical bindings, named contracts, declared capabilities/effects, `if`/`fail`, and checked integer expressions. Selected SSA can lower to a portable WASM MVP artifact when layout, ABI, integer, and trap facts are explicit. Body, SSA, and backend comparison is empirical bounded agreement, not universal equivalence. Translation validators emit PASS/FAIL/UNKNOWN independently of candidate generators. Forge may search isolated compiler candidates but does not decide language correctness. No final grammar, complete type/contract calculus, native backend, Raspberry Pi result, independent evaluation, or production suitability is claimed.
+> **Project status:** the compiler now has an experimental source-to-backend vertical slice. Source Profile 0.1 remains the identity-function grammar. Source Profile 0.2 adds a bounded executable extension with lexical bindings, a small exact integer/boolean type calculus, named contracts, declared capabilities/effects, `if`/`fail`, and checked integer expressions. Selected SSA is realized through a backend-neutral adapter boundary. The current adapters are portable WASM MVP and an executable canonical research-bytecode format. Body, SSA, and backend comparison is empirical bounded agreement, not universal equivalence. Translation validators emit PASS/FAIL/UNKNOWN independently of candidate generators. Forge may coordinate and compare experiments but does not decide language correctness. No final grammar, complete type/contract calculus, native backend, Raspberry Pi result, independent evaluation, or production suitability is claimed.
 
 ## Why this project exists
 
@@ -33,7 +33,7 @@ An MNCS-oriented program should make it possible to answer:
 - `rfcs/` — design proposals that can evolve independently of the specification.
 - `crates/mncs-model/` — the executable semantic model, canonical representation, identities, graph/CFG, evidence manifest, invalidation logic, recursive artifacts, high-level IR, validated SSA artifact, and narrow machine-intent/verifier pilots.
 - `crates/mncs-compiler/` — the evidence-bearing reference compiler driver over the existing semantic, HIR, SSA, obligation, identity, provenance, and portable-backend APIs.
-- `crates/mncs-codegen/` — replaceable portable WASM MVP backend adapter and research interpreter.
+- `crates/mncs-codegen/` — backend-neutral adapter registry plus portable WASM MVP and canonical research-bytecode adapters.
 - `crates/mncs-translation-check/` — independent PASS/FAIL/UNKNOWN translation validators; generators live in a separate module and do not certify themselves.
 - `crates/mncs-syntax/` — source envelopes, lossless tokens/CST, a bounded spanned AST/parser, and deterministic source-representation metrics.
 - `crates/mncs-cli/` — validation, canonicalization, identity, graph/CFG, evidence, IR, SSA, obligation, verification, comparison, diagnostic, diff, compile, backend execution, translation validation, and syntax-tournament commands.
@@ -55,10 +55,28 @@ Run the source vertical slice and emit its language-owned study record:
 cargo run -p mncs-cli -- source-study examples/source/identity.mncs --node-id local-source
 cargo run -p mncs-cli -- source-study examples/source/flagship.mncs --node-id local-flagship
 cargo run -p mncs-cli -- compile examples/executable/checked-add.mncs.json --target portable-wasm
+cargo run -p mncs-cli -- compile examples/executable/checked-add.mncs.json --target research-bytecode
 cargo run -p mncs-cli -- execute-backend examples/executable/checked-add.mncs.json examples/execution/checked-add-request.json
 cargo run -p mncs-cli -- check-backend-execution examples/executable/checked-add.mncs.json examples/execution/checked-add-corpus.json
 cargo run -p mncs-cli -- validate-translation checked-elision examples/executable/checked-add.mncs.json examples/execution/checked-add-corpus.json
 ```
+
+Run one language-owned experiment against the same frozen source/corpus through both adapters:
+
+```bash
+cargo run -p mncs-cli -- experiment plan examples/source/bounded-min.mncs \
+  --backend portable-wasm --corpus examples/execution/bounded-min-corpus.json
+cargo run -p mncs-cli -- experiment run examples/source/bounded-min.mncs \
+  --backend portable-wasm --corpus examples/execution/bounded-min-corpus.json \
+  --output-dir target/experiment-wasm
+cargo run -p mncs-cli -- experiment run examples/source/bounded-min.mncs \
+  --backend research-bytecode --corpus examples/execution/bounded-min-corpus.json \
+  --output-dir target/experiment-bytecode
+cargo run -p mncs-cli -- experiment compare \
+  target/experiment-wasm/result.json target/experiment-bytecode/result.json
+```
+
+`experiment execute BACKEND_ARTIFACT CORPUS` executes an already frozen artifact without recompiling it, which is the narrow runtime boundary for Fabric packaging. `experiment inspect RESULT` verifies all content identities before reporting the bounded observation. See [the language experiment contract](docs/language-experiment-contract.md) and [backend adapter specification](spec/backend-adapters.md).
 
 ## Current semantic objects
 

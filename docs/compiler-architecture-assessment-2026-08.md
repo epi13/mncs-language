@@ -2,13 +2,13 @@
 
 ## Outcome
 
-The repository has an evidence-bearing source-to-SSA vertical slice for a bounded language profile, not yet a complete language compiler.
+The repository has an evidence-bearing source-to-two-backends vertical slice for a bounded language profile, not yet a complete language compiler.
 
-C0–C2 and the first Profile 0.1 frontend slice are implemented: deterministic source envelopes, lossless tokens/CST, spanned AST, bounded elaboration, semantic graph/identity outputs, semantic→HIR→SSA orchestration, transformation observations, unresolved-obligation retention, target-plan uncertainty, Linux/Windows CI, and an AArch64 compile-shape gate. No broad grammar, complete elaborator or type calculus, portable backend, native backend, linked executable, native Raspberry Pi run, or translation validator exists.
+C0–C3 and the Profile 0.1/0.2 frontend slices are implemented experimentally: deterministic source envelopes, lossless tokens/CST, spanned AST, bounded typed elaboration, semantic graph/identity outputs, semantic→HIR→SSA orchestration, transformation observations, unresolved-obligation retention, target-plan uncertainty, backend capability/realization contracts, portable WASM and research-bytecode adapters, translation validators, Linux/Windows CI, and an AArch64 compile-shape gate. No broad grammar, complete type/contract calculus, native backend, linked executable, native Raspberry Pi run, or independent validator exists.
 
 The maturity description is therefore:
 
-> experimental source-to-SSA compiler slice with evidence contracts; language breadth and executable backend remain unimplemented.
+> experimental source-to-plural-backends compiler slice with language-owned experiment/evidence contracts; language breadth, native code generation, and distributed execution remain unimplemented.
 
 ## Existing compiler stages
 
@@ -21,11 +21,11 @@ The maturity description is therefore:
 | AST | spanned, trivia-free representation distinct from semantic identity | experimental 0.1 |
 | semantic graph | elaboration followed by `Program::semantic_graph`, emitted in compiler evidence | experimental bounded profile |
 | identity resolution | deterministic semantic identity inventory emitted after graph construction | partial; not general scope/binding resolution |
-| type and contract analysis | structural validation, effect/capability closure, obligation generation | partial |
+| type and contract analysis | exact bounded bool/integer checking, structural validation, effect/capability closure, obligation generation | partial |
 | HIR | deterministic 0.3 HIR with trace and provenance | experimental driver stage |
-| verification passes | structural validators, evidence checks, bounded body/SSA comparison | partial; not translation validation |
-| lowering / backend | canonical SSA selection and `TargetLoweringPlan` | boundary only |
-| executable artifact | reference interpreters only | missing |
+| verification passes | structural validators, evidence checks, independent-generator translation checks, bounded body/SSA/backend comparison | partial; validators share residual model/runtime trust |
+| lowering / backend | canonical SSA selection, capability manifests, realization request/plan, portable WASM and research-bytecode adapters | experimental plural boundary |
+| executable artifact | typed WASM/bytecode artifacts and adapter-owned bounded reference execution | experimental; no native/linked artifact |
 
 Run `mncs compiler-architecture` for the versioned machine-readable statement.
 
@@ -54,8 +54,8 @@ The next acceleration threshold requires contracts, not syntax volume:
 2. A type/contract calculus beyond the current explicit-input return check and structural validator.
 3. Cross-artifact relationship resolution and recursive semantic-graph completion for non-program artifacts.
 4. Versioned partial-program/recovery-node and source-map identity rules.
-5. Translation-validation request/result and fallback policy implementations.
-6. Target-contract resolution, portable backend adapter, linker derivation, executable identity, and runtime envelope.
+5. Independent translation validators, freshness-bound evidence, and a complete fallback-policy calculus.
+6. Native target-contract resolution, object/linker derivation, executable identity, and production runtime envelopes.
 7. Feature/profile compatibility and migration fixtures across compiler versions.
 8. Assurance and conformance records linked to, but never inferred from, Forge compiler experiments.
 
@@ -104,7 +104,7 @@ The first tranche added:
 - RFC 0039 defining the language/Forge boundary; and
 - a Forge consumer that compares language-owned observations without emitting assurance or conformance verdicts.
 
-The recommended-cycle tranche additionally adds Source Profile 0.1, a source envelope that binds non-file artifact relationships and provenance, a lossless lexer/CST, spanned AST, bounded AST→semantic elaboration, graph/identity/validation artifacts, a source-to-SSA CLI fixture, and Forge experiment persistence through the shared operation registry.
+The subsequent tranches add Source Profile 0.1/0.2, bounded exact type checking, source envelopes, lossless lexer/CST, spanned AST, graph/identity/validation artifacts, backend-neutral capability/realization contracts, two executable backend shapes, language-owned experiment commands/results, and Forge experiment persistence through the shared operation registry.
 
 ## Practical roadmap
 

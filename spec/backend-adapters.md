@@ -113,6 +113,12 @@ Backend artifacts from two different backends MUST remain distinguishable even w
 
 Generic backend artifact handling MUST NOT assume one artifact encoding such as WASM.
 
+The executable contract is `BackendAdapter`. Each registered adapter declares an identity-bound
+`BackendCapabilityManifest`, owns its target contract and configuration, produces a
+`TargetLoweringPlan`, lowers one exact selected-SSA identity, and optionally executes its own typed
+artifact. A `RealizationRequest` binds acceptable backend identities, required intent support,
+artifact kinds, validators, and fallback policy before realization is selected.
+
 ## Execution requirements
 
 Backend lowering and backend execution are distinct capabilities.
@@ -171,3 +177,13 @@ The backend adapter boundary is considered minimally exercised when:
 4. a second backend compiles the same frozen corpus without changing compiler sequencing;
 5. backend identity and assumptions remain present in evidence;
 6. missing target facts continue to produce unresolved lowering rather than guessed defaults.
+
+This target is now exercised by two deliberately different adapters:
+
+| Adapter | Artifact kind | Execution path | Purpose |
+| --- | --- | --- | --- |
+| `mncs-portable-wasm-mvp` | `wasm_module` | embedded decoder/interpreter for the declared MVP subset | portable binary realization experiment |
+| `mncs-research-bytecode` | `research_bytecode` | bounded SSA interpreter over a canonical, identity-bound payload | second executable shape proving that generic orchestration is not WASM-shaped |
+
+The bytecode adapter is a research control, not a production VM or native backend. Agreement between
+the two adapters over a corpus is retained as bounded observation only.
