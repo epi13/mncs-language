@@ -1,0 +1,22 @@
+mncs 0.3;
+
+// Deliberately incorrect candidate: UNKNOWN combined with UNKNOWN becomes PASS.
+module examples.cre1;
+
+enum Evidence { PASS, FAIL, UNKNOWN }
+
+fn combine(left: Evidence, right: Evidence) -> (result: Evidence) {
+    return match left {
+        PASS => right,
+        FAIL => Evidence.FAIL,
+        UNKNOWN => match right {
+            PASS => Evidence.UNKNOWN,
+            FAIL => Evidence.FAIL,
+            UNKNOWN => Evidence.PASS,
+        },
+    };
+}
+
+fn candidate(left: Evidence, right: Evidence) -> (result: Evidence) {
+    return combine(left, right);
+}

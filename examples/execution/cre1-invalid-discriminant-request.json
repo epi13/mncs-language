@@ -1,0 +1,9 @@
+{
+  "schema_version": "0.1",
+  "target": {"module": "examples.cre1", "function": "candidate"},
+  "arguments": [
+    {"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::UNKNOWN","discriminant":99}},
+    {"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre1::Evidence","variant_identity":"mncs:0.2:finite-variant:examples.cre1::Evidence::PASS","discriminant":0}}
+  ],
+  "step_budget": 256
+}

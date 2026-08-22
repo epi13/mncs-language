@@ -1,6 +1,6 @@
 # Concept Reconstruction Experiments
 
-Status: bootstrap compiler reference implemented / non-normative authority
+Status: CRE-1 and CRE-2 local bootstrap paths implemented / non-normative authority
 
 ## Implemented Family Record compiler reference
 
@@ -112,6 +112,29 @@ Reconstruct the MNCS `PASS`, `UNKNOWN`, `FAIL` combination law and test:
 - explicit failure for invalid discriminants.
 
 Compile through every currently available stage, compare independent candidates, inject incorrect candidates, and run portable backends across Fabric hosts where supported.
+
+The local source-level fixture is `examples/source/cre1-evidence-combine.mncs`. It compiles from
+Profile 0.3 source through semantic/HIR/SSA into both current adapters. The frozen corpus exhausts
+the three-by-three input domain and evaluates all six declared algebraic laws. The sibling
+`cre1-evidence-combine-wrong.mncs` deliberately violates UNKNOWN idempotence/preservation and yields
+a language-owned `FAIL` with retained case and property counterexamples. This is bounded evidence,
+not a proof of the law outside the declared finite domain.
+
+## Second CRE: authority gate
+
+`examples/source/cre2-authorized-call.mncs` carries the callee's required capability/effect closure
+at the caller and executes through both adapters. `cre2-undeclared-capability.mncs` is rejected with
+`MNE111`; `cre2-authority-laundering.mncs` is rejected with `MNE134` before HIR/backend realization.
+The declarations make the authority path machine-visible even though Profile 0.3 does not perform an
+external effect at runtime.
+
+## Third CRE blocker
+
+Profile 0.3 can model retry outcomes and authority-closed calls, but it cannot represent a retry
+sequence with a semantically visible attempt bound without hand-unrolling calls. The exact blocker
+and rejected shortcuts are recorded in
+`examples/experiments/cre3-retry-authority-blocker.json`. Bounded iteration is the next pressure
+experiment; unrestricted loops and recursive retry remain intentionally unsupported.
 
 ## Long-term recursive objective
 

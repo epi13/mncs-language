@@ -38,6 +38,7 @@ pub struct BodyValue {
 pub enum BodyType {
     Named(String),
     Integer(IntegerType),
+    Finite { identity: SemanticId, name: String },
 }
 
 impl BodyType {
@@ -61,6 +62,7 @@ impl BodyType {
             Self::Integer(integer) => {
                 format!("{}{}", if integer.signed { 'i' } else { 'u' }, integer.bits)
             }
+            Self::Finite { name, .. } => name.clone(),
         }
     }
 
@@ -115,6 +117,22 @@ pub enum BodyOperationKind {
     IntegerCompare {
         predicate: String,
         operand_type: IntegerType,
+    },
+    FiniteConstruct {
+        type_identity: SemanticId,
+        variant_identity: SemanticId,
+        discriminant: u32,
+    },
+    FiniteIsVariant {
+        type_identity: SemanticId,
+        variant_identity: SemanticId,
+        discriminant: u32,
+    },
+    Call {
+        function: SemanticId,
+        function_name: String,
+        required_capabilities: Vec<String>,
+        effects: Vec<Effect>,
     },
     Effect {
         effect: Effect,
@@ -267,7 +285,7 @@ impl FunctionBody {
             }
             if let Some(input) = function.inputs.get(index) {
                 if parameter.name != input.name
-                    || parameter.ty != BodyType::from_semantic_name(&input.value_type)
+                    || parameter.ty != semantic_body_type(program, &input.value_type)
                 {
                     errors.push(body_diagnostic(
                         "MNB005",
@@ -403,7 +421,14 @@ impl FunctionBody {
                 errors,
             );
             if matches!(block.terminator, BodyTerminator::Return { .. }) {
-                validate_return_types(&block.terminator, function, &available, &block_path, errors);
+                validate_return_types(
+                    &block.terminator,
+                    program,
+                    function,
+                    &available,
+                    &block_path,
+                    errors,
+                );
             }
         }
     }
@@ -591,6 +616,184 @@ fn validate_operation(
                     "MNB042",
                     format!("{path}.results"),
                     "integer comparison result must have boolean type",
+                ));
+            }
+        }
+        BodyOperationKind::FiniteConstruct {
+            type_identity,
+            variant_identity,
+            discriminant,
+        } => {
+            if !operation.operands.is_empty() || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB044",
+                    path.to_owned(),
+                    "finite construction requires no operands and exactly one result",
+                ));
+            }
+            let declared = program
+                .finite_types
+                .iter()
+                .find(|item| &item.identity == type_identity);
+            let valid_variant = declared.and_then(|item| {
+                item.variants.iter().find(|variant| {
+                    &variant.identity == variant_identity && variant.discriminant == *discriminant
+                })
+            });
+            if declared.is_none() || valid_variant.is_none() {
+                errors.push(body_diagnostic(
+                    "MNB045",
+                    format!("{path}.kind"),
+                    "finite constructor does not identify a declared type/variant/discriminant",
+                ));
+            }
+            if let Some(result) = operation.results.first() {
+                let expected = declared.map(|item| BodyType::Finite {
+                    identity: item.identity.clone(),
+                    name: item.name.clone(),
+                });
+                if expected.as_ref() != Some(&result.ty) {
+                    errors.push(body_diagnostic(
+                        "MNB046",
+                        format!("{path}.results"),
+                        "finite constructor result type does not match its nominal type",
+                    ));
+                }
+            }
+        }
+        BodyOperationKind::FiniteIsVariant {
+            type_identity,
+            variant_identity,
+            discriminant,
+        } => {
+            if operation.operands.len() != 1 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB047",
+                    path.to_owned(),
+                    "finite variant test requires one operand and one boolean result",
+                ));
+            }
+            let declared = program
+                .finite_types
+                .iter()
+                .find(|item| &item.identity == type_identity);
+            let valid_variant = declared.and_then(|item| {
+                item.variants.iter().find(|variant| {
+                    &variant.identity == variant_identity && variant.discriminant == *discriminant
+                })
+            });
+            let expected_operand = declared.map(|item| BodyType::Finite {
+                identity: item.identity.clone(),
+                name: item.name.clone(),
+            });
+            if declared.is_none()
+                || valid_variant.is_none()
+                || operation
+                    .operands
+                    .first()
+                    .and_then(|operand| available.get(operand))
+                    != expected_operand.as_ref()
+                || operation
+                    .results
+                    .first()
+                    .is_some_and(|result| !result.ty.is_boolean())
+            {
+                errors.push(body_diagnostic(
+                    "MNB048",
+                    format!("{path}.kind"),
+                    "finite variant test is not type/variant/discriminant consistent",
+                ));
+            }
+        }
+        BodyOperationKind::Call {
+            function: callee_identity,
+            function_name,
+            required_capabilities,
+            effects,
+        } => {
+            let callee = program.functions.iter().find(|candidate| {
+                candidate.name == *function_name
+                    && crate::identity::function_id(&program.module, &candidate.name)
+                        == *callee_identity
+            });
+            let Some(callee) = callee else {
+                errors.push(body_diagnostic(
+                    "MNB049",
+                    format!("{path}.kind.function"),
+                    "call target does not resolve to an exact function identity",
+                ));
+                validate_metadata(program, function, operation, path, errors);
+                return;
+            };
+            if operation.operands.len() != callee.inputs.len()
+                || operation.results.len() != callee.outputs.len()
+            {
+                errors.push(body_diagnostic(
+                    "MNB050",
+                    path.to_owned(),
+                    "call arity does not match the callee signature",
+                ));
+            }
+            for (operand, parameter) in operation.operands.iter().zip(&callee.inputs) {
+                if available
+                    .get(operand)
+                    .map(BodyType::semantic_name)
+                    .as_deref()
+                    != Some(parameter.value_type.as_str())
+                {
+                    errors.push(body_diagnostic(
+                        "MNB051",
+                        format!("{path}.operands"),
+                        "call argument type does not match the callee parameter",
+                    ));
+                }
+            }
+            for (result, output) in operation.results.iter().zip(&callee.outputs) {
+                if result.ty.semantic_name() != output.value_type {
+                    errors.push(body_diagnostic(
+                        "MNB052",
+                        format!("{path}.results"),
+                        "call result type does not match the callee output",
+                    ));
+                }
+            }
+            let mut declared_required = callee.capabilities.clone();
+            declared_required.sort();
+            let mut recorded_required = required_capabilities.clone();
+            recorded_required.sort();
+            let mut declared_effects = callee.effects.clone();
+            declared_effects.sort_by(|left, right| {
+                (&left.kind, &left.target, &left.capability).cmp(&(
+                    &right.kind,
+                    &right.target,
+                    &right.capability,
+                ))
+            });
+            let mut recorded_effects = effects.clone();
+            recorded_effects.sort_by(|left, right| {
+                (&left.kind, &left.target, &left.capability).cmp(&(
+                    &right.kind,
+                    &right.target,
+                    &right.capability,
+                ))
+            });
+            let caller_authorizes = required_capabilities
+                .iter()
+                .all(|capability| function.capabilities.contains(capability))
+                && effects.iter().all(|effect| {
+                    function.effects.iter().any(|caller_effect| {
+                        caller_effect.kind == effect.kind
+                            && caller_effect.capability == effect.capability
+                    })
+                });
+            if recorded_required != declared_required
+                || recorded_effects != declared_effects
+                || !caller_authorizes
+            {
+                errors.push(body_diagnostic(
+                    "MNB053",
+                    format!("{path}.kind"),
+                    "call authority/effect closure is incomplete or was laundered",
                 ));
             }
         }
@@ -855,6 +1058,7 @@ fn check_target(
 
 fn validate_return_types(
     terminator: &BodyTerminator,
+    program: &Program,
     function: &Function,
     available: &BTreeMap<String, BodyType>,
     path: &str,
@@ -872,7 +1076,7 @@ fn validate_return_types(
         return;
     }
     for (index, value) in values.iter().enumerate() {
-        let expected = BodyType::from_semantic_name(&function.outputs[index].value_type);
+        let expected = semantic_body_type(program, &function.outputs[index].value_type);
         if available.get(value) != Some(&expected) {
             errors.push(body_diagnostic(
                 "MNB036",
@@ -884,6 +1088,18 @@ fn validate_return_types(
             ));
         }
     }
+}
+
+fn semantic_body_type(program: &Program, name: &str) -> BodyType {
+    program
+        .finite_types
+        .iter()
+        .find(|finite_type| finite_type.name == name)
+        .map(|finite_type| BodyType::Finite {
+            identity: finite_type.identity.clone(),
+            name: finite_type.name.clone(),
+        })
+        .unwrap_or_else(|| BodyType::from_semantic_name(name))
 }
 
 fn body_diagnostic(code: &str, path: String, message: impl Into<String>) -> Diagnostic {

@@ -764,3 +764,106 @@ fn compiler_study_exposes_a_family_record_reference_without_claiming_success() {
         .unwrap()
         .contains("does not certify experiment success"));
 }
+
+#[test]
+fn cre1_profile_runs_exact_finite_properties_through_both_backends() {
+    let source = example("source/cre1-evidence-combine.mncs");
+    let corpus = example("execution/cre1-evidence-corpus.json");
+    let mut results = Vec::new();
+    for backend in ["mncs-portable-wasm-mvp", "mncs-research-bytecode"] {
+        let output = binary()
+            .args([
+                "experiment",
+                "run",
+                &source,
+                "--backend",
+                backend,
+                "--corpus",
+                &corpus,
+            ])
+            .output()
+            .expect("run CRE-1 experiment");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).expect("experiment JSON");
+        assert_eq!(result["status"], "PASS");
+        assert!(result["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|case_| case_["expectation_met"] == true));
+        assert!(result["properties"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|property| property["passed"] == true));
+        results.push(result);
+    }
+    assert_eq!(
+        results[0]["compiler_study"]["semantic_fingerprint"],
+        results[1]["compiler_study"]["semantic_fingerprint"]
+    );
+    assert_eq!(
+        results[0]["compiler_study"]["ssa_fingerprint"],
+        results[1]["compiler_study"]["ssa_fingerprint"]
+    );
+}
+
+#[test]
+fn cre1_wrong_candidate_retains_exact_counterexamples() {
+    let source = example("source/cre1-evidence-combine-wrong.mncs");
+    let corpus = example("execution/cre1-evidence-corpus.json");
+    let output = binary()
+        .args([
+            "experiment",
+            "run",
+            &source,
+            "--backend",
+            "mncs-research-bytecode",
+            "--corpus",
+            &corpus,
+        ])
+        .output()
+        .expect("run incorrect CRE-1 candidate");
+    assert_eq!(output.status.code(), Some(1));
+    let result: Value = serde_json::from_slice(&output.stdout).expect("experiment JSON");
+    assert_eq!(result["status"], "FAIL");
+    assert!(result["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|case_| case_["case_id"] == "unknown-unknown" && case_["expectation_met"] == false));
+    assert!(result["properties"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|property| property["property_id"] == "idempotence"
+            && property["passed"] == false
+            && property["counterexample"].is_array()));
+}
+
+#[test]
+fn profile_03_rejects_non_exhaustive_matches_and_authority_laundering() {
+    for (fixture, code) in [
+        ("source/cre1-non-exhaustive.mncs", "MNE140"),
+        ("source/cre2-undeclared-capability.mncs", "MNE111"),
+        ("source/cre2-authority-laundering.mncs", "MNE134"),
+        ("source/profile03-recursive-call.mncs", "MNE130"),
+    ] {
+        let source = example(fixture);
+        let output = binary()
+            .args(["source-study", &source])
+            .output()
+            .expect("run negative Source Profile 0.3 fixture");
+        assert_eq!(output.status.code(), Some(1));
+        let result: Value = serde_json::from_slice(&output.stdout).expect("front-end JSON");
+        assert!(result["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == code));
+    }
+}

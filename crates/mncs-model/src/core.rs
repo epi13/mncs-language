@@ -8,8 +8,24 @@ pub struct Program {
     pub schema_version: String,
     pub module: String,
     #[serde(default)]
+    pub finite_types: Vec<FiniteType>,
+    #[serde(default)]
     pub assumptions: Vec<Assumption>,
     pub functions: Vec<Function>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FiniteType {
+    pub identity: crate::SemanticId,
+    pub name: String,
+    pub variants: Vec<FiniteVariant>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FiniteVariant {
+    pub identity: crate::SemanticId,
+    pub name: String,
+    pub discriminant: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

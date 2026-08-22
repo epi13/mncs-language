@@ -1,0 +1,34 @@
+{
+  "schema_version": "0.1",
+  "name": "cre2-authorized-call-gate",
+  "cases": [
+    {
+      "id": "authorized-accept",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "examples.cre2", "function": "authorized"},
+        "arguments": [
+          {"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre2::Decision","variant_identity":"mncs:0.2:finite-variant:examples.cre2::Decision::ACCEPT","discriminant":0}}
+        ],
+        "step_budget": 128
+      },
+      "expected": [
+        {"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre2::Decision","variant_identity":"mncs:0.2:finite-variant:examples.cre2::Decision::ACCEPT","discriminant":0}}
+      ]
+    },
+    {
+      "id": "authorized-reject",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "examples.cre2", "function": "authorized"},
+        "arguments": [
+          {"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre2::Decision","variant_identity":"mncs:0.2:finite-variant:examples.cre2::Decision::REJECT","discriminant":1}}
+        ],
+        "step_budget": 128
+      },
+      "expected": [
+        {"finite":{"type_identity":"mncs:0.2:finite-type:examples.cre2::Decision","variant_identity":"mncs:0.2:finite-variant:examples.cre2::Decision::REJECT","discriminant":1}}
+      ]
+    }
+  ]
+}

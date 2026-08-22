@@ -227,7 +227,7 @@ pub fn execute_ssa_module(
         trace_truncated: false,
         effects: Vec::new(),
     };
-    let Some(mut values) = initialize_inputs(function, request, &mut result) else {
+    let Some(mut values) = initialize_inputs(program, function, request, &mut result) else {
         return result;
     };
     let blocks = function
@@ -267,7 +267,14 @@ pub fn execute_ssa_module(
                 return result;
             }
             trace_instruction(&mut result, block, instruction, "instruction");
-            if execute_instruction(program, instruction, &mut values, &mut result, request) {
+            if execute_instruction(
+                program,
+                module,
+                instruction,
+                &mut values,
+                &mut result,
+                request,
+            ) {
                 return result;
             }
         }
@@ -439,6 +446,7 @@ pub fn compare_body_and_ssa(
 
 fn execute_instruction(
     program: &Program,
+    module: &SsaModule,
     instruction: &SsaInstruction,
     values: &mut BTreeMap<SemanticId, ExecutionValue>,
     result: &mut SsaExecutionResult,
@@ -522,6 +530,142 @@ fn execute_instruction(
                 values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
             }
         }
+        SsaInstructionKind::FiniteConstruct {
+            type_identity,
+            variant_identity,
+            discriminant,
+        } => {
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Finite {
+                        type_identity: type_identity.clone(),
+                        variant_identity: variant_identity.clone(),
+                        discriminant: *discriminant,
+                    },
+                );
+            }
+        }
+        SsaInstructionKind::FiniteIsVariant {
+            type_identity,
+            variant_identity,
+            discriminant,
+        } => {
+            let Some(ExecutionValue::Finite {
+                type_identity: actual_type,
+                variant_identity: actual_variant,
+                discriminant: actual_discriminant,
+            }) = instruction
+                .inputs
+                .first()
+                .and_then(|input| values.get(input))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "finite variant test operand was unavailable",
+                );
+                return true;
+            };
+            if actual_type != type_identity
+                || !crate::execution::valid_finite_value(
+                    program,
+                    actual_type,
+                    actual_variant,
+                    *actual_discriminant,
+                )
+            {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "finite value has an invalid type/variant/discriminant",
+                );
+                return true;
+            }
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Boolean {
+                        value: actual_variant == variant_identity
+                            && actual_discriminant == discriminant,
+                    },
+                );
+            }
+        }
+        SsaInstructionKind::Call { function, .. } => {
+            let Some(callee) = program
+                .functions
+                .iter()
+                .find(|candidate| function_id(&program.module, &candidate.name) == *function)
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "SSA call target does not exist",
+                );
+                return true;
+            };
+            let Some(arguments) = instruction
+                .inputs
+                .iter()
+                .map(|input| values.get(input).cloned())
+                .collect::<Option<Vec<_>>>()
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "SSA call operands were unavailable",
+                );
+                return true;
+            };
+            let remaining = request.step_budget.saturating_sub(result.steps);
+            if remaining == 0 {
+                result.fail(
+                    ExecutionStatus::BudgetExhausted,
+                    instruction_identity(instruction),
+                    "execution step budget exhausted before SSA call",
+                );
+                return true;
+            }
+            let nested_request = crate::ExecutionRequest {
+                schema_version: request.schema_version.clone(),
+                target: crate::ExecutionTarget {
+                    module: request.target.module.clone(),
+                    function: callee.name.clone(),
+                },
+                arguments,
+                step_budget: remaining,
+                policy: request.policy.clone(),
+            };
+            let nested = execute_ssa_module(program, module, &nested_request);
+            let trace_offset = result.steps;
+            result.steps = result.steps.saturating_add(nested.steps);
+            result.effects.extend(nested.effects.clone());
+            for mut entry in nested.trace.clone() {
+                entry.step = entry.step.saturating_add(trace_offset);
+                if result.trace.len() < 256 {
+                    result.trace.push(entry);
+                } else {
+                    result.trace_truncated = true;
+                }
+            }
+            if nested.status != ExecutionStatus::Returned {
+                result.status = nested.status;
+                result.failure = nested.failure;
+                return true;
+            }
+            let Some(returned) = nested.returned.first().cloned() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "SSA callee returned no value",
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), returned);
+            }
+        }
         SsaInstructionKind::Effect => {
             if !matches!(request.policy.effects, crate::EffectExecutionPolicy::Record) {
                 result.fail(ExecutionStatus::Unsupported, instruction_identity(instruction), "effect execution requires explicit record policy; no external side effect was performed");
@@ -587,6 +731,7 @@ fn declared_effect(
 }
 
 fn initialize_inputs(
+    program: &Program,
     function: &SsaFunction,
     request: &crate::ExecutionRequest,
     result: &mut SsaExecutionResult,
@@ -616,6 +761,26 @@ fn initialize_inputs(
                 "argument does not match SSA input type",
             );
             return None;
+        }
+        if let ExecutionValue::Finite {
+            type_identity,
+            variant_identity,
+            discriminant,
+        } = argument
+        {
+            if !crate::execution::valid_finite_value(
+                program,
+                type_identity,
+                variant_identity,
+                *discriminant,
+            ) {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(input.identity.clone()),
+                    "finite argument has an invalid variant/discriminant",
+                );
+                return None;
+            }
         }
         values.insert(input.identity.clone(), normalize_value(argument, &ty)?);
     }
@@ -683,8 +848,13 @@ fn constant_value(value: i128, ty: &IrType) -> Option<ExecutionValue> {
 }
 
 fn body_type(ty: &IrType) -> Option<BodyType> {
-    let IrType::Named(name) = ty;
-    Some(BodyType::from_semantic_name(name))
+    Some(match ty {
+        IrType::Named(name) => BodyType::from_semantic_name(name),
+        IrType::Finite { identity, name } => BodyType::Finite {
+            identity: identity.clone(),
+            name: name.clone(),
+        },
+    })
 }
 
 fn value_matches_type(value: &ExecutionValue, ty: &BodyType) -> bool {
@@ -695,6 +865,9 @@ fn value_matches_type(value: &ExecutionValue, ty: &BodyType) -> bool {
         (ExecutionValue::Boolean { .. }, BodyType::Named(name)) if name == "bool" => true,
         (ExecutionValue::Boolean { .. }, BodyType::Integer(integer)) => {
             integer.bits == 1 && !integer.signed
+        }
+        (ExecutionValue::Finite { type_identity, .. }, BodyType::Finite { identity, .. }) => {
+            type_identity == identity
         }
         _ => false,
     }
@@ -725,6 +898,11 @@ fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionVal
             if integer.bits == 1 && !integer.signed =>
         {
             Some(ExecutionValue::Boolean { value: *value })
+        }
+        (ExecutionValue::Finite { type_identity, .. }, BodyType::Finite { identity, .. })
+            if type_identity == identity =>
+        {
+            Some(value.clone())
         }
         _ => None,
     }

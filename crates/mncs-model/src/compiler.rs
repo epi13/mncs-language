@@ -1023,6 +1023,24 @@ impl BackendEvidence {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendFunctionValueContract {
+    pub inputs: Vec<BackendValueContract>,
+    pub outputs: Vec<BackendValueContract>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackendValueContract {
+    Scalar {
+        semantic_type: String,
+    },
+    Finite {
+        type_identity: SemanticId,
+        variants: BTreeMap<u32, SemanticId>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackendArtifact {
     pub schema_version: String,
     pub identity: SemanticId,
@@ -1035,6 +1053,8 @@ pub struct BackendArtifact {
     pub bytes_sha256: String,
     pub bytes_hex: String,
     pub exports: Vec<String>,
+    #[serde(default)]
+    pub function_value_contracts: BTreeMap<String, BackendFunctionValueContract>,
     pub assumptions: Vec<String>,
     pub obligations_generated: Vec<SemanticId>,
     pub execution_applicability: Vec<String>,
@@ -1114,6 +1134,7 @@ impl BackendArtifact {
             bytes_sha256,
             bytes_hex,
             exports,
+            function_value_contracts: BTreeMap::new(),
             assumptions,
             obligations_generated,
             execution_applicability,
@@ -1127,6 +1148,15 @@ impl BackendArtifact {
 
     pub fn bytes(&self) -> Result<Vec<u8>, String> {
         hex_decode(&self.bytes_hex)
+    }
+
+    pub fn with_function_value_contracts(
+        mut self,
+        function_value_contracts: BTreeMap<String, BackendFunctionValueContract>,
+    ) -> Self {
+        self.function_value_contracts = function_value_contracts;
+        self.identity = identified("backend-artifact", &self.without_identity());
+        self
     }
 
     pub fn wasm_bytes(&self) -> Result<Vec<u8>, String> {
@@ -1153,6 +1183,7 @@ impl BackendArtifact {
             bytes_sha256: &self.bytes_sha256,
             bytes_hex: &self.bytes_hex,
             exports: &self.exports,
+            function_value_contracts: &self.function_value_contracts,
             assumptions: &self.assumptions,
             obligations_generated: &self.obligations_generated,
             execution_applicability: &self.execution_applicability,
@@ -1174,6 +1205,7 @@ struct BackendArtifactMaterial<'a> {
     bytes_sha256: &'a str,
     bytes_hex: &'a str,
     exports: &'a [String],
+    function_value_contracts: &'a BTreeMap<String, BackendFunctionValueContract>,
     assumptions: &'a [String],
     obligations_generated: &'a [SemanticId],
     execution_applicability: &'a [String],

@@ -12,6 +12,8 @@ use crate::{Program, SemanticDiff, SemanticIdentities, ValidationReport};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EdgeKind {
+    ContainsFiniteType,
+    ContainsFiniteVariant,
     ContainsFunction,
     ContainsBody,
     ContainsBlock,
@@ -29,6 +31,9 @@ pub enum EdgeKind {
     ProducesValue,
     PerformsEffect,
     UsesCapability,
+    Calls,
+    ConstructsVariant,
+    TestsVariant,
     RequiresObligation,
     EstablishesFact,
     ReferencesContract,
@@ -153,6 +158,21 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
         .collect::<Vec<_>>();
     let mut edges = Vec::new();
     let program_identity = program_id(&program.module);
+
+    for finite_type in &program.finite_types {
+        edges.push(GraphEdge {
+            from: program_identity.clone(),
+            to: finite_type.identity.clone(),
+            kind: EdgeKind::ContainsFiniteType,
+        });
+        for variant in &finite_type.variants {
+            edges.push(GraphEdge {
+                from: finite_type.identity.clone(),
+                to: variant.identity.clone(),
+                kind: EdgeKind::ContainsFiniteVariant,
+            });
+        }
+    }
 
     for function in &program.functions {
         let function_identity = function_id(&program.module, &function.name);
@@ -326,6 +346,68 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                             kind: EdgeKind::UsesCapability,
                         });
                     }
+                    match &operation.kind {
+                        crate::BodyOperationKind::FiniteConstruct {
+                            variant_identity, ..
+                        } => edges.push(GraphEdge {
+                            from: operation_identity.clone(),
+                            to: variant_identity.clone(),
+                            kind: EdgeKind::ConstructsVariant,
+                        }),
+                        crate::BodyOperationKind::FiniteIsVariant {
+                            variant_identity, ..
+                        } => edges.push(GraphEdge {
+                            from: operation_identity.clone(),
+                            to: variant_identity.clone(),
+                            kind: EdgeKind::TestsVariant,
+                        }),
+                        crate::BodyOperationKind::Call {
+                            function: callee,
+                            required_capabilities,
+                            effects,
+                            ..
+                        } => {
+                            edges.push(GraphEdge {
+                                from: operation_identity.clone(),
+                                to: callee.clone(),
+                                kind: EdgeKind::Calls,
+                            });
+                            for capability in required_capabilities {
+                                edges.push(GraphEdge {
+                                    from: operation_identity.clone(),
+                                    to: capability_id(&program.module, &function.name, capability),
+                                    kind: EdgeKind::UsesCapability,
+                                });
+                            }
+                            if let Some(callee_function) =
+                                program.functions.iter().find(|candidate| {
+                                    function_id(&program.module, &candidate.name) == *callee
+                                })
+                            {
+                                for effect in effects {
+                                    let canonical = serde_json::to_string(
+                                        &crate::canonical::canonical_effect(effect),
+                                    )
+                                    .expect("call effect");
+                                    edges.push(GraphEdge {
+                                        from: operation_identity.clone(),
+                                        to: effect_id(
+                                            &program.module,
+                                            &callee_function.name,
+                                            &canonical,
+                                            callee_function
+                                                .effects
+                                                .iter()
+                                                .position(|declared| declared == effect)
+                                                .unwrap_or(0),
+                                        ),
+                                        kind: EdgeKind::PerformsEffect,
+                                    });
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
                     for contract in &operation.contracts {
                         edges.push(GraphEdge {
                             from: operation_identity.clone(),
@@ -359,7 +441,15 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                                 &operation_identity,
                             ))
                         }
-                        crate::BodyOperationKind::IntegerCompare { .. } => None,
+                        crate::BodyOperationKind::IntegerCompare { .. }
+                        | crate::BodyOperationKind::FiniteConstruct { .. }
+                        | crate::BodyOperationKind::FiniteIsVariant { .. } => None,
+                        crate::BodyOperationKind::Call { .. } => {
+                            Some(crate::obligations::body_obligation_id(
+                                "call-authority-closure",
+                                &operation_identity,
+                            ))
+                        }
                         crate::BodyOperationKind::Effect { .. } => {
                             Some(crate::obligations::body_obligation_id(
                                 "effect-authorized",

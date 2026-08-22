@@ -1,0 +1,13 @@
+mncs 0.3;
+
+// Negative fixture: UNKNOWN is intentionally omitted.
+module examples.cre1_non_exhaustive;
+
+enum Evidence { PASS, FAIL, UNKNOWN }
+
+fn candidate(value: Evidence) -> (result: Evidence) {
+    return match value {
+        PASS => Evidence.PASS,
+        FAIL => Evidence.FAIL,
+    };
+}

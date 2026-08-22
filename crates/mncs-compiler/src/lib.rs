@@ -1122,6 +1122,17 @@ mod tests {
         )
     }
 
+    fn cre1_envelope() -> SourceEnvelope {
+        SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "examples.cre1",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../examples/source/cre1-evidence-combine.mncs"
+            )),
+        )
+    }
+
     #[test]
     fn source_fixture_traverses_every_front_end_stage_into_hir() {
         let compiler = ReferenceCompiler::default();
@@ -1165,6 +1176,53 @@ mod tests {
         let hir = output.front_end.program.unwrap().lower_to_ir().unwrap();
         assert_eq!(hir.functions.len(), 1);
         assert_eq!(hir.functions[0].inputs.len(), 1);
+    }
+
+    #[test]
+    fn source_profile_03_preserves_finite_match_and_call_relations() {
+        let compiler = ReferenceCompiler::default();
+        let front_end = compiler.front_end(cre1_envelope());
+        assert!(front_end.is_valid(), "{:#?}", front_end.diagnostics);
+        let program = front_end.program.expect("elaborated CRE-1 program");
+        assert_eq!(program.finite_types.len(), 1);
+        assert_eq!(program.finite_types[0].variants.len(), 3);
+        let graph = program.semantic_graph().expect("valid semantic graph");
+        assert!(graph
+            .edges
+            .iter()
+            .any(|edge| edge.kind == mncs_model::EdgeKind::Calls));
+        assert!(graph
+            .edges
+            .iter()
+            .any(|edge| edge.kind == mncs_model::EdgeKind::TestsVariant));
+        let hir = program.lower_to_ir().expect("Profile 0.3 HIR");
+        assert!(hir
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .any(|block| block.operations.iter().any(|operation| matches!(
+                operation.kind,
+                mncs_model::IrOperationKind::Call { .. }
+            ))));
+        let ssa = program.lower_to_ssa().expect("Profile 0.3 SSA");
+        assert!(ssa
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .any(
+                |block| block.instructions.iter().any(|instruction| matches!(
+                    instruction.kind,
+                    mncs_model::SsaInstructionKind::Call { .. }
+                ))
+            ));
+        assert!(program
+            .generate_obligations()
+            .obligations
+            .iter()
+            .any(|obligation| {
+                obligation.requirement.0.contains("call-authority-closure")
+                    && obligation.status == ObligationStatus::Pass
+            }));
     }
 
     #[test]

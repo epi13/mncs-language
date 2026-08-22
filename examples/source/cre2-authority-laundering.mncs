@@ -1,0 +1,18 @@
+mncs 0.3;
+
+// CRE-2 negative gate: the caller attempts to invoke an effectful callee
+// without declaring the same capability/effect closure.
+module examples.cre2_laundering;
+
+enum Decision { ACCEPT, REJECT }
+
+fn record(decision: Decision) -> (result: Decision)
+    capability audit_log
+    effect append authorized_by audit_log
+{
+    return decision;
+}
+
+fn invalid(decision: Decision) -> (result: Decision) {
+    return record(decision);
+}

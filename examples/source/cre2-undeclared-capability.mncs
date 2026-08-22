@@ -1,0 +1,12 @@
+mncs 0.3;
+
+// CRE-2 negative gate: the effect declaration lacks its authorizing capability.
+module examples.cre2_undeclared;
+
+enum Decision { ACCEPT, REJECT }
+
+fn invalid(decision: Decision) -> (result: Decision)
+    effect append authorized_by audit_log
+{
+    return decision;
+}

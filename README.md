@@ -4,7 +4,7 @@
 
 Research and reference implementation for a general-purpose, verification-native programming language built on Machine-Native Complexity Standard (MNCS) principles.
 
-> **Project status:** the compiler now has an experimental source-to-backend vertical slice. Source Profile 0.1 remains the identity-function grammar. Source Profile 0.2 adds a bounded executable extension with lexical bindings, a small exact integer/boolean type calculus, named contracts, declared capabilities/effects, `if`/`fail`, and checked integer expressions. Selected SSA is realized through a backend-neutral adapter boundary. The current adapters are portable WASM MVP and an executable canonical research-bytecode format. Body, SSA, and backend comparison is empirical bounded agreement, not universal equivalence. Translation validators emit PASS/FAIL/UNKNOWN independently of candidate generators. Forge may coordinate and compare experiments but does not decide language correctness. No final grammar, complete type/contract calculus, native backend, Raspberry Pi result, independent evaluation, or production suitability is claimed.
+> **Project status:** the compiler now has an experimental source-to-backend vertical slice. Source Profile 0.1 remains the identity-function grammar; 0.2 adds bounded integer/boolean bodies; and 0.3 adds nominal finite types, exhaustive `match`, expression returns/nesting, and non-recursive authority-closed intra-module calls. Selected SSA is realized through a backend-neutral adapter boundary. The current adapters are portable WASM MVP and an executable canonical research-bytecode format. Body, SSA, and backend comparison is empirical bounded agreement, not universal equivalence. Translation validators emit PASS/FAIL/UNKNOWN independently of candidate generators. Forge may coordinate and compare experiments but does not decide language correctness. No final grammar, complete type/contract calculus, native backend, Raspberry Pi result, independent evaluation, or production suitability is claimed.
 
 ## Why this project exists
 
@@ -75,6 +75,19 @@ cargo run -p mncs-cli -- experiment run examples/source/bounded-min.mncs \
 cargo run -p mncs-cli -- experiment compare \
   target/experiment-wasm/result.json target/experiment-bytecode/result.json
 ```
+
+Run the first source-level Concept Reconstruction Experiment through either adapter:
+
+```bash
+cargo run -p mncs-cli -- experiment run examples/source/cre1-evidence-combine.mncs \
+  --backend mncs-portable-wasm-mvp --corpus examples/execution/cre1-evidence-corpus.json
+cargo run -p mncs-cli -- experiment run examples/source/cre1-evidence-combine.mncs \
+  --backend mncs-research-bytecode --corpus examples/execution/cre1-evidence-corpus.json
+```
+
+The corpus checks all nine finite input pairs plus commutativity, associativity, idempotence,
+neutrality, absorption, and UNKNOWN preservation. The deliberately wrong source fixture exits with
+`FAIL` and retains exact counterexamples. See [Source Profile 0.3](docs/source-profile-0.3.md).
 
 `experiment execute BACKEND_ARTIFACT CORPUS` executes an already frozen artifact without recompiling it, which is the narrow runtime boundary for Fabric packaging. `experiment inspect RESULT` verifies all content identities before reporting the bounded observation. See [the language experiment contract](docs/language-experiment-contract.md) and [backend adapter specification](spec/backend-adapters.md).
 

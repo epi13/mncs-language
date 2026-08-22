@@ -10,10 +10,13 @@ claimed bounded relation, parent experiment, and provenance. The realization req
 backend identities, required intents, artifact kinds, validator capabilities, and fallback policy.
 
 The result retains the definition, compiler study, backend capability manifest, target-lowering plan,
-typed backend artifact, translation-validation results, per-case execution observations, unresolved
-obligations, and one conservative status:
+typed backend artifact, translation-validation results, per-case execution observations, bounded
+property observations, unresolved obligations, and one conservative status. An execution corpus may
+bind an exact expected return for a case and finite-domain laws (`commutative`, `associative`,
+`idempotent`, `neutral`, `absorbing`, and `preserved`). A property `FAIL` retains its first
+deterministic counterexample:
 
-- `FAIL` if compilation, validation, or an execution observation fails;
+- `FAIL` if compilation, validation, expected return, or property observation fails;
 - `UNKNOWN` if required evidence or execution remains unresolved;
 - `PASS` only when every requested bounded observation passes.
 

@@ -12,14 +12,14 @@ use std::collections::BTreeMap;
 
 use mncs_model::{
     execute_ssa_module, execute_with_policy, ArtifactRepresentation, BackendArtifact,
-    BackendCapabilityManifest, BackendConfiguration, BackendEvidence, BackendIdentity,
-    BackendResult, CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind,
-    ExecutionCorpus, ExecutionFailure, ExecutionRequest, ExecutionResult, ExecutionStatus,
-    ExecutionTarget, ExecutionValue, IntegerType, Program, SemanticId, SsaModule,
-    TargetContractRef, TargetLoweringPlan, TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION,
-    COMPILER_ARTIFACT_SCHEMA_VERSION, LAYERED_EXECUTION_COMPARISON_INTERPRETATION,
-    PORTABLE_WASM_MVP_BACKEND_NAME, PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET,
-    SSA_SCHEMA_VERSION,
+    BackendCapabilityManifest, BackendConfiguration, BackendEvidence, BackendFunctionValueContract,
+    BackendIdentity, BackendResult, BackendValueContract, BodyType, CompilerArtifactRef,
+    CompilerDiagnostic, CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure,
+    ExecutionRequest, ExecutionResult, ExecutionStatus, ExecutionTarget, ExecutionValue,
+    IntegerType, Program, SemanticId, SsaModule, TargetContractRef, TargetLoweringPlan,
+    TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION, COMPILER_ARTIFACT_SCHEMA_VERSION,
+    LAYERED_EXECUTION_COMPARISON_INTERPRETATION, PORTABLE_WASM_MVP_BACKEND_NAME,
+    PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET, SSA_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 
@@ -429,10 +429,20 @@ pub fn lower_selected_ssa(
             diagnostics,
         };
     }
-    let names = program
+    let names = ssa
         .functions
         .iter()
-        .map(|function| function.name.clone())
+        .map(|ssa_function| {
+            program
+                .functions
+                .iter()
+                .find(|function| {
+                    mncs_model::function_id(&program.module, &function.name)
+                        == ssa_function.semantic_identity
+                })
+                .map(|function| function.name.clone())
+                .unwrap_or_default()
+        })
         .collect::<Vec<_>>();
     let outcome = lower_module(ssa, &names);
     if !outcome.unsupported.is_empty() || outcome.module.is_none() {
@@ -497,7 +507,8 @@ pub fn lower_selected_ssa(
         plan.target.evidence.clone(),
         Vec::new(),
         TransformationStatus::Pass,
-    );
+    )
+    .with_function_value_contracts(function_value_contracts(program));
     let artifact_ref = CompilerArtifactRef::new(
         ArtifactRepresentation::BackendArtifact,
         BACKEND_ARTIFACT_SCHEMA_VERSION,
@@ -612,7 +623,8 @@ pub fn lower_research_bytecode(
         plan.target.evidence.clone(),
         Vec::new(),
         TransformationStatus::Pass,
-    );
+    )
+    .with_function_value_contracts(function_value_contracts(program));
     let artifact_ref = CompilerArtifactRef::new(
         ArtifactRepresentation::BackendArtifact,
         BACKEND_ARTIFACT_SCHEMA_VERSION,
@@ -645,6 +657,49 @@ pub struct BackendExecutionResult {
     pub artifact_sha256: Option<String>,
     pub returned: Vec<ExecutionValue>,
     pub failure: Option<ExecutionFailure>,
+}
+
+fn function_value_contracts(program: &Program) -> BTreeMap<String, BackendFunctionValueContract> {
+    let value_contract = |name: &str| {
+        program
+            .finite_types
+            .iter()
+            .find(|finite_type| finite_type.name == name)
+            .map_or_else(
+                || BackendValueContract::Scalar {
+                    semantic_type: name.to_owned(),
+                },
+                |finite_type| BackendValueContract::Finite {
+                    type_identity: finite_type.identity.clone(),
+                    variants: finite_type
+                        .variants
+                        .iter()
+                        .map(|variant| (variant.discriminant, variant.identity.clone()))
+                        .collect(),
+                },
+            )
+    };
+    program
+        .functions
+        .iter()
+        .map(|function| {
+            (
+                function.name.clone(),
+                BackendFunctionValueContract {
+                    inputs: function
+                        .inputs
+                        .iter()
+                        .map(|value| value_contract(&value.value_type))
+                        .collect(),
+                    outputs: function
+                        .outputs
+                        .iter()
+                        .map(|value| value_contract(&value.value_type))
+                        .collect(),
+                },
+            )
+        })
+        .collect()
 }
 
 fn execute_portable_wasm(
@@ -696,6 +751,24 @@ fn execute_portable_wasm(
             return result;
         }
     };
+    let value_contract = artifact
+        .function_value_contracts
+        .get(&request.target.function);
+    if let Some(contract) = value_contract {
+        if contract.inputs.len() != request.arguments.len()
+            || !contract
+                .inputs
+                .iter()
+                .zip(&request.arguments)
+                .all(|(contract, value)| backend_input_matches(contract, value))
+        {
+            result.failure = Some(ExecutionFailure {
+                identity: Some(artifact.identity.clone()),
+                reason: "backend request violates the language-owned value contract".to_owned(),
+            });
+            return result;
+        }
+    }
     match execute_function(
         &module,
         &request.target.function,
@@ -703,8 +776,28 @@ fn execute_portable_wasm(
         request.step_budget,
     ) {
         Ok(returned) => {
-            result.status = ExecutionStatus::Returned;
-            result.returned = returned;
+            let returned = if let Some(contract) = value_contract {
+                contract
+                    .outputs
+                    .iter()
+                    .zip(returned)
+                    .map(|(contract, value)| backend_output_value(contract, value))
+                    .collect::<Result<Vec<_>, _>>()
+            } else {
+                Ok(returned)
+            };
+            match returned {
+                Ok(returned) => {
+                    result.status = ExecutionStatus::Returned;
+                    result.returned = returned;
+                }
+                Err(reason) => {
+                    result.failure = Some(ExecutionFailure {
+                        identity: Some(artifact.identity.clone()),
+                        reason,
+                    });
+                }
+            }
         }
         Err(trap) => {
             result.status = trap.status;
@@ -715,6 +808,105 @@ fn execute_portable_wasm(
         }
     }
     result
+}
+
+fn backend_input_matches(contract: &BackendValueContract, value: &ExecutionValue) -> bool {
+    match (contract, value) {
+        (BackendValueContract::Scalar { semantic_type }, value) => {
+            match (BodyType::from_semantic_name(semantic_type), value) {
+                (BodyType::Named(name), ExecutionValue::Boolean { .. }) => name == "bool",
+                (BodyType::Integer(expected), ExecutionValue::Integer { value, ty }) => {
+                    expected == *ty && integer_value_fits(*value, expected)
+                }
+                _ => false,
+            }
+        }
+        (
+            BackendValueContract::Finite {
+                type_identity,
+                variants,
+            },
+            ExecutionValue::Finite {
+                type_identity: actual_type,
+                variant_identity,
+                discriminant,
+            },
+        ) => type_identity == actual_type && variants.get(discriminant) == Some(variant_identity),
+        _ => false,
+    }
+}
+
+fn backend_output_value(
+    contract: &BackendValueContract,
+    value: ExecutionValue,
+) -> Result<ExecutionValue, String> {
+    match contract {
+        BackendValueContract::Scalar { semantic_type } => {
+            match (BodyType::from_semantic_name(semantic_type), value) {
+                (BodyType::Named(name), ExecutionValue::Integer { value, .. })
+                    if name == "bool" && (value == 0 || value == 1) =>
+                {
+                    Ok(ExecutionValue::Boolean { value: value == 1 })
+                }
+                (BodyType::Integer(expected), ExecutionValue::Integer { value, .. }) => {
+                    let value = reinterpret_unsigned_backend_value(value, expected);
+                    if !integer_value_fits(value, expected) {
+                        return Err(
+                            "backend returned a scalar outside the language-owned integer type"
+                                .to_owned(),
+                        );
+                    }
+                    Ok(ExecutionValue::Integer {
+                        value,
+                        ty: expected,
+                    })
+                }
+                _ => Err(
+                    "backend scalar result violates the language-owned value contract".to_owned(),
+                ),
+            }
+        }
+        BackendValueContract::Finite {
+            type_identity,
+            variants,
+        } => {
+            let ExecutionValue::Integer { value, .. } = value else {
+                return Err(
+                    "backend finite result was not represented by an integer discriminant"
+                        .to_owned(),
+                );
+            };
+            let discriminant = u32::try_from(value).map_err(|_| {
+                "backend returned a negative or oversized finite discriminant".to_owned()
+            })?;
+            let variant_identity = variants
+                .get(&discriminant)
+                .cloned()
+                .ok_or_else(|| "backend returned an invalid finite discriminant".to_owned())?;
+            Ok(ExecutionValue::Finite {
+                type_identity: type_identity.clone(),
+                variant_identity,
+                discriminant,
+            })
+        }
+    }
+}
+
+fn reinterpret_unsigned_backend_value(value: i128, ty: IntegerType) -> i128 {
+    if !ty.signed && value < 0 && matches!(ty.bits, 32 | 64) {
+        value + (1_i128 << ty.bits)
+    } else {
+        value
+    }
+}
+
+fn integer_value_fits(value: i128, ty: IntegerType) -> bool {
+    if ty.signed {
+        let bound = 1_i128 << (ty.bits - 1);
+        (-bound..bound).contains(&value)
+    } else {
+        value >= 0 && value < (1_i128 << ty.bits)
+    }
 }
 
 fn execute_research_bytecode(
@@ -1014,6 +1206,23 @@ fn values_agree(left: &[ExecutionValue], right: &[ExecutionValue]) -> bool {
                 },
                 ExecutionValue::Boolean { value },
             ) => *int_value == i128::from(*value),
+            (
+                ExecutionValue::Finite {
+                    type_identity: left_type,
+                    variant_identity: left_variant,
+                    discriminant: left_discriminant,
+                },
+                ExecutionValue::Finite {
+                    type_identity: right_type,
+                    variant_identity: right_variant,
+                    discriminant: right_discriminant,
+                },
+            ) => {
+                left_type == right_type
+                    && left_variant == right_variant
+                    && left_discriminant == right_discriminant
+            }
+            _ => false,
         })
 }
 
@@ -1124,14 +1333,17 @@ mod tests {
         let corpus = ExecutionCorpus {
             schema_version: mncs_model::EXECUTION_CORPUS_SCHEMA_VERSION.to_owned(),
             name: "checked-add-backend".to_owned(),
+            properties: Vec::new(),
             cases: vec![
                 ExecutionCase {
                     id: "sum".to_owned(),
                     request: request(20, 22),
+                    expected: None,
                 },
                 ExecutionCase {
                     id: "overflow".to_owned(),
                     request: request(i128::from(i32::MAX), 1),
+                    expected: None,
                 },
             ],
         };

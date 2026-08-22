@@ -579,14 +579,17 @@ mod tests {
         ExecutionCorpus {
             schema_version: mncs_model::EXECUTION_CORPUS_SCHEMA_VERSION.to_owned(),
             name: "checked-add".to_owned(),
+            properties: Vec::new(),
             cases: vec![
                 ExecutionCase {
                     id: "sum".to_owned(),
                     request: request(20, 22),
+                    expected: None,
                 },
                 ExecutionCase {
                     id: "overflow".to_owned(),
                     request: request(i128::from(i32::MAX), 1),
+                    expected: None,
                 },
             ],
         }
@@ -681,9 +684,11 @@ mod tests {
         let no_overflow = ExecutionCorpus {
             schema_version: mncs_model::EXECUTION_CORPUS_SCHEMA_VERSION.to_owned(),
             name: "no-overflow".to_owned(),
+            properties: Vec::new(),
             cases: vec![ExecutionCase {
                 id: "small".to_owned(),
                 request: request(1, 2),
+                expected: None,
             }],
         };
         let unknown = validate_checked_elision(&program, &before, &after, &no_overflow);
