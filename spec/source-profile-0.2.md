@@ -18,11 +18,11 @@ Profile 0.2 function declarations MAY include:
 - `fail MODE;`;
 - integer literals and `+ - * == != < <= > >=`.
 
-The function still ends with an explicit `return NAME;`. Integer expressions elaborate as checked `i64` operations. Comparison expressions elaborate as boolean conditions.
+The function still ends with an explicit `return NAME;`. The bounded type calculus contains `bool` plus signed and unsigned 8-, 16-, 32-, and 64-bit integers. Integer expressions preserve their exact declared type and use checked arithmetic. Comparison expressions require same-typed integer operands and elaborate as boolean conditions. Initializers, conditions, and returns are type checked; unsupported types are rejected rather than coerced.
 
 ## Binding
 
-Each `let` and parameter occupies a lexical scope. Duplicate names in the same scope are `MNE110` ambiguity. Resolution is innermost-scope lookup, never declaration-order search, hashmap iteration, or filesystem order.
+Each `let` and parameter occupies a lexical scope. Duplicate names in the same scope are `MNE110` ambiguity while a nested scope may shadow an outer binding. Duplicate functions, unresolved names, type mismatches, and statements after a terminal `return` or `fail` are deterministic errors. Resolution is innermost-scope lookup by exact binding identity, never hashmap iteration or filesystem order.
 
 ## Authority
 

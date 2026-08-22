@@ -1,0 +1,15 @@
+mncs 0.2;
+
+// Concept Reconstruction Experiment: reconstruct bounded integer minimum from
+// lexical binding, comparison, control flow, and explicit return semantics.
+module examples.concepts;
+
+fn bounded_min(a: i32, b: i32) -> (result: i32)
+    requires bounded_inputs
+    capability checked_integer
+{
+    if a > b {
+        return b;
+    }
+    return a;
+}

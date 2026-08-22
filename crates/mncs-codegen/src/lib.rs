@@ -12,13 +12,14 @@ use std::collections::BTreeMap;
 
 use mncs_model::{
     execute_ssa_module, execute_with_policy, ArtifactRepresentation, BackendArtifact,
-    BackendConfiguration, BackendEvidence, BackendIdentity, BackendResult, CompilerArtifactRef,
-    CompilerDiagnostic, CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure,
-    ExecutionRequest, ExecutionResult, ExecutionStatus, ExecutionTarget, ExecutionValue,
-    IntegerType, Program, SemanticId, SsaModule, TargetContractRef, TargetLoweringPlan,
-    TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION, COMPILER_ARTIFACT_SCHEMA_VERSION,
-    LAYERED_EXECUTION_COMPARISON_INTERPRETATION, PORTABLE_WASM_MVP_BACKEND_NAME,
-    PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET, SSA_SCHEMA_VERSION,
+    BackendCapabilityManifest, BackendConfiguration, BackendEvidence, BackendIdentity,
+    BackendResult, CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind,
+    ExecutionCorpus, ExecutionFailure, ExecutionRequest, ExecutionResult, ExecutionStatus,
+    ExecutionTarget, ExecutionValue, IntegerType, Program, SemanticId, SsaModule,
+    TargetContractRef, TargetLoweringPlan, TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION,
+    COMPILER_ARTIFACT_SCHEMA_VERSION, LAYERED_EXECUTION_COMPARISON_INTERPRETATION,
+    PORTABLE_WASM_MVP_BACKEND_NAME, PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET,
+    SSA_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,8 +27,92 @@ use crate::lower::lower_module;
 use crate::wasm::{decode_module, encode_module, execute_function, WASM_MAGIC, WASM_VERSION};
 
 pub const PORTABLE_WASM_FORMAT: &str = "application/wasm; mncs-portable-wasm-mvp-0.1";
+pub const PORTABLE_WASM_ARTIFACT_KIND: &str = "wasm_module";
+pub const RESEARCH_BYTECODE_BACKEND_NAME: &str = "mncs-research-bytecode";
+pub const RESEARCH_BYTECODE_BACKEND_VERSION: &str = "0.1";
+pub const RESEARCH_BYTECODE_TARGET: &str = "mncs:target:research-bytecode-0.1";
+pub const RESEARCH_BYTECODE_FORMAT: &str =
+    "application/vnd.mncs.research-bytecode+json; version=0.1";
+pub const RESEARCH_BYTECODE_ARTIFACT_KIND: &str = "research_bytecode";
 pub const BACKEND_EXECUTION_RESULT_SCHEMA_VERSION: &str = "0.1";
 pub const LAYERED_EXECUTION_COMPARISON_SCHEMA_VERSION: &str = "0.1";
+
+pub trait BackendAdapter {
+    fn capabilities(&self) -> BackendCapabilityManifest;
+    fn target(&self) -> TargetContractRef;
+    fn configuration(&self) -> BackendConfiguration;
+    fn plan(&self, selected_ssa: CompilerArtifactRef) -> TargetLoweringPlan;
+    fn lower(
+        &self,
+        program: &Program,
+        ssa: &SsaModule,
+        selected_ssa: CompilerArtifactRef,
+        plan: &TargetLoweringPlan,
+    ) -> BackendResult;
+    fn execute(
+        &self,
+        artifact: &BackendArtifact,
+        request: &ExecutionRequest,
+    ) -> BackendExecutionResult;
+}
+
+pub struct PortableWasmAdapter;
+pub struct ResearchBytecodeAdapter;
+
+pub fn backend_names() -> Vec<&'static str> {
+    vec![
+        PORTABLE_WASM_MVP_BACKEND_NAME,
+        RESEARCH_BYTECODE_BACKEND_NAME,
+    ]
+}
+
+pub fn backend_adapter(name: &str) -> Option<Box<dyn BackendAdapter>> {
+    match name {
+        PORTABLE_WASM_MVP_BACKEND_NAME | "portable-wasm" => Some(Box::new(PortableWasmAdapter)),
+        RESEARCH_BYTECODE_BACKEND_NAME | "research-bytecode" => {
+            Some(Box::new(ResearchBytecodeAdapter))
+        }
+        _ => None,
+    }
+}
+
+pub fn backend_capabilities(name: &str) -> Option<BackendCapabilityManifest> {
+    backend_adapter(name).map(|adapter| adapter.capabilities())
+}
+
+pub fn target_for_backend(name: &str) -> Option<TargetContractRef> {
+    backend_adapter(name).map(|adapter| adapter.target())
+}
+
+pub fn configuration_for_backend(name: &str) -> Option<BackendConfiguration> {
+    backend_adapter(name).map(|adapter| adapter.configuration())
+}
+
+pub fn plan_for_backend(
+    name: &str,
+    selected_ssa: CompilerArtifactRef,
+) -> Option<TargetLoweringPlan> {
+    backend_adapter(name).map(|adapter| adapter.plan(selected_ssa))
+}
+
+pub fn lower_with_backend(
+    name: &str,
+    program: &Program,
+    ssa: &SsaModule,
+    selected_ssa: CompilerArtifactRef,
+    plan: &TargetLoweringPlan,
+) -> BackendResult {
+    backend_adapter(name).map_or_else(
+        || {
+            failed(vec![CompilerDiagnostic::new(
+                "CGN001",
+                CompilerDiagnosticKind::UnavailableBackendCapability,
+                format!("unknown backend adapter {name:?}"),
+            )])
+        },
+        |adapter| adapter.lower(program, ssa, selected_ssa, plan),
+    )
+}
 
 pub fn portable_wasm_backend() -> BackendIdentity {
     BackendIdentity::new(
@@ -54,6 +139,46 @@ pub fn portable_wasm_backend_configuration() -> BackendConfiguration {
             "saturating and widening arithmetic are unsupported".to_owned(),
         ],
     }
+}
+
+pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
+    BackendCapabilityManifest::new(
+        portable_wasm_backend(),
+        "mncs:selected-ssa-to-portable-wasm-mvp:0.1",
+        [PORTABLE_WASM_MVP_TARGET.to_owned()].into_iter().collect(),
+        [SSA_SCHEMA_VERSION.to_owned()].into_iter().collect(),
+        ["data-layout", "abi", "integer", "trap"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        ["checked_integer", "wrapping_integer", "explicit_failure"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        [
+            "memory",
+            "effects",
+            "saturating_integer",
+            "widening_integer",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
+        [PORTABLE_WASM_ARTIFACT_KIND.to_owned()]
+            .into_iter()
+            .collect(),
+        ["bounded_execution_agreement".to_owned()]
+            .into_iter()
+            .collect(),
+        ["embedded_mncs_wasm_interpreter".to_owned()]
+            .into_iter()
+            .collect(),
+        ["scalar_parameter_result_abi".to_owned()]
+            .into_iter()
+            .collect(),
+        "checked overflow and declared failure trap through WASM unreachable",
+        true,
+    )
 }
 
 pub fn portable_wasm_target() -> TargetContractRef {
@@ -132,6 +257,121 @@ pub fn target_is_portable_wasm(target: &TargetContractRef) -> bool {
         && target.facts.contains_key("abi")
         && target.facts.contains_key("integer")
         && target.facts.contains_key("trap")
+        && !target.evidence.is_empty()
+}
+
+pub fn research_bytecode_backend() -> BackendIdentity {
+    BackendIdentity::new(
+        RESEARCH_BYTECODE_BACKEND_NAME,
+        RESEARCH_BYTECODE_BACKEND_VERSION,
+    )
+}
+
+pub fn research_bytecode_configuration() -> BackendConfiguration {
+    BackendConfiguration {
+        backend: research_bytecode_backend(),
+        options: BTreeMap::from([("encoding".to_owned(), "canonical-json".to_owned())]),
+        target_features: ["bounded-ssa-interpreter".to_owned()].into_iter().collect(),
+        linker_toolchain: None,
+        assumptions: vec![
+            "execution uses the bounded MNCS SSA interpreter".to_owned(),
+            "artifact serialization is not native machine code".to_owned(),
+        ],
+    }
+}
+
+pub fn research_bytecode_capabilities() -> BackendCapabilityManifest {
+    BackendCapabilityManifest::new(
+        research_bytecode_backend(),
+        "mncs:selected-ssa-to-research-bytecode:0.1",
+        [RESEARCH_BYTECODE_TARGET.to_owned()].into_iter().collect(),
+        [SSA_SCHEMA_VERSION.to_owned()].into_iter().collect(),
+        ["serialization", "integer", "failure", "runtime"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        [
+            "checked_integer",
+            "wrapping_integer",
+            "explicit_failure",
+            "bounded_control_flow",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
+        ["host_effects", "foreign_calls", "unbounded_execution"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        [RESEARCH_BYTECODE_ARTIFACT_KIND.to_owned()]
+            .into_iter()
+            .collect(),
+        ["bounded_execution_agreement".to_owned()]
+            .into_iter()
+            .collect(),
+        ["mncs_ssa_interpreter".to_owned()].into_iter().collect(),
+        ["language_level_call_signature".to_owned()]
+            .into_iter()
+            .collect(),
+        "preserves SSA returned values and explicit bounded failure observations",
+        true,
+    )
+}
+
+pub fn research_bytecode_target() -> TargetContractRef {
+    TargetContractRef::new(
+        RESEARCH_BYTECODE_TARGET,
+        BTreeMap::from([
+            (
+                "serialization".to_owned(),
+                "canonical JSON payload".to_owned(),
+            ),
+            (
+                "integer".to_owned(),
+                "MNCS SSA integer semantics".to_owned(),
+            ),
+            (
+                "failure".to_owned(),
+                "MNCS SSA explicit failure semantics".to_owned(),
+            ),
+            (
+                "runtime".to_owned(),
+                "bounded MNCS SSA interpreter".to_owned(),
+            ),
+        ]),
+        vec![SemanticId(
+            "mncs:target-evidence:research-bytecode-0.1:declared-research-contract".to_owned(),
+        )],
+        vec!["research bytecode is an inspectable interpreter realization".to_owned()],
+    )
+}
+
+pub fn research_bytecode_plan(selected_ssa: CompilerArtifactRef) -> TargetLoweringPlan {
+    TargetLoweringPlan::with_explicit_facts(
+        selected_ssa,
+        research_bytecode_target(),
+        Some(research_bytecode_configuration()),
+        vec!["SSA value types remain explicit in the payload".to_owned()],
+        vec!["language-level function signature".to_owned()],
+        BTreeMap::from([(
+            "integer".to_owned(),
+            "execute exact SSA integer intent".to_owned(),
+        )]),
+        BTreeMap::from([(
+            "failure".to_owned(),
+            "retain explicit SSA failure status".to_owned(),
+        )]),
+        Vec::new(),
+        vec!["preserve selected SSA without rewriting".to_owned()],
+        TransformationStatus::Pass,
+    )
+}
+
+pub fn target_is_research_bytecode(target: &TargetContractRef) -> bool {
+    target.candidate == RESEARCH_BYTECODE_TARGET
+        && ["serialization", "integer", "failure", "runtime"]
+            .iter()
+            .all(|fact| target.facts.contains_key(*fact))
         && !target.evidence.is_empty()
 }
 
@@ -239,10 +479,11 @@ pub fn lower_selected_ssa(
         .unwrap_or_else(portable_wasm_backend);
     let mut assumptions = plan.assumptions_introduced.clone();
     assumptions.extend(plan.target.assumptions.clone());
-    let artifact = BackendArtifact::new(
+    let artifact = BackendArtifact::new_with_kind(
         backend.clone(),
         selected_ssa.clone(),
         plan.target.clone(),
+        PORTABLE_WASM_ARTIFACT_KIND,
         PORTABLE_WASM_FORMAT,
         &bytes,
         outcome.exports,
@@ -252,6 +493,121 @@ pub fn lower_selected_ssa(
             "embedded mncs-portable-wasm-mvp interpreter".to_owned(),
             "no host CLI".to_owned(),
             "no WASI".to_owned(),
+        ],
+        plan.target.evidence.clone(),
+        Vec::new(),
+        TransformationStatus::Pass,
+    );
+    let artifact_ref = CompilerArtifactRef::new(
+        ArtifactRepresentation::BackendArtifact,
+        BACKEND_ARTIFACT_SCHEMA_VERSION,
+        artifact.bytes_sha256.clone(),
+    );
+    let evidence = BackendEvidence::new(
+        backend,
+        selected_ssa,
+        artifact_ref.clone(),
+        assumptions,
+        plan.target.evidence.clone(),
+        TransformationStatus::Pass,
+    );
+    BackendResult {
+        status: TransformationStatus::Pass,
+        artifact: Some(artifact),
+        artifact_ref: Some(artifact_ref),
+        evidence: Some(evidence),
+        diagnostics,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ResearchBytecodePayload {
+    schema_version: String,
+    program: Program,
+    ssa: SsaModule,
+}
+
+pub fn lower_research_bytecode(
+    program: &Program,
+    ssa: &SsaModule,
+    selected_ssa: CompilerArtifactRef,
+    plan: &TargetLoweringPlan,
+) -> BackendResult {
+    let mut diagnostics = Vec::new();
+    if selected_ssa.representation != ArtifactRepresentation::SelectedSsa
+        || !selected_ssa.identity_is_valid()
+        || selected_ssa.fingerprint != ssa.fingerprint().unwrap_or_default()
+    {
+        diagnostics.push(CompilerDiagnostic::new(
+            "CGR101",
+            CompilerDiagnosticKind::InvalidRequest,
+            "research bytecode requires the exact selected SSA identity",
+        ));
+        return failed(diagnostics);
+    }
+    if !target_is_research_bytecode(&plan.target) {
+        diagnostics.push(CompilerDiagnostic::new(
+            "CGR201",
+            CompilerDiagnosticKind::MissingTargetEvidence,
+            "research bytecode requires serialization, integer, failure, and runtime facts",
+        ));
+        return BackendResult {
+            status: TransformationStatus::Unknown,
+            artifact: None,
+            artifact_ref: None,
+            evidence: None,
+            diagnostics,
+        };
+    }
+    if plan.status != TransformationStatus::Pass {
+        diagnostics.push(CompilerDiagnostic::new(
+            "CGR202",
+            CompilerDiagnosticKind::MissingTargetEvidence,
+            "research bytecode will not realize a non-PASS target plan",
+        ));
+        return BackendResult {
+            status: TransformationStatus::Unknown,
+            artifact: None,
+            artifact_ref: None,
+            evidence: None,
+            diagnostics,
+        };
+    }
+    let payload = ResearchBytecodePayload {
+        schema_version: "0.1".to_owned(),
+        program: program.clone(),
+        ssa: ssa.clone(),
+    };
+    let bytes = match serde_json::to_vec(&payload) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            diagnostics.push(CompilerDiagnostic::new(
+                "CGR301",
+                CompilerDiagnosticKind::InternalCompilerDefect,
+                format!("research bytecode serialization failed: {error}"),
+            ));
+            return failed(diagnostics);
+        }
+    };
+    let backend = research_bytecode_backend();
+    let assumptions = plan.assumptions_introduced.clone();
+    let artifact = BackendArtifact::new_with_kind(
+        backend.clone(),
+        selected_ssa.clone(),
+        plan.target.clone(),
+        RESEARCH_BYTECODE_ARTIFACT_KIND,
+        RESEARCH_BYTECODE_FORMAT,
+        &bytes,
+        program
+            .functions
+            .iter()
+            .map(|function| function.name.clone())
+            .collect(),
+        assumptions.clone(),
+        Vec::new(),
+        vec![
+            "bounded MNCS SSA interpreter".to_owned(),
+            "no host process execution".to_owned(),
         ],
         plan.target.evidence.clone(),
         Vec::new(),
@@ -291,7 +647,7 @@ pub struct BackendExecutionResult {
     pub failure: Option<ExecutionFailure>,
 }
 
-pub fn execute_backend(
+fn execute_portable_wasm(
     artifact: &BackendArtifact,
     request: &ExecutionRequest,
 ) -> BackendExecutionResult {
@@ -312,7 +668,7 @@ pub fn execute_backend(
         });
         return result;
     }
-    let bytes = match artifact.wasm_bytes() {
+    let bytes = match artifact.bytes() {
         Ok(bytes) => bytes,
         Err(reason) => {
             result.failure = Some(ExecutionFailure {
@@ -359,6 +715,151 @@ pub fn execute_backend(
         }
     }
     result
+}
+
+fn execute_research_bytecode(
+    artifact: &BackendArtifact,
+    request: &ExecutionRequest,
+) -> BackendExecutionResult {
+    let mut result = BackendExecutionResult {
+        schema_version: BACKEND_EXECUTION_RESULT_SCHEMA_VERSION.to_owned(),
+        status: ExecutionStatus::InvalidRequest,
+        target: request.target.clone(),
+        backend: artifact.backend.clone(),
+        artifact_identity: Some(artifact.identity.clone()),
+        artifact_sha256: Some(artifact.bytes_sha256.clone()),
+        returned: Vec::new(),
+        failure: None,
+    };
+    if !artifact.identity_is_valid()
+        || artifact.artifact_kind != RESEARCH_BYTECODE_ARTIFACT_KIND
+        || artifact.backend != research_bytecode_backend()
+    {
+        result.failure = Some(ExecutionFailure {
+            identity: Some(artifact.identity.clone()),
+            reason: "artifact is not current research bytecode".to_owned(),
+        });
+        return result;
+    }
+    let bytes = match artifact.bytes() {
+        Ok(bytes) => bytes,
+        Err(reason) => {
+            result.failure = Some(ExecutionFailure {
+                identity: Some(artifact.identity.clone()),
+                reason,
+            });
+            return result;
+        }
+    };
+    let payload: ResearchBytecodePayload = match serde_json::from_slice(&bytes) {
+        Ok(payload) => payload,
+        Err(error) => {
+            result.failure = Some(ExecutionFailure {
+                identity: Some(artifact.identity.clone()),
+                reason: format!("invalid research bytecode payload: {error}"),
+            });
+            return result;
+        }
+    };
+    let observation = execute_ssa_module(&payload.program, &payload.ssa, request);
+    result.status = observation.status;
+    result.returned = observation.returned;
+    result.failure = observation.failure;
+    result
+}
+
+pub fn execute_backend(
+    artifact: &BackendArtifact,
+    request: &ExecutionRequest,
+) -> BackendExecutionResult {
+    backend_adapter(&artifact.backend.name).map_or_else(
+        || BackendExecutionResult {
+            schema_version: BACKEND_EXECUTION_RESULT_SCHEMA_VERSION.to_owned(),
+            status: ExecutionStatus::Unsupported,
+            target: request.target.clone(),
+            backend: artifact.backend.clone(),
+            artifact_identity: Some(artifact.identity.clone()),
+            artifact_sha256: Some(artifact.bytes_sha256.clone()),
+            returned: Vec::new(),
+            failure: Some(ExecutionFailure {
+                identity: Some(artifact.identity.clone()),
+                reason: "no registered adapter can execute this backend artifact".to_owned(),
+            }),
+        },
+        |adapter| adapter.execute(artifact, request),
+    )
+}
+
+impl BackendAdapter for PortableWasmAdapter {
+    fn capabilities(&self) -> BackendCapabilityManifest {
+        portable_wasm_capabilities()
+    }
+
+    fn target(&self) -> TargetContractRef {
+        portable_wasm_target()
+    }
+
+    fn configuration(&self) -> BackendConfiguration {
+        portable_wasm_backend_configuration()
+    }
+
+    fn plan(&self, selected_ssa: CompilerArtifactRef) -> TargetLoweringPlan {
+        portable_wasm_plan(selected_ssa)
+    }
+
+    fn lower(
+        &self,
+        program: &Program,
+        ssa: &SsaModule,
+        selected_ssa: CompilerArtifactRef,
+        plan: &TargetLoweringPlan,
+    ) -> BackendResult {
+        lower_selected_ssa(program, ssa, selected_ssa, plan)
+    }
+
+    fn execute(
+        &self,
+        artifact: &BackendArtifact,
+        request: &ExecutionRequest,
+    ) -> BackendExecutionResult {
+        execute_portable_wasm(artifact, request)
+    }
+}
+
+impl BackendAdapter for ResearchBytecodeAdapter {
+    fn capabilities(&self) -> BackendCapabilityManifest {
+        research_bytecode_capabilities()
+    }
+
+    fn target(&self) -> TargetContractRef {
+        research_bytecode_target()
+    }
+
+    fn configuration(&self) -> BackendConfiguration {
+        research_bytecode_configuration()
+    }
+
+    fn plan(&self, selected_ssa: CompilerArtifactRef) -> TargetLoweringPlan {
+        research_bytecode_plan(selected_ssa)
+    }
+
+    fn lower(
+        &self,
+        program: &Program,
+        ssa: &SsaModule,
+        selected_ssa: CompilerArtifactRef,
+        plan: &TargetLoweringPlan,
+    ) -> BackendResult {
+        lower_research_bytecode(program, ssa, selected_ssa, plan)
+    }
+
+    fn execute(
+        &self,
+        artifact: &BackendArtifact,
+        request: &ExecutionRequest,
+    ) -> BackendExecutionResult {
+        execute_research_bytecode(artifact, request)
+    }
 }
 
 fn widen_to_type(value: i128, ty: IntegerType) -> i128 {
@@ -646,6 +1147,55 @@ mod tests {
     }
 
     #[test]
+    fn two_backend_adapters_share_selected_ssa_without_sharing_artifact_shape() {
+        let program = program();
+        let ssa = program.lower_to_ssa().unwrap();
+        let selected = selected_ssa_ref(&ssa);
+        let wasm = lower_with_backend(
+            "portable-wasm",
+            &program,
+            &ssa,
+            selected.clone(),
+            &portable_wasm_plan(selected.clone()),
+        )
+        .artifact
+        .unwrap();
+        let bytecode = lower_with_backend(
+            "research-bytecode",
+            &program,
+            &ssa,
+            selected.clone(),
+            &research_bytecode_plan(selected),
+        )
+        .artifact
+        .unwrap();
+        assert_eq!(wasm.input, bytecode.input);
+        assert_ne!(wasm.backend, bytecode.backend);
+        assert_eq!(wasm.artifact_kind, PORTABLE_WASM_ARTIFACT_KIND);
+        assert_eq!(bytecode.artifact_kind, RESEARCH_BYTECODE_ARTIFACT_KIND);
+        assert_ne!(wasm.identity, bytecode.identity);
+        let wasm_result = execute_backend(&wasm, &request(20, 22));
+        let bytecode_result = execute_backend(&bytecode, &request(20, 22));
+        assert_eq!(wasm_result.status, ExecutionStatus::Returned);
+        assert_eq!(wasm_result.returned, bytecode_result.returned);
+    }
+
+    #[test]
+    fn backend_capabilities_are_identity_bound_and_non_wasm_shaped() {
+        let wasm = portable_wasm_capabilities();
+        let bytecode = research_bytecode_capabilities();
+        assert!(wasm.identity_is_valid());
+        assert!(bytecode.identity_is_valid());
+        assert_ne!(wasm.backend, bytecode.backend);
+        assert!(bytecode
+            .artifact_kinds
+            .contains(RESEARCH_BYTECODE_ARTIFACT_KIND));
+        assert!(!bytecode
+            .artifact_kinds
+            .contains(PORTABLE_WASM_ARTIFACT_KIND));
+    }
+
+    #[test]
     fn unevidenced_target_does_not_emit_a_backend_artifact() {
         let program = program();
         let ssa = program.lower_to_ssa().unwrap();
@@ -670,7 +1220,7 @@ mod tests {
         let mut artifact = lower_selected_ssa(&program, &ssa, selected, &plan)
             .artifact
             .unwrap();
-        artifact.bytes_hex = "00".to_owned();
+        "00".clone_into(&mut artifact.bytes_hex);
         let executed = execute_backend(&artifact, &request(1, 1));
         assert_ne!(executed.status, ExecutionStatus::Returned);
     }

@@ -6,8 +6,9 @@ use std::{
 };
 
 use mncs_codegen::{
-    compare_body_ssa_and_backend, execute_backend, lower_selected_ssa, portable_wasm_plan,
-    portable_wasm_target, selected_ssa_ref, target_is_portable_wasm,
+    backend_adapter, backend_capabilities, backend_names, compare_body_ssa_and_backend,
+    execute_backend, lower_selected_ssa, portable_wasm_plan, selected_ssa_ref, target_for_backend,
+    target_is_portable_wasm,
 };
 use mncs_compiler::{native_node_profile, reference_compiler_architecture, ReferenceCompiler};
 use mncs_model::{
@@ -16,8 +17,10 @@ use mncs_model::{
     CompilationStatus, CompilationStudyRequest, Confidence, DeterministicVerifier,
     DiagnosticCategory, DiagnosticObligation, EvidenceFreshness, EvidenceManifest, EvidenceState,
     ExecutionComparison, ExecutionCorpus, ExecutionRequest, ExecutionStatus, FunctionBody,
-    LoweringExecutionComparison, LoweringExecutionStatus, ObligationStatus, Program, SemanticDiff,
-    SemanticId, TargetContractRef,
+    LanguageExperimentCaseObservation, LanguageExperimentComparison, LanguageExperimentDefinition,
+    LanguageExperimentResult, LoweringExecutionComparison, LoweringExecutionStatus,
+    ObligationStatus, Program, RealizationRequest, SemanticDiff, SemanticId, TargetContractRef,
+    ValidatorRequirement,
 };
 use mncs_syntax::{
     analyze, SourceArtifactKind, SourceEnvelope, SourceMetrics, SourceOrigin, SourceOriginKind,
@@ -81,6 +84,7 @@ fn main() -> ExitCode {
         }
         "compiler-study" => compiler_study_command(args),
         "source-study" => source_study_command(args),
+        "experiment" => experiment_command(args),
         "diff" => two_manifest_command(args, diff),
         "compare" => two_manifest_command(args, compare),
         "slice" => slice_command(args),
@@ -656,7 +660,7 @@ where
     if target.is_some() {
         emit.insert(ArtifactRepresentation::TargetLoweringPlan);
     }
-    if target.as_ref().is_some_and(target_is_portable_wasm) {
+    if target.as_ref().is_some_and(target_has_backend_adapter) {
         emit.insert(ArtifactRepresentation::BackendArtifact);
     }
     let request = compiler.request_for_program(&program, emit, target);
@@ -729,6 +733,462 @@ where
             } else {
                 ExitCode::from(2)
             }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ExperimentOptions {
+    source_path: String,
+    backend: String,
+    corpus_path: String,
+    output_dir: Option<PathBuf>,
+    node_identity: String,
+}
+
+struct PreparedExperiment {
+    envelope: SourceEnvelope,
+    program: Program,
+    definition: LanguageExperimentDefinition,
+}
+
+fn experiment_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let Some(action) = args.next() else {
+        eprintln!("error: experiment requires plan, run, execute, inspect, or compare");
+        return ExitCode::from(2);
+    };
+    match action.as_str() {
+        "plan" | "run" => {
+            let options = match parse_experiment_options(args) {
+                Ok(options) => options,
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    return ExitCode::from(2);
+                }
+            };
+            let prepared = match prepare_experiment(&options) {
+                Ok(prepared) => prepared,
+                Err(code) => return code,
+            };
+            if action == "plan" {
+                if let Some(output_dir) = &options.output_dir {
+                    if let Err(error) = fs::create_dir_all(output_dir).and_then(|_| {
+                        write_pretty_json(output_dir.join("definition.json"), &prepared.definition)
+                    }) {
+                        eprintln!("error: unable to write experiment plan: {error}");
+                        return ExitCode::from(2);
+                    }
+                }
+                return if print_json(&prepared.definition) {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::from(2)
+                };
+            }
+            run_experiment(options, prepared)
+        }
+        "execute" => {
+            let (Some(artifact_path), Some(corpus_path)) = (args.next(), args.next()) else {
+                eprintln!("error: experiment execute requires an artifact and corpus path");
+                return ExitCode::from(2);
+            };
+            if args.next().is_some() {
+                eprintln!("error: unexpected experiment execute arguments");
+                return ExitCode::from(2);
+            }
+            let artifact = match read_json::<mncs_model::BackendArtifact>(&artifact_path) {
+                Ok(artifact) => artifact,
+                Err(code) => return code,
+            };
+            let corpus = match read_json::<ExecutionCorpus>(&corpus_path) {
+                Ok(corpus) => corpus,
+                Err(code) => return code,
+            };
+            let observations = corpus
+                .cases
+                .iter()
+                .map(|case_| {
+                    let observation = execute_backend(&artifact, &case_.request);
+                    LanguageExperimentCaseObservation {
+                        case_id: case_.id.clone(),
+                        status: observation.status,
+                        returned: observation.returned,
+                        failure_reason: observation.failure.map(|failure| failure.reason),
+                    }
+                })
+                .collect::<Vec<_>>();
+            let invalid = observations.iter().any(|observation| {
+                matches!(
+                    observation.status,
+                    ExecutionStatus::InvalidRequest | ExecutionStatus::Unsupported
+                )
+            });
+            if !print_json(&observations) {
+                ExitCode::from(2)
+            } else if invalid {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
+        "inspect" => {
+            let Some(path) = args.next() else {
+                eprintln!("error: experiment inspect requires a result path");
+                return ExitCode::from(2);
+            };
+            if args.next().is_some() {
+                eprintln!("error: unexpected experiment inspect arguments");
+                return ExitCode::from(2);
+            }
+            let result = match read_json::<LanguageExperimentResult>(&path) {
+                Ok(result) => result,
+                Err(code) => return code,
+            };
+            let report = ExperimentInspection::from(&result);
+            if print_json(&report) && report.identity_valid {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        "compare" => {
+            let (Some(left_path), Some(right_path)) = (args.next(), args.next()) else {
+                eprintln!("error: experiment compare requires two result paths");
+                return ExitCode::from(2);
+            };
+            if args.next().is_some() {
+                eprintln!("error: unexpected experiment compare arguments");
+                return ExitCode::from(2);
+            }
+            let left = match read_json::<LanguageExperimentResult>(&left_path) {
+                Ok(result) => result,
+                Err(code) => return code,
+            };
+            let right = match read_json::<LanguageExperimentResult>(&right_path) {
+                Ok(result) => result,
+                Err(code) => return code,
+            };
+            let comparison = LanguageExperimentComparison::compare(&left, &right);
+            if print_json(&comparison) {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(2)
+            }
+        }
+        other => {
+            eprintln!("error: unknown experiment action {other:?}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn parse_experiment_options<I>(args: I) -> Result<ExperimentOptions, String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let source_path = args
+        .next()
+        .ok_or_else(|| "experiment plan/run requires an MNCS source path".to_owned())?;
+    let mut backend = None;
+    let mut corpus_path = None;
+    let mut output_dir = None;
+    let mut node_identity = "local-experiment-node".to_owned();
+    while let Some(option) = args.next() {
+        match option.as_str() {
+            "--backend" => {
+                backend = Some(
+                    args.next()
+                        .ok_or_else(|| "--backend requires an adapter name".to_owned())?,
+                );
+            }
+            "--corpus" => {
+                corpus_path = Some(
+                    args.next()
+                        .ok_or_else(|| "--corpus requires a JSON path".to_owned())?,
+                );
+            }
+            "--output-dir" => {
+                output_dir = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| "--output-dir requires a path".to_owned())?,
+                ));
+            }
+            "--node-id" => {
+                node_identity = args
+                    .next()
+                    .ok_or_else(|| "--node-id requires a value".to_owned())?;
+            }
+            other => return Err(format!("unknown experiment option {other:?}")),
+        }
+    }
+    let backend = backend.ok_or_else(|| {
+        format!(
+            "--backend is required; available adapters: {}",
+            backend_names().join(", ")
+        )
+    })?;
+    if backend_adapter(&backend).is_none() {
+        return Err(format!(
+            "unknown backend {backend:?}; available adapters: {}",
+            backend_names().join(", ")
+        ));
+    }
+    Ok(ExperimentOptions {
+        source_path,
+        backend,
+        corpus_path: corpus_path.ok_or_else(|| "--corpus is required".to_owned())?,
+        output_dir,
+        node_identity,
+    })
+}
+
+fn prepare_experiment(options: &ExperimentOptions) -> Result<PreparedExperiment, ExitCode> {
+    let source = read_source(&options.source_path)?;
+    let envelope = SourceEnvelope::new(
+        SourceArtifactKind::Program,
+        options.source_path.clone(),
+        SourceOrigin {
+            kind: SourceOriginKind::Path,
+            locator: Some(options.source_path.clone()),
+        },
+        source,
+    );
+    let compiler = ReferenceCompiler::default();
+    let front_end = compiler.front_end(envelope.clone());
+    let Some(program) = front_end.program.clone().filter(|_| front_end.is_valid()) else {
+        let _ = print_json(&front_end);
+        return Err(ExitCode::FAILURE);
+    };
+    let ssa = program.lower_to_ssa().map_err(|error| {
+        eprintln!("error: unable to produce selected SSA for experiment: {error}");
+        ExitCode::FAILURE
+    })?;
+    let selected = selected_ssa_ref(&ssa);
+    let adapter = backend_adapter(&options.backend).expect("validated by option parser");
+    let capabilities = adapter.capabilities();
+    let target = adapter.target();
+    let realization = RealizationRequest::new(
+        selected,
+        target,
+        [capabilities.backend.clone()].into_iter().collect(),
+        ["checked_integer", "explicit_failure"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        capabilities.artifact_kinds.clone(),
+        ["bounded_execution_agreement".to_owned()]
+            .into_iter()
+            .collect(),
+        "fail_closed_no_backend_fallback",
+    );
+    let corpus = read_json::<ExecutionCorpus>(&options.corpus_path)?;
+    let definition = LanguageExperimentDefinition::new(
+        Path::new(&options.source_path)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("mncs-experiment"),
+        envelope.identity.clone(),
+        envelope.language_version.clone(),
+        compiler.identity.identity.clone(),
+        BTreeMap::from([("backend".to_owned(), capabilities.backend.name.clone())]),
+        realization,
+        corpus,
+        vec![ValidatorRequirement {
+            relation: "bounded_observational_agreement".to_owned(),
+            validator_profile: "backend-lowering-bounded-agreement:0.1".to_owned(),
+            required: true,
+            allow_unknown: false,
+        }],
+        vec![
+            "compiler_study".to_owned(),
+            "realization_plan".to_owned(),
+            "backend_artifact".to_owned(),
+            "translation_validation".to_owned(),
+            "case_observations".to_owned(),
+        ],
+        vec![
+            "source_to_ssa_identity_chain_is_exact".to_owned(),
+            "FAIL_dominates_UNKNOWN_dominates_PASS".to_owned(),
+        ],
+        "bounded_public_behavior_agreement",
+        None,
+        Vec::new(),
+    );
+    Ok(PreparedExperiment {
+        envelope,
+        program,
+        definition,
+    })
+}
+
+fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> ExitCode {
+    let compiler = ReferenceCompiler::default();
+    let emit = [
+        ArtifactRepresentation::Semantic,
+        ArtifactRepresentation::Hir,
+        ArtifactRepresentation::Ssa,
+        ArtifactRepresentation::TargetLoweringPlan,
+        ArtifactRepresentation::BackendArtifact,
+        ArtifactRepresentation::EvidenceBundle,
+    ]
+    .into_iter()
+    .collect();
+    let request = match compiler.request_for_program_with_backend(
+        &prepared.program,
+        emit,
+        &options.backend,
+    ) {
+        Ok(request) => request,
+        Err(diagnostic) => {
+            let _ = print_json(&diagnostic);
+            return ExitCode::FAILURE;
+        }
+    };
+    let compilation = compiler.compile(request, &prepared.program);
+    if compilation.status == CompilationStatus::Failed {
+        let _ = print_json(&compilation);
+        return ExitCode::FAILURE;
+    }
+    let study_output = compiler.run_source_study_with_backend(
+        prepared.envelope.clone(),
+        native_node_profile(options.node_identity),
+        &options.backend,
+    );
+    let Some(study) = study_output.study else {
+        let _ = print_json(&study_output.front_end);
+        return ExitCode::FAILURE;
+    };
+    let (Some(ssa), Some(plan), Some(artifact)) = (
+        compilation.emissions.ssa.as_ref(),
+        compilation.emissions.target_lowering_plan.clone(),
+        compilation.emissions.backend.clone(),
+    ) else {
+        let _ = print_json(&compilation);
+        return ExitCode::FAILURE;
+    };
+    let validation = validate_backend_lowering(
+        &prepared.program,
+        ssa,
+        &artifact,
+        &prepared.definition.corpus,
+    );
+    let cases = prepared
+        .definition
+        .corpus
+        .cases
+        .iter()
+        .map(|case_| {
+            let observation = execute_backend(&artifact, &case_.request);
+            LanguageExperimentCaseObservation {
+                case_id: case_.id.clone(),
+                status: observation.status,
+                returned: observation.returned,
+                failure_reason: observation.failure.map(|failure| failure.reason),
+            }
+        })
+        .collect();
+    let mut unresolved = Vec::new();
+    if compilation.status == CompilationStatus::CompletedWithUnresolvedObligations {
+        unresolved.push("compilation retained unresolved obligations".to_owned());
+    }
+    let capabilities = backend_capabilities(&options.backend).expect("validated backend");
+    let result = LanguageExperimentResult::new(
+        prepared.definition,
+        study,
+        capabilities,
+        plan,
+        artifact,
+        vec![validation],
+        cases,
+        unresolved,
+    );
+    if let Some(output_dir) = &options.output_dir {
+        if let Err(error) = write_experiment_outputs(output_dir, &result) {
+            eprintln!("error: unable to write experiment outputs: {error}");
+            return ExitCode::from(2);
+        }
+    }
+    let status = result.status;
+    if !print_json(&result) {
+        ExitCode::from(2)
+    } else if status == mncs_model::LanguageExperimentStatus::Fail {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+fn write_experiment_outputs(
+    output_dir: &Path,
+    result: &LanguageExperimentResult,
+) -> Result<(), std::io::Error> {
+    fs::create_dir_all(output_dir)?;
+    write_pretty_json(output_dir.join("definition.json"), &result.definition)?;
+    write_pretty_json(
+        output_dir.join("compiler-study.json"),
+        &result.compiler_study,
+    )?;
+    write_pretty_json(
+        output_dir.join("realization-plan.json"),
+        &result.realization_plan,
+    )?;
+    write_pretty_json(output_dir.join("backend-artifact.json"), &result.artifact)?;
+    write_pretty_json(output_dir.join("result.json"), result)?;
+    let bytes = result.artifact.bytes().map_err(std::io::Error::other)?;
+    fs::write(
+        output_dir.join(format!("artifact.{}", result.artifact.artifact_kind)),
+        bytes,
+    )
+}
+
+#[derive(Debug, Serialize)]
+struct ExperimentInspection {
+    identity: SemanticId,
+    identity_valid: bool,
+    definition_identity: SemanticId,
+    source_artifact_identity: String,
+    semantic_fingerprint: Option<String>,
+    hir_fingerprint: Option<String>,
+    ssa_fingerprint: Option<String>,
+    realization_request_identity: SemanticId,
+    realization_plan_identity: SemanticId,
+    backend_identity: SemanticId,
+    backend_artifact_identity: SemanticId,
+    backend_artifact_kind: String,
+    status: mncs_model::LanguageExperimentStatus,
+    case_count: usize,
+    validation_judgements: Vec<mncs_model::TranslationJudgement>,
+    interpretation: String,
+}
+
+impl From<&LanguageExperimentResult> for ExperimentInspection {
+    fn from(result: &LanguageExperimentResult) -> Self {
+        Self {
+            identity: result.identity.clone(),
+            identity_valid: result.identity_is_valid(),
+            definition_identity: result.definition_identity.clone(),
+            source_artifact_identity: result.definition.source_artifact_identity.clone(),
+            semantic_fingerprint: result.compiler_study.semantic_fingerprint.clone(),
+            hir_fingerprint: result.compiler_study.hir_fingerprint.clone(),
+            ssa_fingerprint: result.compiler_study.ssa_fingerprint.clone(),
+            realization_request_identity: result.definition.realization.identity.clone(),
+            realization_plan_identity: result.realization_plan.identity.clone(),
+            backend_identity: result.backend.identity.clone(),
+            backend_artifact_identity: result.artifact.identity.clone(),
+            backend_artifact_kind: result.artifact.artifact_kind.clone(),
+            status: result.status,
+            case_count: result.cases.len(),
+            validation_judgements: result
+                .translation_validations
+                .iter()
+                .map(|validation| validation.judgement)
+                .collect(),
+            interpretation: result.interpretation.clone(),
         }
     }
 }
@@ -815,11 +1275,17 @@ fn parse_emit(value: &str) -> Result<BTreeSet<ArtifactRepresentation>, String> {
 
 fn unevidenced_target(candidate: impl Into<String>) -> TargetContractRef {
     let candidate = candidate.into();
-    if candidate == "portable-wasm"
-        || candidate == mncs_model::PORTABLE_WASM_MVP_TARGET
-        || candidate == "mncs:target:portable-wasm-mvp-0.1"
-    {
-        return portable_wasm_target();
+    for backend_name in backend_names() {
+        if candidate == backend_name
+            || (backend_name == mncs_model::PORTABLE_WASM_MVP_BACKEND_NAME
+                && candidate == "portable-wasm")
+            || (backend_name == mncs_codegen::RESEARCH_BYTECODE_BACKEND_NAME
+                && candidate == "research-bytecode")
+        {
+            if let Some(target) = target_for_backend(backend_name) {
+                return target;
+            }
+        }
     }
     TargetContractRef::new(
         candidate,
@@ -827,6 +1293,13 @@ fn unevidenced_target(candidate: impl Into<String>) -> TargetContractRef {
         Vec::new(),
         vec!["target name is a candidate identifier, not target evidence".to_owned()],
     )
+}
+
+fn target_has_backend_adapter(target: &TargetContractRef) -> bool {
+    backend_names()
+        .into_iter()
+        .filter_map(target_for_backend)
+        .any(|known| known == *target)
 }
 
 fn read_program_unvalidated(path: &str) -> Result<Program, ExitCode> {
@@ -1588,6 +2061,11 @@ fn print_usage() {
     eprintln!("  mncs compiler-architecture");
     eprintln!("  mncs compiler-study <program.json> [--node-id NODE] [--target TARGET]");
     eprintln!("  mncs source-study <program.mncs> [--node-id NODE]");
+    eprintln!("  mncs experiment plan <program.mncs> --backend BACKEND --corpus CORPUS [--output-dir DIR]");
+    eprintln!("  mncs experiment run <program.mncs> --backend BACKEND --corpus CORPUS [--output-dir DIR] [--node-id NODE]");
+    eprintln!("  mncs experiment execute <backend-artifact.json> <corpus.json>");
+    eprintln!("  mncs experiment inspect <result.json>");
+    eprintln!("  mncs experiment compare <left-result.json> <right-result.json>");
     eprintln!("  mncs diff <before.json> <after.json>");
     eprintln!("  mncs compare <before.json> <after.json>");
     eprintln!("  mncs slice <manifest.json> <semantic-identity>");
