@@ -1,0 +1,42 @@
+{
+  "schema_version": "0.1",
+  "name": "bounded-min-concept-reconstruction",
+  "cases": [
+    {
+      "id": "left-smaller",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "examples.concepts", "function": "bounded_min"},
+        "arguments": [
+          {"integer": {"value": 7, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 11, "type": {"bits": 32, "signed": true}}}
+        ],
+        "step_budget": 64
+      }
+    },
+    {
+      "id": "right-smaller",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "examples.concepts", "function": "bounded_min"},
+        "arguments": [
+          {"integer": {"value": 19, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": -4, "type": {"bits": 32, "signed": true}}}
+        ],
+        "step_budget": 64
+      }
+    },
+    {
+      "id": "equal",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "examples.concepts", "function": "bounded_min"},
+        "arguments": [
+          {"integer": {"value": 3, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 3, "type": {"bits": 32, "signed": true}}}
+        ],
+        "step_budget": 64
+      }
+    }
+  ]
+}

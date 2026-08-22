@@ -169,6 +169,24 @@ impl ReferenceCompiler {
         envelope: SourceEnvelope,
         node: CompilerNodeProfile,
     ) -> SourceStudyOutput {
+        self.run_source_study_inner(envelope, node, None)
+    }
+
+    pub fn run_source_study_with_backend(
+        &self,
+        envelope: SourceEnvelope,
+        node: CompilerNodeProfile,
+        backend_name: &str,
+    ) -> SourceStudyOutput {
+        self.run_source_study_inner(envelope, node, Some(backend_name))
+    }
+
+    fn run_source_study_inner(
+        &self,
+        envelope: SourceEnvelope,
+        node: CompilerNodeProfile,
+        backend_name: Option<&str>,
+    ) -> SourceStudyOutput {
         let front_end = self.front_end(envelope);
         let Some(program) = front_end.program.as_ref().filter(|_| front_end.is_valid()) else {
             return SourceStudyOutput {
@@ -176,7 +194,7 @@ impl ReferenceCompiler {
                 study: None,
             };
         };
-        let emit = [
+        let mut emit = [
             ArtifactRepresentation::Semantic,
             ArtifactRepresentation::Hir,
             ArtifactRepresentation::Ssa,
@@ -184,7 +202,16 @@ impl ReferenceCompiler {
         ]
         .into_iter()
         .collect::<BTreeSet<_>>();
-        let request = self.request_for_program(program, emit, None);
+        if backend_name.is_some() {
+            emit.insert(ArtifactRepresentation::TargetLoweringPlan);
+            emit.insert(ArtifactRepresentation::BackendArtifact);
+        }
+        let request = match backend_name {
+            Some(name) => self
+                .request_for_program_with_backend(program, emit, name)
+                .expect("backend name was validated by the experiment planner"),
+            None => self.request_for_program(program, emit, None),
+        };
         let study_request = CompilationStudyRequest::new(node, request, Vec::new());
         let mut study = self.run_study(study_request, program);
         let front_end_fingerprints = front_end
@@ -283,7 +310,16 @@ impl ReferenceCompiler {
 pub fn elaborate_program(ast: &AbstractSyntaxTree) -> Result<Program, Vec<SourceDiagnostic>> {
     let mut diagnostics = Vec::new();
     let mut functions = Vec::new();
+    let mut names = std::collections::BTreeSet::new();
     for function in &ast.functions {
+        if !names.insert(function.name.text.clone()) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE104",
+                "function identity is duplicated in this module namespace",
+                function.name.span,
+            ));
+            continue;
+        }
         match elaborate_function(ast, function) {
             Ok(elaborated) => functions.push(elaborated),
             Err(mut errors) => diagnostics.append(&mut errors),
@@ -336,9 +372,18 @@ fn elaborate_function(
         .map(|input| BodyParameter {
             id: input.name.text.clone(),
             name: input.name.text.clone(),
-            ty: BodyType::from_semantic_name(&input.value_type.text),
+            ty: profile_type(
+                &input.value_type.text,
+                input.value_type.span,
+                &mut diagnostics,
+            ),
         })
         .collect::<Vec<_>>();
+    let output_type = profile_type(
+        &function.outputs[0].value_type.text,
+        function.outputs[0].value_type.span,
+        &mut diagnostics,
+    );
     let mut capabilities = function
         .capabilities
         .iter()
@@ -402,10 +447,11 @@ fn elaborate_function(
         .map(|clause| clause.name.text.clone())
         .collect::<Vec<_>>();
     let mut env = BindingEnv::new();
-    for input in &function.inputs {
+    for (input, parameter) in function.inputs.iter().zip(&parameters) {
         env.bind(
             input.name.text.clone(),
             input.name.text.clone(),
+            parameter.ty.clone(),
             input.span,
             &mut diagnostics,
         );
@@ -417,18 +463,12 @@ fn elaborate_function(
             &mut diagnostics,
         );
         if let Some(returned) = returned {
-            if let Some(input) = function
-                .inputs
-                .iter()
-                .find(|input| input.name.text == returned)
-            {
-                if input.value_type.text != function.outputs[0].value_type.text {
-                    diagnostics.push(elaboration_diagnostic(
-                        "MNE103",
-                        "returned value type does not match the declared output type",
-                        function.body.returned_value.span,
-                    ));
-                }
+            if returned.ty != output_type {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE103",
+                    "returned value type does not match the declared output type",
+                    function.body.returned_value.span,
+                ));
             }
         }
         vec![BodyBlock {
@@ -440,14 +480,18 @@ fn elaborate_function(
             },
         }]
     } else {
-        let mut builder = BodyBuilder::new();
+        let mut builder = BodyBuilder::new(output_type.clone());
         builder.elaborate_statements(&function.body.statements, &mut env, &mut diagnostics);
         if let Some(returned) = env.resolve(
             &function.body.returned_value.text,
             function.body.returned_value.span,
             &mut diagnostics,
         ) {
-            builder.finish_return(returned);
+            builder.finish_return(
+                returned,
+                function.body.returned_value.span,
+                &mut diagnostics,
+            );
         }
         builder.blocks
     };
@@ -481,7 +525,13 @@ fn elaborate_function(
 }
 
 struct BindingEnv {
-    scopes: Vec<std::collections::BTreeMap<String, (String, SourceSpan)>>,
+    scopes: Vec<std::collections::BTreeMap<String, (ResolvedBinding, SourceSpan)>>,
+}
+
+#[derive(Clone)]
+struct ResolvedBinding {
+    id: String,
+    ty: BodyType,
 }
 
 impl BindingEnv {
@@ -495,6 +545,7 @@ impl BindingEnv {
         &mut self,
         name: String,
         id: String,
+        ty: BodyType,
         span: SourceSpan,
         diagnostics: &mut Vec<SourceDiagnostic>,
     ) {
@@ -508,7 +559,7 @@ impl BindingEnv {
             ));
             return;
         }
-        scope.insert(name, (id, span));
+        scope.insert(name, (ResolvedBinding { id, ty }, span));
     }
 
     fn resolve(
@@ -516,7 +567,7 @@ impl BindingEnv {
         name: &str,
         span: SourceSpan,
         diagnostics: &mut Vec<SourceDiagnostic>,
-    ) -> Option<String> {
+    ) -> Option<ResolvedBinding> {
         for scope in self.scopes.iter().rev() {
             if let Some((id, _)) = scope.get(name) {
                 return Some(id.clone());
@@ -544,10 +595,11 @@ struct BodyBuilder {
     current: usize,
     next_value: usize,
     next_block: usize,
+    output_type: BodyType,
 }
 
 impl BodyBuilder {
-    fn new() -> Self {
+    fn new(output_type: BodyType) -> Self {
         Self {
             blocks: vec![BodyBlock {
                 id: "entry".to_owned(),
@@ -558,6 +610,7 @@ impl BodyBuilder {
             current: 0,
             next_value: 0,
             next_block: 0,
+            output_type,
         }
     }
 
@@ -568,6 +621,14 @@ impl BodyBuilder {
         diagnostics: &mut Vec<SourceDiagnostic>,
     ) {
         for statement in statements {
+            if !self.block_is_open() {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE114",
+                    "statement is unreachable after a terminal return or failure",
+                    statement_span(statement),
+                ));
+                break;
+            }
             self.elaborate_statement(statement, env, diagnostics);
         }
     }
@@ -585,11 +646,25 @@ impl BodyBuilder {
                 value,
                 span,
             } => {
-                let Some(produced) = self.elaborate_expr(value, env, diagnostics) else {
+                let declared = profile_type(&value_type.text, value_type.span, diagnostics);
+                let Some(produced) = self.elaborate_expr(value, Some(&declared), env, diagnostics)
+                else {
                     return;
                 };
-                env.bind(name.text.clone(), produced.clone(), *span, diagnostics);
-                let _ = value_type;
+                if produced.ty != declared {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE115",
+                        "binding initializer type does not match its declared type",
+                        *span,
+                    ));
+                }
+                env.bind(
+                    name.text.clone(),
+                    produced.id.clone(),
+                    declared,
+                    *span,
+                    diagnostics,
+                );
             }
             AstStmt::If {
                 condition,
@@ -597,14 +672,24 @@ impl BodyBuilder {
                 else_body,
                 ..
             } => {
-                let Some(cond) = self.elaborate_expr(condition, env, diagnostics) else {
+                let bool_type = BodyType::Named("bool".to_owned());
+                let Some(cond) = self.elaborate_expr(condition, Some(&bool_type), env, diagnostics)
+                else {
                     return;
                 };
+                if cond.ty != bool_type {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE116",
+                        "if condition must have type bool",
+                        condition.span(),
+                    ));
+                    return;
+                }
                 let then_id = self.new_block();
                 let else_id = self.new_block();
                 let join_id = self.new_block();
                 self.blocks[self.current].terminator = BodyTerminator::ConditionalBranch {
-                    condition: cond,
+                    condition: cond.id,
                     then_target: then_id.clone(),
                     then_arguments: Vec::new(),
                     else_target: else_id.clone(),
@@ -650,8 +735,15 @@ impl BodyBuilder {
             }
             AstStmt::Return { value, span } => {
                 if let Some(resolved) = env.resolve(&value.text, *span, diagnostics) {
+                    if resolved.ty != self.output_type {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE103",
+                            "returned value type does not match the declared output type",
+                            *span,
+                        ));
+                    }
                     self.blocks[self.current].terminator = BodyTerminator::Return {
-                        values: vec![resolved],
+                        values: vec![resolved.id],
                     };
                 }
             }
@@ -661,29 +753,52 @@ impl BodyBuilder {
     fn elaborate_expr(
         &mut self,
         expr: &AstExpr,
+        expected: Option<&BodyType>,
         env: &mut BindingEnv,
         diagnostics: &mut Vec<SourceDiagnostic>,
-    ) -> Option<String> {
+    ) -> Option<ResolvedBinding> {
         match expr {
-            AstExpr::Name(name) => env.resolve(&name.text, name.span, diagnostics),
+            AstExpr::Name(name) => {
+                let resolved = env.resolve(&name.text, name.span, diagnostics)?;
+                if expected.is_some_and(|expected| expected != &resolved.ty) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE117",
+                        "resolved name does not have the required expression type",
+                        name.span,
+                    ));
+                }
+                Some(resolved)
+            }
             AstExpr::Integer { value, text } => {
+                let ty = match expected {
+                    Some(BodyType::Integer(integer)) => BodyType::Integer(*integer),
+                    Some(_) => {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE118",
+                            "integer literal cannot satisfy a non-integer type",
+                            text.span,
+                        ));
+                        BodyType::Integer(IntegerType {
+                            bits: 64,
+                            signed: true,
+                        })
+                    }
+                    None => BodyType::Integer(IntegerType {
+                        bits: 64,
+                        signed: true,
+                    }),
+                };
                 let id = self.new_value("c");
                 self.blocks[self.current].operations.push(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::Constant {
                         value: *value,
-                        ty: BodyType::Integer(IntegerType {
-                            bits: 64,
-                            signed: true,
-                        }),
+                        ty: ty.clone(),
                     },
                     operands: Vec::new(),
                     results: vec![BodyValue {
                         id: id.clone(),
-                        ty: BodyType::Integer(IntegerType {
-                            bits: 64,
-                            signed: true,
-                        }),
+                        ty: ty.clone(),
                     }],
                     contracts: Vec::new(),
                     assumptions: Vec::new(),
@@ -692,16 +807,36 @@ impl BodyBuilder {
                     portability: None,
                 });
                 let _ = text;
-                Some(id)
+                Some(ResolvedBinding { id, ty })
             }
             AstExpr::Binary {
                 op, left, right, ..
             } => {
-                let left_id = self.elaborate_expr(left, env, diagnostics)?;
-                let right_id = self.elaborate_expr(right, env, diagnostics)?;
+                let arithmetic =
+                    matches!(op, AstBinaryOp::Add | AstBinaryOp::Sub | AstBinaryOp::Mul);
+                let operand_expected = arithmetic.then_some(expected).flatten();
+                let left_value = self.elaborate_expr(left, operand_expected, env, diagnostics)?;
+                let right_value =
+                    self.elaborate_expr(right, Some(&left_value.ty), env, diagnostics)?;
+                if left_value.ty != right_value.ty {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE119",
+                        "binary operands must have the same type",
+                        expr.span(),
+                    ));
+                    return None;
+                }
                 let id = self.new_value("v");
                 let (kind, result_ty) = match op {
                     AstBinaryOp::Add | AstBinaryOp::Sub | AstBinaryOp::Mul => {
+                        let BodyType::Integer(operand_type) = left_value.ty else {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE120",
+                                "arithmetic operands must have an integer type",
+                                expr.span(),
+                            ));
+                            return None;
+                        };
                         let operator = match op {
                             AstBinaryOp::Add => "add",
                             AstBinaryOp::Sub => "sub",
@@ -710,19 +845,21 @@ impl BodyBuilder {
                         (
                             BodyOperationKind::Integer {
                                 operator: operator.to_owned(),
-                                operand_type: IntegerType {
-                                    bits: 64,
-                                    signed: true,
-                                },
+                                operand_type,
                                 intent: ArithmeticIntent::Checked,
                             },
-                            BodyType::Integer(IntegerType {
-                                bits: 64,
-                                signed: true,
-                            }),
+                            BodyType::Integer(operand_type),
                         )
                     }
                     _ => {
+                        let BodyType::Integer(operand_type) = left_value.ty else {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE121",
+                                "comparison operands must have an integer type",
+                                expr.span(),
+                            ));
+                            return None;
+                        };
                         let predicate = match op {
                             AstBinaryOp::Eq => "eq",
                             AstBinaryOp::Ne => "ne",
@@ -735,10 +872,7 @@ impl BodyBuilder {
                         (
                             BodyOperationKind::IntegerCompare {
                                 predicate: predicate.to_owned(),
-                                operand_type: IntegerType {
-                                    bits: 64,
-                                    signed: true,
-                                },
+                                operand_type,
                             },
                             BodyType::Named("bool".to_owned()),
                         )
@@ -747,10 +881,10 @@ impl BodyBuilder {
                 self.blocks[self.current].operations.push(BodyOperation {
                     id: id.clone(),
                     kind,
-                    operands: vec![left_id, right_id],
+                    operands: vec![left_value.id, right_value.id],
                     results: vec![BodyValue {
                         id: id.clone(),
-                        ty: result_ty,
+                        ty: result_ty.clone(),
                     }],
                     contracts: Vec::new(),
                     assumptions: Vec::new(),
@@ -758,15 +892,27 @@ impl BodyBuilder {
                     lowering: None,
                     portability: None,
                 });
-                Some(id)
+                Some(ResolvedBinding { id, ty: result_ty })
             }
         }
     }
 
-    fn finish_return(&mut self, value: String) {
+    fn finish_return(
+        &mut self,
+        value: ResolvedBinding,
+        span: SourceSpan,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) {
+        if value.ty != self.output_type {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE103",
+                "returned value type does not match the declared output type",
+                span,
+            ));
+        }
         if self.block_is_open() {
             self.blocks[self.current].terminator = BodyTerminator::Return {
-                values: vec![value],
+                values: vec![value.id],
             };
         }
     }
@@ -801,6 +947,35 @@ impl BodyBuilder {
             &self.blocks[self.current].terminator,
             BodyTerminator::Return { values } if values.is_empty()
         )
+    }
+}
+
+fn profile_type(name: &str, span: SourceSpan, diagnostics: &mut Vec<SourceDiagnostic>) -> BodyType {
+    let ty = BodyType::from_semantic_name(name);
+    let supported = matches!(&ty, BodyType::Named(named) if named == "bool")
+        || matches!(
+            &ty,
+            BodyType::Integer(IntegerType {
+                bits: 8 | 16 | 32 | 64,
+                ..
+            })
+        );
+    if !supported {
+        diagnostics.push(elaboration_diagnostic(
+            "MNE105",
+            "Source Profile 0.2 supports bool and 8/16/32/64-bit integer types",
+            span,
+        ));
+    }
+    ty
+}
+
+fn statement_span(statement: &AstStmt) -> SourceSpan {
+    match statement {
+        AstStmt::Let { span, .. }
+        | AstStmt::If { span, .. }
+        | AstStmt::Fail { span, .. }
+        | AstStmt::Return { span, .. } => *span,
     }
 }
 

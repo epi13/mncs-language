@@ -13,6 +13,7 @@ mod core;
 mod delta;
 mod evidence;
 mod execution;
+mod experiment;
 mod graph;
 mod identity;
 mod ir;
@@ -34,18 +35,19 @@ pub use body::{
 pub use canonical::{CanonicalError, CanonicalForm, CANONICAL_SCHEMA_VERSION};
 pub use cfg::{Cfg, CfgBlock, CFG_SCHEMA_VERSION};
 pub use compiler::{
-    ArtifactRepresentation, BackendArtifact, BackendConfiguration, BackendEvidence,
-    BackendIdentity, BackendResult, BuildHostIdentity, CompilationEmissions,
+    ArtifactRepresentation, BackendArtifact, BackendCapabilityManifest, BackendConfiguration,
+    BackendEvidence, BackendIdentity, BackendResult, BuildHostIdentity, CompilationEmissions,
     CompilationEvidenceBundle, CompilationRequest, CompilationResult, CompilationStatus,
     CompilationStudyRequest, CompilationStudyResult, CompilerArtifactRef, CompilerDiagnostic,
     CompilerDiagnosticKind, CompilerHostIdentity, CompilerImplementationIdentity,
     CompilerNodeProfile, CompilerPassExecutionObservation, CompilerPassIdentity,
-    CrossHostInvariants, ObservationModelRef, PassPipelineIdentity, RelationClaim,
-    RunEnvironmentRef, TargetContractRef, TargetLoweringPlan, TransformationEdge,
-    TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION,
+    CrossHostInvariants, ObservationModelRef, PassPipelineIdentity, RealizationRequest,
+    RelationClaim, RunEnvironmentRef, TargetContractRef, TargetLoweringPlan, TransformationEdge,
+    TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION, BACKEND_CAPABILITY_SCHEMA_VERSION,
     COMPILATION_STUDY_OBSERVATION_INTERPRETATION, COMPILATION_STUDY_RESULT_CONTRACT_ID,
     COMPILER_ARTIFACT_SCHEMA_VERSION, LAYERED_EXECUTION_COMPARISON_INTERPRETATION,
     PORTABLE_WASM_MVP_BACKEND_NAME, PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET,
+    REALIZATION_REQUEST_SCHEMA_VERSION,
 };
 pub use compiler_architecture::{
     CompilerArchitectureContract, CompilerStage, CompilerStageContract, StageAvailability,
@@ -67,6 +69,12 @@ pub use execution::{
     ExecutionStatus, ExecutionSubject, ExecutionTarget, ExecutionTraceEntry, ExecutionValue,
     EXECUTION_COMPARISON_SCHEMA_VERSION, EXECUTION_CORPUS_SCHEMA_VERSION,
     EXECUTION_REQUEST_SCHEMA_VERSION, EXECUTION_RESULT_SCHEMA_VERSION, MAX_EXECUTION_BUDGET,
+};
+pub use experiment::{
+    LanguageExperimentCaseObservation, LanguageExperimentComparison, LanguageExperimentDefinition,
+    LanguageExperimentResult, LanguageExperimentStatus, ValidatorRequirement,
+    LANGUAGE_EXPERIMENT_DEFINITION_CONTRACT_ID, LANGUAGE_EXPERIMENT_INTERPRETATION,
+    LANGUAGE_EXPERIMENT_RESULT_CONTRACT_ID, LANGUAGE_EXPERIMENT_SCHEMA_VERSION,
 };
 pub use graph::{
     EdgeKind, GraphEdge, GraphError, GraphNode, InvalidationReason, InvalidationReport,

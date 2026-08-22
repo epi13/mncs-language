@@ -134,6 +134,80 @@ fn source_profile_0_2_flagship_reaches_ssa() {
 }
 
 #[test]
+fn language_experiment_runs_two_backend_adapters_and_compares_semantics() {
+    let source = example("source/bounded-min.mncs");
+    let corpus = example("execution/bounded-min-corpus.json");
+    let temp = std::env::temp_dir().join(format!("mncs-experiment-test-{}", std::process::id()));
+    let wasm_dir = temp.join("wasm");
+    let bytecode_dir = temp.join("bytecode");
+    for (backend, output_dir) in [
+        ("portable-wasm", &wasm_dir),
+        ("research-bytecode", &bytecode_dir),
+    ] {
+        let output = binary()
+            .args([
+                "experiment",
+                "run",
+                &source,
+                "--backend",
+                backend,
+                "--corpus",
+                &corpus,
+                "--output-dir",
+                output_dir.to_str().unwrap(),
+            ])
+            .output()
+            .expect("run language experiment");
+        assert!(
+            output.status.success(),
+            "{}: {}",
+            backend,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).expect("experiment JSON");
+        assert_eq!(result["status"], "UNKNOWN");
+        assert_eq!(result["translation_validations"][0]["judgement"], "PASS");
+        assert_eq!(result["cases"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            result["definition"]["realization"]["acceptable_backends"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+    let comparison = binary()
+        .args([
+            "experiment",
+            "compare",
+            wasm_dir.join("result.json").to_str().unwrap(),
+            bytecode_dir.join("result.json").to_str().unwrap(),
+        ])
+        .output()
+        .expect("compare backend experiments");
+    assert!(comparison.status.success());
+    let report: Value = serde_json::from_slice(&comparison.stdout).expect("comparison JSON");
+    assert_eq!(report["same_semantics"], true);
+    assert_eq!(report["same_ssa"], true);
+    assert_eq!(report["same_backend"], false);
+    assert_eq!(report["bounded_behavior_agrees"], true);
+    let frozen = binary()
+        .args([
+            "experiment",
+            "execute",
+            bytecode_dir.join("backend-artifact.json").to_str().unwrap(),
+            &corpus,
+        ])
+        .output()
+        .expect("execute frozen backend artifact");
+    assert!(frozen.status.success());
+    let observations: Value =
+        serde_json::from_slice(&frozen.stdout).expect("frozen observations JSON");
+    assert_eq!(observations.as_array().unwrap().len(), 3);
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
 fn source_study_emits_the_front_end_and_hir_stage_chain() {
     let source = example("source/identity.mncs");
     let output = binary()

@@ -16,6 +16,8 @@ pub const PORTABLE_WASM_MVP_TARGET: &str = "mncs:target:portable-wasm-mvp-0.1";
 pub const PORTABLE_WASM_MVP_BACKEND_NAME: &str = "mncs-portable-wasm-mvp";
 pub const PORTABLE_WASM_MVP_BACKEND_VERSION: &str = "0.1";
 pub const BACKEND_ARTIFACT_SCHEMA_VERSION: &str = "0.1";
+pub const BACKEND_CAPABILITY_SCHEMA_VERSION: &str = "0.1";
+pub const REALIZATION_REQUEST_SCHEMA_VERSION: &str = "0.1";
 pub const LAYERED_EXECUTION_COMPARISON_INTERPRETATION: &str =
     "empirical_bounded_agreement_not_universal_equivalence";
 
@@ -597,11 +599,193 @@ impl TransformationEdge {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct BackendIdentity {
     pub identity: SemanticId,
     pub name: String,
     pub version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendCapabilityManifest {
+    pub schema_version: String,
+    pub identity: SemanticId,
+    pub backend: BackendIdentity,
+    pub realization_profile: String,
+    pub target_families: BTreeSet<String>,
+    pub accepted_ir_versions: BTreeSet<String>,
+    pub required_target_facts: BTreeSet<String>,
+    pub supported_machine_intents: BTreeSet<String>,
+    pub unsupported_operations: BTreeSet<String>,
+    pub artifact_kinds: BTreeSet<String>,
+    pub validator_capabilities: BTreeSet<String>,
+    pub runtime_requirements: BTreeSet<String>,
+    pub abi_layout_requirements: BTreeSet<String>,
+    pub failure_behavior: String,
+    pub deterministic: bool,
+}
+
+impl BackendCapabilityManifest {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        backend: BackendIdentity,
+        realization_profile: impl Into<String>,
+        target_families: BTreeSet<String>,
+        accepted_ir_versions: BTreeSet<String>,
+        required_target_facts: BTreeSet<String>,
+        supported_machine_intents: BTreeSet<String>,
+        unsupported_operations: BTreeSet<String>,
+        artifact_kinds: BTreeSet<String>,
+        validator_capabilities: BTreeSet<String>,
+        runtime_requirements: BTreeSet<String>,
+        abi_layout_requirements: BTreeSet<String>,
+        failure_behavior: impl Into<String>,
+        deterministic: bool,
+    ) -> Self {
+        let mut manifest = Self {
+            schema_version: BACKEND_CAPABILITY_SCHEMA_VERSION.to_owned(),
+            identity: SemanticId(String::new()),
+            backend,
+            realization_profile: realization_profile.into(),
+            target_families,
+            accepted_ir_versions,
+            required_target_facts,
+            supported_machine_intents,
+            unsupported_operations,
+            artifact_kinds,
+            validator_capabilities,
+            runtime_requirements,
+            abi_layout_requirements,
+            failure_behavior: failure_behavior.into(),
+            deterministic,
+        };
+        manifest.identity = identified("backend-capability", &manifest.without_identity());
+        manifest
+    }
+
+    pub fn identity_is_valid(&self) -> bool {
+        self.schema_version == BACKEND_CAPABILITY_SCHEMA_VERSION
+            && self.backend.identity_is_valid()
+            && !self.realization_profile.trim().is_empty()
+            && !self.artifact_kinds.is_empty()
+            && !self.failure_behavior.trim().is_empty()
+            && self.identity == identified("backend-capability", &self.without_identity())
+    }
+
+    fn without_identity(&self) -> BackendCapabilityMaterial<'_> {
+        BackendCapabilityMaterial {
+            schema_version: &self.schema_version,
+            backend: &self.backend,
+            realization_profile: &self.realization_profile,
+            target_families: &self.target_families,
+            accepted_ir_versions: &self.accepted_ir_versions,
+            required_target_facts: &self.required_target_facts,
+            supported_machine_intents: &self.supported_machine_intents,
+            unsupported_operations: &self.unsupported_operations,
+            artifact_kinds: &self.artifact_kinds,
+            validator_capabilities: &self.validator_capabilities,
+            runtime_requirements: &self.runtime_requirements,
+            abi_layout_requirements: &self.abi_layout_requirements,
+            failure_behavior: &self.failure_behavior,
+            deterministic: self.deterministic,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct BackendCapabilityMaterial<'a> {
+    schema_version: &'a str,
+    backend: &'a BackendIdentity,
+    realization_profile: &'a str,
+    target_families: &'a BTreeSet<String>,
+    accepted_ir_versions: &'a BTreeSet<String>,
+    required_target_facts: &'a BTreeSet<String>,
+    supported_machine_intents: &'a BTreeSet<String>,
+    unsupported_operations: &'a BTreeSet<String>,
+    artifact_kinds: &'a BTreeSet<String>,
+    validator_capabilities: &'a BTreeSet<String>,
+    runtime_requirements: &'a BTreeSet<String>,
+    abi_layout_requirements: &'a BTreeSet<String>,
+    failure_behavior: &'a str,
+    deterministic: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RealizationRequest {
+    pub schema_version: String,
+    pub identity: SemanticId,
+    pub selected_ssa: CompilerArtifactRef,
+    pub target: TargetContractRef,
+    pub acceptable_backends: BTreeSet<BackendIdentity>,
+    pub required_machine_intents: BTreeSet<String>,
+    pub required_artifact_kinds: BTreeSet<String>,
+    pub required_validators: BTreeSet<String>,
+    pub fallback_policy: String,
+}
+
+impl RealizationRequest {
+    pub fn new(
+        selected_ssa: CompilerArtifactRef,
+        target: TargetContractRef,
+        acceptable_backends: BTreeSet<BackendIdentity>,
+        required_machine_intents: BTreeSet<String>,
+        required_artifact_kinds: BTreeSet<String>,
+        required_validators: BTreeSet<String>,
+        fallback_policy: impl Into<String>,
+    ) -> Self {
+        let mut request = Self {
+            schema_version: REALIZATION_REQUEST_SCHEMA_VERSION.to_owned(),
+            identity: SemanticId(String::new()),
+            selected_ssa,
+            target,
+            acceptable_backends,
+            required_machine_intents,
+            required_artifact_kinds,
+            required_validators,
+            fallback_policy: fallback_policy.into(),
+        };
+        request.identity = identified("realization-request", &request.without_identity());
+        request
+    }
+
+    pub fn identity_is_valid(&self) -> bool {
+        self.schema_version == REALIZATION_REQUEST_SCHEMA_VERSION
+            && self.selected_ssa.representation == ArtifactRepresentation::SelectedSsa
+            && self.selected_ssa.identity_is_valid()
+            && self.target.identity_is_valid()
+            && !self.acceptable_backends.is_empty()
+            && self
+                .acceptable_backends
+                .iter()
+                .all(BackendIdentity::identity_is_valid)
+            && !self.fallback_policy.trim().is_empty()
+            && self.identity == identified("realization-request", &self.without_identity())
+    }
+
+    fn without_identity(&self) -> RealizationRequestMaterial<'_> {
+        RealizationRequestMaterial {
+            schema_version: &self.schema_version,
+            selected_ssa: &self.selected_ssa,
+            target: &self.target,
+            acceptable_backends: &self.acceptable_backends,
+            required_machine_intents: &self.required_machine_intents,
+            required_artifact_kinds: &self.required_artifact_kinds,
+            required_validators: &self.required_validators,
+            fallback_policy: &self.fallback_policy,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct RealizationRequestMaterial<'a> {
+    schema_version: &'a str,
+    selected_ssa: &'a CompilerArtifactRef,
+    target: &'a TargetContractRef,
+    acceptable_backends: &'a BTreeSet<BackendIdentity>,
+    required_machine_intents: &'a BTreeSet<String>,
+    required_artifact_kinds: &'a BTreeSet<String>,
+    required_validators: &'a BTreeSet<String>,
+    fallback_policy: &'a str,
 }
 
 impl BackendIdentity {
@@ -843,6 +1027,8 @@ pub struct BackendArtifact {
     pub backend: BackendIdentity,
     pub input: CompilerArtifactRef,
     pub target: TargetContractRef,
+    #[serde(default = "default_backend_artifact_kind")]
+    pub artifact_kind: String,
     pub format: String,
     pub bytes_sha256: String,
     pub bytes_hex: String,
@@ -861,6 +1047,39 @@ impl BackendArtifact {
         backend: BackendIdentity,
         input: CompilerArtifactRef,
         target: TargetContractRef,
+        format: impl Into<String>,
+        bytes: &[u8],
+        exports: Vec<String>,
+        assumptions: Vec<String>,
+        obligations_generated: Vec<SemanticId>,
+        execution_applicability: Vec<String>,
+        evidence_dependencies: Vec<SemanticId>,
+        unsupported: Vec<String>,
+        status: TransformationStatus,
+    ) -> Self {
+        Self::new_with_kind(
+            backend,
+            input,
+            target,
+            "backend_defined",
+            format,
+            bytes,
+            exports,
+            assumptions,
+            obligations_generated,
+            execution_applicability,
+            evidence_dependencies,
+            unsupported,
+            status,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_kind(
+        backend: BackendIdentity,
+        input: CompilerArtifactRef,
+        target: TargetContractRef,
+        artifact_kind: impl Into<String>,
         format: impl Into<String>,
         bytes: &[u8],
         mut exports: Vec<String>,
@@ -888,6 +1107,7 @@ impl BackendArtifact {
             backend,
             input,
             target,
+            artifact_kind: artifact_kind.into(),
             format: format.into(),
             bytes_sha256,
             bytes_hex,
@@ -903,15 +1123,20 @@ impl BackendArtifact {
         artifact
     }
 
-    pub fn wasm_bytes(&self) -> Result<Vec<u8>, String> {
+    pub fn bytes(&self) -> Result<Vec<u8>, String> {
         hex_decode(&self.bytes_hex)
+    }
+
+    pub fn wasm_bytes(&self) -> Result<Vec<u8>, String> {
+        self.bytes()
     }
 
     pub fn identity_is_valid(&self) -> bool {
         self.backend.identity_is_valid()
             && self.input.identity_is_valid()
             && self.target.identity_is_valid()
-            && self.bytes_sha256 == sha256_hex(&self.wasm_bytes().unwrap_or_default())
+            && !self.artifact_kind.trim().is_empty()
+            && self.bytes_sha256 == sha256_hex(&self.bytes().unwrap_or_default())
             && self.identity == identified("backend-artifact", &self.without_identity())
     }
 
@@ -921,6 +1146,7 @@ impl BackendArtifact {
             backend: &self.backend,
             input: &self.input,
             target: &self.target,
+            artifact_kind: &self.artifact_kind,
             format: &self.format,
             bytes_sha256: &self.bytes_sha256,
             bytes_hex: &self.bytes_hex,
@@ -941,6 +1167,7 @@ struct BackendArtifactMaterial<'a> {
     backend: &'a BackendIdentity,
     input: &'a CompilerArtifactRef,
     target: &'a TargetContractRef,
+    artifact_kind: &'a str,
     format: &'a str,
     bytes_sha256: &'a str,
     bytes_hex: &'a str,
@@ -951,6 +1178,10 @@ struct BackendArtifactMaterial<'a> {
     evidence_dependencies: &'a [SemanticId],
     unsupported: &'a [String],
     status: TransformationStatus,
+}
+
+fn default_backend_artifact_kind() -> String {
+    "backend_defined".to_owned()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1420,6 +1651,14 @@ pub struct CompilationStudyResult {
     pub compiler_host_identity: SemanticId,
     pub build_host_identity: SemanticId,
     pub target_identity: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_identity: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub realization_plan_identity: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_artifact_identity: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_artifact_kind: Option<String>,
     pub compilation_status: CompilationStatus,
     pub stage_fingerprints: BTreeMap<ArtifactRepresentation, String>,
     pub pass_executions: Vec<CompilerPassExecutionObservation>,

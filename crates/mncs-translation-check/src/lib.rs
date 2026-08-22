@@ -413,7 +413,7 @@ pub fn validate_backend_lowering(
             artifact.bytes_sha256.clone(),
         ),
         observational_relation(),
-        "portable-wasm-mvp-lowering",
+        format!("backend-realization:{}", artifact.backend.name),
         judgement,
         vec![mncs_model::LAYERED_EXECUTION_COMPARISON_INTERPRETATION.to_owned()],
         artifact.evidence_dependencies.clone(),
