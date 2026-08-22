@@ -1,0 +1,251 @@
+//! External toolchain probing and host execution for textual realizations.
+//!
+//! Clang, llc, and gcc are outside the MNCS semantic trust boundary. Their
+//! presence, version, flags, and exit status are observations.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use serde::Deserialize;
+
+use mncs_model::{BackendValueContract, ExecutionStatus, ExecutionValue, SemanticId};
+
+use crate::support::{argument_bits, backend_output_value_from_i128};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolchainIdentity {
+    pub name: String,
+    pub path: PathBuf,
+    pub version: String,
+}
+
+impl ToolchainIdentity {
+    pub fn semantic_id(&self) -> SemanticId {
+        SemanticId(format!(
+            "mncs:toolchain:{}:{}",
+            self.name,
+            crate::support::sha256_hex(
+                format!("{}|{}", self.path.display(), self.version).as_bytes()
+            )
+        ))
+    }
+
+    pub fn summary(&self) -> String {
+        format!(
+            "{} {} ({})",
+            self.name,
+            self.version.lines().next().unwrap_or("unknown").trim(),
+            self.path.display()
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NativeError {
+    ToolchainUnavailable(String),
+    UnsupportedTarget(String),
+    CompileFailed(String),
+    ExecutionFailed(String),
+    InvalidOutput(String),
+}
+
+impl NativeError {
+    pub fn status(&self) -> ExecutionStatus {
+        match self {
+            Self::ExecutionFailed(_) => ExecutionStatus::RuntimeFailure,
+            Self::InvalidOutput(_) => ExecutionStatus::InvalidRequest,
+            Self::ToolchainUnavailable(_) | Self::UnsupportedTarget(_) | Self::CompileFailed(_) => {
+                ExecutionStatus::Unsupported
+            }
+        }
+    }
+
+    pub fn reason(&self) -> String {
+        match self {
+            Self::ToolchainUnavailable(reason) => format!("unavailable toolchain: {reason}"),
+            Self::UnsupportedTarget(reason) => format!("unsupported target: {reason}"),
+            Self::CompileFailed(reason) => format!("compiler failure: {reason}"),
+            Self::ExecutionFailed(reason) => format!("execution failure: {reason}"),
+            Self::InvalidOutput(reason) => format!("invalid native observation: {reason}"),
+        }
+    }
+}
+
+pub fn probe_tool(name: &str) -> Option<ToolchainIdentity> {
+    let output = Command::new(name).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if version.is_empty() {
+        return None;
+    }
+    Some(ToolchainIdentity {
+        name: name.to_owned(),
+        path: PathBuf::from(name),
+        version,
+    })
+}
+
+pub fn probe_clang() -> Option<ToolchainIdentity> {
+    probe_tool("clang")
+}
+
+pub fn probe_llc() -> Option<ToolchainIdentity> {
+    probe_tool("llc")
+}
+
+pub fn probe_gcc() -> Option<ToolchainIdentity> {
+    probe_tool("gcc").or_else(|| probe_tool("cc"))
+}
+
+pub fn host_triple() -> &'static str {
+    if cfg!(target_arch = "x86_64") {
+        "x86_64-unknown-linux-gnu"
+    } else if cfg!(target_arch = "aarch64") {
+        "aarch64-unknown-linux-gnu"
+    } else {
+        "unknown-unknown-unknown"
+    }
+}
+
+pub fn host_matches_triple(triple: &str) -> bool {
+    let host = host_triple();
+    triple == host
+        || (host.starts_with("x86_64") && triple.starts_with("x86_64"))
+        || (host.starts_with("aarch64") && triple.starts_with("aarch64"))
+}
+
+#[derive(Debug, Deserialize)]
+struct NativeObservation {
+    status: String,
+    #[serde(default)]
+    value: Option<i128>,
+}
+
+pub fn compile_and_run(
+    sources: &[(&str, &str)],
+    compiler: &ToolchainIdentity,
+    flags: &[&str],
+    args: &[String],
+) -> Result<(i128, ExecutionStatus, String), NativeError> {
+    let digest = crate::support::sha256_hex(
+        sources
+            .iter()
+            .flat_map(|(name, body)| format!("{name}\n{body}").into_bytes())
+            .collect::<Vec<_>>()
+            .as_slice(),
+    );
+    let dir = std::env::temp_dir().join(format!("mncs-native-{}", &digest[..16]));
+    fs::create_dir_all(&dir).map_err(|error| {
+        NativeError::CompileFailed(format!("unable to create work directory: {error}"))
+    })?;
+    let mut paths = Vec::new();
+    for (name, body) in sources {
+        let path = dir.join(name);
+        fs::write(&path, body.as_bytes()).map_err(|error| {
+            NativeError::CompileFailed(format!("unable to write {name}: {error}"))
+        })?;
+        paths.push(path);
+    }
+    let exe = dir.join("mncs-run");
+    let mut command = Command::new(&compiler.path);
+    command.current_dir(&dir);
+    command.args(flags);
+    for path in &paths {
+        match path.extension().and_then(|ext| ext.to_str()) {
+            Some("ll") => {
+                command
+                    .arg("-x")
+                    .arg("ir")
+                    .arg(path.file_name().unwrap_or(path.as_os_str()));
+            }
+            Some("c") => {
+                command
+                    .arg("-x")
+                    .arg("c")
+                    .arg(path.file_name().unwrap_or(path.as_os_str()));
+            }
+            _ => {
+                command.arg(path.file_name().unwrap_or(path.as_os_str()));
+            }
+        }
+    }
+    command.arg("-o").arg(&exe);
+    let compiled = command.output().map_err(|error| {
+        NativeError::ToolchainUnavailable(format!(
+            "{} could not be executed: {error}",
+            compiler.name
+        ))
+    })?;
+    if !compiled.status.success() {
+        return Err(NativeError::CompileFailed(format!(
+            "{} failed: {}",
+            compiler.name,
+            String::from_utf8_lossy(&compiled.stderr)
+        )));
+    }
+    run_executable(&exe, args).map(|observation| (observation.1, observation.0, compiler.summary()))
+}
+
+fn run_executable(exe: &Path, args: &[String]) -> Result<(ExecutionStatus, i128), NativeError> {
+    let output = Command::new(exe)
+        .args(args)
+        .output()
+        .map_err(|error| NativeError::ExecutionFailed(error.to_string()))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout
+        .lines()
+        .rev()
+        .find(|line| line.trim().starts_with('{'))
+        .ok_or_else(|| {
+            NativeError::InvalidOutput(format!(
+                "native program produced no JSON observation (stderr: {})",
+                String::from_utf8_lossy(&output.stderr)
+            ))
+        })?;
+    let observation: NativeObservation = serde_json::from_str(line.trim()).map_err(|error| {
+        NativeError::InvalidOutput(format!("native JSON observation is invalid: {error}"))
+    })?;
+    match observation.status.as_str() {
+        "returned" => Ok((
+            ExecutionStatus::Returned,
+            observation.value.ok_or_else(|| {
+                NativeError::InvalidOutput("returned observation lacks a value".to_owned())
+            })?,
+        )),
+        "runtime_failure" => Ok((ExecutionStatus::RuntimeFailure, 0)),
+        other => Err(NativeError::InvalidOutput(format!(
+            "unknown native status {other:?}"
+        ))),
+    }
+}
+
+pub fn decode_native_value(
+    contract: Option<&BackendValueContract>,
+    status: ExecutionStatus,
+    value: i128,
+) -> Result<Vec<ExecutionValue>, NativeError> {
+    if status != ExecutionStatus::Returned {
+        return Ok(Vec::new());
+    }
+    let Some(contract) = contract else {
+        return Ok(vec![ExecutionValue::Integer {
+            value,
+            ty: mncs_model::IntegerType {
+                bits: 64,
+                signed: true,
+            },
+        }]);
+    };
+    backend_output_value_from_i128(contract, value).map(|value| vec![value])
+}
+
+pub fn argv_from_request(request: &mncs_model::ExecutionRequest) -> Vec<String> {
+    request
+        .arguments
+        .iter()
+        .map(|value| argument_bits(value).to_string())
+        .collect()
+}

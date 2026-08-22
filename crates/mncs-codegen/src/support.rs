@@ -1,0 +1,230 @@
+//! Shared adapter helpers that must stay backend-neutral.
+
+use std::collections::BTreeMap;
+use std::fmt::Write;
+
+use mncs_model::{
+    ArtifactRepresentation, BackendArtifact, BackendFunctionValueContract, BackendIdentity,
+    BackendResult, BackendValueContract, CompilerArtifactRef, CompilerDiagnostic,
+    CompilerDiagnosticKind, ExecutionFailure, ExecutionRequest, ExecutionStatus, ExecutionValue,
+    IntegerType, Program, SsaModule, TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION,
+};
+use sha2::{Digest, Sha256};
+
+use crate::BackendExecutionResult;
+
+pub(crate) fn failed(diagnostics: Vec<CompilerDiagnostic>) -> BackendResult {
+    BackendResult {
+        status: TransformationStatus::Fail,
+        artifact: None,
+        artifact_ref: None,
+        evidence: None,
+        diagnostics,
+    }
+}
+
+pub(crate) fn unknown(diagnostics: Vec<CompilerDiagnostic>) -> BackendResult {
+    BackendResult {
+        status: TransformationStatus::Unknown,
+        artifact: None,
+        artifact_ref: None,
+        evidence: None,
+        diagnostics,
+    }
+}
+
+pub(crate) fn validate_selected_ssa(
+    ssa: &SsaModule,
+    selected_ssa: &CompilerArtifactRef,
+    code: &str,
+) -> Result<(), Box<BackendResult>> {
+    if selected_ssa.representation != ArtifactRepresentation::SelectedSsa
+        || !selected_ssa.identity_is_valid()
+    {
+        return Err(Box::new(failed(vec![CompilerDiagnostic::new(
+            code,
+            CompilerDiagnosticKind::InvalidRequest,
+            "backend lowering requires an exact selected SSA identity",
+        )])));
+    }
+    let expected = ssa.fingerprint().unwrap_or_default();
+    if selected_ssa.fingerprint != expected {
+        return Err(Box::new(failed(vec![CompilerDiagnostic::new(
+            code,
+            CompilerDiagnosticKind::InvalidRequest,
+            "selected SSA fingerprint does not match the supplied SSA module",
+        )])));
+    }
+    Ok(())
+}
+
+pub(crate) fn function_names(program: &Program, ssa: &SsaModule) -> Vec<String> {
+    ssa.functions
+        .iter()
+        .map(|ssa_function| {
+            program
+                .functions
+                .iter()
+                .find(|function| {
+                    mncs_model::function_id(&program.module, &function.name)
+                        == ssa_function.semantic_identity
+                })
+                .map(|function| function.name.clone())
+                .unwrap_or_else(|| export_name(&ssa_function.semantic_identity.0))
+        })
+        .collect()
+}
+
+pub(crate) fn export_name(identity: &str) -> String {
+    identity
+        .rsplit(':')
+        .next()
+        .unwrap_or(identity)
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn function_value_contracts(
+    program: &Program,
+) -> BTreeMap<String, BackendFunctionValueContract> {
+    let value_contract = |name: &str| {
+        program
+            .finite_types
+            .iter()
+            .find(|finite_type| finite_type.name == name)
+            .map_or_else(
+                || BackendValueContract::Scalar {
+                    semantic_type: name.to_owned(),
+                },
+                |finite_type| BackendValueContract::Finite {
+                    type_identity: finite_type.identity.clone(),
+                    variants: finite_type
+                        .variants
+                        .iter()
+                        .map(|variant| (variant.discriminant, variant.identity.clone()))
+                        .collect(),
+                },
+            )
+    };
+    program
+        .functions
+        .iter()
+        .map(|function| {
+            (
+                function.name.clone(),
+                BackendFunctionValueContract {
+                    inputs: function
+                        .inputs
+                        .iter()
+                        .map(|value| value_contract(&value.value_type))
+                        .collect(),
+                    outputs: function
+                        .outputs
+                        .iter()
+                        .map(|value| value_contract(&value.value_type))
+                        .collect(),
+                },
+            )
+        })
+        .collect()
+}
+
+pub(crate) fn artifact_ref(artifact: &BackendArtifact) -> CompilerArtifactRef {
+    CompilerArtifactRef::new(
+        ArtifactRepresentation::BackendArtifact,
+        BACKEND_ARTIFACT_SCHEMA_VERSION,
+        artifact.bytes_sha256.clone(),
+    )
+}
+
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        write!(&mut hex, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    hex
+}
+
+pub(crate) fn empty_execution(
+    artifact: &BackendArtifact,
+    request: &ExecutionRequest,
+) -> BackendExecutionResult {
+    BackendExecutionResult {
+        schema_version: crate::BACKEND_EXECUTION_RESULT_SCHEMA_VERSION.to_owned(),
+        status: ExecutionStatus::InvalidRequest,
+        target: request.target.clone(),
+        backend: artifact.backend.clone(),
+        artifact_identity: Some(artifact.identity.clone()),
+        artifact_sha256: Some(artifact.bytes_sha256.clone()),
+        returned: Vec::new(),
+        steps: 0,
+        effects: Vec::new(),
+        failure: None,
+    }
+}
+
+pub(crate) fn execution_failure(
+    mut result: BackendExecutionResult,
+    status: ExecutionStatus,
+    reason: impl Into<String>,
+) -> BackendExecutionResult {
+    result.status = status;
+    result.failure = Some(ExecutionFailure {
+        identity: result.artifact_identity.clone(),
+        reason: reason.into(),
+    });
+    result
+}
+
+pub(crate) fn argument_bits(value: &ExecutionValue) -> i128 {
+    match value {
+        ExecutionValue::Integer { value, .. } => *value,
+        ExecutionValue::Boolean { value } => i128::from(*value),
+        ExecutionValue::Finite { discriminant, .. } => i128::from(*discriminant),
+    }
+}
+
+pub(crate) fn backend_matches_identity(
+    artifact: &BackendArtifact,
+    expected: &BackendIdentity,
+    kind: &str,
+) -> Result<(), String> {
+    if !artifact.identity_is_valid() {
+        return Err("backend artifact identity is stale or laundered".to_owned());
+    }
+    if artifact.backend != *expected {
+        return Err("artifact backend identity does not match this adapter".to_owned());
+    }
+    if artifact.artifact_kind != kind {
+        return Err(format!(
+            "artifact kind {} is not {kind}",
+            artifact.artifact_kind
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn backend_output_value_from_i128(
+    contract: &BackendValueContract,
+    value: i128,
+) -> Result<ExecutionValue, crate::native::NativeError> {
+    crate::backend_output_value(
+        contract,
+        ExecutionValue::Integer {
+            value,
+            ty: IntegerType {
+                bits: 64,
+                signed: true,
+            },
+        },
+    )
+    .map_err(crate::native::NativeError::InvalidOutput)
+}

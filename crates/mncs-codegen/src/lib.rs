@@ -1,11 +1,18 @@
-//! Replaceable portable backend for MNCS selected SSA.
+//! Replaceable backend adapters for MNCS selected SSA.
 //!
-//! The language owns legality. This crate consumes an explicit target/backend
-//! envelope and produces an identity-bound WASM MVP artifact. Execution of
-//! that artifact is a research interpreter of the emitted subset, not a host
-//! CLI and not a proof of compiler correctness.
+//! The language owns legality. Adapters consume an explicit target/backend
+//! envelope and produce identity-bound realizations. No adapter is the
+//! definition of MNCS.
 
+mod c11;
+mod cranelift_backend;
+mod llvm;
 mod lower;
+mod matrix;
+mod native;
+mod promises;
+mod scalar;
+mod support;
 mod wasm;
 
 use std::collections::BTreeMap;
@@ -59,10 +66,18 @@ pub trait BackendAdapter {
 pub struct PortableWasmAdapter;
 pub struct ResearchBytecodeAdapter;
 
+pub use c11::{C11Adapter, C11_ARTIFACT_KIND, C11_BACKEND_NAME};
+pub use cranelift_backend::{CraneliftAdapter, CRANELIFT_ARTIFACT_KIND, CRANELIFT_BACKEND_NAME};
+pub use llvm::{LlvmAdapter, LLVM_ARTIFACT_KIND, LLVM_BACKEND_NAME};
+pub use matrix::{backend_family_matrix, with_experiment_status, BackendFamilyMatrix};
+
 pub fn backend_names() -> Vec<&'static str> {
     vec![
         PORTABLE_WASM_MVP_BACKEND_NAME,
         RESEARCH_BYTECODE_BACKEND_NAME,
+        LLVM_BACKEND_NAME,
+        C11_BACKEND_NAME,
+        CRANELIFT_BACKEND_NAME,
     ]
 }
 
@@ -72,6 +87,9 @@ pub fn backend_adapter(name: &str) -> Option<Box<dyn BackendAdapter>> {
         RESEARCH_BYTECODE_BACKEND_NAME | "research-bytecode" => {
             Some(Box::new(ResearchBytecodeAdapter))
         }
+        LLVM_BACKEND_NAME | "llvm" | "llvm-ir" => Some(Box::new(LlvmAdapter)),
+        C11_BACKEND_NAME | "c11" | "portable-c" => Some(Box::new(C11Adapter)),
+        CRANELIFT_BACKEND_NAME | "cranelift" => Some(Box::new(CraneliftAdapter)),
         _ => None,
     }
 }
@@ -856,7 +874,7 @@ fn backend_input_matches(contract: &BackendValueContract, value: &ExecutionValue
     }
 }
 
-fn backend_output_value(
+pub(crate) fn backend_output_value(
     contract: &BackendValueContract,
     value: ExecutionValue,
 ) -> Result<ExecutionValue, String> {
@@ -1439,6 +1457,120 @@ mod tests {
         assert!(!bytecode
             .artifact_kinds
             .contains(PORTABLE_WASM_ARTIFACT_KIND));
+        let matrix = backend_family_matrix();
+        assert_eq!(matrix.backends.len(), 5);
+        assert!(matrix
+            .planned_unimplemented
+            .iter()
+            .any(|name| name.contains("spir-v")));
+        for row in &matrix.backends {
+            assert!(!row.artifact_kinds.is_empty());
+            assert!(!row.required_target_facts.is_empty());
+        }
+    }
+
+    fn lower_named(name: &str) -> mncs_model::BackendResult {
+        let program = program();
+        let ssa = program.lower_to_ssa().unwrap();
+        let selected = selected_ssa_ref(&ssa);
+        let plan = plan_for_backend(name, selected.clone()).unwrap();
+        lower_with_backend(name, &program, &ssa, selected, &plan)
+    }
+
+    #[test]
+    fn llvm_c11_and_cranelift_lower_checked_add() {
+        for name in [LLVM_BACKEND_NAME, C11_BACKEND_NAME, CRANELIFT_BACKEND_NAME] {
+            let result = lower_named(name);
+            assert_eq!(result.status, TransformationStatus::Pass, "{name}");
+            let artifact = result.artifact.unwrap();
+            assert!(artifact.identity_is_valid());
+            assert_ne!(artifact.artifact_kind, PORTABLE_WASM_ARTIFACT_KIND);
+            let executed = execute_backend(&artifact, &request(20, 22));
+            if executed.status == ExecutionStatus::Unsupported {
+                let reason = executed
+                    .failure
+                    .as_ref()
+                    .map(|failure| failure.reason.as_str())
+                    .unwrap_or("");
+                assert!(
+                    reason.contains("unavailable toolchain")
+                        || reason.contains("unsupported target")
+                        || reason.contains("Cranelift"),
+                    "{name}: {reason}"
+                );
+                continue;
+            }
+            assert_eq!(
+                executed.status,
+                ExecutionStatus::Returned,
+                "{name}: {:?}",
+                executed.failure
+            );
+            assert_eq!(
+                executed.returned,
+                vec![ExecutionValue::Integer {
+                    value: 42,
+                    ty: IntegerType {
+                        bits: 32,
+                        signed: true,
+                    },
+                }]
+            );
+            let overflow = execute_backend(&artifact, &request(i128::from(i32::MAX), 1));
+            assert_eq!(overflow.status, ExecutionStatus::RuntimeFailure, "{name}");
+        }
+    }
+
+    #[test]
+    fn llvm_withholds_nsw_without_current_no_overflow_evidence() {
+        let result = lower_named(LLVM_BACKEND_NAME);
+        let artifact = result.artifact.unwrap();
+        let ir = String::from_utf8(artifact.bytes().unwrap()).unwrap();
+        assert!(ir.contains("llvm.sadd.with.overflow") || ir.contains("with.overflow"));
+        assert!(artifact
+            .assumptions
+            .iter()
+            .any(|assumption| assumption.contains("withheld")));
+        assert!(!ir.contains(" add nsw i32"));
+    }
+
+    #[test]
+    fn artifact_and_backend_mismatch_is_not_returned() {
+        let program = program();
+        let ssa = program.lower_to_ssa().unwrap();
+        let selected = selected_ssa_ref(&ssa);
+        let mut artifact = lower_with_backend(
+            LLVM_BACKEND_NAME,
+            &program,
+            &ssa,
+            selected.clone(),
+            &plan_for_backend(LLVM_BACKEND_NAME, selected).unwrap(),
+        )
+        .artifact
+        .unwrap();
+        artifact.backend = research_bytecode_backend();
+        let executed = execute_backend(&artifact, &request(1, 1));
+        assert_ne!(executed.status, ExecutionStatus::Returned);
+        assert_eq!(executed.status, ExecutionStatus::InvalidRequest);
+    }
+
+    #[test]
+    fn llvm_and_c11_reject_missing_target_facts() {
+        let program = program();
+        let ssa = program.lower_to_ssa().unwrap();
+        let selected = selected_ssa_ref(&ssa);
+        let plan = TargetLoweringPlan::with_unknown_facts(
+            selected.clone(),
+            TargetContractRef::new("mystery-target", BTreeMap::new(), Vec::new(), Vec::new()),
+            None,
+            vec!["data-layout evidence".to_owned()],
+        );
+        let llvm = crate::llvm::lower_llvm(&program, &ssa, selected.clone(), &plan);
+        let c11 = crate::c11::lower_c11(&program, &ssa, selected, &plan);
+        assert_eq!(llvm.status, TransformationStatus::Unknown);
+        assert_eq!(c11.status, TransformationStatus::Unknown);
+        assert!(llvm.artifact.is_none());
+        assert!(c11.artifact.is_none());
     }
 
     #[test]

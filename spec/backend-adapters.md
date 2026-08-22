@@ -185,12 +185,23 @@ The backend adapter boundary is considered minimally exercised when:
 5. backend identity and assumptions remain present in evidence;
 6. missing target facts continue to produce unresolved lowering rather than guessed defaults.
 
-This target is now exercised by two deliberately different adapters:
+This target is now exercised by five registered adapters. Adding another backend still requires an
+adapter, capability manifest, target facts, lowering, artifact representation, optional execution,
+and tests — not generic compiler sequencing edits.
 
-| Adapter | Artifact kind | Execution path | Purpose |
+| Adapter | Artifact kind | Execution path | Status |
 | --- | --- | --- | --- |
-| `mncs-portable-wasm-mvp` | `wasm_module` | embedded decoder/interpreter for the declared MVP subset | portable binary realization experiment |
-| `mncs-research-bytecode` | `research_bytecode` | bounded SSA interpreter over a canonical, identity-bound payload | second executable shape proving that generic orchestration is not WASM-shaped |
+| `mncs-portable-wasm-mvp` | `wasm_module` | embedded decoder/interpreter for the declared MVP subset | implemented / exercised |
+| `mncs-research-bytecode` | `research_bytecode` | bounded SSA interpreter over an identity-bound payload | implemented / exercised |
+| `mncs-llvm-ir` | `llvm_ir` | external clang; optional llc object pathway | implemented / exercised on CRE-1/2/3 |
+| `mncs-c11` | `c11_translation_unit` | external clang/gcc `-std=c11` | implemented / exercised on CRE-1/2/3 |
+| `mncs-cranelift` | `cranelift_clif` | Cranelift IR/JIT on the host ISA | implemented; CRE JIT execution currently host-mapping limited |
 
-The bytecode adapter is a research control, not a production VM or native backend. Agreement between
-the two adapters over a corpus is retained as bounded observation only.
+LLVM IR generation does not establish correctness. Clang/llc/gcc are outside the MNCS semantic
+trust boundary. Native object/executable realization uses those tools as optional external steps.
+x86-64, AArch64, and Raspberry Pi-class ARM are target realizations, not language variants.
+
+Planned and **not** implemented: SPIR-V/GPU, PTX, eBPF, additional VMs, bare-metal embedded
+toolchains. Query `mncs experiment matrix` for the generated capability envelope.
+
+Agreement across adapters over a corpus is retained as bounded observation only.

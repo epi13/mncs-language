@@ -4,7 +4,7 @@
 
 Research and reference implementation for a general-purpose, verification-native programming language built on Machine-Native Complexity Standard (MNCS) principles.
 
-> **Project status:** the compiler now has an experimental source-to-plural-backends vertical slice. Source Profiles 0.1–0.3 retain their established worlds; Profile 0.4 adds structured, typed, semantically bounded iteration with a versioned 1–32 attempt envelope, explicit carried state, authority closure, obligations, and bounded CFG/SSA backedges. CRE-3 executes three-attempt retry under `UNKNOWN` through portable WASM and research bytecode. Body, SSA, and backend comparison is empirical bounded agreement, not universal equivalence. Exact instruction cost remains `UNKNOWN`, and no final grammar, complete type/contract calculus, general loop/recursion, native backend, independent evaluation, or production suitability is claimed.
+> **Project status:** the compiler has an experimental source-to-plural-backends vertical slice. Source Profiles 0.1–0.4 remain additive language envelopes (not project roadmap numbers). Profile 0.4 bounded iteration and CRE-3 run through portable WASM, research bytecode, LLVM IR (external clang), and C11. Cranelift emits real CLIF and can JIT the scalar envelope; CRE JIT execution is currently host-mapping limited. Body/SSA/backend comparison is empirical bounded agreement, not universal equivalence. Exact instruction cost remains `UNKNOWN`. Roadmap milestone 0.5 is **not** complete. No final grammar, complete type/contract calculus, general loop/recursion, independent evaluation, or production suitability is claimed. See [ROADMAP.md](ROADMAP.md) and [backend family evidence](docs/development-evidence/backend-family-2026-08.md).
 
 ## Why this project exists
 
@@ -33,7 +33,7 @@ An MNCS-oriented program should make it possible to answer:
 - `rfcs/` — design proposals that can evolve independently of the specification.
 - `crates/mncs-model/` — the executable semantic model, canonical representation, identities, graph/CFG, evidence manifest, invalidation logic, recursive artifacts, high-level IR, validated SSA artifact, and narrow machine-intent/verifier pilots.
 - `crates/mncs-compiler/` — the evidence-bearing reference compiler driver over the existing semantic, HIR, SSA, obligation, identity, provenance, and portable-backend APIs.
-- `crates/mncs-codegen/` — backend-neutral adapter registry plus portable WASM MVP and canonical research-bytecode adapters.
+- `crates/mncs-codegen/` — backend-neutral adapter registry plus portable WASM MVP, research bytecode, LLVM IR, C11, and Cranelift adapters.
 - `crates/mncs-translation-check/` — independent PASS/FAIL/UNKNOWN translation validators; generators live in a separate module and do not certify themselves.
 - `crates/mncs-syntax/` — source envelopes, lossless tokens/CST, a bounded spanned AST/parser, and deterministic source-representation metrics.
 - `crates/mncs-cli/` — validation, canonicalization, identity, graph/CFG, evidence, IR, SSA, obligation, verification, comparison, diagnostic, diff, compile, backend execution, translation validation, and syntax-tournament commands.
@@ -56,6 +56,9 @@ cargo run -p mncs-cli -- source-study examples/source/identity.mncs --node-id lo
 cargo run -p mncs-cli -- source-study examples/source/flagship.mncs --node-id local-flagship
 cargo run -p mncs-cli -- compile examples/executable/checked-add.mncs.json --target portable-wasm
 cargo run -p mncs-cli -- compile examples/executable/checked-add.mncs.json --target research-bytecode
+cargo run -p mncs-cli -- experiment matrix
+cargo run -p mncs-cli -- experiment run examples/source/cre1-evidence-combine.mncs \
+  --backend llvm --corpus examples/execution/cre1-evidence-corpus.json
 cargo run -p mncs-cli -- execute-backend examples/executable/checked-add.mncs.json examples/execution/checked-add-request.json
 cargo run -p mncs-cli -- check-backend-execution examples/executable/checked-add.mncs.json examples/execution/checked-add-corpus.json
 cargo run -p mncs-cli -- validate-translation checked-elision examples/executable/checked-add.mncs.json examples/execution/checked-add-corpus.json
