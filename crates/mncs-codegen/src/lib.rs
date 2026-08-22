@@ -1220,7 +1220,7 @@ mod tests {
         let mut artifact = lower_selected_ssa(&program, &ssa, selected, &plan)
             .artifact
             .unwrap();
-        artifact.bytes_hex = "00".to_owned();
+        "00".clone_into(&mut artifact.bytes_hex);
         let executed = execute_backend(&artifact, &request(1, 1));
         assert_ne!(executed.status, ExecutionStatus::Returned);
     }

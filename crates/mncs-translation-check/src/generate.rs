@@ -3,7 +3,10 @@
 //! These functions search for rewrites. They must never be treated as
 //! validators. A generator result is a candidate artifact, not evidence.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Write as _,
+};
 
 use mncs_model::{
     ArithmeticIntent, IntegerOperation, SemanticId, SsaFunction, SsaInstructionKind, SsaModule,
@@ -175,5 +178,11 @@ fn reachable(function: &SsaFunction) -> BTreeSet<SemanticId> {
 
 fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+    digest.iter().fold(
+        String::with_capacity(digest.len() * 2),
+        |mut output, byte| {
+            write!(&mut output, "{byte:02x}").expect("writing to a String cannot fail");
+            output
+        },
+    )
 }
