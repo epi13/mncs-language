@@ -1,6 +1,6 @@
 # Concept Reconstruction Experiments
 
-Status: CRE-1 and CRE-2 local bootstrap paths implemented / non-normative authority
+Status: CRE-1, CRE-2, and CRE-3 local bounded paths implemented / non-normative authority
 
 ## Implemented Family Record compiler reference
 
@@ -128,13 +128,26 @@ at the caller and executes through both adapters. `cre2-undeclared-capability.mn
 The declarations make the authority path machine-visible even though Profile 0.3 does not perform an
 external effect at runtime.
 
-## Third CRE blocker
+## Third CRE: retry authority under uncertain failure
 
-Profile 0.3 can model retry outcomes and authority-closed calls, but it cannot represent a retry
-sequence with a semantically visible attempt bound without hand-unrolling calls. The exact blocker
-and rejected shortcuts are recorded in
-`examples/experiments/cre3-retry-authority-blocker.json`. Bounded iteration is the next pressure
-experiment; unrestricted loops and recursive retry remain intentionally unsupported.
+Profile 0.4 turns the former blocker into the source-level
+`examples/source/cre3-retry-authority.mncs` experiment. Its three-attempt bounded transition carries
+an `Attempt` value, invokes an authority-bearing observation function on each attempt, preserves
+`UNKNOWN`, completes early for PASS/FAIL, and returns `UNKNOWN_EXHAUSTED` only after the exact
+ceiling. The result type records first/second/third success so the frozen corpus observes state
+advancement without retry-specific runner logic.
+
+Both adapters return language-owned PASS for six typed cases: first success, uncertainty then
+success, success at the exact ceiling, repeated uncertainty to exhaustion, immediate terminal
+failure, and uncertainty then terminal failure. Source, semantic, HIR, and selected-SSA
+fingerprints agree; realization requests, backend identities, artifact identities, and
+backend-specific step counts remain distinct. The comparison is bounded agreement only.
+
+`cre3-retry-authority-wrong-unknown.mncs` terminates uncertainty prematurely;
+`cre3-retry-authority-wrong-bound.mncs` performs a fourth attempt. Both produce FAIL with retained
+case counterexamples. Negative fixtures cover unbounded syntax, nonliteral/zero/oversized bounds,
+malformed carried state, authority laundering, and recursive retry. The machine-readable
+definition is `examples/experiments/cre3-retry-authority.json`.
 
 ## Long-term recursive objective
 
