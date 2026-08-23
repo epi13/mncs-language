@@ -64,6 +64,12 @@ Language-owned experiment and compiler-study records emit producer-native Family
 3. Evidence-gated LLVM `nsw`/`nuw` emission with independent checkers (cases A–D exist; promotion does not).
 4. Proof-carrying lowering pilot for one backend promise.
 5. Observe–localize–propose–verify–compare–promote cycle with retained rejected candidates under independent evidence.
+6. Frozen-experiment replication is wired end to end: `experiment execute --baseline` seals a
+   replicated result against an identity-verified baseline (fail-closed on corpus/artifact/baseline
+   mismatches), and the sibling Control/Fabric/Forge/Commons tooling executes the exact frozen
+   realization on one explicitly requested worker and publishes a Family Record replication
+   (demonstrated 2026-08 for CRE-1 through WASM and research-bytecode on a remote Linux worker;
+   bounded-corpus agreement only, no cross-host equivalence claim).
 
 ## 0.1–0.7 milestone reconciliation
 
