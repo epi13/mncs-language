@@ -14,7 +14,7 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/epi13/mncs-language"
-rust-version = "1.79"
+rust-version = "1.85"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

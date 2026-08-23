@@ -154,7 +154,7 @@ impl SourceEnvelope {
                 .provenance
                 .producer_identity
                 .as_ref()
-                .map_or(true, |identity| !identity.trim().is_empty())
+                .is_none_or(|identity| !identity.trim().is_empty())
             && self
                 .provenance
                 .derived_from
