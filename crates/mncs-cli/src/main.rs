@@ -31,6 +31,11 @@ use mncs_translation_check::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Bounded summary emitted by `experiment execute --baseline` after executing a
+/// frozen backend artifact against a recorded baseline experiment result.
+const FROZEN_REPLICATION_SUMMARY_SCHEMA_VERSION: &str = "0.1";
+const LANGUAGE_EXPERIMENT_INTERPRETATION: &str = mncs_model::LANGUAGE_EXPERIMENT_INTERPRETATION;
+
 fn main() -> ExitCode {
     let mut args = env::args().skip(1);
     let Some(command) = args.next() else {
@@ -765,7 +770,7 @@ where
 {
     let mut args = args.into_iter();
     let Some(action) = args.next() else {
-        eprintln!("error: experiment requires plan, run, execute, inspect, compare, or matrix");
+        eprintln!("error: experiment requires plan, run, execute, inspect, compare, or matrix (execute accepts --baseline/--output-dir for frozen replication)");
         return ExitCode::from(2);
     };
     match action.as_str() {
@@ -803,8 +808,38 @@ where
                 eprintln!("error: experiment execute requires an artifact and corpus path");
                 return ExitCode::from(2);
             };
-            if args.next().is_some() {
-                eprintln!("error: unexpected experiment execute arguments");
+            let mut baseline_path: Option<String> = None;
+            let mut output_dir: Option<PathBuf> = None;
+            let mut parse_error = false;
+            while let Some(option) = args.next() {
+                let mut take_value = |what: &str| -> Option<String> {
+                    match args.next() {
+                        Some(value) => Some(value),
+                        None => {
+                            eprintln!("error: {what} requires a value");
+                            parse_error = true;
+                            None
+                        }
+                    }
+                };
+                match option.as_str() {
+                    "--baseline" => baseline_path = take_value("--baseline"),
+                    "--output-dir" => output_dir = take_value("--output-dir").map(PathBuf::from),
+                    other => {
+                        eprintln!("error: unknown experiment execute option {other:?}");
+                        parse_error = true;
+                    }
+                }
+            }
+            if parse_error {
+                return ExitCode::from(2);
+            }
+            if baseline_path.is_some() && output_dir.is_none() {
+                eprintln!("error: experiment execute --baseline requires --output-dir");
+                return ExitCode::from(2);
+            }
+            if output_dir.is_some() && baseline_path.is_none() {
+                eprintln!("error: experiment execute --output-dir requires --baseline");
                 return ExitCode::from(2);
             }
             let artifact = match read_json::<mncs_model::BackendArtifact>(&artifact_path) {
@@ -823,6 +858,19 @@ where
                     experiment_case_observation(case_, observation)
                 })
                 .collect::<Vec<_>>();
+            if baseline_path.is_some() && output_dir.is_none() {
+                eprintln!("error: experiment execute --baseline requires --output-dir");
+                return ExitCode::from(2);
+            }
+            if let (Some(baseline_file), Some(dir)) = (baseline_path, output_dir) {
+                return execute_frozen_replication(
+                    &artifact,
+                    &corpus,
+                    observations,
+                    &baseline_file,
+                    &dir,
+                );
+            }
             let invalid = observations.iter().any(|observation| {
                 matches!(
                     observation.status,
@@ -1142,6 +1190,145 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// Execute an already-frozen backend artifact as a replication of a recorded
+/// baseline experiment result.  The frozen realization is never recompiled and
+/// every identity mismatch fails closed.
+fn execute_frozen_replication(
+    artifact: &mncs_model::BackendArtifact,
+    corpus: &ExecutionCorpus,
+    case_observations: Vec<LanguageExperimentCaseObservation>,
+    baseline_path: &str,
+    output_dir: &Path,
+) -> ExitCode {
+    let baseline = match read_json::<LanguageExperimentResult>(baseline_path) {
+        Ok(baseline) => baseline,
+        Err(code) => return code,
+    };
+    if !baseline.identity_is_valid() {
+        eprintln!("error: baseline experiment result identity is invalid; refusing to replicate");
+        return ExitCode::from(2);
+    }
+    if *corpus != baseline.definition.corpus {
+        eprintln!(
+            "error: corpus does not match the frozen experiment definition corpus; \
+             refusing to replicate with substituted inputs"
+        );
+        return ExitCode::from(2);
+    }
+    if *artifact != baseline.artifact {
+        eprintln!(
+            "error: backend artifact does not match the frozen realization recorded by \
+             the baseline result; refusing to substitute another artifact"
+        );
+        return ExitCode::from(2);
+    }
+    let properties = evaluate_execution_properties(artifact, &baseline.definition.corpus);
+    let replicated = LanguageExperimentResult::new(
+        baseline.definition.clone(),
+        baseline.compiler_study.clone(),
+        baseline.backend_capabilities.clone(),
+        baseline.realization_plan.clone(),
+        artifact.clone(),
+        baseline.translation_validations.clone(),
+        case_observations,
+        properties,
+        baseline.unresolved_reasons.clone(),
+    );
+    if !replicated.identity_is_valid() {
+        eprintln!("error: replicated experiment result identity is invalid");
+        return ExitCode::from(2);
+    }
+    if let Err(error) = fs::create_dir_all(output_dir) {
+        eprintln!("error: unable to create replication output directory: {error}");
+        return ExitCode::from(2);
+    }
+    if let Err(error) = write_pretty_json(output_dir.join("replicated-result.json"), &replicated) {
+        eprintln!("error: unable to write replicated result: {error}");
+        return ExitCode::from(2);
+    }
+    if let Err(error) = write_pretty_json(
+        output_dir.join("replicated-family-reference.json"),
+        &replicated.family_reference(),
+    ) {
+        eprintln!("error: unable to write replicated family reference: {error}");
+        return ExitCode::from(2);
+    }
+    let cases_matching_baseline = baseline
+        .cases
+        .iter()
+        .filter(|baseline_case| replicated.cases.iter().any(|case_| case_ == *baseline_case))
+        .count();
+    let properties_matching_baseline = baseline
+        .properties
+        .iter()
+        .filter(|baseline_property| {
+            replicated
+                .properties
+                .iter()
+                .any(|property| property == *baseline_property)
+        })
+        .count();
+    let bounded_behavior_agrees = cases_matching_baseline == baseline.cases.len()
+        && properties_matching_baseline == baseline.properties.len()
+        && replicated.cases.len() == baseline.cases.len()
+        && replicated.properties.len() == baseline.properties.len();
+    let earliest_case_divergence = replicated
+        .cases
+        .iter()
+        .zip(baseline.cases.iter())
+        .find(|(observed, expected)| observed != expected)
+        .map(|(observed, _)| observed.case_id.clone());
+    let summary = FrozenReplicationSummary {
+        schema_version: FROZEN_REPLICATION_SUMMARY_SCHEMA_VERSION.to_owned(),
+        baseline_result_identity: baseline.identity.clone(),
+        replicated_result_identity: replicated.identity.clone(),
+        definition_identity: replicated.definition_identity.clone(),
+        backend_identity: replicated.backend.clone(),
+        backend_artifact_identity: replicated.artifact.identity.clone(),
+        identity_valid: true,
+        status: replicated.status,
+        case_count: replicated.cases.len(),
+        property_count: replicated.properties.len(),
+        cases_matching_baseline,
+        properties_matching_baseline,
+        bounded_behavior_agrees,
+        earliest_case_divergence,
+        comparison: LanguageExperimentComparison::compare(&baseline, &replicated),
+        interpretation: LANGUAGE_EXPERIMENT_INTERPRETATION.to_owned(),
+    };
+    let printed = print_json(&summary);
+    if !printed {
+        ExitCode::from(2)
+    } else if !bounded_behavior_agrees
+        || replicated.status == mncs_model::LanguageExperimentStatus::Fail
+    {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FrozenReplicationSummary {
+    schema_version: String,
+    baseline_result_identity: SemanticId,
+    replicated_result_identity: SemanticId,
+    definition_identity: SemanticId,
+    backend_identity: mncs_model::BackendIdentity,
+    backend_artifact_identity: SemanticId,
+    identity_valid: bool,
+    status: mncs_model::LanguageExperimentStatus,
+    case_count: usize,
+    property_count: usize,
+    cases_matching_baseline: usize,
+    properties_matching_baseline: usize,
+    bounded_behavior_agrees: bool,
+    earliest_case_divergence: Option<String>,
+    comparison: LanguageExperimentComparison,
+    interpretation: String,
 }
 
 fn experiment_case_observation(
@@ -2295,7 +2482,7 @@ fn print_usage() {
     eprintln!("  mncs source-study <program.mncs> [--node-id NODE]");
     eprintln!("  mncs experiment plan <program.mncs> --backend BACKEND --corpus CORPUS [--output-dir DIR]");
     eprintln!("  mncs experiment run <program.mncs> --backend BACKEND --corpus CORPUS [--output-dir DIR] [--node-id NODE]");
-    eprintln!("  mncs experiment execute <backend-artifact.json> <corpus.json>");
+    eprintln!("  mncs experiment execute <backend-artifact.json> <corpus.json> [--baseline RESULT.json --output-dir DIR]");
     eprintln!("  mncs experiment inspect <result.json>");
     eprintln!("  mncs experiment compare <left-result.json> <right-result.json>");
     eprintln!("  mncs experiment matrix");

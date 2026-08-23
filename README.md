@@ -115,7 +115,7 @@ absence of unexpected effects. See [Source Profile 0.4](docs/source-profile-0.4.
 fingerprints, Joern comparison, compatibility checks, and scoped non-claims are recorded in the
 [Profile 0.4 development evidence](docs/development-evidence/source-profile-0.4-bounded-iteration-cre3-2026-08.md).
 
-`experiment execute BACKEND_ARTIFACT CORPUS` executes an already frozen artifact without recompiling it, which is the narrow runtime boundary for Fabric packaging. `experiment inspect RESULT` verifies all content identities before reporting the bounded observation. See [the language experiment contract](docs/language-experiment-contract.md) and [backend adapter specification](spec/backend-adapters.md).
+`experiment execute BACKEND_ARTIFACT CORPUS` executes an already frozen artifact without recompiling it, which is the narrow runtime boundary for Fabric packaging. Adding `--baseline RESULT --output-dir DIR` turns the same boundary into an identity-bound replication: it fails closed on any corpus, artifact, or baseline identity mismatch and seals a replicated experiment result with fresh bounded observations. `experiment inspect RESULT` verifies all content identities before reporting the bounded observation. See [the language experiment contract](docs/language-experiment-contract.md) and [backend adapter specification](spec/backend-adapters.md).
 
 ## Current semantic objects
 

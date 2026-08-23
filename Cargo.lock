@@ -344,6 +344,7 @@ dependencies = [
  "mncs-translation-check",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

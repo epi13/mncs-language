@@ -41,6 +41,7 @@ mncs experiment run SOURCE --backend BACKEND --corpus CORPUS --output-dir DIR
 mncs experiment inspect DIR/result.json
 mncs experiment compare LEFT/result.json RIGHT/result.json
 mncs experiment execute DIR/backend-artifact.json CORPUS
+mncs experiment execute DIR/backend-artifact.json CORPUS --baseline BASELINE/result.json --output-dir REPLICA
 ```
 
 `plan` freezes the source-to-selected-SSA identity and realization requirements. `run` performs the
@@ -48,6 +49,34 @@ language-owned compilation, realization, validation, and bounded observation. `e
 already frozen backend artifact and corpus and does not recompile; this is the intended narrow Fabric
 runtime entry point. `inspect` rechecks content identities. `compare` localizes the earliest known
 semantic/representation/realization divergence and reports bounded behavior agreement separately.
+
+### Frozen replication (`execute --baseline`)
+
+With `--baseline RESULT --output-dir DIR`, `execute` performs an identity-bound replication of a
+recorded experiment realization instead of emitting anonymous case observations. Before executing
+anything it fails closed unless all of the following hold:
+
+- the baseline result's entire identity chain re-verifies (`experiment inspect` semantics);
+- the supplied corpus is exactly equal to the corpus sealed inside the baseline definition;
+- the supplied backend artifact is exactly equal to the frozen artifact recorded by the baseline.
+
+Any mismatch aborts with exit code 2 and writes no outputs; a mutated or substituted realization is
+never silently rebuilt or replaced. On success the command executes every corpus case and every
+bounded property law against the frozen artifact, seals a new `LanguageExperimentResult` that
+inherits the definition, compiler study, capability manifest, realization plan, artifact, and
+translation validations verbatim from the baseline, and writes `replicated-result.json` plus
+`replicated-family-reference.json`. Because language identities are content-addressed, a replication
+that observes identical bounded behavior yields the identical result identity as the baseline;
+behavioral divergence changes the identity while the Fabric layer separately records which worker
+and execution attempt produced it. The printed summary carries both result identities, the
+definition/backend/artifact identities, per-case/per-property agreement counts, a bounded behavior
+agreement flag, and the full experiment comparison. Exit code 1 reports `FAIL` status or observed
+baseline disagreement.
+
+The compile-time evidence inherited into a replicated result (study fingerprints, translation
+validations) describes the original realization of the frozen artifact; the fresh case and property
+observations describe this specific execution. Runtime facts such as worker identity remain owned by
+Fabric execution records, never by the language result.
 
 When an output directory is requested, `family-reference.json` provides an observational
 `LanguageExperimentResult` reference with exact source/profile, compiler/pipeline,
