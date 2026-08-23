@@ -1033,3 +1033,351 @@ fn profile_04_rejects_unbounded_malformed_and_authority_expanding_iteration() {
             .any(|diagnostic| diagnostic["code"] == code));
     }
 }
+
+fn frozen_replication_workspace(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "mncs-frozen-replication-{}-{}",
+        name,
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create workspace");
+    dir
+}
+
+#[test]
+fn frozen_execute_with_baseline_emits_a_sealed_replicated_result() {
+    let temp = frozen_replication_workspace("happy");
+    let source = example("source/cre1-evidence-combine.mncs");
+    let corpus = example("execution/cre1-evidence-corpus.json");
+    let baseline_dir = temp.join("baseline");
+    let run = binary()
+        .args([
+            "experiment",
+            "run",
+            &source,
+            "--backend",
+            "mncs-portable-wasm-mvp",
+            "--corpus",
+            &corpus,
+            "--output-dir",
+            baseline_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run CRE-1 baseline");
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    let replica_dir = temp.join("replica");
+    let replication = binary()
+        .args([
+            "experiment",
+            "execute",
+            baseline_dir.join("backend-artifact.json").to_str().unwrap(),
+            &corpus,
+            "--baseline",
+            baseline_dir.join("result.json").to_str().unwrap(),
+            "--output-dir",
+            replica_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("frozen replication");
+    assert!(
+        replication.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replication.stderr)
+    );
+    let summary: Value =
+        serde_json::from_slice(&replication.stdout).expect("replication summary JSON");
+    assert_eq!(summary["schemaVersion"], "0.1");
+    assert_eq!(summary["identityValid"], true);
+    assert_eq!(summary["status"], "PASS");
+    assert_eq!(summary["boundedBehaviorAgrees"], true);
+    assert_eq!(summary["casesMatchingBaseline"], 9);
+    assert_eq!(summary["propertiesMatchingBaseline"], 6);
+    let definition_identity = summary["definitionIdentity"].clone();
+    assert_eq!(
+        summary["replicatedResultIdentity"],
+        summary["baselineResultIdentity"]
+    );
+    assert!(summary["comparison"]["same_backend_artifact"] == true);
+
+    let replicated: Value = serde_json::from_slice(
+        &std::fs::read(replica_dir.join("replicated-result.json")).expect("replicated result"),
+    )
+    .expect("replicated result JSON");
+    assert_eq!(replicated["definition"]["identity"], definition_identity);
+    assert_eq!(replicated["identity"], summary["replicatedResultIdentity"]);
+
+    let inspection = binary()
+        .args([
+            "experiment",
+            "inspect",
+            replica_dir.join("replicated-result.json").to_str().unwrap(),
+        ])
+        .output()
+        .expect("inspect replicated result");
+    assert!(inspection.status.success());
+    let report: Value = serde_json::from_slice(&inspection.stdout).expect("inspection JSON");
+    assert_eq!(report["identity_valid"], true);
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn frozen_execute_rejects_substituted_corpus_without_writing_outputs() {
+    let temp = frozen_replication_workspace("corpus-mismatch");
+    let source = example("source/cre1-evidence-combine.mncs");
+    let corpus = example("execution/cre1-evidence-corpus.json");
+    let baseline_dir = temp.join("baseline");
+    let run = binary()
+        .args([
+            "experiment",
+            "run",
+            &source,
+            "--backend",
+            "mncs-portable-wasm-mvp",
+            "--corpus",
+            &corpus,
+            "--output-dir",
+            baseline_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run CRE-1 baseline");
+    assert!(run.status.success());
+
+    let mut mutated: Value =
+        serde_json::from_str(&std::fs::read_to_string(&corpus).expect("read canonical corpus"))
+            .expect("canonical corpus JSON");
+    mutated["cases"][0]["request"]["step_budget"] = Value::from(
+        mutated["cases"][0]["request"]["step_budget"]
+            .as_u64()
+            .unwrap_or(1000)
+            + 7,
+    );
+    let mutated_path = temp.join("corpus-mutated.json");
+    std::fs::write(&mutated_path, serde_json::to_vec_pretty(&mutated).unwrap())
+        .expect("write mutated corpus");
+
+    let replica_dir = temp.join("replica");
+    let replication = binary()
+        .args([
+            "experiment",
+            "execute",
+            baseline_dir.join("backend-artifact.json").to_str().unwrap(),
+            mutated_path.to_str().unwrap(),
+            "--baseline",
+            baseline_dir.join("result.json").to_str().unwrap(),
+            "--output-dir",
+            replica_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("frozen replication with substituted corpus");
+    assert_eq!(replication.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&replication.stderr).contains("corpus does not match"));
+    assert!(!replica_dir.exists());
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn frozen_execute_rejects_a_mutated_frozen_backend_artifact() {
+    let temp = frozen_replication_workspace("artifact-mutation");
+    let source = example("source/cre1-evidence-combine.mncs");
+    let corpus = example("execution/cre1-evidence-corpus.json");
+    let baseline_dir = temp.join("baseline");
+    let run = binary()
+        .args([
+            "experiment",
+            "run",
+            &source,
+            "--backend",
+            "mncs-portable-wasm-mvp",
+            "--corpus",
+            &corpus,
+            "--output-dir",
+            baseline_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run CRE-1 baseline");
+    assert!(run.status.success());
+
+    // Mutate the artifact body while keeping the recorded bytes digest
+    // self-consistent, so only the comparison against the frozen realization
+    // identity can catch the substitution.
+    let mut artifact: Value = serde_json::from_str(
+        &std::fs::read_to_string(baseline_dir.join("backend-artifact.json"))
+            .expect("read frozen artifact"),
+    )
+    .expect("artifact JSON");
+    let hex = artifact["bytes_hex"].as_str().unwrap().to_owned();
+    let mut bytes: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
+        .collect();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0x01;
+    artifact["bytes_hex"] = Value::String(
+        bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+    );
+    artifact["bytes_sha256"] = Value::String({
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(&bytes);
+        format!("sha256:{digest:x}")
+    });
+    let mutated_artifact_path = temp.join("backend-artifact-mutated.json");
+    std::fs::write(
+        &mutated_artifact_path,
+        serde_json::to_vec_pretty(&artifact).unwrap(),
+    )
+    .expect("write mutated artifact");
+
+    let replica_dir = temp.join("replica");
+    let replication = binary()
+        .args([
+            "experiment",
+            "execute",
+            mutated_artifact_path.to_str().unwrap(),
+            &corpus,
+            "--baseline",
+            baseline_dir.join("result.json").to_str().unwrap(),
+            "--output-dir",
+            replica_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("frozen replication with mutated artifact");
+    assert_eq!(replication.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&replication.stderr)
+        .contains("does not match the frozen realization"));
+    assert!(!replica_dir.exists());
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn frozen_execute_rejects_a_tampered_baseline_result() {
+    let temp = frozen_replication_workspace("tampered-baseline");
+    let source = example("source/cre1-evidence-combine.mncs");
+    let corpus = example("execution/cre1-evidence-corpus.json");
+    let baseline_dir = temp.join("baseline");
+    let run = binary()
+        .args([
+            "experiment",
+            "run",
+            &source,
+            "--backend",
+            "mncs-portable-wasm-mvp",
+            "--corpus",
+            &corpus,
+            "--output-dir",
+            baseline_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run CRE-1 baseline");
+    assert!(run.status.success());
+
+    let mut tampered: Value = serde_json::from_str(
+        &std::fs::read_to_string(baseline_dir.join("result.json")).expect("read baseline result"),
+    )
+    .expect("baseline JSON");
+    tampered["status"] = Value::String("FAIL".to_owned());
+    let tampered_path = temp.join("baseline-tampered.json");
+    std::fs::write(
+        &tampered_path,
+        serde_json::to_vec_pretty(&tampered).unwrap(),
+    )
+    .expect("write tampered baseline");
+
+    let replication = binary()
+        .args([
+            "experiment",
+            "execute",
+            baseline_dir.join("backend-artifact.json").to_str().unwrap(),
+            &corpus,
+            "--baseline",
+            tampered_path.to_str().unwrap(),
+            "--output-dir",
+            temp.join("replica").to_str().unwrap(),
+        ])
+        .output()
+        .expect("frozen replication with tampered baseline");
+    assert_eq!(replication.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&replication.stderr).contains("identity is invalid"));
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn frozen_replication_preserves_distinct_realization_identities_across_backends() {
+    let temp = frozen_replication_workspace("plurality");
+    let source = example("source/cre1-evidence-combine.mncs");
+    let corpus = example("execution/cre1-evidence-corpus.json");
+    let mut summaries = Vec::new();
+    for backend in ["mncs-portable-wasm-mvp", "mncs-research-bytecode"] {
+        let baseline_dir = temp.join(format!("baseline-{backend}"));
+        let run = binary()
+            .args([
+                "experiment",
+                "run",
+                &source,
+                "--backend",
+                backend,
+                "--corpus",
+                &corpus,
+                "--output-dir",
+                baseline_dir.to_str().unwrap(),
+            ])
+            .output()
+            .expect("run CRE-1 baseline");
+        assert!(
+            run.status.success(),
+            "{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        let replica_dir = temp.join(format!("replica-{backend}"));
+        let replication = binary()
+            .args([
+                "experiment",
+                "execute",
+                baseline_dir.join("backend-artifact.json").to_str().unwrap(),
+                &corpus,
+                "--baseline",
+                baseline_dir.join("result.json").to_str().unwrap(),
+                "--output-dir",
+                replica_dir.to_str().unwrap(),
+            ])
+            .output()
+            .expect("frozen replication");
+        assert!(
+            replication.status.success(),
+            "{}",
+            String::from_utf8_lossy(&replication.stderr)
+        );
+        summaries.push((
+            serde_json::from_slice::<Value>(&run.stdout).expect("baseline JSON"),
+            serde_json::from_slice::<Value>(&replication.stdout).expect("summary JSON"),
+        ));
+    }
+    let (wasm_baseline, wasm_summary) = &summaries[0];
+    let (bc_baseline, bc_summary) = &summaries[1];
+    // Each replication keeps its own frozen realization identity.
+    assert_eq!(
+        wasm_baseline["artifact"]["identity"],
+        wasm_summary["backendArtifactIdentity"]
+    );
+    assert_eq!(
+        bc_baseline["artifact"]["identity"],
+        bc_summary["backendArtifactIdentity"]
+    );
+    assert_ne!(
+        wasm_summary["backendArtifactIdentity"],
+        bc_summary["backendArtifactIdentity"]
+    );
+    // Both replications agree on bounded behavior while remaining distinct records.
+    assert_eq!(wasm_summary["boundedBehaviorAgrees"], true);
+    assert_eq!(bc_summary["boundedBehaviorAgrees"], true);
+    let _ = std::fs::remove_dir_all(temp);
+}
