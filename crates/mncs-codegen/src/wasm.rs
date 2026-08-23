@@ -983,7 +983,7 @@ fn decode_body(payload: &[u8]) -> Result<FuncBody, WasmTrap> {
                 format!("unsupported WASM local type {byte:#x}"),
             )
         })?;
-        locals.extend(std::iter::repeat(ty).take(count as usize));
+        locals.extend(std::iter::repeat_n(ty, count as usize));
     }
     let mut body = Vec::new();
     while cursor < payload.len() {
