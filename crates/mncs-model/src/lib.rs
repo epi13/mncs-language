@@ -90,8 +90,8 @@ pub use graph::{
     SemanticGraph,
 };
 pub use identity::{
-    finite_type_id, finite_variant_id, function_id, record_type_id, IdentityChange, IdentityKind,
-    IdentityRecord, SemanticDiff, SemanticId, SemanticIdentities,
+    contract_id, finite_type_id, finite_variant_id, function_id, record_type_id, IdentityChange,
+    IdentityKind, IdentityRecord, SemanticDiff, SemanticId, SemanticIdentities,
 };
 pub use ir::{
     CapabilityUse, FailurePathKind, HighLevelIr, IrBlock, IrBoundedIteration, IrError, IrFunction,
