@@ -570,16 +570,28 @@ fn merge_imported_declarations(
 
     // Deterministic merge order: import declaration order, then declaration
     // order within each dependency.
+    //
+    // Linked dependency programs contain their own imports' declarations, so
+    // one identity can arrive through several paths; that is a diamond
+    // re-export and binds once. Only a name conflict between DIFFERENT
+    // identities fails closed.
     for module in imported {
         for finite_type in &module.program.finite_types {
-            if context.finite_types_by_name.contains_key(&finite_type.name)
-                || context.finite_type_names.contains(&finite_type.name)
-            {
-                let same_identity = context
-                    .finite_types_by_name
-                    .get(&finite_type.name)
-                    .is_some_and(|existing| existing.identity == finite_type.identity);
-                if !same_identity {
+            // A local declaration sharing a name with an import is always a
+            // collision; the module declared both under one namespace.
+            if context.finite_type_names.contains(&finite_type.name) {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE174",
+                    format!(
+                        "imported finite type '{}' collides with a local declaration",
+                        finite_type.name
+                    ),
+                    ast.module.span,
+                ));
+                continue;
+            }
+            if let Some(existing) = context.finite_types_by_name.get(&finite_type.name) {
+                if existing.identity != finite_type.identity {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE174",
                         format!(
@@ -597,14 +609,19 @@ fn merge_imported_declarations(
             context.imported_finite_types.push(finite_type.clone());
         }
         for record_type in &module.program.record_types {
-            if context.record_types_by_name.contains_key(&record_type.name)
-                || context.record_type_names.contains(&record_type.name)
-            {
-                let same_identity = context
-                    .record_types_by_name
-                    .get(&record_type.name)
-                    .is_some_and(|existing| existing.identity == record_type.identity);
-                if !same_identity {
+            if context.record_type_names.contains(&record_type.name) {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE175",
+                    format!(
+                        "imported record type '{}' collides with a local declaration",
+                        record_type.name
+                    ),
+                    ast.module.span,
+                ));
+                continue;
+            }
+            if let Some(existing) = context.record_types_by_name.get(&record_type.name) {
+                if existing.identity != record_type.identity {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE175",
                         format!(
@@ -622,26 +639,43 @@ fn merge_imported_declarations(
             context.imported_record_types.push(record_type.clone());
         }
         for function in &module.program.functions {
-            if context.signatures.contains_key(&function.name)
-                || context.function_names.contains(&function.name)
-            {
+            let candidate_signature = signature_from_function(module, function);
+            if context.function_names.contains(&function.name) {
                 diagnostics.push(elaboration_diagnostic(
                     "MNE176",
                     format!(
-                        "imported function '{}' collides with an existing binding",
+                        "imported function '{}' collides with a local declaration",
                         function.name
                     ),
                     ast.module.span,
                 ));
                 continue;
             }
+            if let Some(existing) = context.signatures.get(&function.name) {
+                if existing.identity != candidate_signature.identity {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE176",
+                        format!(
+                            "imported function '{}' collides with an existing binding",
+                            function.name
+                        ),
+                        ast.module.span,
+                    ));
+                }
+                continue;
+            }
             let mut imported_function = function.clone();
-            imported_function.home_module = Some(module.program.module.clone());
-            context.signatures.insert(
-                function.name.clone(),
-                signature_from_function(module, function),
-            );
-            context.function_names.insert(function.name.clone());
+            if imported_function.home_module.is_none() {
+                // Locals of the dependency become linked imports here;
+                // declarations that already carry a home keep it.
+                imported_function.home_module = Some(module.program.module.clone());
+            }
+            // Imported names live in `signatures`, not in the locals-only
+            // `function_names` set, so later diamond arrivals compare by
+            // identity instead of colliding as locals.
+            context
+                .signatures
+                .insert(function.name.clone(), candidate_signature);
             context.imported_functions.push(imported_function);
         }
     }
@@ -649,7 +683,8 @@ fn merge_imported_declarations(
 }
 
 /// Builds the call-checking signature for a function declared in another
-/// module. Identities stay anchored to the declaring module.
+/// module. Identities stay anchored to the declaring module: a function that
+/// itself arrived through linking keeps its original home namespace.
 fn signature_from_function(module: &ImportedModule, function: &Function) -> FunctionSignature {
     let body_type = |name: &str| body_type_from_name(module, name);
     let inputs = function
@@ -664,8 +699,12 @@ fn signature_from_function(module: &ImportedModule, function: &Function) -> Func
     let mut capabilities = function.capabilities.clone();
     capabilities.sort();
     capabilities.dedup();
+    let home = function
+        .home_module
+        .as_deref()
+        .unwrap_or(&module.program.module);
     FunctionSignature {
-        identity: function_id(&module.program.module, &function.name),
+        identity: function_id(home, &function.name),
         inputs,
         output,
         capabilities,
