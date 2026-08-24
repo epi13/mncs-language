@@ -824,8 +824,78 @@ fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) 
             type_identity == identity
                 && valid_finite_value(program, type_identity, variant_identity, *discriminant)
         }
+        (
+            ExecutionValue::Record {
+                type_identity,
+                fields,
+                ..
+            },
+            BodyType::Record { identity, .. },
+        ) => type_identity == identity && record_fields_match(program, type_identity, fields),
         _ => false,
     }
+}
+
+/// A logical record value matches its declaration when the field sets agree
+/// exactly (both sides keep fields sorted by name) and every field value
+/// matches its declared semantic type.
+fn record_fields_match(
+    program: &Program,
+    record_identity: &SemanticId,
+    fields: &[(String, ExecutionValue)],
+) -> bool {
+    let Some(declaration) = program
+        .record_types
+        .iter()
+        .find(|decl| &decl.identity == record_identity)
+    else {
+        return false;
+    };
+    if declaration.fields.len() != fields.len() {
+        return false;
+    }
+    declaration
+        .fields
+        .iter()
+        .zip(fields.iter())
+        .all(|(declared, (field_name, field_value))| {
+            field_name == &declared.name
+                && value_matches_named_type(program, field_value, &declared.field_type)
+        })
+}
+
+fn value_matches_named_type(program: &Program, value: &ExecutionValue, name: &str) -> bool {
+    let derived = BodyType::from_semantic_name(name);
+    if !matches!(derived, BodyType::Named(_)) {
+        return value_matches_type(program, value, &derived);
+    }
+    if name == "bool" {
+        return matches!(value, ExecutionValue::Boolean { .. });
+    }
+    if let Some(finite) = program.finite_types.iter().find(|decl| decl.name == name) {
+        return value_matches_type(
+            program,
+            value,
+            &BodyType::Finite {
+                identity: finite.identity.clone(),
+                name: finite.name.clone(),
+            },
+        );
+    }
+    if let Some(record) = program.record_types.iter().find(|decl| decl.name == name) {
+        return match value {
+            ExecutionValue::Record {
+                type_identity,
+                fields,
+                ..
+            } => {
+                type_identity == &record.identity
+                    && record_fields_match(program, &record.identity, fields)
+            }
+            _ => false,
+        };
+    }
+    false
 }
 
 fn constant_value(value: i128, ty: &BodyType) -> Option<ExecutionValue> {
@@ -882,6 +952,16 @@ fn normalize_value(
         ) if type_identity == identity
             && valid_finite_value(program, type_identity, variant_identity, *discriminant) =>
         {
+            Some(value.clone())
+        }
+        (
+            ExecutionValue::Record {
+                type_identity,
+                fields,
+                ..
+            },
+            BodyType::Record { identity, .. },
+        ) if type_identity == identity && record_fields_match(program, type_identity, fields) => {
             Some(value.clone())
         }
         _ => None,
