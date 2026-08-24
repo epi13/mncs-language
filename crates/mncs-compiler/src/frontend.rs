@@ -216,6 +216,18 @@ impl ReferenceCompiler {
         self.run_source_study_inner(envelope, node, Some(backend_name), &NullResolver)
     }
 
+    /// Runs a source study against a specific backend with a module resolver
+    /// for `use` imports.
+    pub fn run_source_study_with_backend_and_resolver(
+        &self,
+        envelope: SourceEnvelope,
+        node: CompilerNodeProfile,
+        backend_name: &str,
+        resolver: &dyn ModuleResolver,
+    ) -> SourceStudyOutput {
+        self.run_source_study_inner(envelope, node, Some(backend_name), resolver)
+    }
+
     fn run_source_study_inner(
         &self,
         envelope: SourceEnvelope,
