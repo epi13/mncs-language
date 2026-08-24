@@ -757,6 +757,7 @@ struct PreparedExperiment {
     program: Program,
     definition: LanguageExperimentDefinition,
     semantic_json_source: bool,
+    source_dir: Option<PathBuf>,
 }
 
 fn experiment_command<I>(args: I) -> ExitCode
@@ -1356,6 +1357,11 @@ fn prepare_experiment(options: &ExperimentOptions) -> Result<PreparedExperiment,
         Vec::new(),
     );
     Ok(PreparedExperiment {
+        source_dir: Some({
+            let mut dir = PathBuf::from(&options.source_path);
+            dir.pop();
+            dir
+        }),
         envelope,
         program,
         definition,
@@ -1401,10 +1407,18 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
             &prepared.program,
         )
     } else {
-        let study_output = compiler.run_source_study_with_backend(
+        let resolver = prepared
+            .source_dir
+            .clone()
+            .map(|root| FileModuleResolver { root })
+            .unwrap_or_else(|| FileModuleResolver {
+                root: PathBuf::from("."),
+            });
+        let study_output = compiler.run_source_study_with_backend_and_resolver(
             prepared.envelope.clone(),
             native_node_profile(options.node_identity),
             &options.backend,
+            &resolver,
         );
         let Some(study) = study_output.study else {
             let _ = print_json(&study_output.front_end);
@@ -2762,6 +2776,19 @@ impl FileModuleResolver {
     }
 }
 
+impl FileModuleResolver {
+    /// Candidate paths for one module name under one root directory:
+    /// the full dotted path, then a sibling named after the final segment.
+    fn candidates(root: &std::path::Path, module: &str) -> Vec<PathBuf> {
+        let dotted = module.replace('.', "/");
+        let tail = module.rsplit('.').next().unwrap_or(module);
+        vec![
+            root.join(format!("{dotted}.mncs")),
+            root.join(format!("{tail}.mncs")),
+        ]
+    }
+}
+
 impl ModuleResolver for FileModuleResolver {
     fn resolve(&self, module: &str) -> Option<SourceEnvelope> {
         if module.is_empty()
@@ -2774,29 +2801,29 @@ impl ModuleResolver for FileModuleResolver {
         {
             return None;
         }
-        // Two deterministic layouts are supported, tried in order:
-        //   1. the full dotted path beneath the importing file's directory;
-        //   2. a sibling file named after the final path segment.
-        let dotted = module.replace('.', "/");
-        let full_path = self.root.join(format!("{dotted}.mncs"));
-        let tail = module.rsplit('.').next().unwrap_or(module);
-        let sibling_path = self.root.join(format!("{tail}.mncs"));
-        let (path, source) = match fs::read_to_string(&full_path) {
-            Ok(source) => (full_path, source),
-            Err(_) => {
-                let source = fs::read_to_string(&sibling_path).ok()?;
-                (sibling_path, source)
+        // Deterministic layout search: the importing file's directory first,
+        // then its parent (so files grouped in a subdirectory can import a
+        // sibling tree rooted one level up).
+        let mut roots = vec![self.root.clone()];
+        if let Some(parent) = self.root.parent() {
+            roots.push(parent.to_path_buf());
+        }
+        for root in roots {
+            for path in Self::candidates(&root, module) {
+                if let Ok(source) = fs::read_to_string(&path) {
+                    return Some(SourceEnvelope::new(
+                        SourceArtifactKind::Program,
+                        path.to_string_lossy().to_string(),
+                        SourceOrigin {
+                            kind: SourceOriginKind::Path,
+                            locator: Some(path.to_string_lossy().to_string()),
+                        },
+                        source,
+                    ));
+                }
             }
-        };
-        Some(SourceEnvelope::new(
-            SourceArtifactKind::Program,
-            path.to_string_lossy().to_string(),
-            SourceOrigin {
-                kind: SourceOriginKind::Path,
-                locator: Some(path.to_string_lossy().to_string()),
-            },
-            source,
-        ))
+        }
+        None
     }
 }
 

@@ -1037,10 +1037,16 @@ impl<'a> Parser<'a> {
             );
             self.cursor += 1;
         }
-        if functions.is_empty() {
+        // A module must declare something: a function, a type, or an import.
+        // Vocabulary-only modules (shared enums/records) are legitimate.
+        let declared_anything = !(functions.is_empty()
+            && finite_types.is_empty()
+            && record_types.is_empty()
+            && uses.is_empty());
+        if !declared_anything {
             self.error(
                 "MNP006",
-                "source profile requires at least one function",
+                "module declares nothing; expected at least one function, type, or import",
                 vec![TokenKind::FunctionKeyword],
             );
         }
@@ -1074,7 +1080,7 @@ impl<'a> Parser<'a> {
             root,
         };
         let ast = match (header_keyword, version, module) {
-            (Some(_), Some(language_version), Some(module)) if !functions.is_empty() => {
+            (Some(_), Some(language_version), Some(module)) if declared_anything => {
                 Some(AbstractSyntaxTree {
                     schema_version: AST_SCHEMA_VERSION.to_owned(),
                     source_identity: self.envelope.identity.clone(),
