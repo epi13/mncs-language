@@ -445,7 +445,10 @@ pub fn function_id(module: &str, function: &str) -> SemanticId {
     make_id(IdentityKind::Function, &[module, function])
 }
 
-pub(crate) fn contract_id(module: &str, function: &str, contract: &str) -> SemanticId {
+/// Public contract identity: `mncs:0.2:contract:<module>::<function>::<id>`.
+/// Generally useful for tools that must reference contract clauses without
+/// re-deriving identity rules.
+pub fn contract_id(module: &str, function: &str, contract: &str) -> SemanticId {
     make_id(IdentityKind::Contract, &[module, function, contract])
 }
 

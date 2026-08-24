@@ -91,6 +91,7 @@ pub use graph::{
 };
 pub use identity::{
     finite_type_id, finite_variant_id, function_id, module_id, record_type_id, IdentityChange,
+    contract_id, finite_type_id, finite_variant_id, function_id, record_type_id, IdentityChange,
     IdentityKind, IdentityRecord, SemanticDiff, SemanticId, SemanticIdentities,
 };
 pub use ir::{
