@@ -902,43 +902,52 @@ impl<'a> Parser<'a> {
             Vec::new(),
         );
 
+        // Declarations may be interleaved freely: enums, records, and
+        // functions may appear in any order. Each construct remains gated by
+        // its own source profile.
         let mut finite_types = Vec::new();
-        let mut finite_type_nodes = Vec::new();
-        while matches!(
-            self.profile.as_str(),
-            SOURCE_PROFILE_VERSION_0_3 | SOURCE_PROFILE_VERSION_0_4 | SOURCE_PROFILE_VERSION_0_5
-        ) && self.current_kind() == Some(TokenKind::EnumKeyword)
-        {
-            let (node, finite_type) = self.finite_type();
-            finite_type_nodes.push(node);
-            if let Some(finite_type) = finite_type {
-                finite_types.push(finite_type);
-            }
-        }
         let mut record_types = Vec::new();
-        let mut record_type_nodes = Vec::new();
-        while self.current_kind() == Some(TokenKind::RecordKeyword) {
-            if !matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_5) {
-                self.error(
-                    "MNP120",
-                    "record declarations require source profile 0.5",
-                    vec![TokenKind::RecordKeyword],
-                );
-                break;
-            }
-            let (node, record_decl) = self.record_decl();
-            record_type_nodes.push(node);
-            if let Some(record_decl) = record_decl {
-                record_types.push(record_decl);
-            }
-        }
         let mut functions = Vec::new();
-        let mut function_nodes = Vec::new();
-        while self.current_kind() == Some(TokenKind::FunctionKeyword) {
-            let (node, function) = self.function();
-            function_nodes.push(node);
-            if let Some(function) = function {
-                functions.push(function);
+        let mut declaration_nodes = Vec::new();
+        loop {
+            match self.current_kind() {
+                Some(TokenKind::EnumKeyword)
+                    if matches!(
+                        self.profile.as_str(),
+                        SOURCE_PROFILE_VERSION_0_3
+                            | SOURCE_PROFILE_VERSION_0_4
+                            | SOURCE_PROFILE_VERSION_0_5
+                    ) =>
+                {
+                    let (node, finite_type) = self.finite_type();
+                    declaration_nodes.push(node);
+                    if let Some(finite_type) = finite_type {
+                        finite_types.push(finite_type);
+                    }
+                }
+                Some(TokenKind::RecordKeyword) => {
+                    if !matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_5) {
+                        self.error(
+                            "MNP120",
+                            "record declarations require source profile 0.5",
+                            vec![TokenKind::RecordKeyword],
+                        );
+                        break;
+                    }
+                    let (node, record_decl) = self.record_decl();
+                    declaration_nodes.push(node);
+                    if let Some(record_decl) = record_decl {
+                        record_types.push(record_decl);
+                    }
+                }
+                Some(TokenKind::FunctionKeyword) => {
+                    let (node, function) = self.function();
+                    declaration_nodes.push(node);
+                    if let Some(function) = function {
+                        functions.push(function);
+                    }
+                }
+                _ => break,
             }
         }
         // Outside Profile 0.5 `record` is an ordinary identifier; a stray
@@ -973,9 +982,7 @@ impl<'a> Parser<'a> {
 
         let source_span = SourceSpan::at(&self.envelope.text, 0, self.envelope.text.len());
         let mut children = vec![header, module_node];
-        children.extend(finite_type_nodes);
-        children.extend(record_type_nodes);
-        children.extend(function_nodes);
+        children.extend(declaration_nodes);
         let root = CstNode {
             kind: CstKind::Document,
             span: source_span,
