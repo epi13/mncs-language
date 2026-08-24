@@ -15,11 +15,13 @@ use mncs_model::{
 use mncs_syntax::{
     parse, AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstStmt, ConcreteSyntaxTree,
     DiagnosticSeverity, DiagnosticStage, LexedDocument, ParseOutput, SourceArtifactKind,
-    SourceDiagnostic, SourceEnvelope, SourceSpan, AST_SCHEMA_VERSION, CST_SCHEMA_VERSION,
-    LEXICAL_SCHEMA_VERSION, SOURCE_ENVELOPE_SCHEMA_VERSION, SOURCE_PROFILE_VERSION_0_4,
+    SourceDiagnostic, SourceEnvelope, SourceSpan, SpannedText, AST_SCHEMA_VERSION,
+    CST_SCHEMA_VERSION, LEXICAL_SCHEMA_VERSION, SOURCE_ENVELOPE_SCHEMA_VERSION,
+    SOURCE_PROFILE_VERSION_0_4,
 };
 use serde::Serialize;
 
+use crate::resolution::{NameResolution, NameResolutionIndex, ResolvedNameKind};
 use crate::{fingerprint, native_node_profile, ReferenceCompiler};
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,6 +34,10 @@ pub struct SourceFrontEndResult {
     pub semantic_graph: Option<SemanticGraph>,
     pub identities: Option<SemanticIdentities>,
     pub validation: Option<ValidationReport>,
+    /// Authoritative name resolutions recorded during elaboration. Resolutions
+    /// are recorded best-effort, so a partially valid document still exposes
+    /// the occurrences that elaboration resolved successfully.
+    pub name_resolutions: NameResolutionIndex,
     pub artifacts: Vec<CompilerArtifactRef>,
     pub diagnostics: Vec<SourceDiagnostic>,
 }
@@ -91,6 +97,7 @@ impl ReferenceCompiler {
         let mut validation = None;
         let mut semantic_graph = None;
         let mut identities = None;
+        let mut name_resolutions = NameResolutionIndex::default();
         if let Some(tree) = &ast {
             artifacts.push(CompilerArtifactRef::new(
                 ArtifactRepresentation::AbstractSyntaxTree,
@@ -104,8 +111,8 @@ impl ReferenceCompiler {
                     tree.span,
                 ));
             } else {
-                match elaborate_program(tree) {
-                    Ok(elaborated) => {
+                match elaborate_program_with_resolutions(tree) {
+                    (Ok(elaborated), resolutions) => {
                         let report = elaborated.validate();
                         let canonical = elaborated
                             .canonical_form()
@@ -148,8 +155,12 @@ impl ReferenceCompiler {
                         ));
                         validation = Some(report);
                         program = Some(elaborated);
+                        name_resolutions = NameResolutionIndex::new(resolutions);
                     }
-                    Err(mut errors) => diagnostics.append(&mut errors),
+                    (Err(mut errors), resolutions) => {
+                        name_resolutions = NameResolutionIndex::new(resolutions);
+                        diagnostics.append(&mut errors)
+                    }
                 }
             }
         }
@@ -162,6 +173,7 @@ impl ReferenceCompiler {
             semantic_graph,
             identities,
             validation,
+            name_resolutions,
             artifacts,
             diagnostics,
         }
@@ -311,7 +323,23 @@ impl ReferenceCompiler {
 }
 
 pub fn elaborate_program(ast: &AbstractSyntaxTree) -> Result<Program, Vec<SourceDiagnostic>> {
+    elaborate_program_with_resolutions(ast).0
+}
+
+/// Elaborate `ast` and additionally return every name resolution that
+/// elaboration decided. The resolutions are authoritative: each entry is the
+/// exact binding decision used to accept the corresponding occurrence.
+///
+/// Recording is best-effort; when elaboration fails, the resolutions decided
+/// before the failure are still returned so tools can navigate partially valid
+/// documents without re-implementing binding rules.
+pub fn elaborate_program_with_resolutions(
+    ast: &AbstractSyntaxTree,
+) -> (Result<Program, Vec<SourceDiagnostic>>, Vec<NameResolution>) {
     let mut diagnostics = Vec::new();
+    let mut resolutions = Vec::new();
+    let declarations = DeclarationSpans::from_ast(ast);
+    record_annotation_type_resolutions(ast, &declarations, &mut resolutions);
     let mut finite_types = Vec::new();
     let mut finite_type_names = BTreeSet::new();
     for declaration in &ast.finite_types {
@@ -476,12 +504,14 @@ pub fn elaborate_program(ast: &AbstractSyntaxTree) -> Result<Program, Vec<Source
             &finite_types_by_name,
             &record_types_by_name,
             &signatures,
+            &declarations,
+            &mut resolutions,
         ) {
             Ok(elaborated) => functions.push(elaborated),
             Err(mut errors) => diagnostics.append(&mut errors),
         }
     }
-    if diagnostics.is_empty() {
+    let outcome = if diagnostics.is_empty() {
         Ok(Program {
             schema_version: SUPPORTED_SCHEMA_VERSION.to_owned(),
             module: ast.module.text.clone(),
@@ -492,15 +522,151 @@ pub fn elaborate_program(ast: &AbstractSyntaxTree) -> Result<Program, Vec<Source
         })
     } else {
         Err(diagnostics)
+    };
+    (outcome, resolutions)
+}
+
+/// Source spans of every nominal declaration name, used to point name
+/// occurrences at the exact declaration they resolve to.
+#[derive(Debug, Clone, Default)]
+struct DeclarationSpans {
+    functions: BTreeMap<String, SourceSpan>,
+    finite_types: BTreeMap<String, SourceSpan>,
+    finite_variants: BTreeMap<(String, String), SourceSpan>,
+    record_types: BTreeMap<String, SourceSpan>,
+    record_fields: BTreeMap<(String, String), SourceSpan>,
+}
+
+impl DeclarationSpans {
+    fn from_ast(ast: &AbstractSyntaxTree) -> Self {
+        let mut declarations = Self::default();
+        for finite_type in &ast.finite_types {
+            declarations
+                .finite_types
+                .insert(finite_type.name.text.clone(), finite_type.name.span);
+            for variant in &finite_type.variants {
+                declarations.finite_variants.insert(
+                    (finite_type.name.text.clone(), variant.text.clone()),
+                    variant.span,
+                );
+            }
+        }
+        for record in &ast.record_types {
+            declarations
+                .record_types
+                .insert(record.name.text.clone(), record.name.span);
+            for field in &record.fields {
+                declarations.record_fields.insert(
+                    (record.name.text.clone(), field.name.text.clone()),
+                    field.name.span,
+                );
+            }
+        }
+        for function in &ast.functions {
+            declarations
+                .functions
+                .insert(function.name.text.clone(), function.name.span);
+        }
+        declarations
     }
 }
 
+/// Record type-annotation occurrences (parameter, output, binding, and carried
+/// state types). Annotation positions are syntactically unambiguous; the only
+/// decision is whether the annotated name denotes a declared nominal type.
+fn record_annotation_type_resolutions(
+    ast: &AbstractSyntaxTree,
+    declarations: &DeclarationSpans,
+    resolutions: &mut Vec<NameResolution>,
+) {
+    for function in &ast.functions {
+        for parameter in function.inputs.iter().chain(&function.outputs) {
+            record_annotation(&parameter.value_type, ast, declarations, resolutions);
+        }
+        record_annotation_block(&function.body.statements, ast, declarations, resolutions);
+    }
+}
+
+fn record_annotation_block(
+    statements: &[AstStmt],
+    ast: &AbstractSyntaxTree,
+    declarations: &DeclarationSpans,
+    resolutions: &mut Vec<NameResolution>,
+) {
+    for statement in statements {
+        match statement {
+            AstStmt::Let { value_type, .. } => {
+                record_annotation(value_type, ast, declarations, resolutions);
+            }
+            AstStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                record_annotation_block(then_body, ast, declarations, resolutions);
+                record_annotation_block(else_body, ast, declarations, resolutions);
+            }
+            AstStmt::BoundedIteration {
+                state_type, body, ..
+            } => {
+                record_annotation(state_type, ast, declarations, resolutions);
+                record_annotation_block(body, ast, declarations, resolutions);
+            }
+            AstStmt::Fail { .. } | AstStmt::Return { .. } => {}
+        }
+    }
+}
+
+fn annotation_kind(name: &str, ast: &AbstractSyntaxTree) -> Option<ResolvedNameKind> {
+    if ast
+        .finite_types
+        .iter()
+        .any(|declared| declared.name.text == name)
+    {
+        Some(ResolvedNameKind::FiniteType)
+    } else if ast
+        .record_types
+        .iter()
+        .any(|declared| declared.name.text == name)
+    {
+        Some(ResolvedNameKind::RecordType)
+    } else {
+        None
+    }
+}
+
+fn record_annotation(
+    name: &SpannedText,
+    ast: &AbstractSyntaxTree,
+    declarations: &DeclarationSpans,
+    resolutions: &mut Vec<NameResolution>,
+) {
+    let Some(kind) = annotation_kind(&name.text, ast) else {
+        return;
+    };
+    let declaration = match kind {
+        ResolvedNameKind::FiniteType => declarations.finite_types.get(&name.text),
+        _ => declarations.record_types.get(&name.text),
+    }
+    .copied();
+    if let Some(declaration) = declaration {
+        resolutions.push(NameResolution {
+            occurrence: name.span,
+            declaration,
+            kind,
+        });
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn elaborate_function(
     ast: &AbstractSyntaxTree,
     function: &AstFunction,
     finite_types: &BTreeMap<String, FiniteType>,
     record_types: &BTreeMap<String, RecordType>,
     signatures: &BTreeMap<String, FunctionSignature>,
+    declarations: &DeclarationSpans,
+    resolutions: &mut Vec<NameResolution>,
 ) -> Result<Function, Vec<SourceDiagnostic>> {
     let mut diagnostics = Vec::new();
     if function.outputs.len() != 1 {
@@ -617,11 +783,12 @@ fn elaborate_function(
             input.name.text.clone(),
             input.name.text.clone(),
             parameter.ty.clone(),
-            input.span,
+            input.name.span,
+            BoundNameKind::Parameter,
             &mut diagnostics,
         );
     }
-    let (blocks, bounded_iterations) = if function.body.statements.is_empty()
+    let (blocks, bounded_iterations, builder_resolutions) = if function.body.statements.is_empty()
         && matches!(function.body.returned_value, AstExpr::Name(_))
     {
         let AstExpr::Name(returned_name) = &function.body.returned_value else {
@@ -647,6 +814,7 @@ fn elaborate_function(
                 },
             }],
             Vec::new(),
+            Vec::new(),
         )
     } else {
         let mut builder = BodyBuilder::new(
@@ -655,6 +823,7 @@ fn elaborate_function(
             finite_types,
             record_types,
             signatures,
+            declarations,
         );
         builder.elaborate_statements(&function.body.statements, &mut env, &mut diagnostics);
         if let Some(returned) = builder.elaborate_expr(
@@ -669,8 +838,15 @@ fn elaborate_function(
                 &mut diagnostics,
             );
         }
-        (builder.blocks, builder.bounded_iterations)
+        let builder_resolutions = std::mem::take(&mut builder.resolutions);
+        (
+            builder.blocks,
+            builder.bounded_iterations,
+            builder_resolutions,
+        )
     };
+    resolutions.extend(env.take_resolutions());
+    resolutions.extend(builder_resolutions);
     if !diagnostics.is_empty() {
         return Err(diagnostics);
     }
@@ -891,7 +1067,8 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
 }
 
 struct BindingEnv {
-    scopes: Vec<std::collections::BTreeMap<String, (ResolvedBinding, SourceSpan)>>,
+    scopes: Vec<std::collections::BTreeMap<String, (ResolvedBinding, SourceSpan, BoundNameKind)>>,
+    resolutions: Vec<NameResolution>,
 }
 
 #[derive(Clone)]
@@ -900,10 +1077,30 @@ struct ResolvedBinding {
     ty: BodyType,
 }
 
+/// Lexical role of a bound name; recorded so tools can distinguish parameter,
+/// local binding, and carried iteration-state declarations.
+#[derive(Debug, Clone, Copy)]
+enum BoundNameKind {
+    Parameter,
+    Binding,
+    IterationState,
+}
+
+impl BoundNameKind {
+    fn resolved_kind(self) -> ResolvedNameKind {
+        match self {
+            Self::Parameter => ResolvedNameKind::Parameter,
+            Self::Binding => ResolvedNameKind::Binding,
+            Self::IterationState => ResolvedNameKind::IterationState,
+        }
+    }
+}
+
 impl BindingEnv {
     fn new() -> Self {
         Self {
             scopes: vec![std::collections::BTreeMap::new()],
+            resolutions: Vec::new(),
         }
     }
 
@@ -912,30 +1109,41 @@ impl BindingEnv {
         name: String,
         id: String,
         ty: BodyType,
-        span: SourceSpan,
+        declaration: SourceSpan,
+        kind: BoundNameKind,
         diagnostics: &mut Vec<SourceDiagnostic>,
     ) {
         let scope = self.scopes.last_mut().expect("scope stack is non-empty");
-        if let Some((_, existing)) = scope.get(&name) {
+        if let Some((_, existing, _)) = scope.get(&name) {
             let _ = existing;
             diagnostics.push(elaboration_diagnostic(
                 "MNE110",
                 "binding is ambiguous in this lexical scope",
-                span,
+                declaration,
             ));
             return;
         }
-        scope.insert(name, (ResolvedBinding { id, ty }, span));
+        self.resolutions.push(NameResolution {
+            occurrence: declaration,
+            declaration,
+            kind: kind.resolved_kind(),
+        });
+        scope.insert(name, (ResolvedBinding { id, ty }, declaration, kind));
     }
 
     fn resolve(
-        &self,
+        &mut self,
         name: &str,
         span: SourceSpan,
         diagnostics: &mut Vec<SourceDiagnostic>,
     ) -> Option<ResolvedBinding> {
         for scope in self.scopes.iter().rev() {
-            if let Some((id, _)) = scope.get(name) {
+            if let Some((id, declaration, kind)) = scope.get(name) {
+                self.resolutions.push(NameResolution {
+                    occurrence: span,
+                    declaration: *declaration,
+                    kind: kind.resolved_kind(),
+                });
                 return Some(id.clone());
             }
         }
@@ -961,6 +1169,10 @@ impl BindingEnv {
     fn pop(&mut self) {
         self.scopes.pop();
     }
+
+    fn take_resolutions(&mut self) -> Vec<NameResolution> {
+        std::mem::take(&mut self.resolutions)
+    }
 }
 
 struct BodyBuilder<'a> {
@@ -974,16 +1186,20 @@ struct BodyBuilder<'a> {
     finite_types: &'a BTreeMap<String, FiniteType>,
     record_types: &'a BTreeMap<String, RecordType>,
     signatures: &'a BTreeMap<String, FunctionSignature>,
+    declarations: &'a DeclarationSpans,
+    resolutions: Vec<NameResolution>,
     in_iteration: bool,
 }
 
 impl<'a> BodyBuilder<'a> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         output_type: BodyType,
         function: String,
         finite_types: &'a BTreeMap<String, FiniteType>,
         record_types: &'a BTreeMap<String, RecordType>,
         signatures: &'a BTreeMap<String, FunctionSignature>,
+        declarations: &'a DeclarationSpans,
     ) -> Self {
         Self {
             blocks: vec![BodyBlock {
@@ -1001,6 +1217,8 @@ impl<'a> BodyBuilder<'a> {
             finite_types,
             record_types,
             signatures,
+            declarations,
+            resolutions: Vec::new(),
             in_iteration: false,
         }
     }
@@ -1059,7 +1277,8 @@ impl<'a> BodyBuilder<'a> {
                     name.text.clone(),
                     produced.id.clone(),
                     declared,
-                    *span,
+                    name.span,
+                    BoundNameKind::Binding,
                     diagnostics,
                 );
             }
@@ -1338,6 +1557,7 @@ impl<'a> BodyBuilder<'a> {
             header_state.clone(),
             carried_type.clone(),
             state.span,
+            BoundNameKind::IterationState,
             diagnostics,
         );
         self.elaborate_statements(body, env, diagnostics);
@@ -1473,7 +1693,8 @@ impl<'a> BodyBuilder<'a> {
             state.text.clone(),
             exit_state,
             carried_type,
-            *span,
+            state.span,
+            BoundNameKind::IterationState,
             diagnostics,
         );
     }
@@ -1604,6 +1825,24 @@ impl<'a> BodyBuilder<'a> {
                     ));
                     return None;
                 };
+                if let Some(&declaration) = self.declarations.finite_types.get(&type_name.text) {
+                    self.resolutions.push(NameResolution {
+                        occurrence: type_name.span,
+                        declaration,
+                        kind: ResolvedNameKind::FiniteType,
+                    });
+                }
+                if let Some(&declaration) = self
+                    .declarations
+                    .finite_variants
+                    .get(&(type_name.text.clone(), variant.text.clone()))
+                {
+                    self.resolutions.push(NameResolution {
+                        occurrence: variant.span,
+                        declaration,
+                        kind: ResolvedNameKind::FiniteVariant,
+                    });
+                }
                 let ty = BodyType::Finite {
                     identity: finite_type.identity.clone(),
                     name: finite_type.name.clone(),
@@ -1649,6 +1888,13 @@ impl<'a> BodyBuilder<'a> {
                     ));
                     return None;
                 };
+                if let Some(&declaration) = self.declarations.functions.get(&function.text) {
+                    self.resolutions.push(NameResolution {
+                        occurrence: function.span,
+                        declaration,
+                        kind: ResolvedNameKind::Function,
+                    });
+                }
                 if arguments.len() != signature.inputs.len() {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE132",
@@ -1771,6 +2017,17 @@ impl<'a> BodyBuilder<'a> {
                         ));
                         continue;
                     };
+                    if let Some(&declaration) = self
+                        .declarations
+                        .finite_variants
+                        .get(&(type_name.clone(), arm.variant.text.clone()))
+                    {
+                        self.resolutions.push(NameResolution {
+                            occurrence: arm.variant.span,
+                            declaration,
+                            kind: ResolvedNameKind::FiniteVariant,
+                        });
+                    }
                     if !seen.insert(variant.identity.clone()) {
                         diagnostics.push(elaboration_diagnostic(
                             "MNE139",
@@ -1899,6 +2156,32 @@ impl<'a> BodyBuilder<'a> {
                     ));
                     return None;
                 };
+                if let Some(&declaration) = self.declarations.record_types.get(&type_name.text) {
+                    self.resolutions.push(NameResolution {
+                        occurrence: type_name.span,
+                        declaration,
+                        kind: ResolvedNameKind::RecordType,
+                    });
+                }
+                for (name, _) in fields {
+                    if record_type
+                        .fields
+                        .iter()
+                        .any(|field| field.name == name.text)
+                    {
+                        if let Some(&declaration) = self
+                            .declarations
+                            .record_fields
+                            .get(&(type_name.text.clone(), name.text.clone()))
+                        {
+                            self.resolutions.push(NameResolution {
+                                occurrence: name.span,
+                                declaration,
+                                kind: ResolvedNameKind::RecordField,
+                            });
+                        }
+                    }
+                }
                 let ty = BodyType::Record {
                     identity: record_type.identity.clone(),
                     name: record_type.name.clone(),
@@ -2044,6 +2327,17 @@ impl<'a> BodyBuilder<'a> {
                     ));
                     return None;
                 };
+                if let Some(&declaration) = self
+                    .declarations
+                    .record_fields
+                    .get(&(record_type.name.clone(), field.text.clone()))
+                {
+                    self.resolutions.push(NameResolution {
+                        occurrence: field.span,
+                        declaration,
+                        kind: ResolvedNameKind::RecordField,
+                    });
+                }
                 let result_ty = profile_type(
                     &declared_field.field_type,
                     field.span,

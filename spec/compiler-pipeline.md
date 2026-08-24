@@ -87,3 +87,15 @@ In particular:
 - no portable/native backend or executable artifact is implemented.
 
 The machine-readable architecture record is authoritative over informal maturity summaries.
+
+## 7. Source-level name resolution
+
+Elaboration records every name-binding decision it makes as a `NameResolutionIndex` (`crates/mncs-compiler`, schema `0.1`). Each entry binds one use-site span to the source span of the declaration it resolves to, classified as function, parameter, local binding, iteration state, finite type, finite variant, record type, or record field.
+
+Properties:
+
+- entries originate only from actual elaboration decisions; nothing is inferred from text alone;
+- recording is best-effort: occurrences resolved before an elaboration error are retained so tools can navigate partially valid documents;
+- the index contains use sites only; declaration inventories derive from the lossless AST.
+
+Consumers (language services, CLI navigation, Forge) MUST treat this index as the authoritative source-position-to-declaration relation and MUST NOT re-implement binding rules independently.

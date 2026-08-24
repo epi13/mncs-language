@@ -5,8 +5,14 @@
 //! `mncs-model`.
 
 mod frontend;
+mod resolution;
 
-pub use frontend::{elaborate_program, SourceFrontEndResult, SourceStudyOutput};
+pub use frontend::{
+    elaborate_program, elaborate_program_with_resolutions, SourceFrontEndResult, SourceStudyOutput,
+};
+pub use resolution::{
+    NameResolution, NameResolutionIndex, ResolvedNameKind, NAME_RESOLUTION_SCHEMA_VERSION,
+};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
