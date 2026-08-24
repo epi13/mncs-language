@@ -902,43 +902,52 @@ impl<'a> Parser<'a> {
             Vec::new(),
         );
 
+        // Declarations may be interleaved freely: enums, records, and
+        // functions may appear in any order. Each construct remains gated by
+        // its own source profile.
         let mut finite_types = Vec::new();
-        let mut finite_type_nodes = Vec::new();
-        while matches!(
-            self.profile.as_str(),
-            SOURCE_PROFILE_VERSION_0_3 | SOURCE_PROFILE_VERSION_0_4 | SOURCE_PROFILE_VERSION_0_5
-        ) && self.current_kind() == Some(TokenKind::EnumKeyword)
-        {
-            let (node, finite_type) = self.finite_type();
-            finite_type_nodes.push(node);
-            if let Some(finite_type) = finite_type {
-                finite_types.push(finite_type);
-            }
-        }
         let mut record_types = Vec::new();
-        let mut record_type_nodes = Vec::new();
-        while self.current_kind() == Some(TokenKind::RecordKeyword) {
-            if !matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_5) {
-                self.error(
-                    "MNP120",
-                    "record declarations require source profile 0.5",
-                    vec![TokenKind::RecordKeyword],
-                );
-                break;
-            }
-            let (node, record_decl) = self.record_decl();
-            record_type_nodes.push(node);
-            if let Some(record_decl) = record_decl {
-                record_types.push(record_decl);
-            }
-        }
         let mut functions = Vec::new();
-        let mut function_nodes = Vec::new();
-        while self.current_kind() == Some(TokenKind::FunctionKeyword) {
-            let (node, function) = self.function();
-            function_nodes.push(node);
-            if let Some(function) = function {
-                functions.push(function);
+        let mut declaration_nodes = Vec::new();
+        loop {
+            match self.current_kind() {
+                Some(TokenKind::EnumKeyword)
+                    if matches!(
+                        self.profile.as_str(),
+                        SOURCE_PROFILE_VERSION_0_3
+                            | SOURCE_PROFILE_VERSION_0_4
+                            | SOURCE_PROFILE_VERSION_0_5
+                    ) =>
+                {
+                    let (node, finite_type) = self.finite_type();
+                    declaration_nodes.push(node);
+                    if let Some(finite_type) = finite_type {
+                        finite_types.push(finite_type);
+                    }
+                }
+                Some(TokenKind::RecordKeyword) => {
+                    if !matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_5) {
+                        self.error(
+                            "MNP120",
+                            "record declarations require source profile 0.5",
+                            vec![TokenKind::RecordKeyword],
+                        );
+                        break;
+                    }
+                    let (node, record_decl) = self.record_decl();
+                    declaration_nodes.push(node);
+                    if let Some(record_decl) = record_decl {
+                        record_types.push(record_decl);
+                    }
+                }
+                Some(TokenKind::FunctionKeyword) => {
+                    let (node, function) = self.function();
+                    declaration_nodes.push(node);
+                    if let Some(function) = function {
+                        functions.push(function);
+                    }
+                }
+                _ => break,
             }
         }
         // Outside Profile 0.5 `record` is an ordinary identifier; a stray
@@ -973,9 +982,7 @@ impl<'a> Parser<'a> {
 
         let source_span = SourceSpan::at(&self.envelope.text, 0, self.envelope.text.len());
         let mut children = vec![header, module_node];
-        children.extend(finite_type_nodes);
-        children.extend(record_type_nodes);
-        children.extend(function_nodes);
+        children.extend(declaration_nodes);
         let root = CstNode {
             kind: CstKind::Document,
             span: source_span,
@@ -2173,6 +2180,32 @@ mod tests {
             SourceArtifactKind::Program,
             "branching",
             "mncs 0.5;\nmodule example.branch;\nenum S { PASS, FAIL }\nrecord T { v: i32 }\nfn pick(s: S, ok: bool, base: T) -> (result: i32) { return match s { PASS => 1, FAIL => 0 }; } fn branch(ok: bool) -> (result: i32) { if ok { return 1; } return 0; } fn loop_from_record(n: i32) -> (result: i32) { iterate steps up_to 2 carrying acc: T = T { v: n } { next acc = T { ..acc, v: acc.v + 1 }; } return acc.v; } fn literal(base: T) -> (result: i32) { let updated: T = T { ..base, v: 7 }; return updated.v; }\n",
+        );
+        let parsed = parse(&envelope);
+        assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+    }
+
+    #[test]
+    fn declarations_may_be_interleaved_across_kinds() {
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "interleaved",
+            "mncs 0.5;\nmodule example.interleaved;\nrecord P { l: i32, r: i32 }\nenum Pick { LEFT, RIGHT, TIE }\nfn classify(l: i32, r: i32) -> (result: Pick) { let p: P = P { l: l, r: r }; if p.l > p.r { return Pick.LEFT; } return Pick.RIGHT; }\nrecord Tally { left: i32, right: i32 }\nfn tally(pick: Pick) -> (result: Tally) { return match pick { LEFT => Tally { left: 1, right: 0 }, RIGHT => Tally { left: 0, right: 1 }, TIE => Tally { left: 0, right: 0 } }; }\nenum Mode { ON, OFF }\nfn mode(open: bool) -> (result: Mode) { if open { return Mode.ON; } return Mode.OFF; }\n",
+        );
+        let parsed = parse(&envelope);
+        assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+        let ast = parsed.ast.expect("valid AST");
+        assert_eq!(ast.record_types.len(), 2);
+        assert_eq!(ast.finite_types.len(), 2);
+        assert_eq!(ast.functions.len(), 3);
+    }
+
+    #[test]
+    fn profile_03_interleaves_enums_and_functions_only() {
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "interleaved-03",
+            "mncs 0.3;\nmodule example.interleaved03;\nenum E { A, B }\nfn f(e: E) -> (result: i32) { return match e { A => 1, B => 2 }; }\nenum F { C, D }\nfn g(e: F) -> (result: i32) { return match e { C => 3, D => 4 }; }\n",
         );
         let parsed = parse(&envelope);
         assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);

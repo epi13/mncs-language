@@ -177,6 +177,26 @@ The following example intentionally performs a network effect without declaring 
 cargo run -p mncs-cli -- validate examples/invalid-undeclared-effect.mncs.json
 ```
 
+Every manifest-consuming command (`validate`, `canonicalize`, `graph`,
+`evidence-manifest`, `ir`, `ssa`, `obligations`, `verify`, `diagnose`,
+`body`, `trace`, `compile`, `execute`, ...) also accepts `.mncs` source
+files directly, running the reference front end first:
+
+```bash
+cargo run -p mncs-cli -- validate examples/source/cre1-evidence-combine.mncs
+cargo run -p mncs-cli -- obligations examples/source/cre3-retry-authority.mncs
+cargo run -p mncs-cli -- compile examples/source/profile05-interleaved-declarations.mncs --emit semantic
+```
+
+Source Profile 0.5 declarations may be interleaved freely: enums, records,
+and functions can appear in any order, and record values are accepted at the
+execution boundary as corpus arguments, expected results, and compared
+observations across body/SSA/backend layers.
+
+The MNCS Lineage project (`epi13/mncs-lineage`) now builds its succession
+semantics on these capabilities and is an active proving ground for them;
+its conversion record documents the language pressure in detail.
+
 Explore the semantic foundation with the small before/after examples:
 
 ```bash

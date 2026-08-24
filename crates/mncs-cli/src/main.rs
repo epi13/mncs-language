@@ -125,17 +125,9 @@ fn main() -> ExitCode {
 }
 
 fn validate(path: &str) -> ExitCode {
-    let input = match read_source(path) {
-        Ok(input) => input,
-        Err(code) => return code,
-    };
-
-    let program = match Program::from_json(&input) {
+    let program = match load_program(path) {
         Ok(program) => program,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(2);
-        }
+        Err(code) => return code,
     };
 
     let report = program.validate();
@@ -192,11 +184,7 @@ where
 }
 
 fn read_valid_program(path: &str) -> Result<Program, ExitCode> {
-    let input = read_source(path)?;
-    let program = Program::from_json(&input).map_err(|error| {
-        eprintln!("error: {error}");
-        ExitCode::from(2)
-    })?;
+    let program = load_program(path)?;
     let report = program.validate();
     if !report.valid {
         if !print_json(&report) {
@@ -2011,12 +1999,41 @@ fn target_has_backend_adapter(target: &TargetContractRef) -> bool {
         .any(|known| known == *target)
 }
 
-fn read_program_unvalidated(path: &str) -> Result<Program, ExitCode> {
+/// Load a semantic program from either canonical manifest JSON or, when the
+/// path ends in `.mncs`, directly from MNCS source text via the reference
+/// front end.
+fn load_program(path: &str) -> Result<Program, ExitCode> {
+    if Path::new(path)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("mncs"))
+    {
+        let source = read_source(path)?;
+        let envelope = mncs_syntax::SourceEnvelope::inline(
+            mncs_syntax::SourceArtifactKind::Program,
+            path,
+            source,
+        );
+        let front_end = ReferenceCompiler::default().front_end(envelope);
+        let diagnostics = front_end.diagnostics.clone();
+        let valid = front_end.is_valid();
+        let program = front_end.program;
+        match program.filter(|_| valid) {
+            Some(program) => return Ok(program),
+            None => {
+                let _ = print_json(&diagnostics);
+                return Err(ExitCode::from(2));
+            }
+        }
+    }
     let input = read_source(path)?;
     Program::from_json(&input).map_err(|error| {
         eprintln!("error: invalid semantic manifest: {error}");
         ExitCode::from(2)
     })
+}
+
+fn read_program_unvalidated(path: &str) -> Result<Program, ExitCode> {
+    load_program(path)
 }
 
 fn write_compilation_outputs(
