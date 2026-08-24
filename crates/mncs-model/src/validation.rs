@@ -60,6 +60,22 @@ impl Program {
             &mut errors,
         );
 
+        // Imported declarations keep identities anchored to their declaring
+        // module namespaces, so identity re-derivation accepts any bound
+        // dependency namespace as well as this program's own.
+        let mut known_namespaces = vec![self.module.clone()];
+        for dependency in &self.dependencies {
+            if let Some(name) = dependency.module_name() {
+                known_namespaces.push(name);
+            }
+        }
+        let identity_matches_some_namespace =
+            |expected_for: &dyn Fn(&str) -> crate::SemanticId, actual: &crate::SemanticId| {
+                known_namespaces
+                    .iter()
+                    .any(|namespace| expected_for(namespace) == *actual)
+            };
+
         let mut finite_type_names = BTreeSet::new();
         for (type_index, finite_type) in self.finite_types.iter().enumerate() {
             let type_path = format!("finite_types[{type_index}]");
@@ -72,7 +88,10 @@ impl Program {
                     "finite type names must be non-empty and unique",
                 ));
             }
-            if finite_type.identity != finite_type_id(&self.module, &finite_type.name) {
+            if !identity_matches_some_namespace(
+                &|namespace| finite_type_id(namespace, &finite_type.name),
+                &finite_type.identity,
+            ) {
                 errors.push(diagnostic(
                     "MNCS015",
                     format!("{type_path}.identity"),
@@ -106,9 +125,10 @@ impl Program {
                         "finite variant discriminants must be unique and canonical declaration ordinals",
                     ));
                 }
-                if variant.identity
-                    != finite_variant_id(&self.module, &finite_type.name, &variant.name)
-                {
+                if !identity_matches_some_namespace(
+                    &|namespace| finite_variant_id(namespace, &finite_type.name, &variant.name),
+                    &variant.identity,
+                ) {
                     errors.push(diagnostic(
                         "MNCS019",
                         format!("{variant_path}.identity"),
@@ -336,6 +356,7 @@ pub(crate) mod tests {
         Program {
             schema_version: SUPPORTED_SCHEMA_VERSION.to_owned(),
             module: "Banking.Transfer".to_owned(),
+            dependencies: Vec::new(),
             finite_types: vec![],
             record_types: Vec::new(),
             assumptions: vec![Assumption {
@@ -345,6 +366,7 @@ pub(crate) mod tests {
                 confidence: AssumptionConfidence::External,
             }],
             functions: vec![Function {
+                home_module: None,
                 name: "transfer".to_owned(),
                 inputs: vec![Value {
                     name: "amount".to_owned(),

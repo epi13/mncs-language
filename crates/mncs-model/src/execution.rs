@@ -1361,6 +1361,7 @@ mod tests {
             &Program {
                 schema_version: "0.1".to_owned(),
                 module: "m".to_owned(),
+                dependencies: Vec::new(),
                 finite_types: Vec::new(),
                 record_types: Vec::new(),
                 assumptions: Vec::new(),
@@ -1375,6 +1376,7 @@ mod tests {
                 blocks: Vec::new(),
             },
             &Function {
+                home_module: None,
                 name: "f".to_owned(),
                 inputs: Vec::new(),
                 outputs: Vec::new(),

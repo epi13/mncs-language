@@ -1,0 +1,19 @@
+mncs 0.6;
+
+// Imports the evidence lattice and binds against it. The caller must
+// re-declare any authority the callee requires; here `combine` declares no
+// capabilities, so nothing extra is needed.
+module examples.imports.study;
+
+use examples.imports.evidence;
+
+enum Outcome { ACCEPT, DEFER }
+
+fn decide(first: Verdict, second: Verdict) -> (outcome: Outcome) {
+    let combined: Verdict = combine(first, second);
+    return match combined {
+        PASS => Outcome.ACCEPT,
+        FAIL => Outcome.DEFER,
+        UNKNOWN => Outcome.DEFER,
+    };
+}

@@ -69,6 +69,16 @@ pub struct SourceStudyOutput {
 
 impl ReferenceCompiler {
     pub fn front_end(&self, envelope: SourceEnvelope) -> SourceFrontEndResult {
+        self.front_end_with_resolver(envelope, &NullResolver)
+    }
+
+    /// Runs the front end with a module resolver, linking `use` imports at
+    /// elaboration time.
+    pub fn front_end_with_resolver(
+        &self,
+        envelope: SourceEnvelope,
+        resolver: &dyn ModuleResolver,
+    ) -> SourceFrontEndResult {
         let ParseOutput {
             lexical,
             cst,
@@ -111,7 +121,7 @@ impl ReferenceCompiler {
                     tree.span,
                 ));
             } else {
-                match elaborate_program_with_resolutions(tree) {
+                match elaborate_program_with_resolver(tree, resolver) {
                     (Ok(elaborated), resolutions) => {
                         let report = elaborated.validate();
                         let canonical = elaborated
@@ -143,7 +153,7 @@ impl ReferenceCompiler {
                             diagnostics.extend(report.errors.iter().map(|error| {
                                 elaboration_diagnostic(
                                     &error.code,
-                                    &format!("{}: {}", error.path, error.message),
+                                    format!("{}: {}", error.path, error.message),
                                     tree.span,
                                 )
                             }));
@@ -184,7 +194,17 @@ impl ReferenceCompiler {
         envelope: SourceEnvelope,
         node: CompilerNodeProfile,
     ) -> SourceStudyOutput {
-        self.run_source_study_inner(envelope, node, None)
+        self.run_source_study_inner(envelope, node, None, &NullResolver)
+    }
+
+    /// Runs a source study with a module resolver for `use` imports.
+    pub fn run_source_study_with_resolver(
+        &self,
+        envelope: SourceEnvelope,
+        node: CompilerNodeProfile,
+        resolver: &dyn ModuleResolver,
+    ) -> SourceStudyOutput {
+        self.run_source_study_inner(envelope, node, None, resolver)
     }
 
     pub fn run_source_study_with_backend(
@@ -193,7 +213,7 @@ impl ReferenceCompiler {
         node: CompilerNodeProfile,
         backend_name: &str,
     ) -> SourceStudyOutput {
-        self.run_source_study_inner(envelope, node, Some(backend_name))
+        self.run_source_study_inner(envelope, node, Some(backend_name), &NullResolver)
     }
 
     fn run_source_study_inner(
@@ -201,8 +221,9 @@ impl ReferenceCompiler {
         envelope: SourceEnvelope,
         node: CompilerNodeProfile,
         backend_name: Option<&str>,
+        resolver: &dyn ModuleResolver,
     ) -> SourceStudyOutput {
-        let front_end = self.front_end(envelope);
+        let front_end = self.front_end_with_resolver(envelope, resolver);
         let Some(program) = front_end.program.as_ref().filter(|_| front_end.is_valid()) else {
             return SourceStudyOutput {
                 front_end,
@@ -326,20 +347,415 @@ pub fn elaborate_program(ast: &AbstractSyntaxTree) -> Result<Program, Vec<Source
     elaborate_program_with_resolutions(ast).0
 }
 
-/// Elaborate `ast` and additionally return every name resolution that
-/// elaboration decided. The resolutions are authoritative: each entry is the
-/// exact binding decision used to accept the corresponding occurrence.
+/// Resolves imported module names to source envelopes during elaboration.
+///
+/// The name identifies the candidate; compatibility is established only by
+/// elaborating the resolved module (RFC 0014: names are not compatibility).
+/// Resolution misses and unresolvable modules are diagnostics in the
+/// importing module, never silent skips.
+pub trait ModuleResolver {
+    fn resolve(&self, module: &str) -> Option<SourceEnvelope>;
+}
+
+/// A resolver that finds nothing. Programs elaborated with it must be
+/// self-contained.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NullResolver;
+
+impl ModuleResolver for NullResolver {
+    fn resolve(&self, _module: &str) -> Option<SourceEnvelope> {
+        None
+    }
+}
+
+/// Elaborates `ast` alone; module imports produce an "unavailable" diagnostic.
+pub fn elaborate_program_with_resolutions(
+    ast: &AbstractSyntaxTree,
+) -> (Result<Program, Vec<SourceDiagnostic>>, Vec<NameResolution>) {
+    elaborate_program_with_resolver(ast, &NullResolver)
+}
+
+/// Elaborates `ast` together with every module it imports, transitively.
+///
+/// Linking is elaboration-time: each dependency is elaborated independently
+/// against the same resolver, its exported declarations are bound into this
+/// module's namespace under collision rules, and functions from dependencies
+/// participate in call checking and authority closure exactly as local
+/// declarations do. The import graph must be acyclic; cycles are rejected.
+///
+/// Function, finite-type, and record-type identities stay computed from
+/// their *declaring* module, so a declaration keeps one stable identity
+/// across every program that binds it.
+pub fn elaborate_program_with_resolver(
+    ast: &AbstractSyntaxTree,
+    resolver: &dyn ModuleResolver,
+) -> (Result<Program, Vec<SourceDiagnostic>>, Vec<NameResolution>) {
+    let mut diagnostics = Vec::new();
+    let mut resolutions = Vec::new();
+    let mut elaborated = BTreeMap::new();
+    let mut visiting = BTreeSet::new();
+    if let Err(mut errors) = elaborate_import_closure(ast, resolver, &mut elaborated, &mut visiting)
+    {
+        diagnostics.append(&mut errors);
+        return (Err(diagnostics), resolutions);
+    }
+    match link_module_with_closure(ast, &elaborated, &mut resolutions) {
+        Ok(program) => (Ok(program), resolutions),
+        Err(mut errors) => {
+            diagnostics.append(&mut errors);
+            (Err(diagnostics), resolutions)
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ImportedModule {
+    program: Program,
+}
+
+#[derive(Default)]
+struct MergedContext {
+    finite_types_by_name: BTreeMap<String, FiniteType>,
+    record_types_by_name: BTreeMap<String, RecordType>,
+    signatures: BTreeMap<String, FunctionSignature>,
+    imported_finite_types: Vec<FiniteType>,
+    imported_record_types: Vec<RecordType>,
+    imported_functions: Vec<Function>,
+    finite_type_names: BTreeSet<String>,
+    record_type_names: BTreeSet<String>,
+    function_names: BTreeSet<String>,
+}
+
+/// Elaborates the transitive import closure of `ast`, post-order, into
+/// `elaborated`. Every module in the closure is linked only after all of its
+/// own imports are present in the map.
+fn elaborate_import_closure(
+    ast: &AbstractSyntaxTree,
+    resolver: &dyn ModuleResolver,
+    elaborated: &mut BTreeMap<String, Program>,
+    visiting: &mut BTreeSet<String>,
+) -> Result<(), Vec<SourceDiagnostic>> {
+    let name = ast.module.text.clone();
+    if elaborated.contains_key(&name) {
+        return Ok(());
+    }
+    if !visiting.insert(name.clone()) {
+        return Err(vec![elaboration_diagnostic(
+            "MNE171",
+            "module import graph contains a cycle",
+            ast.module.span,
+        )]);
+    }
+    for use_decl in &ast.uses {
+        let dependency_name = use_decl.module.text.clone();
+        if dependency_name == name {
+            return Err(vec![elaboration_diagnostic(
+                "MNE171",
+                "a module may not import itself",
+                use_decl.module.span,
+            )]);
+        }
+        if elaborated.contains_key(&dependency_name) {
+            continue;
+        }
+        let Some(dependency_envelope) = resolver.resolve(&dependency_name) else {
+            return Err(vec![elaboration_diagnostic(
+                "MNE173",
+                format!("imported module '{dependency_name}' is unavailable to the resolver"),
+                use_decl.module.span,
+            )]);
+        };
+        let parsed = mncs_syntax::parse(&dependency_envelope);
+        let Some(dependency_ast) = parsed.ast else {
+            let codes = parsed
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(vec![elaboration_diagnostic(
+                "MNE172",
+                format!("imported module '{dependency_name}' failed to parse [{codes}]"),
+                use_decl.module.span,
+            )]);
+        };
+        elaborate_import_closure(&dependency_ast, resolver, elaborated, visiting)?;
+        let dependency_program =
+            link_module_with_closure(&dependency_ast, elaborated, &mut Vec::new());
+        let dependency_program = dependency_program.map_err(|errors| {
+            vec![elaboration_diagnostic(
+                "MNE172",
+                format!(
+                    "imported module '{dependency_name}' failed to elaborate [{}]",
+                    errors
+                        .iter()
+                        .map(|diagnostic| diagnostic.code.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                use_decl.module.span,
+            )]
+        })?;
+        elaborated.insert(dependency_name, dependency_program);
+    }
+    visiting.remove(&name);
+    Ok(())
+}
+
+/// Links one module against its already-elaborated direct imports.
+fn link_module_with_closure(
+    ast: &AbstractSyntaxTree,
+    elaborated: &BTreeMap<String, Program>,
+    resolutions: &mut Vec<NameResolution>,
+) -> Result<Program, Vec<SourceDiagnostic>> {
+    let mut diagnostics = Vec::new();
+    let mut imported = Vec::new();
+    let mut seen = BTreeSet::new();
+    for use_decl in &ast.uses {
+        let name = use_decl.module.text.clone();
+        if !seen.insert(name.clone()) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE170",
+                format!("module '{name}' is imported more than once"),
+                use_decl.module.span,
+            ));
+            continue;
+        }
+        let _ = &name;
+        match elaborated.get(&name) {
+            Some(program) => imported.push(ImportedModule {
+                program: program.clone(),
+            }),
+            None => diagnostics.push(elaboration_diagnostic(
+                "MNE173",
+                format!("imported module '{name}' is unavailable to the resolver"),
+                use_decl.module.span,
+            )),
+        }
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    let context = merge_imported_declarations(ast, &imported, &mut diagnostics);
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    elaborate_linked_module(ast, &context, resolutions)
+}
+
+/// Binds imported declarations into this module's namespace. Collisions fail
+/// closed: identical re-exports of the same identity are accepted once, any
+/// other name conflict is an error.
+fn merge_imported_declarations(
+    ast: &AbstractSyntaxTree,
+    imported: &[ImportedModule],
+    diagnostics: &mut Vec<SourceDiagnostic>,
+) -> MergedContext {
+    let mut context = MergedContext::default();
+
+    // Local declarations occupy the namespace first.
+    for declaration in &ast.finite_types {
+        context
+            .finite_type_names
+            .insert(declaration.name.text.clone());
+    }
+    for declaration in &ast.record_types {
+        context
+            .record_type_names
+            .insert(declaration.name.text.clone());
+    }
+    for function in &ast.functions {
+        context.function_names.insert(function.name.text.clone());
+    }
+
+    // Deterministic merge order: import declaration order, then declaration
+    // order within each dependency.
+    for module in imported {
+        for finite_type in &module.program.finite_types {
+            if context.finite_types_by_name.contains_key(&finite_type.name)
+                || context.finite_type_names.contains(&finite_type.name)
+            {
+                let same_identity = context
+                    .finite_types_by_name
+                    .get(&finite_type.name)
+                    .is_some_and(|existing| existing.identity == finite_type.identity);
+                if !same_identity {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE174",
+                        format!(
+                            "imported finite type '{}' collides with an existing binding",
+                            finite_type.name
+                        ),
+                        ast.module.span,
+                    ));
+                }
+                continue;
+            }
+            context
+                .finite_types_by_name
+                .insert(finite_type.name.clone(), finite_type.clone());
+            context.imported_finite_types.push(finite_type.clone());
+        }
+        for record_type in &module.program.record_types {
+            if context.record_types_by_name.contains_key(&record_type.name)
+                || context.record_type_names.contains(&record_type.name)
+            {
+                let same_identity = context
+                    .record_types_by_name
+                    .get(&record_type.name)
+                    .is_some_and(|existing| existing.identity == record_type.identity);
+                if !same_identity {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE175",
+                        format!(
+                            "imported record type '{}' collides with an existing binding",
+                            record_type.name
+                        ),
+                        ast.module.span,
+                    ));
+                }
+                continue;
+            }
+            context
+                .record_types_by_name
+                .insert(record_type.name.clone(), record_type.clone());
+            context.imported_record_types.push(record_type.clone());
+        }
+        for function in &module.program.functions {
+            if context.signatures.contains_key(&function.name)
+                || context.function_names.contains(&function.name)
+            {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE176",
+                    format!(
+                        "imported function '{}' collides with an existing binding",
+                        function.name
+                    ),
+                    ast.module.span,
+                ));
+                continue;
+            }
+            let mut imported_function = function.clone();
+            imported_function.home_module = Some(module.program.module.clone());
+            context.signatures.insert(
+                function.name.clone(),
+                signature_from_function(module, function),
+            );
+            context.function_names.insert(function.name.clone());
+            context.imported_functions.push(imported_function);
+        }
+    }
+    context
+}
+
+/// Builds the call-checking signature for a function declared in another
+/// module. Identities stay anchored to the declaring module.
+fn signature_from_function(module: &ImportedModule, function: &Function) -> FunctionSignature {
+    let body_type = |name: &str| body_type_from_name(module, name);
+    let inputs = function
+        .inputs
+        .iter()
+        .map(|value| body_type(&value.value_type))
+        .collect();
+    let output = function.outputs.first().map_or_else(
+        || BodyType::Named("invalid".to_owned()),
+        |value| body_type(&value.value_type),
+    );
+    let mut capabilities = function.capabilities.clone();
+    capabilities.sort();
+    capabilities.dedup();
+    FunctionSignature {
+        identity: function_id(&module.program.module, &function.name),
+        inputs,
+        output,
+        capabilities,
+        effects: function.effects.clone(),
+    }
+}
+
+/// Resolves a type name against the merged namespace without diagnosing:
+/// dependency programs are valid by the time merging happens, so unknown
+/// names cannot occur here.
+fn body_type_from_name(module: &ImportedModule, name: &str) -> BodyType {
+    if let Some(finite_type) = module
+        .program
+        .finite_types
+        .iter()
+        .find(|decl| decl.name == name)
+    {
+        return BodyType::Finite {
+            identity: finite_type.identity.clone(),
+            name: finite_type.name.clone(),
+        };
+    }
+    if let Some(record_type) = module
+        .program
+        .record_types
+        .iter()
+        .find(|decl| decl.name == name)
+    {
+        return BodyType::Record {
+            identity: record_type.identity.clone(),
+            name: record_type.name.clone(),
+        };
+    }
+    BodyType::from_semantic_name(name)
+}
+
+/// Elaborate `ast` alone (no imports) and additionally return every name
+/// resolution that elaboration decided. The resolutions are authoritative:
+/// each entry is the exact binding decision used to accept the corresponding
+/// occurrence.
 ///
 /// Recording is best-effort; when elaboration fails, the resolutions decided
 /// before the failure are still returned so tools can navigate partially valid
 /// documents without re-implementing binding rules.
-pub fn elaborate_program_with_resolutions(
+fn elaborate_linked_module(
     ast: &AbstractSyntaxTree,
-) -> (Result<Program, Vec<SourceDiagnostic>>, Vec<NameResolution>) {
+    context: &MergedContext,
+    resolutions: &mut Vec<NameResolution>,
+) -> Result<Program, Vec<SourceDiagnostic>> {
     let mut diagnostics = Vec::new();
-    let mut resolutions = Vec::new();
+
+    // A local declaration may not shadow an imported binding under a
+    // different identity; identical identities (diamond re-export) are fine
+    // and were already folded away during merging.
+    for declaration in &ast.finite_types {
+        if let Some(imported) = context.finite_types_by_name.get(&declaration.name.text) {
+            let local_identity = finite_type_id(&ast.module.text, &declaration.name.text);
+            if imported.identity != local_identity {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE174",
+                    format!(
+                        "local finite type '{}' collides with an imported binding of a different identity",
+                        declaration.name.text
+                    ),
+                    declaration.name.span,
+                ));
+            }
+        }
+    }
+    for declaration in &ast.record_types {
+        if context
+            .record_types_by_name
+            .contains_key(&declaration.name.text)
+            || context
+                .finite_types_by_name
+                .contains_key(&declaration.name.text)
+        {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE175",
+                format!(
+                    "local record type '{}' collides with an imported binding",
+                    declaration.name.text
+                ),
+                declaration.name.span,
+            ));
+        }
+    }
+
     let declarations = DeclarationSpans::from_ast(ast);
-    record_annotation_type_resolutions(ast, &declarations, &mut resolutions);
+    record_annotation_type_resolutions(ast, &declarations, resolutions);
     let mut finite_types = Vec::new();
     let mut finite_type_names = BTreeSet::new();
     for declaration in &ast.finite_types {
@@ -377,6 +793,11 @@ pub fn elaborate_program_with_resolutions(
             name: declaration.name.text.clone(),
             variants,
         });
+    }
+    // Imported types join the module namespace after local declarations;
+    // collisions were rejected above, so every import is appended verbatim.
+    for imported in &context.imported_finite_types {
+        finite_types.push(imported.clone());
     }
     let finite_types_by_name = finite_types
         .iter()
@@ -458,7 +879,11 @@ pub fn elaborate_program_with_resolutions(
             fields,
         });
     }
-    let record_types_by_name = resolved_records
+    let mut all_records = resolved_records;
+    for imported in &context.imported_record_types {
+        all_records.push(imported.clone());
+    }
+    let record_types_by_name = all_records
         .iter()
         .map(|record| (record.name.clone(), record.clone()))
         .collect::<BTreeMap<_, _>>();
@@ -474,22 +899,19 @@ pub fn elaborate_program_with_resolutions(
             continue;
         }
     }
-    let signatures = ast
-        .functions
-        .iter()
-        .map(|function| {
-            (
-                function.name.text.clone(),
-                FunctionSignature::from_ast(
-                    ast,
-                    function,
-                    &finite_types_by_name,
-                    &record_types_by_name,
-                    &mut diagnostics,
-                ),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
+    let mut signatures = context.signatures.clone();
+    for function in &ast.functions {
+        signatures.insert(
+            function.name.text.clone(),
+            FunctionSignature::from_ast(
+                ast,
+                function,
+                &finite_types_by_name,
+                &record_types_by_name,
+                &mut diagnostics,
+            ),
+        );
+    }
     reject_recursive_calls(ast, &signatures, &mut diagnostics);
     for function in &ast.functions {
         if functions
@@ -505,25 +927,34 @@ pub fn elaborate_program_with_resolutions(
             &record_types_by_name,
             &signatures,
             &declarations,
-            &mut resolutions,
+            resolutions,
         ) {
             Ok(elaborated) => functions.push(elaborated),
             Err(mut errors) => diagnostics.append(&mut errors),
         }
     }
-    let outcome = if diagnostics.is_empty() {
+    if diagnostics.is_empty() {
+        let mut all_functions = context.imported_functions.clone();
+        all_functions.extend(functions);
+        let mut dependencies: Vec<SemanticId> = ast
+            .uses
+            .iter()
+            .map(|use_decl| mncs_model::module_id(&use_decl.module.text))
+            .collect();
+        dependencies.sort();
+        dependencies.dedup();
         Ok(Program {
             schema_version: SUPPORTED_SCHEMA_VERSION.to_owned(),
             module: ast.module.text.clone(),
+            dependencies,
             finite_types,
-            record_types: resolved_records,
+            record_types: all_records,
             assumptions: Vec::new(),
-            functions,
+            functions: all_functions,
         })
     } else {
         Err(diagnostics)
-    };
-    (outcome, resolutions)
+    }
 }
 
 /// Source spans of every nominal declaration name, used to point name
@@ -854,6 +1285,7 @@ fn elaborate_function(
     let _ = assumptions;
     Ok(Function {
         name: function.name.text.clone(),
+        home_module: None,
         inputs,
         outputs,
         contracts,
@@ -1411,7 +1843,7 @@ impl<'a> BodyBuilder<'a> {
         if !(1..=SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND).contains(&bound_u32) {
             diagnostics.push(elaboration_diagnostic(
                 "MNE142",
-                &format!(
+                format!(
                     "iteration bound must be between 1 and {} in Source Profile 0.4",
                     SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND
                 ),
@@ -2047,7 +2479,7 @@ impl<'a> BodyBuilder<'a> {
                 if !missing.is_empty() {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE140",
-                        &format!(
+                        format!(
                             "non-exhaustive match; missing variants: {}",
                             missing.join(", ")
                         ),
@@ -2604,12 +3036,16 @@ fn statement_span(statement: &AstStmt) -> SourceSpan {
     }
 }
 
-fn elaboration_diagnostic(code: &str, message: &str, span: SourceSpan) -> SourceDiagnostic {
+fn elaboration_diagnostic(
+    code: &str,
+    message: impl Into<String>,
+    span: SourceSpan,
+) -> SourceDiagnostic {
     SourceDiagnostic {
         code: code.to_owned(),
         stage: DiagnosticStage::Elaboration,
         severity: DiagnosticSeverity::Error,
-        message: message.to_owned(),
+        message: message.into(),
         span,
         expected: Vec::new(),
         found: None,

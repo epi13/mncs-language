@@ -353,10 +353,12 @@ mod tests {
         Program {
             schema_version: "0.1".to_owned(),
             module: "demo".to_owned(),
+            dependencies: Vec::new(),
             finite_types: vec![],
             record_types: Vec::new(),
             assumptions: vec![],
             functions: vec![Function {
+                home_module: None,
                 name: "f".to_owned(),
                 inputs: vec![],
                 outputs: vec![],
