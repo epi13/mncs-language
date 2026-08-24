@@ -2012,6 +2012,28 @@ fn target_has_backend_adapter(target: &TargetContractRef) -> bool {
 }
 
 fn read_program_unvalidated(path: &str) -> Result<Program, ExitCode> {
+    if Path::new(path)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("mncs"))
+    {
+        let source = read_source(path)?;
+        let envelope = mncs_syntax::SourceEnvelope::inline(
+            mncs_syntax::SourceArtifactKind::Program,
+            path,
+            source,
+        );
+        let front_end = ReferenceCompiler::default().front_end(envelope);
+        let diagnostics = front_end.diagnostics.clone();
+        let valid = front_end.is_valid();
+        let program = front_end.program;
+        match program.filter(|_| valid) {
+            Some(program) => return Ok(program),
+            None => {
+                let _ = print_json(&diagnostics);
+                return Err(ExitCode::from(2));
+            }
+        }
+    }
     let input = read_source(path)?;
     Program::from_json(&input).map_err(|error| {
         eprintln!("error: invalid semantic manifest: {error}");

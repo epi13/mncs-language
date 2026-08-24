@@ -1,0 +1,116 @@
+{
+  "schema_version": "0.1",
+  "name": "profile05-interleaved-record-values-v1",
+  "cases": [
+    {
+      "id": "classify-left",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.profile05_interleaved_declarations",
+          "function": "classify"
+        },
+        "arguments": [
+          {"integer": {"value": 9, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 4, "type": {"bits": 32, "signed": true}}}
+        ],
+        "step_budget": 128
+      },
+      "expected_status": "returned",
+      "maximum_steps": 20000,
+      "prohibit_unexpected_effects": true,
+      "expected": [
+        {"finite": {
+          "type_identity": "mncs:0.2:finite-type:examples.profile05_interleaved_declarations::Pick",
+          "variant_identity": "mncs:0.2:finite-variant:examples.profile05_interleaved_declarations::Pick::LEFT",
+          "discriminant": 0
+        }}
+      ]
+    },
+    {
+      "id": "classify-tie",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.profile05_interleaved_declarations",
+          "function": "classify"
+        },
+        "arguments": [
+          {"integer": {"value": 5, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 5, "type": {"bits": 32, "signed": true}}}
+        ],
+        "step_budget": 128
+      },
+      "expected_status": "returned",
+      "maximum_steps": 20000,
+      "prohibit_unexpected_effects": true,
+      "expected": [
+        {"finite": {
+          "type_identity": "mncs:0.2:finite-type:examples.profile05_interleaved_declarations::Pick",
+          "variant_identity": "mncs:0.2:finite-variant:examples.profile05_interleaved_declarations::Pick::TIE",
+          "discriminant": 2
+        }}
+      ]
+    },
+    {
+      "id": "tally-left-carries-record-state",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.profile05_interleaved_declarations",
+          "function": "tally"
+        },
+        "arguments": [
+          {"finite": {
+            "type_identity": "mncs:0.2:finite-type:examples.profile05_interleaved_declarations::Pick",
+            "variant_identity": "mncs:0.2:finite-variant:examples.profile05_interleaved_declarations::Pick::LEFT",
+            "discriminant": 0
+          }}
+        ],
+        "step_budget": 128
+      },
+      "expected_status": "returned",
+      "maximum_steps": 20000,
+      "prohibit_unexpected_effects": true,
+      "expected": [
+        {"record": {
+          "type_identity": "mncs:0.2:record-type:examples.profile05_interleaved_declarations::Tally::left%3Ai32%3Bright%3Ai32%3B",
+          "name": "Tally",
+          "fields": [
+            ["left", {"integer": {"value": 1, "type": {"bits": 32, "signed": true}}}],
+            ["right", {"integer": {"value": 0, "type": {"bits": 32, "signed": true}}}]]
+        }}
+      ]
+    },
+    {
+      "id": "tally-right",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.profile05_interleaved_declarations",
+          "function": "tally"
+        },
+        "arguments": [
+          {"finite": {
+            "type_identity": "mncs:0.2:finite-type:examples.profile05_interleaved_declarations::Pick",
+            "variant_identity": "mncs:0.2:finite-variant:examples.profile05_interleaved_declarations::Pick::RIGHT",
+            "discriminant": 1
+          }}
+        ],
+        "step_budget": 128
+      },
+      "expected_status": "returned",
+      "maximum_steps": 20000,
+      "prohibit_unexpected_effects": true,
+      "expected": [
+        {"record": {
+          "type_identity": "mncs:0.2:record-type:examples.profile05_interleaved_declarations::Tally::left%3Ai32%3Bright%3Ai32%3B",
+          "name": "Tally",
+          "fields": [
+            ["left", {"integer": {"value": 0, "type": {"bits": 32, "signed": true}}}],
+            ["right", {"integer": {"value": 1, "type": {"bits": 32, "signed": true}}}]]
+        }}
+      ]
+    }
+  ]
+}
