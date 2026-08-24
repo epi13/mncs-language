@@ -1289,6 +1289,21 @@ fn values_agree(left: &[ExecutionValue], right: &[ExecutionValue]) -> bool {
                     && left_discriminant == right_discriminant
             }
             (
+                ExecutionValue::Record {
+                    type_identity: left_type,
+                    name: left_name,
+                    fields: left_fields,
+                },
+                ExecutionValue::Record {
+                    type_identity: right_type,
+                    name: right_name,
+                    fields: right_fields,
+                },
+            ) => {
+                left_type == right_type
+                    && left_name == right_name
+                    && record_fields_agree(left_fields, right_fields)
+            }
                 ExecutionValue::Record { fields: left, .. },
                 ExecutionValue::Record { fields: right, .. },
             ) => record_values_agree(left, right),
@@ -1296,6 +1311,10 @@ fn values_agree(left: &[ExecutionValue], right: &[ExecutionValue]) -> bool {
         })
 }
 
+/// Logical record agreement: fields are kept in canonical (sorted) name
+/// order on both sides, so positional pairing is name pairing. Field values
+/// agree recursively under the same observable rules.
+fn record_fields_agree(
 /// Logical record observations agree when both sides carry the same canonical
 /// field sequence (fields are kept sorted by name) and every field agrees
 /// under the same scalar rules as top-level observations.
