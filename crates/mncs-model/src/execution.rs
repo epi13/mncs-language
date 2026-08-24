@@ -52,6 +52,14 @@ pub enum ExecutionValue {
         variant_identity: SemanticId,
         discriminant: u32,
     },
+    /// A logical record value.  Fields are kept in canonical (sorted) name
+    /// order; this is the *logical* value model — no physical layout, offset,
+    /// or packing is part of its meaning.
+    Record {
+        type_identity: SemanticId,
+        name: String,
+        fields: Vec<(String, ExecutionValue)>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -506,6 +514,64 @@ fn execute_operation(
                 return Some(result.clone());
             };
             values.insert(operation.results[0].id.clone(), value);
+        }
+        BodyOperationKind::RecordConstruct {
+            type_identity,
+            field_names,
+        } => {
+            let mut fields = Vec::new();
+            for (name, operand) in field_names.iter().zip(&operation.operands) {
+                match values.get(operand) {
+                    Some(value) => fields.push((name.clone(), value.clone())),
+                    None => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            "record construction operand was unavailable".to_owned(),
+                        );
+                        return Some(result.clone());
+                    }
+                }
+            }
+            let output = operation.results.first()?;
+            values.insert(
+                output.id.clone(),
+                ExecutionValue::Record {
+                    type_identity: type_identity.clone(),
+                    name: output.ty.semantic_name(),
+                    fields,
+                },
+            );
+        }
+        BodyOperationKind::RecordProject { field, .. } => {
+            let operand = operation.operands.first()?;
+            match values.get(operand) {
+                Some(ExecutionValue::Record { fields, .. }) => {
+                    match fields.iter().find(|(name, _)| name == field) {
+                        Some((_, value)) => {
+                            if let Some(output) = operation.results.first() {
+                                values.insert(output.id.clone(), value.clone());
+                            }
+                        }
+                        None => {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                Some(identity.clone()),
+                                format!("record has no field {field:?}"),
+                            );
+                            return Some(result.clone());
+                        }
+                    }
+                }
+                _ => {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "record projection operand is not a record value".to_owned(),
+                    );
+                    return Some(result.clone());
+                }
+            }
         }
         BodyOperationKind::Integer {
             operator,
@@ -1237,6 +1303,7 @@ mod tests {
                 schema_version: "0.1".to_owned(),
                 module: "m".to_owned(),
                 finite_types: Vec::new(),
+                record_types: Vec::new(),
                 assumptions: Vec::new(),
                 functions: Vec::new(),
             },

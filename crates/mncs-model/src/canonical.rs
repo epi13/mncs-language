@@ -354,6 +354,7 @@ mod tests {
             schema_version: "0.1".to_owned(),
             module: "demo".to_owned(),
             finite_types: vec![],
+            record_types: Vec::new(),
             assumptions: vec![],
             functions: vec![Function {
                 name: "f".to_owned(),

@@ -56,6 +56,14 @@ pub enum SsaInstructionKind {
         variant_identity: SemanticId,
         discriminant: u32,
     },
+    RecordConstruct {
+        type_identity: SemanticId,
+        field_names: Vec<String>,
+    },
+    RecordProject {
+        type_identity: SemanticId,
+        field: String,
+    },
     Call {
         function: SemanticId,
         required_capabilities: Vec<SemanticId>,
@@ -161,12 +169,25 @@ pub struct SsaTraceMap {
     pub entries: Vec<SsaTraceEntry>,
 }
 
+/// Logical record declarations carried into selected SSA so every backend
+/// can compute its own representation without re-reading source.  Field
+/// order is canonical (sorted by name); field types are leaf scalars,
+/// finite types, or other declared records.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SsaRecordType {
+    pub identity: SemanticId,
+    pub name: String,
+    pub fields: Vec<(String, IrType)>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SsaModule {
     pub schema_version: String,
     pub identity: SemanticId,
     pub semantic_identity: SemanticId,
     pub hir_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub record_types: Vec<SsaRecordType>,
     pub functions: Vec<SsaFunction>,
     pub obligations: Vec<ObligationRecord>,
     pub trace: SsaTraceMap,
@@ -401,11 +422,48 @@ impl Program {
             "mncs:0.4:ssa:module:{}",
             sha256_hex(format!("{}:{}", semantic_identity, hir_fingerprint).as_bytes())
         ));
+        let record_types = self
+            .record_types
+            .iter()
+            .map(|record| SsaRecordType {
+                identity: record.identity.clone(),
+                name: record.name.clone(),
+                fields: record
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        let field_ir_type = if let Some(finite) = self
+                            .finite_types
+                            .iter()
+                            .find(|item| item.name == field.field_type)
+                        {
+                            IrType::Finite {
+                                identity: finite.identity.clone(),
+                                name: field.field_type.clone(),
+                            }
+                        } else if let Some(nested) = self
+                            .record_types
+                            .iter()
+                            .find(|item| item.name == field.field_type)
+                        {
+                            IrType::Record {
+                                identity: nested.identity.clone(),
+                                name: field.field_type.clone(),
+                            }
+                        } else {
+                            IrType::Named(field.field_type.clone())
+                        };
+                        (field.name.clone(), field_ir_type)
+                    })
+                    .collect(),
+            })
+            .collect();
         let module = SsaModule {
             schema_version: SSA_SCHEMA_VERSION.to_owned(),
             identity,
             semantic_identity,
             hir_fingerprint,
+            record_types,
             functions,
             obligations: ir.obligations,
             trace: SsaTraceMap {
@@ -1258,6 +1316,20 @@ fn ssa_kind(kind: &IrOperationKind) -> SsaInstructionKind {
             predicate: predicate.clone(),
             operand_type: *operand_type,
         },
+        IrOperationKind::RecordConstruct {
+            type_identity,
+            field_names,
+        } => SsaInstructionKind::RecordConstruct {
+            type_identity: type_identity.clone(),
+            field_names: field_names.clone(),
+        },
+        IrOperationKind::RecordProject {
+            type_identity,
+            field,
+        } => SsaInstructionKind::RecordProject {
+            type_identity: type_identity.clone(),
+            field: field.clone(),
+        },
         IrOperationKind::FiniteConstruct {
             type_identity,
             variant_identity,
@@ -1319,6 +1391,20 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
             predicate: predicate.clone(),
             operand_type: *operand_type,
         },
+        BodyOperationKind::RecordConstruct {
+            type_identity,
+            field_names,
+        } => SsaInstructionKind::RecordConstruct {
+            type_identity: type_identity.clone(),
+            field_names: field_names.clone(),
+        },
+        BodyOperationKind::RecordProject {
+            type_identity,
+            field,
+        } => SsaInstructionKind::RecordProject {
+            type_identity: type_identity.clone(),
+            field: field.clone(),
+        },
         BodyOperationKind::FiniteConstruct {
             type_identity,
             variant_identity,
@@ -1371,6 +1457,10 @@ fn body_failure(kind: &BodyOperationKind) -> Option<FailureMode> {
 fn body_type(ty: &crate::BodyType) -> IrType {
     match ty {
         crate::BodyType::Finite { identity, name } => IrType::Finite {
+            identity: identity.clone(),
+            name: name.clone(),
+        },
+        crate::BodyType::Record { identity, name } => IrType::Record {
             identity: identity.clone(),
             name: name.clone(),
         },

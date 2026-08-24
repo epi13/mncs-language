@@ -88,6 +88,7 @@ pub enum BodyType {
     Named(String),
     Integer(IntegerType),
     Finite { identity: SemanticId, name: String },
+    Record { identity: SemanticId, name: String },
 }
 
 impl BodyType {
@@ -112,6 +113,7 @@ impl BodyType {
                 format!("{}{}", if integer.signed { 'i' } else { 'u' }, integer.bits)
             }
             Self::Finite { name, .. } => name.clone(),
+            Self::Record { name, .. } => name.clone(),
         }
     }
 
@@ -176,6 +178,15 @@ pub enum BodyOperationKind {
         type_identity: SemanticId,
         variant_identity: SemanticId,
         discriminant: u32,
+    },
+    RecordConstruct {
+        type_identity: SemanticId,
+        /// Canonical (sorted) field names for the constructed value.
+        field_names: Vec<String>,
+    },
+    RecordProject {
+        type_identity: SemanticId,
+        field: String,
     },
     Call {
         function: SemanticId,
@@ -900,6 +911,143 @@ fn validate_operation(
                 ));
             }
         }
+        BodyOperationKind::RecordConstruct {
+            type_identity,
+            field_names,
+        } => {
+            if operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB048",
+                    path.to_owned(),
+                    "record construction requires exactly one result",
+                ));
+            }
+            let declared = program
+                .record_types
+                .iter()
+                .find(|item| &item.identity == type_identity);
+            let Some(declared) = declared else {
+                errors.push(body_diagnostic(
+                    "MNB049",
+                    format!("{path}.kind"),
+                    "record construction does not identify a declared record type",
+                ));
+                return;
+            };
+            // Canonical field order is sorted by field name; the operand list
+            // must follow it so one logical construction has one encoding.
+            let mut canonical: Vec<String> = declared
+                .fields
+                .iter()
+                .map(|field| field.name.clone())
+                .collect();
+            canonical.sort();
+            let mut supplied = field_names.clone();
+            supplied.sort();
+            supplied.dedup();
+            if &supplied != field_names {
+                errors.push(body_diagnostic(
+                    "MNB050",
+                    format!("{path}.kind.field_names"),
+                    "record construction field names are not in canonical order",
+                ));
+            }
+            if supplied != canonical || field_names.len() != operation.operands.len() {
+                errors.push(body_diagnostic(
+                    "MNB051",
+                    format!("{path}.kind"),
+                    "record construction fields do not exactly match the declared fields",
+                ));
+                return;
+            }
+            for (index, field) in declared.fields.iter().enumerate() {
+                let expected_field_type = semantic_record_field_type(program, field);
+                let Some(operand) = operation.operands.get(index) else {
+                    break;
+                };
+                let actual = available.get(operand);
+                if actual != Some(&expected_field_type) {
+                    errors.push(body_diagnostic(
+                        "MNB052",
+                        format!("{path}.operands[{index}]"),
+                        "record field value type does not match the declared field type",
+                    ));
+                }
+            }
+            if let Some(result) = operation.results.first() {
+                let expected = BodyType::Record {
+                    identity: declared.identity.clone(),
+                    name: declared.name.clone(),
+                };
+                if result.ty != expected {
+                    errors.push(body_diagnostic(
+                        "MNB053",
+                        format!("{path}.results"),
+                        "record construction result type does not match its nominal record",
+                    ));
+                }
+            }
+        }
+        BodyOperationKind::RecordProject {
+            type_identity,
+            field,
+        } => {
+            if operation.operands.len() != 1 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB054",
+                    path.to_owned(),
+                    "record projection requires one operand and one result",
+                ));
+                return;
+            }
+            let declared = program
+                .record_types
+                .iter()
+                .find(|item| &item.identity == type_identity);
+            let Some(declared) = declared else {
+                errors.push(body_diagnostic(
+                    "MNB049",
+                    format!("{path}.kind"),
+                    "record projection does not identify a declared record type",
+                ));
+                return;
+            };
+            let expected_operand = BodyType::Record {
+                identity: declared.identity.clone(),
+                name: declared.name.clone(),
+            };
+            if operation
+                .operands
+                .first()
+                .and_then(|operand| available.get(operand))
+                != Some(&expected_operand)
+            {
+                errors.push(body_diagnostic(
+                    "MNB055",
+                    format!("{path}.operands[0]"),
+                    "record projection operand does not have the projected record type",
+                ));
+            }
+            match declared.fields.iter().find(|item| &item.name == field) {
+                None => errors.push(body_diagnostic(
+                    "MNB056",
+                    format!("{path}.kind.field"),
+                    "record projection names a field the record does not declare",
+                )),
+                Some(declared_field) => {
+                    let expected_field_type = semantic_record_field_type(program, declared_field);
+                    if operation.results.first().map(|result| &result.ty)
+                        != Some(&expected_field_type)
+                    {
+                        errors.push(body_diagnostic(
+                            "MNB057",
+                            format!("{path}.results"),
+                            "record projection result type does not match the field type",
+                        ));
+                    }
+                }
+            }
+        }
         BodyOperationKind::Call {
             function: callee_identity,
             function_name,
@@ -1286,6 +1434,12 @@ fn validate_return_types(
 }
 
 fn semantic_body_type(program: &Program, name: &str) -> BodyType {
+    if let Some(record_type) = program.record_types.iter().find(|item| item.name == name) {
+        return BodyType::Record {
+            identity: record_type.identity.clone(),
+            name: record_type.name.clone(),
+        };
+    }
     program
         .finite_types
         .iter()
@@ -1295,6 +1449,11 @@ fn semantic_body_type(program: &Program, name: &str) -> BodyType {
             name: finite_type.name.clone(),
         })
         .unwrap_or_else(|| BodyType::from_semantic_name(name))
+}
+
+/// Resolve a declared record field's semantic body type at validation time.
+fn semantic_record_field_type(program: &Program, field: &crate::core::RecordField) -> BodyType {
+    semantic_body_type(program, &field.field_type)
 }
 
 fn body_diagnostic(code: &str, path: String, message: impl Into<String>) -> Diagnostic {

@@ -16,27 +16,27 @@ Use these labels mechanically. Adjacent infrastructure is not completion.
 | **Planned** | Intended, not started. |
 | **Research-only / RFC-defined** | Design exists; not an executable claim. |
 
-Source Profiles (0.1–0.4 language envelopes) are **not** project roadmap milestones (0.1–0.7). Source Profile 0.4 does not mean roadmap 0.4 is the current completion gate, and a future Source Profile 0.5 would not complete roadmap milestone 0.5.
+Source Profiles (**0.1–0.5** language envelopes) are **not** project roadmap milestones (0.1–0.7). Source Profile 0.4 does not mean roadmap 0.4 is the current completion gate, and Source Profile 0.5 does not complete roadmap milestone 0.5.
 
 ## Current implementation snapshot (2026-08)
 
 ### Language
 
-Source Profiles **0.1–0.4** exist and remain additive. Programs can express modules, functions, contracts/effects/capabilities, scalar integers with wrapping/checked intent, finite enums, exhaustive match, calls with authority closure, and Profile 0.4 bounded iteration (`iterate … up_to N carrying …`, bound 1–32). Next semantic pressure point remains **logical product/record values** (RFC 0019), not physical C/LLVM/WASM layout.
+Source Profiles **0.1–0.5** exist and remain additive. Programs can express modules, functions, contracts/effects/capabilities, scalar integers with wrapping/checked intent, finite enums, exhaustive match, calls with authority closure, and Profile 0.4 bounded iteration (`iterate … up_to N carrying …`, bound 1–32). **Profile 0.5 adds logical record values** (RFC 0019): nominal record declarations with canonical field identity (`record_type_id` hashes sorted `name:type;` pairs — declaration order never changes the logical type), construction with exact field coverage, functional update from a base value, and field projection. Records are values without physical layout; record equality operators are explicitly **not defined** in 0.5. Records cannot yet carry through bounded-iteration state or cross module boundaries beyond calls.
 
 ### Compiler
 
-Executable stages: source envelope → CST/AST → semantic program → HIR → SSA → selected SSA → `TargetLoweringPlan` → backend adapter → `BackendArtifact` + evidence. Transformations are identity-bound. Experimental: evidence-gated no-overflow elision, translation validators, backend promises. Missing: general memory/layout, unrestricted loops, proof kernel, production backend.
+Executable stages: source envelope → CST/AST → semantic program → HIR → SSA → selected SSA → `TargetLoweringPlan` → backend adapter → `BackendArtifact` + evidence. Transformations are identity-bound. Record construct/project flow through body validation (MNB048–057), HIR, SSA, both reference executors, and the WASM realization. Experimental: evidence-gated no-overflow elision, translation validators, backend promises. Missing: general memory/layout, unrestricted loops, proof kernel, production backend.
 
 ### Backends
 
 | Realization | Exists | Local execute | External tools | Status |
 | --- | --- | --- | --- | --- |
-| portable WASM MVP | yes | embedded interpreter | no | implemented / exercised |
-| research bytecode | yes | SSA interpreter | no | implemented / exercised |
-| LLVM IR | yes | no in-process interpreter | clang/llc | implemented / exercised |
-| C11 | yes | no in-process interpreter | clang/gcc | implemented / exercised |
-| Cranelift CLIF/JIT | yes | host JIT for the scalar envelope | host ISA mapping | implemented but partial |
+| portable WASM MVP | yes | embedded interpreter | no | implemented / exercised; records realized by intra-function forwarding (never materialized); record-typed parameters/results/block-params fail closed |
+| research bytecode | yes | SSA interpreter | no | implemented / exercised; records supported as logical SSA values |
+| LLVM IR | yes | no in-process interpreter | clang/llc | implemented / exercised; records unsupported (`record_values` in capability envelope) |
+| C11 | yes | no in-process interpreter | clang/gcc | implemented / exercised; records unsupported |
+| Cranelift CLIF/JIT | yes | host JIT for the scalar envelope | host ISA mapping | implemented but partial; records unsupported |
 | SPIR-V, PTX, eBPF, extra VMs | no | n/a | n/a | planned |
 
 WASM is one realization. Generic orchestration is adapter-neutral.
@@ -59,7 +59,12 @@ Language-owned experiment and compiler-study records emit producer-native Family
 
 ### Immediate next work
 
-1. Logical product/record values as Source Profile 0.5 (not roadmap 0.5).
+1. ~~Logical product/record values as Source Profile 0.5~~ — **implemented (experimental)** as of
+   2026-08-23: nominal records with canonical field identity, construction, functional update,
+   projection; differential agreement demonstrated across WASM (forwarding realization) and
+   research bytecode; LLVM/C11/Cranelift fail closed. Remaining for maturity: record equality
+   semantics, records through bounded-iteration state and block parameters on WASM, scalar-backend
+   realizations, CRE coverage that pressures nested records.
 2. Cranelift multi-function/host-mapping execution without claiming WASM semantics.
 3. Evidence-gated LLVM `nsw`/`nuw` emission with independent checkers (cases A–D exist; promotion does not).
 4. Proof-carrying lowering pilot for one backend promise.

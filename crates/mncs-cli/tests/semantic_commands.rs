@@ -1381,3 +1381,95 @@ fn frozen_replication_preserves_distinct_realization_identities_across_backends(
     assert_eq!(bc_summary["boundedBehaviorAgrees"], true);
     let _ = std::fs::remove_dir_all(temp);
 }
+
+#[test]
+fn profile_05_record_values_execute_identically_across_backends() {
+    let source = example("source/profile05-record-values.mncs");
+    let corpus = example("execution/profile05-record-values-corpus.json");
+    let mut results = Vec::new();
+    for backend in ["mncs-portable-wasm-mvp", "mncs-research-bytecode"] {
+        let output = binary()
+            .args([
+                "experiment",
+                "run",
+                &source,
+                "--backend",
+                backend,
+                "--corpus",
+                &corpus,
+            ])
+            .output()
+            .expect("run Profile 0.5 record experiment");
+        assert!(
+            output.status.success(),
+            "{backend}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).expect("record result JSON");
+        assert_eq!(result["definition"]["source_profile"], "0.5");
+        // Checked arithmetic outside a bounded counter stays UNKNOWN; the
+        // record operations themselves must not change that honesty.
+        assert_eq!(result["status"], "UNKNOWN");
+        results.push(result);
+    }
+    // Bounded behavior agrees across realizations even though artifacts differ.
+    let observed: Vec<Vec<(String, String, Option<i64>)>> = results
+        .iter()
+        .map(|result| {
+            result["cases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|case_| {
+                    (
+                        case_["case_id"].as_str().unwrap().to_owned(),
+                        case_["status"].as_str().unwrap().to_owned(),
+                        case_["returned"]
+                            .as_array()
+                            .and_then(|values| values.first())
+                            .and_then(|value| value["integer"]["value"].as_i64()),
+                    )
+                })
+                .collect()
+        })
+        .collect();
+    assert_eq!(observed[0], observed[1]);
+    let by_id = |observed: &[(String, String, Option<i64>)], id: &str| {
+        observed
+            .iter()
+            .find(|(case_id, _, _)| case_id == id)
+            .expect("corpus case present")
+            .clone()
+    };
+    let zero = by_id(&observed[0], "zero");
+    assert_eq!(zero.1, "returned");
+    assert_eq!(zero.2, Some(42));
+    // Checked i32 multiply overflow traps identically on both realizations.
+    assert_eq!(by_id(&observed[0], "overflow-guard").1, "runtime_failure");
+    assert_eq!(by_id(&observed[1], "overflow-guard").1, "runtime_failure");
+}
+
+#[test]
+fn profile_05_record_negatives_are_rejected_before_execution() {
+    for (fixture, code) in [
+        ("source/profile05-invalid-duplicate-field.mncs", "MNE152"),
+        (
+            "source/profile05-invalid-literal-unknown-field.mncs",
+            "MNE156",
+        ),
+        ("source/profile05-records-in-profile04.mncs", "MNP120"),
+    ] {
+        let source = example(fixture);
+        let output = binary()
+            .args(["source-study", &source])
+            .output()
+            .expect("run negative Profile 0.5 fixture");
+        assert_eq!(output.status.code(), Some(1));
+        let result: Value = serde_json::from_slice(&output.stdout).expect("front-end JSON");
+        assert!(result["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == code));
+    }
+}

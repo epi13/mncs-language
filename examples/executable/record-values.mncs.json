@@ -1,0 +1,383 @@
+{
+  "schema_version": "0.1",
+  "module": "examples.profile05_record_values",
+  "finite_types": [],
+  "record_types": [
+    {
+      "identity": "mncs:0.2:record-type:examples.profile05_record_values::Reading::celsius%3Ai32%3Bmilli%3Ai32%3B",
+      "name": "Reading",
+      "fields": [
+        {
+          "name": "celsius",
+          "type": "i32"
+        },
+        {
+          "name": "milli",
+          "type": "i32"
+        }
+      ]
+    }
+  ],
+  "assumptions": [],
+  "functions": [
+    {
+      "name": "main",
+      "inputs": [
+        {
+          "name": "celsius",
+          "type": "i32"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "result",
+          "type": "i32"
+        }
+      ],
+      "contracts": [],
+      "effects": [],
+      "capabilities": [],
+      "assumptions": [],
+      "evidence": [],
+      "failure": "isolated",
+      "body": {
+        "schema_version": "0.2",
+        "entry": "entry",
+        "parameters": [
+          {
+            "id": "celsius",
+            "name": "celsius",
+            "type": {
+              "integer": {
+                "bits": 32,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "blocks": [
+          {
+            "id": "entry",
+            "parameters": [],
+            "operations": [
+              {
+                "id": "c0",
+                "kind": {
+                  "constant": {
+                    "value": 3,
+                    "type": {
+                      "integer": {
+                        "bits": 32,
+                        "signed": true
+                      }
+                    }
+                  }
+                },
+                "operands": [],
+                "results": [
+                  {
+                    "id": "c0",
+                    "type": {
+                      "integer": {
+                        "bits": 32,
+                        "signed": true
+                      }
+                    }
+                  }
+                ],
+                "contracts": [],
+                "assumptions": [],
+                "machine_intent": null,
+                "lowering": null,
+                "portability": null
+              },
+              {
+                "id": "rec1",
+                "kind": {
+                  "record_construct": {
+                    "type_identity": "mncs:0.2:record-type:examples.profile05_record_values::Reading::celsius%3Ai32%3Bmilli%3Ai32%3B",
+                    "field_names": [
+                      "celsius",
+                      "milli"
+                    ]
+                  }
+                },
+                "operands": [
+                  "celsius",
+                  "c0"
+                ],
+                "results": [
+                  {
+                    "id": "rec1",
+                    "type": {
+                      "record": {
+                        "identity": "mncs:0.2:record-type:examples.profile05_record_values::Reading::celsius%3Ai32%3Bmilli%3Ai32%3B",
+                        "name": "Reading"
+                      }
+                    }
+                  }
+                ],
+                "contracts": [],
+                "assumptions": [],
+                "machine_intent": null,
+                "lowering": null,
+                "portability": null
+              },
+              {
+                "id": "proj2",
+                "kind": {
+                  "record_project": {
+                    "type_identity": "mncs:0.2:record-type:examples.profile05_record_values::Reading::celsius%3Ai32%3Bmilli%3Ai32%3B",
+                    "field": "celsius"
+                  }
+                },
+                "operands": [
+                  "rec1"
+                ],
+                "results": [
+                  {
+                    "id": "proj2",
+                    "type": {
+                      "integer": {
+                        "bits": 32,
+                        "signed": true
+                      }
+                    }
+                  }
+                ],
+                "contracts": [],
+                "assumptions": [],
+                "machine_intent": null,
+                "lowering": null,
+                "portability": null
+              },
+              {
+                "id": "c3",
+                "kind": {
+                  "constant": {
+                    "value": 21,
+                    "type": {
+                      "integer": {
+                        "bits": 32,
+                        "signed": true
+                      }
+                    }
+                  }
+                },
+                "operands": [],
+                "results": [
+                  {
+                    "id": "c3",
+                    "type": {
+                      "integer": {
+                        "bits": 32,
+                        "signed": true
+                      }
+                    }
+                  }
+                ],
+                "contracts": [],
+                "assumptions": [],
+                "machine_intent": null,
+                "lowering": null,
+                "portability": null
+              },
+              {
+                "id": "rec4",
+                "kind": {
+                  "record_construct": {
+                    "type_identity": "mncs:0.2:record-type:examples.profile05_record_values::Reading::celsius%3Ai32%3Bmilli%3Ai32%3B",
+                    "field_names": [
+                      "celsius",
+                      "milli"
+                    ]
+                  }
+                },
+                "operands": [
+                  "proj2",
+                  "c3"
+                ],
+                "results": [
+                  {
+                    "id": "rec4",
+                    "type": {
+                      "record": {
+                        "identity": "mncs:0.2:record-type:examples.profile05_record_values::Reading::celsius%3Ai32%3Bmilli%3Ai32%3B",
+                        "name": "Reading"
+                      }
+                    }
+                  }
+                ],
+                "contracts": [],
+                "assumptions": [],
+                "machine_intent": null,
+                "lowering": null,
+                "portability": null
+              },
+              {
+                "id": "proj5",
+                "kind": {
+                  "record_project": {
+                    "type_identity": "mncs:0.2:record-type:examples.profile05_record_values::Reading::celsius%3Ai32%3Bmilli%3Ai32%3B",
+                    "field": "celsius"
+                  }
+                },
+                "operands": [
+                  "rec4"
+                ],
+                "results": [
+                  {
+                    "id": "proj5",
+                    "type": {
+                      "integer": {
+                        "bits": 32,
+                        "signed": true
+                      }
+                    }
+                  }
+                ],
+                "contracts": [],
+                "assumptions": [],
+                "machine_intent": null,
+                "lowering": null,
+                "portability": null
+              },
+              {
+                "id": "proj6",
+                "kind": {
+                  "record_project": {
+                    "type_identity": "mncs:0.2:record-type:examples.profile05_record_values::Reading::celsius%3Ai32%3Bmilli%3Ai32%3B",
+                    "field": "milli"
+                  }
+                },
+                "operands": [
+                  "rec4"
+                ],
+                "results": [
+                  {
+                    "id": "proj6",
+                    "type": {
+                      "integer": {
+                        "bits": 32,
+                        "signed": true
+                      }
+                    }
+                  }
+                ],
+                "contracts": [],
+                "assumptions": [],
+                "machine_intent": null,
+                "lowering": null,
+                "portability": null
+              },
+              {
+                "id": "c7",
+                "kind": {
+                  "constant": {
+                    "value": 2,
+                    "type": {
+                      "integer": {
+                        "bits": 32,
+                        "signed": true
+                      }
+                    }
+                  }
+                },
+                "operands": [],
+                "results": [
+                  {
+                    "id": "c7",
+                    "type": {
+                      "integer": {
+                        "bits": 32,
+                        "signed": true
+                      }
+                    }
+                  }
+                ],
+                "contracts": [],
+                "assumptions": [],
+                "machine_intent": null,
+                "lowering": null,
+                "portability": null
+              },
+              {
+                "id": "v8",
+                "kind": {
+                  "integer": {
+                    "operator": "mul",
+                    "operand_type": {
+                      "bits": 32,
+                      "signed": true
+                    },
+                    "intent": "checked"
+                  }
+                },
+                "operands": [
+                  "proj6",
+                  "c7"
+                ],
+                "results": [
+                  {
+                    "id": "v8",
+                    "type": {
+                      "integer": {
+                        "bits": 32,
+                        "signed": true
+                      }
+                    }
+                  }
+                ],
+                "contracts": [],
+                "assumptions": [],
+                "machine_intent": null,
+                "lowering": null,
+                "portability": null
+              },
+              {
+                "id": "v9",
+                "kind": {
+                  "integer": {
+                    "operator": "add",
+                    "operand_type": {
+                      "bits": 32,
+                      "signed": true
+                    },
+                    "intent": "checked"
+                  }
+                },
+                "operands": [
+                  "proj5",
+                  "v8"
+                ],
+                "results": [
+                  {
+                    "id": "v9",
+                    "type": {
+                      "integer": {
+                        "bits": 32,
+                        "signed": true
+                      }
+                    }
+                  }
+                ],
+                "contracts": [],
+                "assumptions": [],
+                "machine_intent": null,
+                "lowering": null,
+                "portability": null
+              }
+            ],
+            "terminator": {
+              "return": {
+                "values": [
+                  "v9"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

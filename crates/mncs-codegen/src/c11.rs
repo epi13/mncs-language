@@ -84,6 +84,7 @@ pub fn c11_capabilities() -> BackendCapabilityManifest {
         .map(str::to_owned)
         .collect(),
         [
+            "record_values",
             "memory",
             "effects",
             "saturating_integer",
@@ -645,11 +646,15 @@ pub fn execute_c11(
         );
     };
     let driver = c_driver(&request.target.function, contract.inputs.len());
+    let argv = match argv_from_request(request) {
+        Ok(argv) => argv,
+        Err(reason) => return execution_failure(result, ExecutionStatus::Unsupported, &reason),
+    };
     match compile_and_run(
         &[("module.c", source.as_str()), ("driver.c", driver.as_str())],
         &compiler,
         &["-std=c11", "-O0", "-Wall"],
-        &argv_from_request(request),
+        &argv,
     ) {
         Ok((value, status, _)) => {
             result.status = status;

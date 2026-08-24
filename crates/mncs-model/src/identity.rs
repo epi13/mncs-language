@@ -30,6 +30,7 @@ pub enum IdentityKind {
     Program,
     FiniteType,
     FiniteVariant,
+    RecordType,
     Function,
     Contract,
     Assumption,
@@ -227,7 +228,9 @@ impl Program {
                             }
                             crate::BodyOperationKind::IntegerCompare { .. }
                             | crate::BodyOperationKind::FiniteConstruct { .. }
-                            | crate::BodyOperationKind::FiniteIsVariant { .. } => None,
+                            | crate::BodyOperationKind::FiniteIsVariant { .. }
+                            | crate::BodyOperationKind::RecordConstruct { .. }
+                            | crate::BodyOperationKind::RecordProject { .. } => None,
                             crate::BodyOperationKind::Call { .. } => {
                                 Some(crate::obligations::body_obligation_id(
                                     "call-authority-closure",
@@ -405,6 +408,27 @@ pub fn finite_type_id(module: &str, name: &str) -> SemanticId {
     make_id(IdentityKind::FiniteType, &[module, name])
 }
 
+/// Logical record-type identity.  Field names and types participate in
+/// canonical (sorted) order so declaration order cannot change the logical
+/// type; no physical layout information participates.
+pub fn record_type_id(module: &str, name: &str, fields: &[(&str, &str)]) -> SemanticId {
+    let mut canonical: Vec<(&str, &str)> = fields.to_vec();
+    canonical.sort();
+    make_id(
+        IdentityKind::RecordType,
+        &[module, name, &{
+            let mut joined = String::new();
+            for (field_name, field_type) in &canonical {
+                joined.push_str(field_name);
+                joined.push(':');
+                joined.push_str(field_type);
+                joined.push(';');
+            }
+            joined
+        }],
+    )
+}
+
 pub fn finite_variant_id(module: &str, type_name: &str, variant: &str) -> SemanticId {
     make_id(IdentityKind::FiniteVariant, &[module, type_name, variant])
 }
@@ -501,6 +525,7 @@ fn make_id(kind: IdentityKind, components: &[&str]) -> SemanticId {
         IdentityKind::Program => "program",
         IdentityKind::FiniteType => "finite-type",
         IdentityKind::FiniteVariant => "finite-variant",
+        IdentityKind::RecordType => "record-type",
         IdentityKind::Function => "function",
         IdentityKind::Contract => "contract",
         IdentityKind::Assumption => "assumption",
@@ -613,7 +638,27 @@ fn fingerprint_json(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::{record_type_id, IdentityKind};
     use crate::validation::tests::valid_program;
+
+    #[test]
+    fn record_type_identity_is_canonical_in_field_order() {
+        let sorted = record_type_id("m", "R", &[("a", "i32"), ("b", "i32")]);
+        let permuted = record_type_id("m", "R", &[("b", "i32"), ("a", "i32")]);
+        assert_eq!(sorted, permuted);
+        let different_field_type = record_type_id("m", "R", &[("a", "i64"), ("b", "i32")]);
+        assert_ne!(sorted, different_field_type);
+        let different_name = record_type_id("m", "S", &[("a", "i32"), ("b", "i32")]);
+        assert_ne!(sorted, different_name);
+    }
+
+    #[test]
+    fn record_type_ids_use_the_record_kind_namespace() {
+        let identity = record_type_id("m", "R", &[("a", "i32")]);
+        assert!(identity.0.contains(":record-type:"));
+        assert!(!identity.0.contains(":finite-type:"));
+        let _ = IdentityKind::Program;
+    }
 
     #[test]
     fn identity_is_deterministic_and_namespaced() {

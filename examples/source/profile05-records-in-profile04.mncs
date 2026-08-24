@@ -1,0 +1,10 @@
+mncs 0.4;
+
+// Negative fixture: record declarations require Source Profile 0.5.
+module examples.profile05_records_in_04;
+
+record Reading { celsius: i32 }
+
+fn main(v: i32) -> (result: i32) {
+    return v;
+}

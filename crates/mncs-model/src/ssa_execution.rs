@@ -466,6 +466,75 @@ fn execute_instruction(
                 values.insert(output.identity.clone(), value);
             }
         }
+        SsaInstructionKind::RecordConstruct {
+            type_identity,
+            field_names,
+        } => {
+            let Some(output) = instruction.outputs.first() else {
+                return true;
+            };
+            if field_names.len() != instruction.inputs.len() {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "record construction field count does not match its operands",
+                );
+                return true;
+            }
+            let mut fields = Vec::new();
+            for (name, input) in field_names.iter().zip(&instruction.inputs) {
+                let Some(value) = values.get(input) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "record construction operand was unavailable",
+                    );
+                    return true;
+                };
+                fields.push((name.clone(), value.clone()));
+            }
+            fields.sort_by(|left, right| left.0.cmp(&right.0));
+            let name = match &output.ty {
+                IrType::Record { name, .. } | IrType::Named(name) => name.clone(),
+                IrType::Finite { name, .. } => name.clone(),
+            };
+            values.insert(
+                output.identity.clone(),
+                ExecutionValue::Record {
+                    type_identity: type_identity.clone(),
+                    name,
+                    fields,
+                },
+            );
+        }
+        SsaInstructionKind::RecordProject { field, .. } => {
+            let Some(input) = instruction.inputs.first() else {
+                return true;
+            };
+            let Some(ExecutionValue::Record { fields, .. }) = values.get(input) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "record projection operand is not a record value",
+                );
+                return true;
+            };
+            match fields.iter().find(|(name, _)| name == field) {
+                Some((_, value)) => {
+                    if let Some(output) = instruction.outputs.first() {
+                        values.insert(output.identity.clone(), value.clone());
+                    }
+                }
+                None => {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "record has no such field",
+                    );
+                    return true;
+                }
+            }
+        }
         SsaInstructionKind::Integer {
             operator,
             operand_type,
@@ -746,7 +815,7 @@ fn initialize_inputs(
     }
     let mut values = BTreeMap::new();
     for (input, argument) in function.inputs.iter().zip(&request.arguments) {
-        let Some(ty) = body_type(&input.ty) else {
+        let Some(ty) = ssa_input_type(program, &input.ty) else {
             result.fail(
                 ExecutionStatus::Unsupported,
                 Some(input.identity.clone()),
@@ -847,10 +916,30 @@ fn constant_value(value: i128, ty: &IrType) -> Option<ExecutionValue> {
     }
 }
 
+/// Resolves an SSA input type against the module's declarations.  Scalar and
+/// finite types arrive fully identified; record types keep only their name in
+/// SSA type positions, so they are resolved through the module's declared
+/// logical records before any argument is admitted.
+fn ssa_input_type(program: &Program, ty: &IrType) -> Option<BodyType> {
+    if let IrType::Named(name) = ty {
+        if let Some(record) = program.record_types.iter().find(|item| &item.name == name) {
+            return Some(BodyType::Record {
+                identity: record.identity.clone(),
+                name: record.name.clone(),
+            });
+        }
+    }
+    body_type(ty)
+}
+
 fn body_type(ty: &IrType) -> Option<BodyType> {
     Some(match ty {
         IrType::Named(name) => BodyType::from_semantic_name(name),
         IrType::Finite { identity, name } => BodyType::Finite {
+            identity: identity.clone(),
+            name: name.clone(),
+        },
+        IrType::Record { identity, name } => BodyType::Record {
             identity: identity.clone(),
             name: name.clone(),
         },
@@ -867,6 +956,9 @@ fn value_matches_type(value: &ExecutionValue, ty: &BodyType) -> bool {
             integer.bits == 1 && !integer.signed
         }
         (ExecutionValue::Finite { type_identity, .. }, BodyType::Finite { identity, .. }) => {
+            type_identity == identity
+        }
+        (ExecutionValue::Record { type_identity, .. }, BodyType::Record { identity, .. }) => {
             type_identity == identity
         }
         _ => false,
@@ -900,6 +992,11 @@ fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionVal
             Some(ExecutionValue::Boolean { value: *value })
         }
         (ExecutionValue::Finite { type_identity, .. }, BodyType::Finite { identity, .. })
+            if type_identity == identity =>
+        {
+            Some(value.clone())
+        }
+        (ExecutionValue::Record { type_identity, .. }, BodyType::Record { identity, .. })
             if type_identity == identity =>
         {
             Some(value.clone())

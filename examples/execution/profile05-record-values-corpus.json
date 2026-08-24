@@ -1,0 +1,72 @@
+{
+ "schema_version": "0.1",
+ "name": "profile05-record-values-v1",
+ "cases": [
+  {
+   "id": "zero",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile05_record_values",
+     "function": "main"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 256
+   }
+  },
+  {
+   "id": "negative",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile05_record_values",
+     "function": "main"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": -5,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 256
+   }
+  },
+  {
+   "id": "overflow-guard",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile05_record_values",
+     "function": "main"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 2147483647,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 256
+   }
+  }
+ ]
+}

@@ -60,8 +60,8 @@ pub use compiler_architecture::{
 };
 pub use core::{
     Assumption, AssumptionConfidence, ContractClause, ContractKind, Effect, EvidenceClaim,
-    EvidenceStatus, FailureMode, FiniteType, FiniteVariant, Function, ParseError, Program, Value,
-    SUPPORTED_SCHEMA_VERSION,
+    EvidenceStatus, FailureMode, FiniteType, FiniteVariant, Function, ParseError, Program,
+    RecordField, RecordType, Value, SUPPORTED_SCHEMA_VERSION,
 };
 pub use delta::{AuthorityDelta, EvidenceDelta, FailureChange, SemanticChangeSet, SemanticDelta};
 pub use evidence::{
@@ -89,8 +89,8 @@ pub use graph::{
     SemanticGraph,
 };
 pub use identity::{
-    finite_type_id, finite_variant_id, function_id, IdentityChange, IdentityKind, IdentityRecord,
-    SemanticDiff, SemanticId, SemanticIdentities,
+    finite_type_id, finite_variant_id, function_id, record_type_id, IdentityChange, IdentityKind,
+    IdentityRecord, SemanticDiff, SemanticId, SemanticIdentities,
 };
 pub use ir::{
     CapabilityUse, FailurePathKind, HighLevelIr, IrBlock, IrBoundedIteration, IrError, IrFunction,
