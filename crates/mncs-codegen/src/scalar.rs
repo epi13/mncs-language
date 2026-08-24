@@ -9,7 +9,9 @@ use mncs_model::{
     SsaInstruction, SsaInstructionKind, SsaModule, SsaTerminator, SsaValue,
 };
 
-use crate::promises::{integer_no_overflow_promise, promise_summary, LoweringPromise};
+use crate::promises::{
+    integer_no_overflow_promise, non_arithmetic_promise_decisions, promise_summary, LoweringPromise,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalarTy {
@@ -36,7 +38,7 @@ pub enum ScalarInst {
         intent: ArithmeticIntent,
         lhs: SemanticId,
         rhs: SemanticId,
-        promise: LoweringPromise,
+        promise: Box<LoweringPromise>,
     },
     Compare {
         dest: ScalarValue,
@@ -95,6 +97,7 @@ pub struct ScalarFunction {
     pub result: ScalarValue,
     pub blocks: Vec<ScalarBlock>,
     pub promises: Vec<String>,
+    pub promise_decisions: Vec<mncs_model::BackendPromiseDecision>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,12 +105,14 @@ pub struct ScalarModule {
     pub functions: Vec<ScalarFunction>,
     pub unsupported: Vec<String>,
     pub features: Vec<String>,
+    pub promise_decisions: Vec<mncs_model::BackendPromiseDecision>,
 }
 
 pub fn lower_to_scalar(_program: &Program, ssa: &SsaModule, names: &[String]) -> ScalarModule {
     let mut functions = Vec::new();
     let mut unsupported = Vec::new();
     let mut features = Vec::new();
+    let mut promise_decisions = Vec::new();
     let callees: BTreeMap<SemanticId, String> = ssa
         .functions
         .iter()
@@ -130,6 +135,7 @@ pub fn lower_to_scalar(_program: &Program, ssa: &SsaModule, names: &[String]) ->
         match lower_function(ssa, function, name, &callees) {
             Ok(lowered) => {
                 features.extend(lowered.promises.iter().cloned());
+                promise_decisions.extend(lowered.promise_decisions.iter().cloned());
                 functions.push(lowered);
             }
             Err(reason) => unsupported.push(format!("{}: {reason}", function.identity.0)),
@@ -148,6 +154,7 @@ pub fn lower_to_scalar(_program: &Program, ssa: &SsaModule, names: &[String]) ->
         functions,
         unsupported,
         features,
+        promise_decisions,
     }
 }
 
@@ -167,6 +174,7 @@ fn lower_function(
         .collect::<Result<Vec<_>, _>>()?;
     let result = scalar_value(&function.outputs[0])?;
     let mut promises = Vec::new();
+    let mut promise_decisions = Vec::new();
     let mut blocks = Vec::new();
     for block in &function.blocks {
         let params = block
@@ -181,6 +189,7 @@ fn lower_function(
                 instruction,
                 callees,
                 &mut promises,
+                &mut promise_decisions,
             )?);
         }
         blocks.push(ScalarBlock {
@@ -198,6 +207,7 @@ fn lower_function(
         result,
         blocks,
         promises,
+        promise_decisions,
     })
 }
 
@@ -206,6 +216,7 @@ fn lower_instruction(
     instruction: &SsaInstruction,
     callees: &BTreeMap<SemanticId, String>,
     promises: &mut Vec<String>,
+    promise_decisions: &mut Vec<mncs_model::BackendPromiseDecision>,
 ) -> Result<ScalarInst, String> {
     let dest = instruction
         .outputs
@@ -236,13 +247,15 @@ fn lower_instruction(
             }
             let promise = integer_no_overflow_promise(module, instruction);
             promises.push(promise_summary(&promise));
+            promise_decisions.push(promise.decision.clone());
+            promise_decisions.extend(non_arithmetic_promise_decisions(instruction));
             Ok(ScalarInst::Integer {
                 dest,
                 operator: operator.clone(),
                 intent: *intent,
                 lhs: operand(instruction, 0)?,
                 rhs: operand(instruction, 1)?,
-                promise,
+                promise: Box::new(promise),
             })
         }
         SsaInstructionKind::IntegerCompare {

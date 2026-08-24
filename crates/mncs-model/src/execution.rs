@@ -607,7 +607,10 @@ fn execute_operation(
                 operation.results[0].id.clone(),
                 ExecutionValue::Integer {
                     value,
-                    ty: *operand_type,
+                    ty: match &operation.results[0].ty {
+                        BodyType::Integer(ty) => *ty,
+                        _ => *operand_type,
+                    },
                 },
             );
         }
@@ -960,38 +963,30 @@ pub(crate) fn evaluate_integer(
     if matches!(operator, "and" | "or" | "xor") {
         return evaluate_bitwise(operator, ty, left, right);
     }
-    let raw = match operator {
-        "add" => left.checked_add(right)?,
-        "sub" => left.checked_sub(right)?,
-        "mul" => left.checked_mul(right)?,
-        _ => return None,
-    };
     let result_bits = match intent {
         ArithmeticIntent::Widening { bits } => bits,
         _ => ty.bits,
     };
-    if matches!(intent, ArithmeticIntent::Widening { bits } if bits != ty.bits) {
+    if crate::arithmetic_result_type(operator, ty, intent)
+        != Some(IntegerType {
+            bits: result_bits,
+            signed: ty.signed,
+        })
+    {
         return None;
     }
     if !(1..=126).contains(&result_bits) {
         return None;
     }
-    let (minimum, maximum) = integer_limits(result_bits, ty.signed)?;
-    let overflow = raw < minimum || raw > maximum;
-    match intent {
-        ArithmeticIntent::Wrapping => Some(wrap_value(raw, ty.bits, ty.signed)?),
-        ArithmeticIntent::Checked
-        | ArithmeticIntent::Trapping
-        | ArithmeticIntent::Widening { .. }
-            if overflow =>
-        {
-            None
-        }
-        ArithmeticIntent::Checked
-        | ArithmeticIntent::Trapping
-        | ArithmeticIntent::Widening { .. } => Some(raw),
-        ArithmeticIntent::Saturating => Some(raw.clamp(minimum, maximum)),
+    crate::IntegerOperation {
+        operator: operator.to_owned(),
+        operand_type: ty,
+        left,
+        right,
+        intent,
     }
+    .evaluate()
+    .value
 }
 
 fn evaluate_bitwise(operator: &str, ty: IntegerType, left: i128, right: i128) -> Option<i128> {
@@ -1033,22 +1028,6 @@ fn integer_limits(bits: u16, signed: bool) -> Option<(i128, i128)> {
 fn in_range(value: i128, ty: IntegerType) -> bool {
     integer_limits(ty.bits, ty.signed)
         .is_some_and(|(minimum, maximum)| (minimum..=maximum).contains(&value))
-}
-
-fn wrap_value(value: i128, bits: u16, signed: bool) -> Option<i128> {
-    let (_, maximum) = integer_limits(bits, false)?;
-    let modulus = maximum.checked_add(1)?;
-    let wrapped = value.rem_euclid(modulus);
-    if signed {
-        let sign = 1_i128.checked_shl(u32::from(bits - 1))?;
-        Some(if wrapped >= sign {
-            wrapped - modulus
-        } else {
-            wrapped
-        })
-    } else {
-        Some(wrapped)
-    }
 }
 
 fn assign_block_arguments(

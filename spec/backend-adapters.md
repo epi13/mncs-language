@@ -48,6 +48,8 @@ Every backend integration MUST expose or provide equivalent behavior for:
 - explicit assumptions introduced by the backend;
 - backend artifact identity and provenance;
 - obligations and evidence dependencies produced or consumed by lowering.
+- identity-bound decisions for every emitted or withheld backend promise that applies to the
+  selected operation.
 
 A backend MAY additionally expose:
 
@@ -195,7 +197,7 @@ and tests — not generic compiler sequencing edits.
 | `mncs-research-bytecode` | `research_bytecode` | bounded SSA interpreter over an identity-bound payload | implemented / exercised |
 | `mncs-llvm-ir` | `llvm_ir` | external clang; optional llc object pathway | implemented / exercised on CRE-1/2/3 |
 | `mncs-c11` | `c11_translation_unit` | external clang/gcc `-std=c11` | implemented / exercised on CRE-1/2/3 |
-| `mncs-cranelift` | `cranelift_clif` | Cranelift IR/JIT on the host ISA | implemented; CRE JIT execution currently host-mapping limited |
+| `mncs-cranelift` | `cranelift_clif` | Cranelift IR/JIT on the host ISA | CLIF implemented; execution reports host-scoped `UNSUPPORTED` when executable-memory policy denies JIT mapping |
 
 LLVM IR generation does not establish correctness. Clang/llc/gcc are outside the MNCS semantic
 trust boundary. Native object/executable realization uses those tools as optional external steps.

@@ -154,7 +154,7 @@ pub fn portable_wasm_backend_configuration() -> BackendConfiguration {
         assumptions: vec![
             "WASM MVP has no linear memory in this subset".to_owned(),
             "checked overflow traps as unreachable".to_owned(),
-            "saturating and widening arithmetic are unsupported".to_owned(),
+            "saturating uses explicit bounded-width clamp logic; widening uses exact i64 intermediates".to_owned(),
         ],
     }
 }
@@ -172,6 +172,8 @@ pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
         [
             "checked_integer",
             "wrapping_integer",
+            "saturating_integer_bounded_width",
+            "widening_integer_bounded_width",
             "explicit_failure",
             "semantic_bounded_iteration",
             "immutable_record_values_intra_function_only",
@@ -182,8 +184,8 @@ pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
         [
             "memory",
             "effects",
-            "saturating_integer",
-            "widening_integer",
+            "saturating_integer_above_bounded_width",
+            "widening_integer_above_64_bits",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -221,7 +223,7 @@ pub fn portable_wasm_target() -> TargetContractRef {
             ),
             (
                 "integer".to_owned(),
-                "wrapping=wasm wrapping; checked=explicit overflow test then trap".to_owned(),
+                "wrapping=wasm wrapping; checked=explicit overflow test then trap; saturating=explicit clamp; widening=exact extended-width arithmetic".to_owned(),
             ),
             (
                 "trap".to_owned(),
@@ -264,6 +266,14 @@ pub fn portable_wasm_plan(selected_ssa: CompilerArtifactRef) -> TargetLoweringPl
             (
                 "checked".to_owned(),
                 "explicit overflow test then unreachable".to_owned(),
+            ),
+            (
+                "saturating".to_owned(),
+                "explicit bounded-width clamp".to_owned(),
+            ),
+            (
+                "widening".to_owned(),
+                "exact extended-width arithmetic".to_owned(),
             ),
             (
                 "unsupported".to_owned(),
@@ -322,6 +332,8 @@ pub fn research_bytecode_capabilities() -> BackendCapabilityManifest {
         [
             "checked_integer",
             "wrapping_integer",
+            "saturating_integer",
+            "widening_integer",
             "explicit_failure",
             "bounded_control_flow",
             "semantic_bounded_iteration",
@@ -889,7 +901,7 @@ pub(crate) fn backend_output_value(
                     Ok(ExecutionValue::Boolean { value: value == 1 })
                 }
                 (BodyType::Integer(expected), ExecutionValue::Integer { value, .. }) => {
-                    let value = reinterpret_unsigned_backend_value(value, expected);
+                    let value = reinterpret_backend_value(value, expected);
                     if !integer_value_fits(value, expected) {
                         return Err(
                             "backend returned a scalar outside the language-owned integer type"
@@ -932,8 +944,16 @@ pub(crate) fn backend_output_value(
     }
 }
 
-fn reinterpret_unsigned_backend_value(value: i128, ty: IntegerType) -> i128 {
-    if !ty.signed && value < 0 && matches!(ty.bits, 32 | 64) {
+fn reinterpret_backend_value(value: i128, ty: IntegerType) -> i128 {
+    if ty.signed {
+        let modulus = 1_i128 << ty.bits;
+        let sign = 1_i128 << (ty.bits - 1);
+        if (sign..modulus).contains(&value) {
+            value - modulus
+        } else {
+            value
+        }
+    } else if value < 0 && matches!(ty.bits, 32 | 64) {
         value + (1_i128 << ty.bits)
     } else {
         value
@@ -1413,6 +1433,40 @@ mod tests {
     }
 
     #[test]
+    fn saturating_and_widening_arithmetic_agree_across_both_executable_backends() {
+        let program = Program::from_json(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/executable/arithmetic-envelope.mncs.json"
+        )))
+        .expect("arithmetic envelope");
+        assert!(program.validate().valid);
+        let ssa = program.lower_to_ssa().expect("arithmetic SSA");
+        let corpus: ExecutionCorpus = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/execution/arithmetic-envelope-corpus.json"
+        )))
+        .expect("arithmetic corpus");
+        let selected = selected_ssa_ref(&ssa);
+        for backend in [
+            PORTABLE_WASM_MVP_BACKEND_NAME,
+            RESEARCH_BYTECODE_BACKEND_NAME,
+        ] {
+            let plan = plan_for_backend(backend, selected.clone()).expect("backend plan");
+            let artifact = lower_with_backend(backend, &program, &ssa, selected.clone(), &plan)
+                .artifact
+                .expect("arithmetic artifact");
+            let comparison = compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus);
+            assert_eq!(
+                comparison.status,
+                LayeredExecutionStatus::ConsistentOverCorpus,
+                "{backend}: {comparison:#?}"
+            );
+            assert_eq!(comparison.matching_cases, 5);
+            assert_eq!(comparison.mismatching_cases, 0);
+        }
+    }
+
+    #[test]
     fn two_backend_adapters_share_selected_ssa_without_sharing_artifact_shape() {
         let program = program();
         let ssa = program.lower_to_ssa().unwrap();
@@ -1534,6 +1588,74 @@ mod tests {
             .iter()
             .any(|assumption| assumption.contains("withheld")));
         assert!(!ir.contains(" add nsw i32"));
+    }
+
+    #[test]
+    fn llvm_emits_nsw_only_with_a_recheckable_constant_range_certificate() {
+        let program = Program::from_json(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/executable/verified-constant-add.mncs.json"
+        )))
+        .expect("constant program");
+        assert!(program.validate().valid);
+        let ssa = program.lower_to_ssa().expect("SSA");
+        let selected = selected_ssa_ref(&ssa);
+        let result = lower_with_backend(
+            LLVM_BACKEND_NAME,
+            &program,
+            &ssa,
+            selected.clone(),
+            &plan_for_backend(LLVM_BACKEND_NAME, selected).unwrap(),
+        );
+        let artifact = result.artifact.expect("LLVM artifact");
+        let ir = String::from_utf8(artifact.bytes().unwrap()).unwrap();
+        assert!(ir.contains(" add nsw i32"), "{ir}");
+        assert!(ir.contains(" add nuw i32"), "{ir}");
+        let emitted = artifact
+            .promise_decisions
+            .iter()
+            .find(|decision| decision.permitted)
+            .expect("permitted promise decision");
+        let certificate = emitted.certificate.as_ref().expect("certificate");
+        assert!(certificate.identity_is_valid());
+        let instruction = ssa.functions[0].blocks[0]
+            .instructions
+            .iter()
+            .find(|instruction| {
+                matches!(
+                    instruction.kind,
+                    mncs_model::SsaInstructionKind::Integer { .. }
+                )
+            })
+            .expect("integer instruction");
+        assert!(crate::promises::verify_constant_no_overflow_certificate(
+            &ssa,
+            instruction,
+            certificate
+        ));
+        let mut stale = ssa.clone();
+        stale.identity = SemanticId("mncs:stale:selected-ssa".to_owned());
+        assert!(!crate::promises::verify_constant_no_overflow_certificate(
+            &stale,
+            instruction,
+            certificate
+        ));
+        for promise in [
+            mncs_model::BackendPromise::InBounds,
+            mncs_model::BackendPromise::Alignment,
+            mncs_model::BackendPromise::NonAliasing,
+            mncs_model::BackendPromise::Relaxation,
+        ] {
+            assert!(artifact
+                .promise_decisions
+                .iter()
+                .any(|decision| decision.promise == promise && !decision.permitted));
+        }
+        let mut tampered = artifact.clone();
+        tampered.promise_decisions[0]
+            .reason
+            .push_str("; unauthorized mutation");
+        assert!(!tampered.identity_is_valid());
     }
 
     #[test]

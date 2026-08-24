@@ -731,7 +731,7 @@ fn validate_operation(
         BodyOperationKind::Integer {
             operator,
             operand_type,
-            intent: _,
+            intent,
         } => {
             if !matches!(
                 operator.as_str(),
@@ -774,15 +774,21 @@ fn validate_operation(
                     ));
                 }
             }
-            if operation
-                .results
-                .first()
-                .is_some_and(|result| result.ty != BodyType::Integer(*operand_type))
-            {
+            let result_type = crate::arithmetic_result_type(operator, *operand_type, *intent);
+            if result_type.is_none() {
+                errors.push(body_diagnostic(
+                    "MNB058",
+                    format!("{path}.kind.intent"),
+                    "widening arithmetic requires an exact wider result; unsigned widening subtraction is unsupported and widths must be <= 126",
+                ));
+            }
+            if operation.results.first().is_some_and(|result| {
+                result_type.is_some_and(|ty| result.ty != BodyType::Integer(ty))
+            }) {
                 errors.push(body_diagnostic(
                     "MNB018",
                     format!("{path}.results"),
-                    "integer result type does not match the operation type",
+                    "integer result type does not match the arithmetic intent result type",
                 ));
             }
         }
@@ -1694,6 +1700,27 @@ pub(crate) mod tests {
         let report = program.validate();
         assert!(!report.valid);
         assert!(report.errors.iter().any(|error| error.code == "MNB043"));
+    }
+
+    #[test]
+    fn body_requires_the_exact_widening_result_type() {
+        let mut program = Program::from_json(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/executable/arithmetic-envelope.mncs.json"
+        )))
+        .expect("arithmetic envelope");
+        assert!(program.validate().valid);
+        let wide = program.functions[1].body.as_mut().expect("body").blocks[0]
+            .operations
+            .first_mut()
+            .expect("widening operation");
+        wide.results[0].ty = BodyType::Integer(IntegerType {
+            bits: 15,
+            signed: true,
+        });
+        let report = program.validate();
+        assert!(!report.valid);
+        assert!(report.errors.iter().any(|error| error.code == "MNB018"));
     }
 
     #[test]

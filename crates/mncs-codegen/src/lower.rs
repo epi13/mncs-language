@@ -312,7 +312,19 @@ fn lower_instruction(
             let dest = dest_local(layout, instruction)?;
             let left = operand_local(layout, instruction, 0)?;
             let right = operand_local(layout, instruction, 1)?;
-            emit_integer(body, operator, *operand_type, *intent, left, right, dest)?;
+            let result_type = instruction
+                .outputs
+                .first()
+                .and_then(|output| wasm_type(&output.ty).ok().and_then(|(_, integer)| integer))
+                .ok_or_else(|| "integer instruction result has no integer type".to_owned())?;
+            emit_integer(
+                body,
+                operator,
+                *operand_type,
+                result_type,
+                *intent,
+                [left, right, dest],
+            )?;
         }
         SsaInstructionKind::IntegerCompare {
             predicate,
@@ -463,13 +475,13 @@ fn emit_const(body: &mut Vec<Instr>, value: i128, ty: &IrType) -> Result<(), Str
 fn emit_integer(
     body: &mut Vec<Instr>,
     operator: &str,
-    ty: IntegerType,
+    operand_type: IntegerType,
+    result_type: IntegerType,
     intent: ArithmeticIntent,
-    left: u32,
-    right: u32,
-    dest: u32,
+    locals: [u32; 3],
 ) -> Result<(), String> {
-    let wasm = val_type(ty)?;
+    let [left, right, dest] = locals;
+    let wasm = val_type(operand_type)?;
     let wrapping = match (wasm, operator) {
         (ValType::I32, "add") => Instr::I32Add,
         (ValType::I32, "sub") => Instr::I32Sub,
@@ -490,7 +502,7 @@ fn emit_integer(
             body.push(Instr::LocalGet(left));
             body.push(Instr::LocalGet(right));
             body.push(wrapping);
-            mask_width(body, ty, wasm);
+            mask_width(body, result_type, wasm);
             body.push(Instr::LocalSet(dest));
         }
         ArithmeticIntent::Checked | ArithmeticIntent::Trapping => {
@@ -498,20 +510,130 @@ fn emit_integer(
             body.push(Instr::LocalGet(right));
             body.push(wrapping);
             body.push(Instr::LocalSet(dest));
-            emit_checked(body, operator, ty, wasm, left, right, dest)?;
-            mask_width(body, ty, wasm);
-            if ty.bits < 32 && matches!(wasm, ValType::I32) {
+            emit_checked(body, operator, operand_type, wasm, left, right, dest)?;
+            mask_width(body, result_type, wasm);
+            if result_type.bits < 32 && matches!(wasm, ValType::I32) {
                 body.push(Instr::LocalGet(dest));
-                mask_width(body, ty, wasm);
+                mask_width(body, result_type, wasm);
                 body.push(Instr::LocalSet(dest));
             }
         }
-        ArithmeticIntent::Saturating | ArithmeticIntent::Widening { .. } => {
-            return Err(format!(
-                "arithmetic intent {intent:?} is unsupported on the portable WASM MVP backend"
-            ));
+        ArithmeticIntent::Saturating => {
+            emit_saturating(body, operator, operand_type, result_type, left, right, dest)?
+        }
+        ArithmeticIntent::Widening { .. } => {
+            emit_widening(body, operator, operand_type, result_type, left, right, dest)?
         }
     }
+    Ok(())
+}
+
+fn emit_wide_i64_operation(
+    body: &mut Vec<Instr>,
+    operator: &str,
+    ty: IntegerType,
+    left: u32,
+    right: u32,
+) -> Result<(), String> {
+    body.push(Instr::LocalGet(left));
+    body.push(if ty.signed {
+        Instr::I64ExtendI32S
+    } else {
+        Instr::I64ExtendI32U
+    });
+    body.push(Instr::LocalGet(right));
+    body.push(if ty.signed {
+        Instr::I64ExtendI32S
+    } else {
+        Instr::I64ExtendI32U
+    });
+    body.push(match operator {
+        "add" => Instr::I64Add,
+        "sub" => Instr::I64Sub,
+        "mul" => Instr::I64Mul,
+        _ => return Err(format!("unsupported exact arithmetic operator {operator}")),
+    });
+    Ok(())
+}
+
+fn emit_saturating(
+    body: &mut Vec<Instr>,
+    operator: &str,
+    operand: IntegerType,
+    result: IntegerType,
+    left: u32,
+    right: u32,
+    dest: u32,
+) -> Result<(), String> {
+    if result != operand
+        || operand.bits > 32
+        || (!operand.signed && operand.bits > 31)
+        || !matches!(operator, "add" | "sub" | "mul")
+    {
+        return Err("portable WASM saturating arithmetic requires signed 1..=32-bit or unsigned 1..=31-bit add/sub/mul".to_owned());
+    }
+    let (min, max) = if operand.signed {
+        let top = 1_i64 << (operand.bits - 1);
+        (-top, top - 1)
+    } else {
+        (0, (1_i64 << operand.bits) - 1)
+    };
+    emit_wide_i64_operation(body, operator, operand, left, right)?;
+    body.push(Instr::I64Const(max));
+    body.push(Instr::I64GtS);
+    body.push(Instr::If);
+    body.push(Instr::I32Const(
+        i32::try_from(max).map_err(|_| "saturation maximum is not i32")?,
+    ));
+    body.push(Instr::LocalSet(dest));
+    body.push(Instr::Else);
+    emit_wide_i64_operation(body, operator, operand, left, right)?;
+    body.push(Instr::I64Const(min));
+    body.push(Instr::I64LtS);
+    body.push(Instr::If);
+    body.push(Instr::I32Const(
+        i32::try_from(min).map_err(|_| "saturation minimum is not i32")?,
+    ));
+    body.push(Instr::LocalSet(dest));
+    body.push(Instr::Else);
+    emit_wide_i64_operation(body, operator, operand, left, right)?;
+    body.push(Instr::I32WrapI64);
+    mask_width(body, result, ValType::I32);
+    body.push(Instr::LocalSet(dest));
+    body.push(Instr::End);
+    body.push(Instr::End);
+    Ok(())
+}
+
+fn emit_widening(
+    body: &mut Vec<Instr>,
+    operator: &str,
+    operand: IntegerType,
+    result: IntegerType,
+    left: u32,
+    right: u32,
+    dest: u32,
+) -> Result<(), String> {
+    if operand.bits > 32 || result.bits > 64 || result.signed != operand.signed {
+        return Err(
+            "portable WASM widening arithmetic requires operands <= 32 bits and results <= 64 bits"
+                .to_owned(),
+        );
+    }
+    if mncs_model::arithmetic_result_type(
+        operator,
+        operand,
+        ArithmeticIntent::Widening { bits: result.bits },
+    ) != Some(result)
+    {
+        return Err("widening result type is not exact for this operation".to_owned());
+    }
+    emit_wide_i64_operation(body, operator, operand, left, right)?;
+    if matches!(val_type(result)?, ValType::I32) {
+        body.push(Instr::I32WrapI64);
+        mask_width(body, result, ValType::I32);
+    }
+    body.push(Instr::LocalSet(dest));
     Ok(())
 }
 
@@ -700,11 +822,13 @@ fn mask_width(body: &mut Vec<Instr>, ty: IntegerType, wasm: ValType) {
         body.push(Instr::I32Const(mask));
         body.push(Instr::I32And);
         if ty.signed {
-            let shift = 32 - i32::from(ty.bits);
-            body.push(Instr::I32Const(shift));
-            // emulate sign extend via arithmetic: (x << s) >> s is not in MVP
-            // without shr_s. Keep the masked unsigned value for sub-32-bit
-            // signed wrapping; execution reconstructs MNCS signed values.
+            // Sign-extend an N-bit value without relying on optional WASM
+            // sign-extension instructions: (masked ^ sign) - sign.
+            let sign = 1_i32.wrapping_shl(u32::from(ty.bits - 1));
+            body.push(Instr::I32Const(sign));
+            body.push(Instr::I32Xor);
+            body.push(Instr::I32Const(sign));
+            body.push(Instr::I32Sub);
         }
     }
 }

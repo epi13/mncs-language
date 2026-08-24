@@ -118,3 +118,24 @@ Runs the micro-verifiers, debug queries, candidate checks, and evidence producti
 Coordinates recursive or distributed refinement across agents, machines, verifier implementations, and trust boundaries.
 
 This separation keeps recursive improvement native to the language model without coupling the language to one orchestration implementation.
+
+## Roadmap 0.5 bounded cycle
+
+`mncs experiment refine BASELINE CANDIDATE... --budget N` implements the first closed bounded
+realization cycle. It accepts only an identity-valid PASS baseline, refuses a zero or exceeded
+candidate budget, and records for every candidate:
+
+- the frozen baseline and candidate result identities;
+- the single localized dimension (`backend:<baseline>-><candidate>`);
+- source, semantic, HIR, SSA, artifact, corpus, and bounded-observation comparison;
+- every translation-validator identity consumed;
+- unresolved evidence or validator failures;
+- an explicit `accepted_as_experimental_realization` or `rejected_and_retained` disposition; and
+- human-readable reasons inside the identity-sealed machine artifact.
+
+Promotion requires a valid candidate identity, PASS status, no unresolved required evidence, current
+PASS translation validators, identical source/semantic/HIR/SSA identities, and bounded public
+behavior agreement. It changes only the experimental realization; it cannot change MNCS semantics.
+The CLI integration test uses a research-bytecode baseline, accepts a WASM candidate over five
+arithmetic edges, and retains an intentionally incorrect CRE-1 candidate as rejected. Forge/search
+may supply candidates but appears in the artifact as explicitly lacking promotion authority.

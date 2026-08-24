@@ -77,12 +77,13 @@ pub use execution::{
     EXECUTION_REQUEST_SCHEMA_VERSION, EXECUTION_RESULT_SCHEMA_VERSION, MAX_EXECUTION_BUDGET,
 };
 pub use experiment::{
-    FamilyExperimentObservation, FamilyExperimentReference, LanguageExperimentCaseObservation,
-    LanguageExperimentComparison, LanguageExperimentDefinition,
-    LanguageExperimentPropertyObservation, LanguageExperimentResult, LanguageExperimentStatus,
-    ValidatorRequirement, FAMILY_EXPERIMENT_REFERENCE_SCHEMA_VERSION,
-    LANGUAGE_EXPERIMENT_DEFINITION_CONTRACT_ID, LANGUAGE_EXPERIMENT_INTERPRETATION,
-    LANGUAGE_EXPERIMENT_RESULT_CONTRACT_ID, LANGUAGE_EXPERIMENT_SCHEMA_VERSION,
+    BoundedRefinementCandidateDecision, BoundedRefinementCycle, FamilyExperimentObservation,
+    FamilyExperimentReference, LanguageExperimentCaseObservation, LanguageExperimentComparison,
+    LanguageExperimentDefinition, LanguageExperimentPropertyObservation, LanguageExperimentResult,
+    LanguageExperimentStatus, ValidatorRequirement, BOUNDED_REFINEMENT_CYCLE_SCHEMA_VERSION,
+    FAMILY_EXPERIMENT_REFERENCE_SCHEMA_VERSION, LANGUAGE_EXPERIMENT_DEFINITION_CONTRACT_ID,
+    LANGUAGE_EXPERIMENT_INTERPRETATION, LANGUAGE_EXPERIMENT_RESULT_CONTRACT_ID,
+    LANGUAGE_EXPERIMENT_SCHEMA_VERSION,
 };
 pub use graph::{
     EdgeKind, GraphEdge, GraphError, GraphNode, InvalidationReason, InvalidationReport,
@@ -98,10 +99,11 @@ pub use ir::{
     PathKind, StateRegionKind, TraceEntry, TraceMap, HIGH_LEVEL_IR_SCHEMA_VERSION,
 };
 pub use machine_intent::{
-    AlignmentCapability, ArithmeticIntent, BackendPromise, BackendPromiseDecision, Fact,
-    HighLevelIrNode, IntegerEvaluation, IntegerOperation, IntegerType, Intent,
-    MachineIntentExpression, MachinePreference, Obligation, ObligationStatus, Preference,
-    Requirement,
+    arithmetic_result_type, minimum_widening_bits, AlignmentCapability, ArithmeticIntent,
+    BackendPromise, BackendPromiseCertificate, BackendPromiseDecision, Fact, HighLevelIrNode,
+    IntegerEvaluation, IntegerOperation, IntegerType, Intent, MachineIntentExpression,
+    MachinePreference, Obligation, ObligationStatus, Preference, Requirement,
+    BACKEND_PROMISE_CERTIFICATE_SCHEMA_VERSION,
 };
 pub use obligations::{
     generate_machine_intent_obligations, ObligationGeneration, ObligationRecord,

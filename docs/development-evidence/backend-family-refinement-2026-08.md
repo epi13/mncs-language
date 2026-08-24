@@ -41,3 +41,7 @@ PASS on CRE-1/2/3 for WASM/bytecode/LLVM/C11 is bounded observational agreement.
 `UNKNOWN` exact instruction cost is retained.
 
 Forge did not gain semantic authority.
+
+This earlier observe/compare/withhold record is superseded for the Roadmap 0.5 completion gate by
+the sealed `BoundedRefinementCycle` experiment in `roadmap-0.5-2026-08.md`. The earlier Cranelift
+rejection remains useful host-scoped negative evidence.

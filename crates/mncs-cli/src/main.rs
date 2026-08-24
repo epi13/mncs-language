@@ -2,7 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs,
     path::{Path, PathBuf},
-    process::ExitCode,
+    process::{Command, ExitCode},
 };
 
 use mncs_codegen::{
@@ -762,6 +762,7 @@ struct PreparedExperiment {
     envelope: SourceEnvelope,
     program: Program,
     definition: LanguageExperimentDefinition,
+    semantic_json_source: bool,
 }
 
 fn experiment_command<I>(args: I) -> ExitCode
@@ -770,7 +771,7 @@ where
 {
     let mut args = args.into_iter();
     let Some(action) = args.next() else {
-        eprintln!("error: experiment requires plan, run, execute, inspect, compare, or matrix (execute accepts --baseline/--output-dir for frozen replication)");
+        eprintln!("error: experiment requires plan, run, execute, inspect, compare, refine, rust-control, or matrix (execute accepts --baseline/--output-dir for frozen replication)");
         return ExitCode::from(2);
     };
     match action.as_str() {
@@ -943,6 +944,72 @@ where
                 ExitCode::from(2)
             }
         }
+        "refine" => {
+            let Some(baseline_path) = args.next() else {
+                eprintln!("error: experiment refine requires a baseline and at least one candidate result");
+                return ExitCode::from(2);
+            };
+            let mut candidate_paths = Vec::new();
+            let mut budget = 4_u32;
+            while let Some(argument) = args.next() {
+                if argument == "--budget" {
+                    let Some(value) = args.next() else {
+                        eprintln!("error: --budget requires an integer");
+                        return ExitCode::from(2);
+                    };
+                    budget = match value.parse() {
+                        Ok(value) => value,
+                        Err(_) => {
+                            eprintln!("error: --budget requires an integer");
+                            return ExitCode::from(2);
+                        }
+                    };
+                } else {
+                    candidate_paths.push(argument);
+                }
+            }
+            if candidate_paths.is_empty() {
+                eprintln!("error: experiment refine requires at least one candidate result");
+                return ExitCode::from(2);
+            }
+            let baseline = match read_json::<LanguageExperimentResult>(&baseline_path) {
+                Ok(result) => result,
+                Err(code) => return code,
+            };
+            let mut candidates = Vec::new();
+            for path in candidate_paths {
+                match read_json::<LanguageExperimentResult>(&path) {
+                    Ok(result) => candidates.push(result),
+                    Err(code) => return code,
+                }
+            }
+            let cycle =
+                match mncs_model::BoundedRefinementCycle::compare(&baseline, &candidates, budget) {
+                    Ok(cycle) => cycle,
+                    Err(error) => {
+                        eprintln!("error: bounded refinement refused: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                };
+            if print_json(&cycle) && cycle.identity_is_valid() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        "rust-control" => {
+            let (Some(result_path), Some(control_path)) = (args.next(), args.next()) else {
+                eprintln!(
+                    "error: experiment rust-control requires a result and Rust control source"
+                );
+                return ExitCode::from(2);
+            };
+            if args.next().is_some() {
+                eprintln!("error: unexpected experiment rust-control arguments");
+                return ExitCode::from(2);
+            }
+            rust_control_comparison(&result_path, &control_path)
+        }
         other => {
             eprintln!("error: unknown experiment action {other:?}");
             ExitCode::from(2)
@@ -1011,6 +1078,199 @@ where
     })
 }
 
+#[derive(Debug, Deserialize)]
+struct RustControlOutput {
+    status: String,
+    value: Option<i128>,
+}
+
+#[derive(Debug, Serialize)]
+struct RustControlCaseComparison {
+    case_id: String,
+    backend_status: ExecutionStatus,
+    backend_returned: Vec<ExecutionValue>,
+    control_status: String,
+    control_value: Option<i128>,
+    agrees: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct RustControlComparison {
+    schema_version: String,
+    identity: SemanticId,
+    experiment_result: SemanticId,
+    backend_artifact: SemanticId,
+    control_source_identity: String,
+    rustc_version: String,
+    cases: Vec<RustControlCaseComparison>,
+    bounded_agreement: bool,
+    interpretation: String,
+}
+
+fn rust_control_comparison(result_path: &str, control_path: &str) -> ExitCode {
+    let result = match read_json::<LanguageExperimentResult>(result_path) {
+        Ok(result) if result.identity_is_valid() => result,
+        Ok(_) => {
+            eprintln!("error: experiment result identity is invalid or stale");
+            return ExitCode::FAILURE;
+        }
+        Err(code) => return code,
+    };
+    let control_source = match read_source(control_path) {
+        Ok(source) => source,
+        Err(code) => return code,
+    };
+    let control_envelope = SourceEnvelope::new(
+        SourceArtifactKind::Program,
+        control_path.to_owned(),
+        SourceOrigin {
+            kind: SourceOriginKind::Path,
+            locator: Some(control_path.to_owned()),
+        },
+        control_source,
+    );
+    let rustc_version = match Command::new("rustc").arg("--version").output() {
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).trim().to_owned()
+        }
+        Ok(output) => {
+            eprintln!(
+                "error: rustc --version failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return ExitCode::FAILURE;
+        }
+        Err(error) => {
+            eprintln!("error: rustc is unavailable for the control comparison: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let binary_path = env::temp_dir().join(format!("mncs-rust-control-{}", std::process::id()));
+    let compiled = Command::new("rustc")
+        .args([control_path, "-O", "-o"])
+        .arg(&binary_path)
+        .output();
+    let compiled = match compiled {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => {
+            eprintln!(
+                "error: Rust control compilation failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return ExitCode::FAILURE;
+        }
+        Err(error) => {
+            eprintln!("error: unable to execute rustc: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let _ = compiled;
+    let mut cases = Vec::new();
+    for corpus_case in &result.definition.corpus.cases {
+        let Some(backend_case) = result
+            .cases
+            .iter()
+            .find(|case_| case_.case_id == corpus_case.id)
+        else {
+            let _ = fs::remove_file(&binary_path);
+            eprintln!("error: result omitted corpus case {:?}", corpus_case.id);
+            return ExitCode::FAILURE;
+        };
+        let mut command = Command::new(&binary_path);
+        command.arg(&corpus_case.request.target.function);
+        for argument in &corpus_case.request.arguments {
+            let ExecutionValue::Integer { value, .. } = argument else {
+                let _ = fs::remove_file(&binary_path);
+                eprintln!("error: Rust control pilot supports integer arguments only");
+                return ExitCode::FAILURE;
+            };
+            command.arg(value.to_string());
+        }
+        let output = match command.output() {
+            Ok(output) if output.status.success() => output,
+            Ok(output) => {
+                let _ = fs::remove_file(&binary_path);
+                eprintln!(
+                    "error: Rust control failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                return ExitCode::FAILURE;
+            }
+            Err(error) => {
+                let _ = fs::remove_file(&binary_path);
+                eprintln!("error: unable to execute Rust control: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let control: RustControlOutput = match serde_json::from_slice(&output.stdout) {
+            Ok(control) => control,
+            Err(error) => {
+                let _ = fs::remove_file(&binary_path);
+                eprintln!("error: Rust control emitted invalid JSON: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let backend_value = match backend_case.returned.as_slice() {
+            [ExecutionValue::Integer { value, .. }] => Some(*value),
+            _ => None,
+        };
+        let expected_control_status = match backend_case.status {
+            ExecutionStatus::Returned => "returned",
+            ExecutionStatus::RuntimeFailure => "runtime_failure",
+            ExecutionStatus::Unsupported => "unsupported",
+            ExecutionStatus::BudgetExhausted => "budget_exhausted",
+            ExecutionStatus::InvalidRequest => "invalid_request",
+        };
+        let agrees = control.status == expected_control_status && control.value == backend_value;
+        cases.push(RustControlCaseComparison {
+            case_id: corpus_case.id.clone(),
+            backend_status: backend_case.status,
+            backend_returned: backend_case.returned.clone(),
+            control_status: control.status,
+            control_value: control.value,
+            agrees,
+        });
+    }
+    let _ = fs::remove_file(&binary_path);
+    let bounded_agreement = cases.iter().all(|case_| case_.agrees);
+    let identity_material = serde_json::to_string(&(
+        &result.identity,
+        &result.artifact.identity,
+        &control_envelope.identity,
+        &rustc_version,
+        &cases,
+    ))
+    .expect("Rust control comparison is serializable");
+    let identity = SourceEnvelope::new(
+        SourceArtifactKind::VerificationSystem,
+        "rust-control-comparison",
+        SourceOrigin {
+            kind: SourceOriginKind::Generated,
+            locator: None,
+        },
+        identity_material,
+    )
+    .identity;
+    let report = RustControlComparison {
+        schema_version: "0.1".to_owned(),
+        identity: SemanticId(identity),
+        experiment_result: result.identity,
+        backend_artifact: result.artifact.identity,
+        control_source_identity: control_envelope.identity,
+        rustc_version,
+        cases,
+        bounded_agreement,
+        interpretation: "finite generated-backend/Rust-control agreement is bounded empirical evidence, not proof or universal equivalence".to_owned(),
+    };
+    if !print_json(&report) {
+        ExitCode::from(2)
+    } else if bounded_agreement {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
 fn prepare_experiment(options: &ExperimentOptions) -> Result<PreparedExperiment, ExitCode> {
     let source = read_source(&options.source_path)?;
     let envelope = SourceEnvelope::new(
@@ -1023,10 +1283,27 @@ fn prepare_experiment(options: &ExperimentOptions) -> Result<PreparedExperiment,
         source,
     );
     let compiler = ReferenceCompiler::default();
-    let front_end = compiler.front_end(envelope.clone());
-    let Some(program) = front_end.program.clone().filter(|_| front_end.is_valid()) else {
-        let _ = print_json(&front_end);
-        return Err(ExitCode::FAILURE);
+    let semantic_json_source = Path::new(&options.source_path)
+        .extension()
+        .is_some_and(|extension| extension == "json");
+    let program = if semantic_json_source {
+        let program = Program::from_json(&envelope.text).map_err(|error| {
+            eprintln!("error: invalid canonical semantic JSON experiment source: {error}");
+            ExitCode::FAILURE
+        })?;
+        let report = program.validate();
+        if !report.valid {
+            let _ = print_json(&report);
+            return Err(ExitCode::FAILURE);
+        }
+        program
+    } else {
+        let front_end = compiler.front_end(envelope.clone());
+        let Some(program) = front_end.program.clone().filter(|_| front_end.is_valid()) else {
+            let _ = print_json(&front_end);
+            return Err(ExitCode::FAILURE);
+        };
+        program
     };
     let ssa = program.lower_to_ssa().map_err(|error| {
         eprintln!("error: unable to produce selected SSA for experiment: {error}");
@@ -1087,6 +1364,7 @@ fn prepare_experiment(options: &ExperimentOptions) -> Result<PreparedExperiment,
         envelope,
         program,
         definition,
+        semantic_json_source,
     })
 }
 
@@ -1113,19 +1391,31 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
             return ExitCode::FAILURE;
         }
     };
-    let compilation = compiler.compile(request, &prepared.program);
+    let compilation = compiler.compile(request.clone(), &prepared.program);
     if compilation.status == CompilationStatus::Failed {
         let _ = print_json(&compilation);
         return ExitCode::FAILURE;
     }
-    let study_output = compiler.run_source_study_with_backend(
-        prepared.envelope.clone(),
-        native_node_profile(options.node_identity),
-        &options.backend,
-    );
-    let Some(study) = study_output.study else {
-        let _ = print_json(&study_output.front_end);
-        return ExitCode::FAILURE;
+    let study = if prepared.semantic_json_source {
+        compiler.run_study(
+            CompilationStudyRequest::new(
+                native_node_profile(options.node_identity),
+                request,
+                Vec::new(),
+            ),
+            &prepared.program,
+        )
+    } else {
+        let study_output = compiler.run_source_study_with_backend(
+            prepared.envelope.clone(),
+            native_node_profile(options.node_identity),
+            &options.backend,
+        );
+        let Some(study) = study_output.study else {
+            let _ = print_json(&study_output.front_end);
+            return ExitCode::FAILURE;
+        };
+        study
     };
     let (Some(ssa), Some(plan), Some(artifact)) = (
         compilation.emissions.ssa.as_ref(),
@@ -2485,6 +2775,10 @@ fn print_usage() {
     eprintln!("  mncs experiment execute <backend-artifact.json> <corpus.json> [--baseline RESULT.json --output-dir DIR]");
     eprintln!("  mncs experiment inspect <result.json>");
     eprintln!("  mncs experiment compare <left-result.json> <right-result.json>");
+    eprintln!(
+        "  mncs experiment refine <baseline-result.json> <candidate-result.json>... [--budget N]"
+    );
+    eprintln!("  mncs experiment rust-control <result.json> <equivalent-control.rs>");
     eprintln!("  mncs experiment matrix");
     eprintln!("  mncs diff <before.json> <after.json>");
     eprintln!("  mncs compare <before.json> <after.json>");

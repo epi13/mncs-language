@@ -23,6 +23,7 @@ pub const LANGUAGE_EXPERIMENT_INTERPRETATION: &str =
     "bounded_language_observation_not_universal_equivalence_or_conformance";
 pub const FAMILY_EXPERIMENT_REFERENCE_SCHEMA_VERSION: &str =
     "mncs.family-record.producer-reference.v0.1";
+pub const BOUNDED_REFINEMENT_CYCLE_SCHEMA_VERSION: &str = "0.1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -30,6 +31,164 @@ pub enum LanguageExperimentStatus {
     Pass,
     Fail,
     Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoundedRefinementCandidateDecision {
+    pub candidate: SemanticId,
+    pub baseline: SemanticId,
+    pub changed_dimension: String,
+    pub comparison: LanguageExperimentComparison,
+    pub evidence_consumed: Vec<SemanticId>,
+    pub promoted: bool,
+    pub disposition: String,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoundedRefinementCycle {
+    pub schema_version: String,
+    pub identity: SemanticId,
+    pub baseline: SemanticId,
+    pub candidate_budget: u32,
+    pub candidates_considered: u32,
+    pub decisions: Vec<BoundedRefinementCandidateDecision>,
+    pub promoted_candidates: Vec<SemanticId>,
+    pub rejected_candidates: Vec<SemanticId>,
+    pub independent_authority: String,
+    pub interpretation: String,
+}
+
+impl BoundedRefinementCycle {
+    pub fn compare(
+        baseline: &LanguageExperimentResult,
+        candidates: &[LanguageExperimentResult],
+        candidate_budget: u32,
+    ) -> Result<Self, String> {
+        if candidate_budget == 0
+            || candidates.is_empty()
+            || candidates.len() > candidate_budget as usize
+        {
+            return Err("bounded refinement candidate budget is zero or exceeded".to_owned());
+        }
+        if !baseline.identity_is_valid() || baseline.status != LanguageExperimentStatus::Pass {
+            return Err(
+                "baseline identity must be valid and its bounded experiment must PASS".to_owned(),
+            );
+        }
+        let mut decisions = Vec::new();
+        for candidate in candidates {
+            let comparison = LanguageExperimentComparison::compare(baseline, candidate);
+            let identity_valid = candidate.identity_is_valid();
+            let validators_pass = candidate.translation_validations.iter().all(|validation| {
+                validation.judgement == TranslationJudgement::Pass && validation.identity_is_valid()
+            });
+            let protected = comparison.same_source
+                && comparison.same_semantics
+                && comparison.same_hir
+                && comparison.same_ssa
+                && comparison.bounded_behavior_agrees;
+            let promoted = identity_valid
+                && candidate.status == LanguageExperimentStatus::Pass
+                && candidate.unresolved_reasons.is_empty()
+                && validators_pass
+                && protected;
+            let mut reasons = Vec::new();
+            if promoted {
+                reasons.push("identity-bound translation validators PASS and bounded public behavior agrees with the frozen baseline".to_owned());
+                reasons.push("promotion applies only to the experimental backend realization; it does not change MNCS semantics".to_owned());
+            } else {
+                if !identity_valid {
+                    reasons.push("candidate result identity is invalid or stale".to_owned());
+                }
+                if candidate.status != LanguageExperimentStatus::Pass {
+                    reasons.push(format!(
+                        "candidate experiment status is {:?}",
+                        candidate.status
+                    ));
+                }
+                if !candidate.unresolved_reasons.is_empty() {
+                    reasons.push("candidate retains unresolved required evidence".to_owned());
+                }
+                if !validators_pass {
+                    reasons.push(
+                        "one or more independent translation validators did not PASS".to_owned(),
+                    );
+                }
+                if !protected {
+                    reasons.push(
+                        "source/stage identities or bounded public behavior diverge from baseline"
+                            .to_owned(),
+                    );
+                }
+            }
+            let mut evidence_consumed = vec![baseline.identity.clone(), candidate.identity.clone()];
+            evidence_consumed.extend(
+                candidate
+                    .translation_validations
+                    .iter()
+                    .map(|validation| validation.identity.clone()),
+            );
+            evidence_consumed.sort();
+            evidence_consumed.dedup();
+            decisions.push(BoundedRefinementCandidateDecision {
+                candidate: candidate.identity.clone(),
+                baseline: baseline.identity.clone(),
+                changed_dimension: format!(
+                    "backend:{}->{}",
+                    baseline.backend.name, candidate.backend.name
+                ),
+                comparison,
+                evidence_consumed,
+                promoted,
+                disposition: if promoted {
+                    "accepted_as_experimental_realization"
+                } else {
+                    "rejected_and_retained"
+                }
+                .to_owned(),
+                reasons,
+            });
+        }
+        let promoted_candidates = decisions
+            .iter()
+            .filter(|decision| decision.promoted)
+            .map(|decision| decision.candidate.clone())
+            .collect();
+        let rejected_candidates = decisions
+            .iter()
+            .filter(|decision| !decision.promoted)
+            .map(|decision| decision.candidate.clone())
+            .collect();
+        let mut cycle = Self {
+            schema_version: BOUNDED_REFINEMENT_CYCLE_SCHEMA_VERSION.to_owned(),
+            identity: SemanticId(String::new()),
+            baseline: baseline.identity.clone(),
+            candidate_budget,
+            candidates_considered: decisions.len() as u32,
+            decisions,
+            promoted_candidates,
+            rejected_candidates,
+            independent_authority: "mncs-language identity/freshness checks plus translation validators; Forge/search has no promotion authority".to_owned(),
+            interpretation: "bounded observe-localize-propose-verify-compare-promote-or-reject history; finite agreement is not universal equivalence".to_owned(),
+        };
+        cycle.seal();
+        Ok(cycle)
+    }
+
+    pub fn seal(&mut self) {
+        self.identity = SemanticId(String::new());
+        self.identity = experiment_identity("bounded-refinement-cycle", self);
+    }
+
+    pub fn identity_is_valid(&self) -> bool {
+        let mut material = self.clone();
+        material.identity = SemanticId(String::new());
+        self.schema_version == BOUNDED_REFINEMENT_CYCLE_SCHEMA_VERSION
+            && self.candidates_considered == self.decisions.len() as u32
+            && self.candidates_considered <= self.candidate_budget
+            && self.identity == experiment_identity("bounded-refinement-cycle", &material)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

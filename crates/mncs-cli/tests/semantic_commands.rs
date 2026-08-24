@@ -208,6 +208,142 @@ fn language_experiment_runs_two_backend_adapters_and_compares_semantics() {
 }
 
 #[test]
+fn roadmap_05_arithmetic_control_and_bounded_refinement_are_evidence_gated() {
+    let source = example("executable/arithmetic-envelope.mncs.json");
+    let corpus = example("execution/arithmetic-envelope-corpus.json");
+    let control = example("controls/arithmetic-envelope.rs");
+    let temp = std::env::temp_dir().join(format!("mncs-roadmap-05-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp);
+    let bytecode_dir = temp.join("bytecode");
+    let wasm_dir = temp.join("wasm");
+    for (backend, output_dir) in [
+        ("mncs-research-bytecode", &bytecode_dir),
+        ("mncs-portable-wasm-mvp", &wasm_dir),
+    ] {
+        let output = binary()
+            .args([
+                "experiment",
+                "run",
+                &source,
+                "--backend",
+                backend,
+                "--corpus",
+                &corpus,
+                "--output-dir",
+                output_dir.to_str().unwrap(),
+            ])
+            .output()
+            .expect("run Roadmap 0.5 arithmetic experiment");
+        assert!(
+            output.status.success(),
+            "{backend}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout).expect("experiment JSON");
+        assert_eq!(result["status"], "PASS");
+        assert!(result["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|case_| case_["expectation_met"] == true));
+    }
+
+    let rust_control = binary()
+        .args([
+            "experiment",
+            "rust-control",
+            wasm_dir.join("result.json").to_str().unwrap(),
+            &control,
+        ])
+        .output()
+        .expect("compare generated output with Rust control");
+    assert!(
+        rust_control.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust_control.stderr)
+    );
+    let rust_report: Value =
+        serde_json::from_slice(&rust_control.stdout).expect("Rust control JSON");
+    assert_eq!(rust_report["bounded_agreement"], true);
+    assert_eq!(rust_report["cases"].as_array().unwrap().len(), 5);
+
+    let rejected_dir = temp.join("rejected");
+    let rejected = binary()
+        .args([
+            "experiment",
+            "run",
+            &example("source/cre1-evidence-combine-wrong.mncs"),
+            "--backend",
+            "mncs-research-bytecode",
+            "--corpus",
+            &example("execution/cre1-evidence-corpus.json"),
+            "--output-dir",
+            rejected_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run rejected candidate");
+    assert_eq!(rejected.status.code(), Some(1));
+
+    let refinement = binary()
+        .args([
+            "experiment",
+            "refine",
+            bytecode_dir.join("result.json").to_str().unwrap(),
+            wasm_dir.join("result.json").to_str().unwrap(),
+            rejected_dir.join("result.json").to_str().unwrap(),
+            "--budget",
+            "2",
+        ])
+        .output()
+        .expect("run bounded refinement cycle");
+    assert!(
+        refinement.status.success(),
+        "{}",
+        String::from_utf8_lossy(&refinement.stderr)
+    );
+    let cycle: Value = serde_json::from_slice(&refinement.stdout).expect("refinement JSON");
+    let typed_cycle: mncs_model::BoundedRefinementCycle =
+        serde_json::from_slice(&refinement.stdout).expect("typed refinement cycle");
+    assert!(typed_cycle.identity_is_valid());
+    assert_eq!(cycle["candidates_considered"], 2);
+    assert_eq!(cycle["promoted_candidates"].as_array().unwrap().len(), 1);
+    assert_eq!(cycle["rejected_candidates"].as_array().unwrap().len(), 1);
+    assert_eq!(cycle["decisions"][0]["promoted"], true);
+    assert_eq!(
+        cycle["decisions"][1]["disposition"],
+        "rejected_and_retained"
+    );
+    assert!(cycle["independent_authority"]
+        .as_str()
+        .unwrap()
+        .contains("Forge/search has no promotion authority"));
+
+    let unsupported = binary()
+        .args([
+            "experiment",
+            "run",
+            &source,
+            "--backend",
+            "mncs-llvm-ir",
+            "--corpus",
+            &corpus,
+        ])
+        .output()
+        .expect("run unsupported scalar arithmetic experiment");
+    assert_eq!(unsupported.status.code(), Some(1));
+    let unsupported_result: Value =
+        serde_json::from_slice(&unsupported.stdout).expect("unsupported result JSON");
+    assert!(unsupported_result["artifact"].is_null());
+    assert!(unsupported_result["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|diagnostic| diagnostic["kind"] == "unavailable_backend_capability"));
+
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
 fn source_study_emits_the_front_end_and_hir_stage_chain() {
     let source = example("source/identity.mncs");
     let output = binary()

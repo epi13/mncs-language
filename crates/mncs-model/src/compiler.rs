@@ -15,7 +15,7 @@ use crate::{CanonicalForm, HighLevelIr, ObligationRecord, SemanticId, SsaModule}
 pub const PORTABLE_WASM_MVP_TARGET: &str = "mncs:target:portable-wasm-mvp-0.1";
 pub const PORTABLE_WASM_MVP_BACKEND_NAME: &str = "mncs-portable-wasm-mvp";
 pub const PORTABLE_WASM_MVP_BACKEND_VERSION: &str = "0.1";
-pub const BACKEND_ARTIFACT_SCHEMA_VERSION: &str = "0.1";
+pub const BACKEND_ARTIFACT_SCHEMA_VERSION: &str = "0.2";
 pub const BACKEND_CAPABILITY_SCHEMA_VERSION: &str = "0.1";
 pub const REALIZATION_REQUEST_SCHEMA_VERSION: &str = "0.1";
 pub const LAYERED_EXECUTION_COMPARISON_INTERPRETATION: &str =
@@ -1059,6 +1059,8 @@ pub struct BackendArtifact {
     pub obligations_generated: Vec<SemanticId>,
     pub execution_applicability: Vec<String>,
     pub evidence_dependencies: Vec<SemanticId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub promise_decisions: Vec<crate::BackendPromiseDecision>,
     pub unsupported: Vec<String>,
     pub status: TransformationStatus,
 }
@@ -1139,6 +1141,7 @@ impl BackendArtifact {
             obligations_generated,
             execution_applicability,
             evidence_dependencies,
+            promise_decisions: Vec::new(),
             unsupported,
             status,
         };
@@ -1155,6 +1158,28 @@ impl BackendArtifact {
         function_value_contracts: BTreeMap<String, BackendFunctionValueContract>,
     ) -> Self {
         self.function_value_contracts = function_value_contracts;
+        self.identity = identified("backend-artifact", &self.without_identity());
+        self
+    }
+
+    pub fn with_promise_decisions(
+        mut self,
+        mut promise_decisions: Vec<crate::BackendPromiseDecision>,
+    ) -> Self {
+        promise_decisions.sort_by(|left, right| {
+            (&left.subject, format!("{:?}", left.promise))
+                .cmp(&(&right.subject, format!("{:?}", right.promise)))
+        });
+        promise_decisions.dedup();
+        self.evidence_dependencies.extend(
+            promise_decisions
+                .iter()
+                .filter_map(|decision| decision.certificate.as_ref())
+                .map(|certificate| certificate.identity.clone()),
+        );
+        self.evidence_dependencies.sort();
+        self.evidence_dependencies.dedup();
+        self.promise_decisions = promise_decisions;
         self.identity = identified("backend-artifact", &self.without_identity());
         self
     }
@@ -1188,6 +1213,7 @@ impl BackendArtifact {
             obligations_generated: &self.obligations_generated,
             execution_applicability: &self.execution_applicability,
             evidence_dependencies: &self.evidence_dependencies,
+            promise_decisions: &self.promise_decisions,
             unsupported: &self.unsupported,
             status: self.status,
         }
@@ -1210,6 +1236,7 @@ struct BackendArtifactMaterial<'a> {
     obligations_generated: &'a [SemanticId],
     execution_applicability: &'a [String],
     evidence_dependencies: &'a [SemanticId],
+    promise_decisions: &'a [crate::BackendPromiseDecision],
     unsupported: &'a [String],
     status: TransformationStatus,
 }

@@ -1,0 +1,32 @@
+{
+  "schema_version": "0.2",
+  "name": "arithmetic-envelope-edges",
+  "cases": [
+    {
+      "id": "sat-positive-overflow",
+      "request": {"schema_version": "0.1", "target": {"module": "Examples.ArithmeticEnvelope", "function": "saturating_add"}, "arguments": [{"integer": {"value": 127, "type": {"bits": 8, "signed": true}}}, {"integer": {"value": 1, "type": {"bits": 8, "signed": true}}}], "step_budget": 64},
+      "expected": [{"integer": {"value": 127, "type": {"bits": 8, "signed": true}}}], "expected_status": "returned"
+    },
+    {
+      "id": "sat-negative-overflow",
+      "request": {"schema_version": "0.1", "target": {"module": "Examples.ArithmeticEnvelope", "function": "saturating_add"}, "arguments": [{"integer": {"value": -128, "type": {"bits": 8, "signed": true}}}, {"integer": {"value": -1, "type": {"bits": 8, "signed": true}}}], "step_budget": 64},
+      "expected": [{"integer": {"value": -128, "type": {"bits": 8, "signed": true}}}], "expected_status": "returned"
+    },
+    {
+      "id": "sat-in-range",
+      "request": {"schema_version": "0.1", "target": {"module": "Examples.ArithmeticEnvelope", "function": "saturating_add"}, "arguments": [{"integer": {"value": 20, "type": {"bits": 8, "signed": true}}}, {"integer": {"value": 22, "type": {"bits": 8, "signed": true}}}], "step_budget": 64},
+      "expected": [{"integer": {"value": 42, "type": {"bits": 8, "signed": true}}}], "expected_status": "returned"
+    },
+    {
+      "id": "wide-positive-edge",
+      "request": {"schema_version": "0.1", "target": {"module": "Examples.ArithmeticEnvelope", "function": "widening_mul"}, "arguments": [{"integer": {"value": 127, "type": {"bits": 8, "signed": true}}}, {"integer": {"value": 127, "type": {"bits": 8, "signed": true}}}], "step_budget": 64},
+      "expected": [{"integer": {"value": 16129, "type": {"bits": 16, "signed": true}}}], "expected_status": "returned"
+    },
+    {
+      "id": "wide-negative-edge",
+      "request": {"schema_version": "0.1", "target": {"module": "Examples.ArithmeticEnvelope", "function": "widening_mul"}, "arguments": [{"integer": {"value": -128, "type": {"bits": 8, "signed": true}}}, {"integer": {"value": 127, "type": {"bits": 8, "signed": true}}}], "step_budget": 64},
+      "expected": [{"integer": {"value": -16256, "type": {"bits": 16, "signed": true}}}], "expected_status": "returned"
+    }
+  ],
+  "properties": []
+}

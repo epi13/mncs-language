@@ -51,7 +51,14 @@ impl IntegerOperation {
             ArithmeticIntent::Widening { bits } => bits,
             _ => self.operand_type.bits,
         };
-        let (minimum, maximum) = limits(result_bits, self.operand_type.signed);
+        let Some((minimum, maximum)) = limits(result_bits, self.operand_type.signed) else {
+            return IntegerEvaluation {
+                value: None,
+                overflow: true,
+                trapped: matches!(self.intent, ArithmeticIntent::Trapping),
+                result_bits,
+            };
+        };
         let raw = match self.operator.as_str() {
             "add" => self.left.checked_add(self.right),
             "sub" => self.left.checked_sub(self.right),
@@ -70,8 +77,14 @@ impl IntegerOperation {
             .unwrap_or(true);
         match self.intent {
             ArithmeticIntent::Wrapping => IntegerEvaluation {
-                value: raw
-                    .map(|value| wrap(value, self.operand_type.bits, self.operand_type.signed)),
+                value: match self.operator.as_str() {
+                    "add" => Some(self.left.wrapping_add(self.right)),
+                    "sub" => Some(self.left.wrapping_sub(self.right)),
+                    "mul" => Some(self.left.wrapping_mul(self.right)),
+                    "and" | "or" | "xor" => raw,
+                    _ => None,
+                }
+                .map(|value| wrap(value, self.operand_type.bits, self.operand_type.signed)),
                 overflow,
                 trapped: false,
                 result_bits,
@@ -83,7 +96,16 @@ impl IntegerOperation {
                 result_bits,
             },
             ArithmeticIntent::Saturating => IntegerEvaluation {
-                value: raw.map(|value| value.clamp(minimum, maximum)),
+                value: Some(match raw {
+                    Some(value) => value.clamp(minimum, maximum),
+                    None => saturation_bound(
+                        self.operator.as_str(),
+                        self.left,
+                        self.right,
+                        minimum,
+                        maximum,
+                    ),
+                }),
                 overflow,
                 trapped: false,
                 result_bits,
@@ -104,8 +126,67 @@ impl IntegerOperation {
     }
 }
 
+pub fn arithmetic_result_type(
+    operator: &str,
+    operand: IntegerType,
+    intent: ArithmeticIntent,
+) -> Option<IntegerType> {
+    if !(1..=126).contains(&operand.bits) {
+        return None;
+    }
+    match intent {
+        ArithmeticIntent::Widening { bits }
+            if bits >= minimum_widening_bits(operator, operand)? && bits <= 126 =>
+        {
+            Some(IntegerType {
+                bits,
+                signed: operand.signed,
+            })
+        }
+        ArithmeticIntent::Widening { .. } => None,
+        _ => Some(operand),
+    }
+}
+
+pub fn minimum_widening_bits(operator: &str, operand: IntegerType) -> Option<u16> {
+    match operator {
+        "add" => operand.bits.checked_add(1),
+        "sub" if operand.signed => operand.bits.checked_add(1),
+        "sub" => None,
+        "mul" => operand.bits.checked_mul(2),
+        _ => None,
+    }
+}
+
+fn saturation_bound(operator: &str, left: i128, right: i128, minimum: i128, maximum: i128) -> i128 {
+    match operator {
+        "add" => {
+            if right.is_negative() {
+                minimum
+            } else {
+                maximum
+            }
+        }
+        "sub" => {
+            if right.is_negative() {
+                maximum
+            } else {
+                minimum
+            }
+        }
+        "mul" => {
+            if left.is_negative() == right.is_negative() {
+                maximum
+            } else {
+                minimum
+            }
+        }
+        _ => maximum,
+    }
+}
+
 fn bitwise(operator: &str, ty: IntegerType, left: i128, right: i128) -> Option<i128> {
-    let (_, maximum) = limits(ty.bits, false);
+    let (_, maximum) = limits(ty.bits, false)?;
     let modulus = maximum.checked_add(1)?;
     let left = left.rem_euclid(modulus);
     let right = right.rem_euclid(modulus);
@@ -251,13 +332,87 @@ pub enum BackendPromise {
     NonAliasing,
     TrappingArithmetic,
     WrappingArithmetic,
+    Relaxation,
+}
+
+pub const BACKEND_PROMISE_CERTIFICATE_SCHEMA_VERSION: &str = "0.1";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendPromiseCertificate {
+    pub schema_version: String,
+    pub identity: SemanticId,
+    pub promise: BackendPromise,
+    pub selected_ssa: SemanticId,
+    pub subject: SemanticId,
+    pub obligation: SemanticId,
+    pub verifier: SemanticId,
+    pub method: String,
+    pub dependencies: Vec<SemanticId>,
+}
+
+impl BackendPromiseCertificate {
+    pub fn new(
+        promise: BackendPromise,
+        selected_ssa: SemanticId,
+        subject: SemanticId,
+        obligation: SemanticId,
+        verifier: SemanticId,
+        method: impl Into<String>,
+        mut dependencies: Vec<SemanticId>,
+    ) -> Self {
+        dependencies.sort();
+        dependencies.dedup();
+        let mut certificate = Self {
+            schema_version: BACKEND_PROMISE_CERTIFICATE_SCHEMA_VERSION.to_owned(),
+            identity: SemanticId(String::new()),
+            promise,
+            selected_ssa,
+            subject,
+            obligation,
+            verifier,
+            method: method.into(),
+            dependencies,
+        };
+        certificate.identity = certificate.expected_identity();
+        certificate
+    }
+
+    pub fn identity_is_valid(&self) -> bool {
+        self.schema_version == BACKEND_PROMISE_CERTIFICATE_SCHEMA_VERSION
+            && !self.method.trim().is_empty()
+            && !self.verifier.0.trim().is_empty()
+            && self.identity == self.expected_identity()
+    }
+
+    fn expected_identity(&self) -> SemanticId {
+        let material = (
+            self.promise,
+            &self.selected_ssa,
+            &self.subject,
+            &self.obligation,
+            &self.verifier,
+            &self.method,
+            &self.dependencies,
+        );
+        let json = serde_json::to_string(&material).expect("promise certificate is serializable");
+        SemanticId(format!(
+            "mncs:0.5:backend-promise-certificate:{}",
+            sha256_hex(json.as_bytes())
+        ))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackendPromiseDecision {
     pub promise: BackendPromise,
+    pub subject: SemanticId,
     pub permitted: bool,
     pub reason: String,
+    pub obligation: Option<SemanticId>,
+    pub evidence_status: Option<ObligationStatus>,
+    pub evidence_freshness: Option<EvidenceFreshness>,
+    pub attribute: Option<String>,
+    pub certificate: Option<BackendPromiseCertificate>,
 }
 
 impl BackendPromiseDecision {
@@ -273,6 +428,7 @@ impl BackendPromiseDecision {
             BackendPromise::NonAliasing => "non-aliasing",
             BackendPromise::TrappingArithmetic => "trapping-arithmetic",
             BackendPromise::WrappingArithmetic => "wrapping-arithmetic",
+            BackendPromise::Relaxation => "relaxation",
         };
         let required = obligations.iter().find(|obligation| {
             obligation.subject == *subject && obligation.requirement.0.ends_with(suffix)
@@ -280,8 +436,14 @@ impl BackendPromiseDecision {
         let Some(obligation) = required else {
             return Self {
                 promise,
+                subject: subject.clone(),
                 permitted: false,
                 reason: "required obligation is absent".to_owned(),
+                obligation: None,
+                evidence_status: None,
+                evidence_freshness: None,
+                attribute: None,
+                certificate: None,
             };
         };
         let permitted = obligation.status == ObligationStatus::Pass
@@ -296,27 +458,32 @@ impl BackendPromiseDecision {
         };
         Self {
             promise,
+            subject: subject.clone(),
             permitted,
             reason,
+            obligation: Some(obligation.identity.clone()),
+            evidence_status: Some(obligation.status),
+            evidence_freshness: Some(obligation.freshness),
+            attribute: None,
+            certificate: None,
         }
     }
 }
 
-fn limits(bits: u16, signed: bool) -> (i128, i128) {
-    assert!(
-        (1..=126).contains(&bits),
-        "executable pilot supports 1..=126 bits"
-    );
+fn limits(bits: u16, signed: bool) -> Option<(i128, i128)> {
+    if !(1..=126).contains(&bits) {
+        return None;
+    }
     if signed {
         let top = 1_i128 << (bits - 1);
-        (-top, top - 1)
+        Some((-top, top - 1))
     } else {
-        (0, (1_i128 << bits) - 1)
+        Some((0, (1_i128 << bits) - 1))
     }
 }
 
 fn wrap(value: i128, bits: u16, signed: bool) -> i128 {
-    let (_, maximum) = limits(bits, false);
+    let (_, maximum) = limits(bits, false).expect("validated arithmetic width");
     let modulus = maximum + 1;
     let wrapped = value.rem_euclid(modulus);
     if signed {
@@ -397,6 +564,95 @@ mod tests {
         bitwise.left = -1;
         bitwise.right = 1;
         assert_eq!(bitwise.evaluate().value, Some(-2));
+    }
+
+    #[test]
+    fn saturating_and_widening_edges_are_exact_and_type_directed() {
+        let mut negative = operation(ArithmeticIntent::Saturating);
+        negative.left = -128;
+        negative.right = -1;
+        assert_eq!(negative.evaluate().value, Some(-128));
+
+        let widening_type = arithmetic_result_type(
+            "mul",
+            IntegerType {
+                bits: 8,
+                signed: true,
+            },
+            ArithmeticIntent::Widening { bits: 16 },
+        );
+        assert_eq!(
+            widening_type,
+            Some(IntegerType {
+                bits: 16,
+                signed: true,
+            })
+        );
+        assert!(arithmetic_result_type(
+            "mul",
+            IntegerType {
+                bits: 8,
+                signed: true,
+            },
+            ArithmeticIntent::Widening { bits: 15 },
+        )
+        .is_none());
+        assert!(arithmetic_result_type(
+            "sub",
+            IntegerType {
+                bits: 8,
+                signed: false,
+            },
+            ArithmeticIntent::Widening { bits: 9 },
+        )
+        .is_none());
+
+        let wide = IntegerOperation {
+            operator: "mul".to_owned(),
+            operand_type: IntegerType {
+                bits: 8,
+                signed: true,
+            },
+            left: -128,
+            right: 127,
+            intent: ArithmeticIntent::Widening { bits: 16 },
+        }
+        .evaluate();
+        assert_eq!(wide.value, Some(-16_256));
+        assert!(!wide.overflow);
+        assert_eq!(wide.result_bits, 16);
+
+        let maximum_u126 = (1_i128 << 126) - 1;
+        let host_overflowing_wrap = IntegerOperation {
+            operator: "mul".to_owned(),
+            operand_type: IntegerType {
+                bits: 126,
+                signed: false,
+            },
+            left: maximum_u126,
+            right: maximum_u126,
+            intent: ArithmeticIntent::Wrapping,
+        }
+        .evaluate();
+        assert_eq!(host_overflowing_wrap.value, Some(1));
+        assert!(host_overflowing_wrap.overflow);
+
+        let host_overflowing_saturation = IntegerOperation {
+            intent: ArithmeticIntent::Saturating,
+            ..IntegerOperation {
+                operator: "mul".to_owned(),
+                operand_type: IntegerType {
+                    bits: 126,
+                    signed: false,
+                },
+                left: maximum_u126,
+                right: maximum_u126,
+                intent: ArithmeticIntent::Wrapping,
+            }
+        }
+        .evaluate();
+        assert_eq!(host_overflowing_saturation.value, Some(maximum_u126));
+        assert!(host_overflowing_saturation.overflow);
     }
 
     #[test]

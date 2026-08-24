@@ -121,7 +121,7 @@ corpus differential comparison
 The request and result schemas are versioned JSON artifacts. Execution has a mandatory finite step
 budget, a fixed trace cap, and explicit `returned`, `runtime_failure`, `unsupported`,
 `budget_exhausted`, and `invalid_request` outcomes. Integer arithmetic follows the represented
-wrapping, checked, saturating, trapping, or currently supported widening intent without relying on
+wrapping, checked, saturating, trapping, or validated exact-width widening intent without relying on
 host overflow. Integer comparisons are typed and interpret signed and unsigned operands according to
 their declared type.
 

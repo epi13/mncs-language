@@ -298,7 +298,8 @@ pub fn lower_cranelift(
         Vec::new(),
         TransformationStatus::Pass,
     )
-    .with_function_value_contracts(function_value_contracts(program));
+    .with_function_value_contracts(function_value_contracts(program))
+    .with_promise_decisions(scalar.promise_decisions.clone());
     let artifact_ref = artifact_ref(&artifact);
     let evidence = BackendEvidence::new(
         cranelift_backend(),

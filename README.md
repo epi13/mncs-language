@@ -4,7 +4,7 @@
 
 Research and reference implementation for a general-purpose, verification-native programming language built on Machine-Native Complexity Standard (MNCS) principles.
 
-> **Project status:** the compiler has an experimental source-to-plural-backends vertical slice. Source Profiles 0.1–0.4 remain additive language envelopes (not project roadmap numbers). Profile 0.4 bounded iteration and CRE-3 run through portable WASM, research bytecode, LLVM IR (external clang), and C11. Cranelift emits real CLIF and can JIT the scalar envelope; CRE JIT execution is currently host-mapping limited. Body/SSA/backend comparison is empirical bounded agreement, not universal equivalence. Exact instruction cost remains `UNKNOWN`. Roadmap milestone 0.5 is **not** complete. No final grammar, complete type/contract calculus, general loop/recursion, independent evaluation, or production suitability is claimed. See [ROADMAP.md](ROADMAP.md) and [backend family evidence](docs/development-evidence/backend-family-2026-08.md).
+> **Project status:** Roadmap milestone 0.5 is complete as a bounded experimental milestone. The compiler has a source-to-plural-backends vertical slice, explicit wrapping/checked/saturating/trapping/widening arithmetic semantics, certificate-gated LLVM `nsw`/`nuw`, and a sealed accept/reject refinement cycle. Source Profiles 0.1–0.5 are additive language envelopes—not project roadmap numbers. CRE-1/2/3 run through portable WASM, research bytecode, LLVM IR (external clang), and C11. Cranelift emits real CLIF; this host reports its JIT executable-memory transition as `UNSUPPORTED`. Body/SSA/backend and Rust-control comparisons are finite empirical agreement, not proof. Exact instruction cost remains `UNKNOWN`. No final grammar, complete type/contract calculus, general loop/recursion, independent evaluation, or production suitability is claimed. See [ROADMAP.md](ROADMAP.md) and the [Roadmap 0.5 evidence record](docs/development-evidence/roadmap-0.5-2026-08.md).
 
 ## Why this project exists
 
@@ -63,6 +63,34 @@ cargo run -p mncs-cli -- execute-backend examples/executable/checked-add.mncs.js
 cargo run -p mncs-cli -- check-backend-execution examples/executable/checked-add.mncs.json examples/execution/checked-add-corpus.json
 cargo run -p mncs-cli -- validate-translation checked-elision examples/executable/checked-add.mncs.json examples/execution/checked-add-corpus.json
 ```
+
+Exercise the Roadmap 0.5 arithmetic and refinement gate:
+
+```bash
+cargo run -p mncs-cli -- check-lowering-execution \
+  examples/executable/arithmetic-envelope.mncs.json \
+  examples/execution/arithmetic-envelope-corpus.json
+cargo run -p mncs-cli -- experiment run \
+  examples/executable/arithmetic-envelope.mncs.json \
+  --backend mncs-research-bytecode \
+  --corpus examples/execution/arithmetic-envelope-corpus.json \
+  --output-dir target/roadmap05-bytecode
+cargo run -p mncs-cli -- experiment run \
+  examples/executable/arithmetic-envelope.mncs.json \
+  --backend mncs-portable-wasm-mvp \
+  --corpus examples/execution/arithmetic-envelope-corpus.json \
+  --output-dir target/roadmap05-wasm
+cargo run -p mncs-cli -- experiment rust-control \
+  target/roadmap05-wasm/result.json examples/controls/arithmetic-envelope.rs
+cargo run -p mncs-cli -- experiment refine \
+  target/roadmap05-bytecode/result.json target/roadmap05-wasm/result.json --budget 1
+```
+
+The first two realizations agree on five saturation/widening edge cases. The Rust comparison is
+explicitly bounded, and `experiment refine` promotes only an experimental realization whose
+identity, translation validators, unresolved evidence, and protected observations pass. A rejected
+candidate remains in the sealed cycle with its reasons. LLVM/C11/Cranelift advertise
+saturating/widening as unsupported and refuse this fixture instead of approximating it.
 
 Run one language-owned experiment against the same frozen source/corpus through both adapters:
 
@@ -133,7 +161,7 @@ The 0.1 model contains:
 
 A key initial rule is that every effect must identify an authorizing capability, and that capability must be declared by the function. Evidence must reference a declared contract property rather than floating as unbound metadata.
 
-The experimental 0.2 layer adds deterministic SHA-256 content fingerprints, structural semantic identities, a typed semantic graph, dependency-aware evidence manifests, conservative invalidation, diagnostic obligations, backward causal slices, finite refinement budgets, typed isolated repair patches, explicit promotion records, semantic/authority/evidence deltas, and versioned verifier artifact import checks. The 0.3 layer accepts a small syntax-independent executable body model, computes deterministic CFG reachability/dominance, and lowers symbolic values, state regions, normal and failure paths, explicit effect capability uses, contract/evidence traceability, generated obligations, machine-intent links, lowering/portability envelopes, and transformation provenance into HIR. The experimental 0.4 layer projects that subset into validated block-parameter SSA while retaining semantic/HIR/SSA identities and refusing a stronger no-overflow transformation without exact current verifier evidence. Forge is a local development/evidence harness, not a sandbox or independent evaluator. This is not a production compiler or backend.
+The experimental 0.2 layer adds deterministic SHA-256 content fingerprints, structural semantic identities, a typed semantic graph, dependency-aware evidence manifests, conservative invalidation, diagnostic obligations, backward causal slices, finite refinement budgets, typed isolated repair patches, explicit promotion records, semantic/authority/evidence deltas, and versioned verifier artifact import checks. The 0.3 layer accepts a small syntax-independent executable body model, computes deterministic CFG reachability/dominance, and lowers symbolic values, state regions, normal and failure paths, explicit effect capability uses, contract/evidence traceability, generated obligations, machine-intent links, lowering/portability envelopes, and transformation provenance into HIR. The experimental 0.4 layer projects that subset into validated block-parameter SSA while retaining semantic/HIR/SSA identities. Roadmap 0.5 adds explicit saturating/widening semantics, bounded plural-backend execution, machine-readable emitted/withheld promise decisions, a release-path checked constant-range certificate for LLVM `nsw`/`nuw`, Rust-control comparison, and a sealed bounded refinement-cycle artifact. Forge is a local development/evidence harness, not a sandbox, independent evaluator, or promotion authority. This is not a production compiler or backend.
 
 ## Try the semantic prototype
 
@@ -366,7 +394,7 @@ MNCS must remain applicable to existing languages even if this project never bec
 
 ## Roadmap
 
-The current implementation is progressing through **Milestone 0.2 — Semantic graph, identity, and recursive artifacts** and the first part of **Milestone 0.3 — High-level MNCS IR** while retaining the 0.1 model and syntax laboratory. See [ROADMAP.md](ROADMAP.md).
+The current implementation has completed the bounded experimental acceptance gate for **Milestone 0.5 — Backend and bounded recursive-refinement experiment**. Source Profile work and roadmap milestones remain separately versioned. See [ROADMAP.md](ROADMAP.md) for residual maturity work and the 0.6 boundary.
 
 ## Contributing
 

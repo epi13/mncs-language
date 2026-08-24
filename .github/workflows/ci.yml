@@ -104,6 +104,19 @@ jobs:
             echo "candidate with regressed protected property was unexpectedly accepted" >&2
             exit 1
           fi
+          cargo run -p mncs-cli -- check-lowering-execution examples/executable/arithmetic-envelope.mncs.json examples/execution/arithmetic-envelope-corpus.json
+          cargo run -p mncs-cli -- experiment run examples/executable/arithmetic-envelope.mncs.json --backend mncs-research-bytecode --corpus examples/execution/arithmetic-envelope-corpus.json --output-dir /tmp/mncs-roadmap05-bytecode
+          cargo run -p mncs-cli -- experiment run examples/executable/arithmetic-envelope.mncs.json --backend mncs-portable-wasm-mvp --corpus examples/execution/arithmetic-envelope-corpus.json --output-dir /tmp/mncs-roadmap05-wasm
+          cargo run -p mncs-cli -- experiment rust-control /tmp/mncs-roadmap05-wasm/result.json examples/controls/arithmetic-envelope.rs
+          if cargo run -p mncs-cli -- experiment run examples/source/cre1-evidence-combine-wrong.mncs --backend mncs-research-bytecode --corpus examples/execution/cre1-evidence-corpus.json --output-dir /tmp/mncs-roadmap05-rejected; then
+            echo "invalid refinement candidate was unexpectedly accepted" >&2
+            exit 1
+          fi
+          cargo run -p mncs-cli -- experiment refine /tmp/mncs-roadmap05-bytecode/result.json /tmp/mncs-roadmap05-wasm/result.json /tmp/mncs-roadmap05-rejected/result.json --budget 2
+          if cargo run -p mncs-cli -- experiment run examples/executable/arithmetic-envelope.mncs.json --backend mncs-llvm-ir --corpus examples/execution/arithmetic-envelope-corpus.json; then
+            echo "LLVM unexpectedly approximated unsupported saturating/widening semantics" >&2
+            exit 1
+          fi
           for fixture in bounded-sum-baseline bounded-sum-equivalent-refactor bounded-sum-regression; do
             cargo run -p mncs-cli -- check-lowering-execution "examples/execution/${fixture}.mncs.json" examples/execution/bounded-sum-corpus.json
           done

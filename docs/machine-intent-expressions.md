@@ -120,6 +120,35 @@ when current evidence establishes them for the exact operation.
 Missing evidence produces conservative lowering, explicit fallback, or `UNKNOWN`; it does not
 produce optimistic backend metadata.
 
+## Roadmap 0.5 executable pilot
+
+The implemented pilot carries five integer intents through validation, HIR, selected SSA, and both
+reference evaluators:
+
+| Intent | Edge behavior |
+| --- | --- |
+| wrapping | reduce modulo the declared width and reinterpret the signed bit when required |
+| checked | return the declared failure outcome when the exact-width result is out of range |
+| trapping | take the explicit trap/failure path on the same overflow condition |
+| saturating | clamp to the declared type minimum or maximum; host overflow is never the definition |
+| widening | require the declared wider result type (at least `N+1` for add/signed sub or `2N` for multiply) and compute without narrow overflow |
+
+Unsigned widening subtraction is deliberately outside the current envelope because a same-signed
+unsigned result cannot represent its full mathematical range. Widths above the reference model's
+`i128`-safe bound are rejected. Portable WASM realizes signed saturation through 32-bit operands,
+unsigned saturation through 31-bit operands, and widening through 32→64-bit intermediates. The
+research bytecode/reference path supports the validated semantic envelope. LLVM, C11, and Cranelift
+advertise the unsupported operations and fail closed.
+
+Scalar backend artifacts now contain identity-bound `promise_decisions`. For LLVM checked/trapping
+constant arithmetic, discovery may propose a no-overflow certificate. A narrow release-path checker
+recomputes the typed operation and validates the selected-SSA identity, semantic subject, original
+overflow obligation, verifier/method, constant-producer dependencies, and certificate identity.
+Only then may LLVM emit signed `nsw` or unsigned `nuw`. Missing, stale, mismatched, `UNKNOWN`, or
+uncertified evidence selects `llvm.*.with.overflow`. In-bounds, alignment, non-aliasing, and
+relaxation decisions are recorded as withheld when the current scalar operation provides no such
+subject or evidence; no interface placeholder is treated as permission.
+
 ## Recursive discovery
 
 A useful non-orthodox technique may begin as an intentional deviation, accumulate repeated bounded

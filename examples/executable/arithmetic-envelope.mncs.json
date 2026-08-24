@@ -1,0 +1,48 @@
+{
+  "schema_version": "0.1",
+  "module": "Examples.ArithmeticEnvelope",
+  "functions": [
+    {
+      "name": "saturating_add",
+      "inputs": [{"name": "a", "type": "i8"}, {"name": "b", "type": "i8"}],
+      "outputs": [{"name": "result", "type": "i8"}],
+      "contracts": [], "effects": [], "capabilities": [], "assumptions": [], "evidence": [], "failure": "isolated",
+      "body": {
+        "schema_version": "0.2", "entry": "entry",
+        "parameters": [
+          {"id": "a", "name": "a", "type": {"integer": {"bits": 8, "signed": true}}},
+          {"id": "b", "name": "b", "type": {"integer": {"bits": 8, "signed": true}}}
+        ],
+        "blocks": [{
+          "id": "entry", "parameters": [],
+          "operations": [{
+            "id": "sat", "kind": {"integer": {"operator": "add", "operand_type": {"bits": 8, "signed": true}, "intent": "saturating"}},
+            "operands": ["a", "b"], "results": [{"id": "result", "type": {"integer": {"bits": 8, "signed": true}}}]
+          }],
+          "terminator": {"return": {"values": ["result"]}}
+        }]
+      }
+    },
+    {
+      "name": "widening_mul",
+      "inputs": [{"name": "a", "type": "i8"}, {"name": "b", "type": "i8"}],
+      "outputs": [{"name": "result", "type": "i16"}],
+      "contracts": [], "effects": [], "capabilities": [], "assumptions": [], "evidence": [], "failure": "isolated",
+      "body": {
+        "schema_version": "0.2", "entry": "entry",
+        "parameters": [
+          {"id": "a", "name": "a", "type": {"integer": {"bits": 8, "signed": true}}},
+          {"id": "b", "name": "b", "type": {"integer": {"bits": 8, "signed": true}}}
+        ],
+        "blocks": [{
+          "id": "entry", "parameters": [],
+          "operations": [{
+            "id": "wide", "kind": {"integer": {"operator": "mul", "operand_type": {"bits": 8, "signed": true}, "intent": {"widening": {"bits": 16}}}},
+            "operands": ["a", "b"], "results": [{"id": "result", "type": {"integer": {"bits": 16, "signed": true}}}]
+          }],
+          "terminator": {"return": {"values": ["result"]}}
+        }]
+      }
+    }
+  ]
+}

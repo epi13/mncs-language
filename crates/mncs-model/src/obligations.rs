@@ -190,19 +190,28 @@ impl Program {
                                         iteration.backedge == block.id
                                             && operation.id.starts_with("iteration_decrement")
                                     });
+                                let total_by_semantics = matches!(
+                                    intent,
+                                    crate::ArithmeticIntent::Wrapping
+                                        | crate::ArithmeticIntent::Saturating
+                                        | crate::ArithmeticIntent::Widening { .. }
+                                );
+                                let discharged = bounded_counter_step || total_by_semantics;
                                 let requirement = requirement_id("integer-overflow", &subject);
                                 obligations.push(ObligationRecord {
                                     schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
                                     identity: body_obligation_id("integer-overflow", &subject),
                                     subject: subject.clone(),
                                     requirement,
-                                    status: if bounded_counter_step {
+                                    status: if discharged {
                                         ObligationStatus::Pass
                                     } else {
                                         ObligationStatus::Unknown
                                     },
                                     method: if bounded_counter_step {
                                         "language-bounded-iteration-counter-decrement".to_owned()
+                                    } else if total_by_semantics {
+                                        format!("language-explicit-{intent:?}-semantics")
                                     } else {
                                         format!("symbolic-{intent:?}")
                                     },
@@ -214,12 +223,12 @@ impl Program {
                                         })
                                         .collect(),
                                     dependencies: vec![function_identity.clone(), subject],
-                                    freshness: if bounded_counter_step {
+                                    freshness: if discharged {
                                         EvidenceFreshness::Current
                                     } else {
                                         EvidenceFreshness::Unknown
                                     },
-                                    fallback: (!bounded_counter_step).then(|| {
+                                    fallback: (!discharged).then(|| {
                                         "retain explicit arithmetic behavior or insert a runtime check"
                                             .to_owned()
                                     }),

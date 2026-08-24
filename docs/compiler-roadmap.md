@@ -30,7 +30,7 @@ The repository now implements the first bounded compiler tranche for the existin
 - **C0 implemented:** `mncs-model` owns versioned compiler request, result, evidence, pass, transformation-edge, host/build/target/run, target-plan, diagnostic, study, and backend-boundary artifacts. Their identities use deterministic serialization and distinct identity domains. Integrity checks reject laundered identities, wrong transformation endpoints, stale backend bindings, omitted target/backend assumptions, and unresolved-obligation references not retained by the bundle.
 - **C1 implemented for the current subset:** `mncs-compiler` validates an exact semantic input and orchestrates the existing `Program::lower_to_ir` and `Program::lower_to_ssa` implementations. `mncs compile` emits deterministic semantic, HIR, SSA, target-plan, and evidence JSON without defining a second HIR or SSA. Invalid semantics do not reach HIR/SSA, and unresolved obligations remain visible with conservative selection.
 - **C2 repository boundary implemented; native study pending:** Linux and Windows CI build/test and run the compiler workflows. The Linux-to-AArch64 job remains a compile-shape check only. `mncs compiler-study` and `examples/compiler-study/bounded-sum.mncs.json` provide the machine-readable Fabric-side interface for native Raspberry Pi execution, but no Raspberry Pi result is claimed in this repository state.
-- **C3 backend-plural prototype implemented locally:** `mncs-codegen::BackendAdapter` realizes selected SSA through identity-bound capability manifests, target/configuration contracts, plans, typed artifacts, and adapter-owned execution. Portable WASM MVP, research bytecode, LLVM IR, C11, and Cranelift compile the same exact selected SSA without changing compiler sequencing. Unevidenced targets still produce `UNKNOWN` and no backend artifact. Body/SSA/backend comparison is empirical bounded agreement over a frozen corpus. LLVM/C11 execute through external clang/gcc; Cranelift JIT is host-ISA-limited. SPIR-V/PTX/eBPF remain unimplemented.
+- **C3 backend-plural prototype implemented locally:** `mncs-codegen::BackendAdapter` realizes selected SSA through identity-bound capability manifests, target/configuration contracts, plans, typed artifacts, machine-readable promise decisions, and adapter-owned execution. Portable WASM MVP, research bytecode, LLVM IR, C11, and Cranelift compile the same exact selected SSA without changing compiler sequencing. Unevidenced targets still produce `UNKNOWN` and no backend artifact. Body/SSA/backend comparison is empirical bounded agreement over a frozen corpus. LLVM/C11 execute through external clang/gcc; Cranelift JIT remains host-ISA and executable-memory-policy limited. SPIR-V/PTX/eBPF remain unimplemented.
 - **C5 prototype implemented locally:** `mncs-translation-check` validates constant folding with exact overflow semantics, unreachable-block removal, constant-branch simplification, checked-to-wrapping elision, and backend lowering. Generators are untrusted. `FAIL` retains a counterexample when possible. `UNKNOWN` never authorizes promotion. Residual trust: validators share `mncs-model` integer evaluation and `mncs-codegen` research execution, but not generator algorithms.
 
 The target-independent compiler artifacts intentionally exclude timestamps, absolute paths, usernames, hostnames, process IDs, and host observations. Compiler request/result and study identities include their derivation context; semantic, HIR, and SSA fingerprints do not.
@@ -46,6 +46,14 @@ typed execution observations. Profile 0.4's additive cycle policy rejects arbitr
 graphs without silently redefining legacy semantic fixtures. CRE-3 now executes through both
 adapters; exact instruction cost remains an explicit UNKNOWN separate from the known attempt
 ceiling.
+
+Source Profile 0.5 adds logical record values without committing to a physical struct layout.
+Separately, project Roadmap 0.5 completes the bounded backend/refinement tranche: saturating and
+widening arithmetic have explicit type-directed semantics, portable WASM and research bytecode
+execute their bounded envelope, LLVM no-overflow flags require a rechecked constant-range
+certificate, Rust-control comparison is available, and accepted/rejected realization candidates are
+retained in a sealed bounded refinement cycle. These project and source profile numbers do not
+define one another.
 
 ## Ownership boundary
 

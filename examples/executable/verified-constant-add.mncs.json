@@ -1,0 +1,39 @@
+{
+  "schema_version": "0.1",
+  "module": "Examples.VerifiedConstantAdd",
+  "functions": [{
+    "name": "answer",
+    "inputs": [],
+    "outputs": [{"name": "result", "type": "i32"}],
+    "contracts": [], "effects": [], "capabilities": [], "assumptions": [], "evidence": [], "failure": "isolated",
+    "body": {
+      "schema_version": "0.2", "entry": "entry", "parameters": [],
+      "blocks": [{
+        "id": "entry", "parameters": [],
+        "operations": [
+          {"id": "twenty", "kind": {"constant": {"value": 20, "type": {"integer": {"bits": 32, "signed": true}}}}, "results": [{"id": "twenty", "type": {"integer": {"bits": 32, "signed": true}}}]},
+          {"id": "twenty_two", "kind": {"constant": {"value": 22, "type": {"integer": {"bits": 32, "signed": true}}}}, "results": [{"id": "twenty_two", "type": {"integer": {"bits": 32, "signed": true}}}]},
+          {"id": "answer", "kind": {"integer": {"operator": "add", "operand_type": {"bits": 32, "signed": true}, "intent": "checked"}}, "operands": ["twenty", "twenty_two"], "results": [{"id": "result", "type": {"integer": {"bits": 32, "signed": true}}}]}
+        ],
+        "terminator": {"return": {"values": ["result"]}}
+      }]
+    }
+  }, {
+    "name": "unsigned_answer",
+    "inputs": [],
+    "outputs": [{"name": "result", "type": "u32"}],
+    "contracts": [], "effects": [], "capabilities": [], "assumptions": [], "evidence": [], "failure": "isolated",
+    "body": {
+      "schema_version": "0.2", "entry": "entry", "parameters": [],
+      "blocks": [{
+        "id": "entry", "parameters": [],
+        "operations": [
+          {"id": "twenty", "kind": {"constant": {"value": 20, "type": {"integer": {"bits": 32, "signed": false}}}}, "results": [{"id": "twenty", "type": {"integer": {"bits": 32, "signed": false}}}]},
+          {"id": "twenty_two", "kind": {"constant": {"value": 22, "type": {"integer": {"bits": 32, "signed": false}}}}, "results": [{"id": "twenty_two", "type": {"integer": {"bits": 32, "signed": false}}}]},
+          {"id": "answer", "kind": {"integer": {"operator": "add", "operand_type": {"bits": 32, "signed": false}, "intent": "checked"}}, "operands": ["twenty", "twenty_two"], "results": [{"id": "result", "type": {"integer": {"bits": 32, "signed": false}}}]}
+        ],
+        "terminator": {"return": {"values": ["result"]}}
+      }]
+    }
+  }]
+}

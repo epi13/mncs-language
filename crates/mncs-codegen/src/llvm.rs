@@ -126,7 +126,7 @@ pub fn llvm_target() -> TargetContractRef {
             ),
             (
                 "integer".to_owned(),
-                "wrapping=llvm wrapping; checked/trapping=llvm.*.with.overflow then status=1; nsw only with current PASS evidence".to_owned(),
+                "wrapping=llvm wrapping; checked/trapping=llvm.*.with.overflow then status=1; nsw/nuw only with a current independently rechecked certificate".to_owned(),
             ),
             (
                 "trap".to_owned(),
@@ -307,7 +307,8 @@ pub fn lower_llvm(
         Vec::new(),
         TransformationStatus::Pass,
     )
-    .with_function_value_contracts(function_value_contracts(program));
+    .with_function_value_contracts(function_value_contracts(program))
+    .with_promise_decisions(scalar.promise_decisions.clone());
     let artifact_ref = artifact_ref(&artifact);
     let evidence = BackendEvidence::new(
         llvm_backend(),
@@ -560,19 +561,25 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             };
             let left = load_value(out, names, lhs, "lhs", split);
             let right = load_value(out, names, rhs, "rhs", split);
-            let nsw =
-                promise.decision.permitted && matches!(operator.as_str(), "add" | "sub" | "mul");
+            let overflow_flag = promise
+                .decision
+                .permitted
+                .then_some(promise.attribute.as_deref())
+                .flatten()
+                .and_then(|attribute| attribute.strip_prefix("llvm."));
+            let no_overflow =
+                overflow_flag.is_some() && matches!(operator.as_str(), "add" | "sub" | "mul");
             if matches!(
                 intent,
                 ArithmeticIntent::Checked | ArithmeticIntent::Trapping
             ) && matches!(operator.as_str(), "add" | "sub" | "mul")
-                && !nsw
+                && !no_overflow
             {
                 emit_checked(out, dest, operator, &left, &right, names, split);
             } else {
                 *split += 1;
                 let tmp = format!("bin{split}");
-                let flags = if nsw { " nsw" } else { "" };
+                let flags = overflow_flag.map_or(String::new(), |flag| format!(" {flag}"));
                 let _ = writeln!(out, "  %{tmp} = {llvm_op}{flags} {ty} %{left}, %{right}");
                 store_dest(out, names, dest, &tmp);
             }

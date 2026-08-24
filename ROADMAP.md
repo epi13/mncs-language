@@ -36,7 +36,7 @@ Executable stages: source envelope → CST/AST → semantic program → HIR → 
 | research bytecode | yes | SSA interpreter | no | implemented / exercised; records supported as logical SSA values |
 | LLVM IR | yes | no in-process interpreter | clang/llc | implemented / exercised; records unsupported (`record_values` in capability envelope) |
 | C11 | yes | no in-process interpreter | clang/gcc | implemented / exercised; records unsupported |
-| Cranelift CLIF/JIT | yes | host JIT for the scalar envelope | host ISA mapping | implemented but partial; records unsupported |
+| Cranelift CLIF/JIT | yes | host JIT for the scalar envelope | host ISA and executable-memory policy | implemented; execution may report host-scoped `UNSUPPORTED`; records and saturating/widening are outside its declared envelope |
 | SPIR-V, PTX, eBPF, extra VMs | no | n/a | n/a | planned |
 
 WASM is one realization. Generic orchestration is adapter-neutral.
@@ -47,7 +47,7 @@ MNCS verifies capability/effect closure, finite exhaustiveness, bounded-iteratio
 
 ### Experiments
 
-CRE-1, CRE-2, and CRE-3 run through WASM, research bytecode, LLVM, and C11. Cranelift lowers the same selected SSA; CRE JIT execution is currently withheld on this host's executable-mapping path. See `docs/development-evidence/backend-family-2026-08.md`.
+CRE-1, CRE-2, and CRE-3 run through WASM, research bytecode, LLVM, and C11. Cranelift lowers the same selected SSA; this host reports the JIT realization `UNSUPPORTED` because its executable-memory transition is denied. That is recorded as an execution-host limitation, not a semantic or CLIF-lowering failure. See `docs/development-evidence/backend-family-2026-08.md`.
 
 ### Forge
 
@@ -65,11 +65,14 @@ Language-owned experiment and compiler-study records emit producer-native Family
    research bytecode; LLVM/C11/Cranelift fail closed. Remaining for maturity: record equality
    semantics, records through bounded-iteration state and block parameters on WASM, scalar-backend
    realizations, CRE coverage that pressures nested records.
-2. Cranelift multi-function/host-mapping execution without claiming WASM semantics.
-3. Evidence-gated LLVM `nsw`/`nuw` emission with independent checkers (cases A–D exist; promotion does not).
-4. Proof-carrying lowering pilot for one backend promise.
-5. Observe–localize–propose–verify–compare–promote cycle with retained rejected candidates under independent evidence.
-6. Frozen-experiment replication is wired end to end: `experiment execute --baseline` seals a
+2. Cranelift object/external-link fallback for hosts that prohibit JIT executable mappings; the
+   present compiler/CLIF path is complete for the declared scalar envelope and reports the host
+   refusal without fabricating execution evidence.
+3. Extend saturating/widening realization beyond the bounded WASM and reference envelopes while
+   retaining capability-gated refusal in LLVM/C11/Cranelift.
+4. Generalize proof-carrying promises beyond the completed constant-range `nsw`/`nuw` pilot to
+   memory, aliasing, alignment, and target relaxation operations when those semantics exist.
+5. Frozen-experiment replication is wired end to end: `experiment execute --baseline` seals a
    replicated result against an identity-verified baseline (fail-closed on corpus/artifact/baseline
    mismatches), and the sibling Control/Fabric/Forge/Commons tooling executes the exact frozen
    realization on one explicitly requested worker and publishes a Family Record replication
@@ -78,7 +81,10 @@ Language-owned experiment and compiler-study records emit producer-native Family
 
 ## 0.1–0.7 milestone reconciliation
 
-Roadmap **0.5 has not been reached.**
+Roadmap **0.5 is complete as a bounded experimental milestone.** Completion does not imply a
+production compiler, universal equivalence, a general proof kernel, or completion of Source Profile
+0.5 maturity work. The acceptance record is in
+`docs/development-evidence/roadmap-0.5-2026-08.md`.
 
 ## Active cross-cutting track — source representations
 
@@ -918,26 +924,29 @@ does not establish universal equivalence, production runtime behavior, or compil
 
 ## 0.5 — Backend and bounded recursive-refinement experiment
 
-**Status: In progress. Not complete.** Do not mark 0.5 done because WASM, LLVM, C11, and Cranelift adapters exist.
+**Status: Complete (bounded experimental milestone, 2026-08-23).** Backend count alone did not
+complete this milestone; the evidence-gated promise, arithmetic, control comparison, and retained
+refinement-cycle criteria below were exercised together.
 
 | Acceptance item | Status |
 | --- | --- |
-| constrained subset to LLVM IR, Cranelift IR, or WASM | **Implemented / exercised** (WASM, LLVM IR, Cranelift CLIF; C11 extra) |
-| optimization attributes only from verified facts | **Implemented but partial** (LLVM `nsw` withheld without current PASS; overflow intrinsics are conservative) |
-| wrapping, checked, saturating, trapping, widening integers | **Implemented but partial** (wrapping/checked/trapping exercised; saturating/widening still unsupported) |
-| record why no-overflow/in-bounds/alignment/non-aliasing/relaxation promises are emitted or withheld | **Implemented but partial** (no-overflow withhold/emit decision exists; alignment/in-bounds/non-aliasing are interface-only) |
+| constrained subset to LLVM IR, Cranelift IR, or WASM | **Implemented / exercised** (WASM, LLVM IR, Cranelift CLIF; research bytecode and C11 are additional realizations) |
+| optimization attributes only from verified facts | **Implemented / exercised** (`nsw`/`nuw` require a selected-SSA-bound constant-range certificate that is rechecked on the release authorization path; otherwise LLVM uses overflow intrinsics) |
+| wrapping, checked, saturating, trapping, widening integers | **Implemented / exercised** as language semantics through body/HIR/SSA/reference execution; bounded saturating/widening widths execute in WASM and research bytecode, while unsupported scalar backends fail closed |
+| record why no-overflow/in-bounds/alignment/non-aliasing/relaxation promises are emitted or withheld | **Implemented / exercised** as identity-bound `promise_decisions`; no-overflow has emitted and withheld cases, and non-applicable memory/alignment/alias/relaxation promises are explicitly withheld |
 | executable + evidence manifest together | **Implemented / exercised** for adapter artifacts; native packaging is external clang/llc |
-| compare generated output with equivalent Rust or Zig | **Planned** |
+| compare generated output with equivalent Rust or Zig | **Implemented / exercised** by `experiment rust-control`; five WASM arithmetic edge cases agree with an independently compiled Rust control |
 | bind realizations to compiler/backend/feature/ABI/pass identities | **Implemented / exercised** |
 | document backend-introduced assumptions | **Implemented / exercised** |
-| one bounded observe–localize–propose–verify–compare–promote cycle | **Implemented but partial** (cross-backend CRE compare exists; independent promotion authority does not) |
-| independent evidence before automatic promotion | **Implemented / exercised** as a negative: Forge cannot promote |
-| auditable accepted/rejected transformation history | **Implemented but partial** (elision decisions and experiment FAIL records retained) |
-| proof-carrying lowering for one backend promise | **Planned** |
-| untrusted proof search / narrow trusted checking | **Research-only / RFC-defined** (Forge remains untrusted search) |
+| one bounded observe–localize–propose–verify–compare–promote cycle | **Implemented / exercised** by `experiment refine` over a frozen bytecode baseline, accepted WASM realization, and retained rejected semantic mutant |
+| independent evidence before automatic promotion | **Implemented / exercised**: valid PASS translation-validator artifacts and protected identity/behavior agreement are mandatory; Forge/search has no promotion authority |
+| auditable accepted/rejected transformation history | **Implemented / exercised** in sealed `BoundedRefinementCycle` decisions with evidence identities and rejection reasons |
+| proof-carrying lowering for one backend promise | **Implemented / exercised** for LLVM signed/unsigned no-overflow attributes using exact constant-range certificates |
+| untrusted proof search / narrow trusted checking | **Implemented / exercised** for the pilot: certificate discovery proposes; a narrow identity/dependency/range checker authorizes emission; Forge remains untrusted search |
 
 The body and SSA reference evaluators are study oracles and finite conformance tools, not substitutes
-for the proof kernel or a production backend. Roadmap 0.5 remains incomplete.
+for the proof kernel or a production backend. Roadmap 0.5 completion is scoped to the table above;
+the residual maturity items are documented as post-0.5 work rather than silently treated as proof.
 
 ## 0.6 — Surface-language and self-description experiments
 

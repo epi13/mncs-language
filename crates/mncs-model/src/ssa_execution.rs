@@ -570,7 +570,15 @@ fn execute_instruction(
                     output.identity.clone(),
                     ExecutionValue::Integer {
                         value,
-                        ty: *operand_type,
+                        ty: match &output.ty {
+                            crate::IrType::Named(name) => {
+                                match crate::BodyType::from_semantic_name(name) {
+                                    crate::BodyType::Integer(ty) => ty,
+                                    _ => *operand_type,
+                                }
+                            }
+                            _ => *operand_type,
+                        },
                     },
                 );
             }
