@@ -937,6 +937,7 @@ impl<'a> Parser<'a> {
             Vec::new(),
         );
 
+        // Module imports precede every other declaration.
         let mut uses = Vec::new();
         let mut use_nodes = Vec::new();
         while self.current_kind() == Some(TokenKind::UseKeyword) {
@@ -944,34 +945,6 @@ impl<'a> Parser<'a> {
             use_nodes.push(node);
             if let Some(use_decl) = use_decl {
                 uses.push(use_decl);
-            }
-        }
-        let mut finite_types = Vec::new();
-        let mut finite_type_nodes = Vec::new();
-        while profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_3)
-            && self.current_kind() == Some(TokenKind::EnumKeyword)
-        {
-            let (node, finite_type) = self.finite_type();
-            finite_type_nodes.push(node);
-            if let Some(finite_type) = finite_type {
-                finite_types.push(finite_type);
-            }
-        }
-        let mut record_types = Vec::new();
-        let mut record_type_nodes = Vec::new();
-        while self.current_kind() == Some(TokenKind::RecordKeyword) {
-            if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_5) {
-                self.error(
-                    "MNP120",
-                    "record declarations require source profile 0.5 or later",
-                    vec![TokenKind::RecordKeyword],
-                );
-                break;
-            }
-            let (node, record_decl) = self.record_decl();
-            record_type_nodes.push(node);
-            if let Some(record_decl) = record_decl {
-                record_types.push(record_decl);
             }
         }
         // Declarations may be interleaved freely: enums, records, and
@@ -984,12 +957,7 @@ impl<'a> Parser<'a> {
         loop {
             match self.current_kind() {
                 Some(TokenKind::EnumKeyword)
-                    if matches!(
-                        self.profile.as_str(),
-                        SOURCE_PROFILE_VERSION_0_3
-                            | SOURCE_PROFILE_VERSION_0_4
-                            | SOURCE_PROFILE_VERSION_0_5
-                    ) =>
+                    if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_3) =>
                 {
                     let (node, finite_type) = self.finite_type();
                     declaration_nodes.push(node);
@@ -998,10 +966,10 @@ impl<'a> Parser<'a> {
                     }
                 }
                 Some(TokenKind::RecordKeyword) => {
-                    if !matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_5) {
+                    if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_5) {
                         self.error(
                             "MNP120",
-                            "record declarations require source profile 0.5",
+                            "record declarations require source profile 0.5 or later",
                             vec![TokenKind::RecordKeyword],
                         );
                         break;
@@ -1061,9 +1029,6 @@ impl<'a> Parser<'a> {
         let source_span = SourceSpan::at(&self.envelope.text, 0, self.envelope.text.len());
         let mut children = vec![header, module_node];
         children.extend(use_nodes);
-        children.extend(finite_type_nodes);
-        children.extend(record_type_nodes);
-        children.extend(function_nodes);
         children.extend(declaration_nodes);
         let root = CstNode {
             kind: CstKind::Document,
