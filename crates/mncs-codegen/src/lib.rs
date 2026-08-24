@@ -1288,7 +1288,40 @@ fn values_agree(left: &[ExecutionValue], right: &[ExecutionValue]) -> bool {
                     && left_variant == right_variant
                     && left_discriminant == right_discriminant
             }
+            (
+                ExecutionValue::Record {
+                    type_identity: left_type,
+                    name: left_name,
+                    fields: left_fields,
+                },
+                ExecutionValue::Record {
+                    type_identity: right_type,
+                    name: right_name,
+                    fields: right_fields,
+                },
+            ) => {
+                left_type == right_type
+                    && left_name == right_name
+                    && record_fields_agree(left_fields, right_fields)
+            }
             _ => false,
+        })
+}
+
+/// Logical record agreement: fields are kept in canonical (sorted) name
+/// order on both sides, so positional pairing is name pairing. Field values
+/// agree recursively under the same observable rules.
+fn record_fields_agree(
+    left: &[(String, ExecutionValue)],
+    right: &[(String, ExecutionValue)],
+) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| {
+            left.0 == right.0
+                && values_agree(
+                    std::slice::from_ref(&left.1),
+                    std::slice::from_ref(&right.1),
+                )
         })
 }
 
