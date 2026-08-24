@@ -1634,6 +1634,7 @@ impl<'a> Parser<'a> {
                 let name = self.spanned(TokenKind::Identifier, "MNP062", "expected expression")?;
                 if self.current_kind() == Some(TokenKind::LeftBrace)
                     && matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_5)
+                    && self.at_record_literal()
                 {
                     return self.record_literal(name);
                 }
@@ -1746,6 +1747,26 @@ impl<'a> Parser<'a> {
             };
         }
         base
+    }
+
+    /// Profile 0.5 shares `Name {` between record literals and every construct
+    /// that follows an expression with a `{` block (`match` scrutinees, `if`
+    /// conditions, bounded-iteration bodies). A record literal always opens
+    /// with a functional update (`..base`) or a field declaration (`name :`),
+    /// so bounded lookahead disambiguates without guessing.
+    fn at_record_literal(&self) -> bool {
+        match self.peek_kind(1) {
+            Some(TokenKind::DotDot) => true,
+            Some(TokenKind::Identifier) => {
+                matches!(self.peek_kind(2), Some(TokenKind::Colon))
+            }
+            _ => false,
+        }
+    }
+
+    fn peek_kind(&self, offset: usize) -> Option<TokenKind> {
+        let index = *self.significant.get(self.cursor + offset)?;
+        Some(self.tokens.get(index)?.kind)
     }
 
     fn record_literal(&mut self, type_name: SpannedText) -> Option<AstExpr> {
@@ -2144,6 +2165,17 @@ mod tests {
         assert_eq!(ast.functions[0].inputs[0].value_type.text, "i64");
         let span = ast.functions[0].body.returned_value.span();
         assert_eq!(&fixture().text[span.start..span.end], "value");
+    }
+
+    #[test]
+    fn profile_05_disambiguates_record_literals_from_block_openers() {
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "branching",
+            "mncs 0.5;\nmodule example.branch;\nenum S { PASS, FAIL }\nrecord T { v: i32 }\nfn pick(s: S, ok: bool, base: T) -> (result: i32) { return match s { PASS => 1, FAIL => 0 }; } fn branch(ok: bool) -> (result: i32) { if ok { return 1; } return 0; } fn loop_from_record(n: i32) -> (result: i32) { iterate steps up_to 2 carrying acc: T = T { v: n } { next acc = T { ..acc, v: acc.v + 1 }; } return acc.v; } fn literal(base: T) -> (result: i32) { let updated: T = T { ..base, v: 7 }; return updated.v; }\n",
+        );
+        let parsed = parse(&envelope);
+        assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
     }
 
     #[test]
