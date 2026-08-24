@@ -1288,7 +1288,28 @@ fn values_agree(left: &[ExecutionValue], right: &[ExecutionValue]) -> bool {
                     && left_variant == right_variant
                     && left_discriminant == right_discriminant
             }
+            (
+                ExecutionValue::Record { fields: left, .. },
+                ExecutionValue::Record { fields: right, .. },
+            ) => record_values_agree(left, right),
             _ => false,
+        })
+}
+
+/// Logical record observations agree when both sides carry the same canonical
+/// field sequence (fields are kept sorted by name) and every field agrees
+/// under the same scalar rules as top-level observations.
+fn record_values_agree(
+    left: &[(String, ExecutionValue)],
+    right: &[(String, ExecutionValue)],
+) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| {
+            left.0 == right.0
+                && values_agree(
+                    std::slice::from_ref(&left.1),
+                    std::slice::from_ref(&right.1),
+                )
         })
 }
 

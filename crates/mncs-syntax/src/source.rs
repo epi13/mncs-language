@@ -2186,6 +2186,32 @@ mod tests {
     }
 
     #[test]
+    fn declarations_may_be_interleaved_across_kinds() {
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "interleaved",
+            "mncs 0.5;\nmodule example.interleaved;\nrecord P { l: i32, r: i32 }\nenum Pick { LEFT, RIGHT, TIE }\nfn classify(l: i32, r: i32) -> (result: Pick) { let p: P = P { l: l, r: r }; if p.l > p.r { return Pick.LEFT; } return Pick.RIGHT; }\nrecord Tally { left: i32, right: i32 }\nfn tally(pick: Pick) -> (result: Tally) { return match pick { LEFT => Tally { left: 1, right: 0 }, RIGHT => Tally { left: 0, right: 1 }, TIE => Tally { left: 0, right: 0 } }; }\nenum Mode { ON, OFF }\nfn mode(open: bool) -> (result: Mode) { if open { return Mode.ON; } return Mode.OFF; }\n",
+        );
+        let parsed = parse(&envelope);
+        assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+        let ast = parsed.ast.expect("valid AST");
+        assert_eq!(ast.record_types.len(), 2);
+        assert_eq!(ast.finite_types.len(), 2);
+        assert_eq!(ast.functions.len(), 3);
+    }
+
+    #[test]
+    fn profile_03_interleaves_enums_and_functions_only() {
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "interleaved-03",
+            "mncs 0.3;\nmodule example.interleaved03;\nenum E { A, B }\nfn f(e: E) -> (result: i32) { return match e { A => 1, B => 2 }; }\nenum F { C, D }\nfn g(e: F) -> (result: i32) { return match e { C => 3, D => 4 }; }\n",
+        );
+        let parsed = parse(&envelope);
+        assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+    }
+
+    #[test]
     fn reports_structured_recovery_diagnostic() {
         let envelope = SourceEnvelope::inline(
             SourceArtifactKind::Program,

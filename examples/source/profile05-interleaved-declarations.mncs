@@ -1,0 +1,31 @@
+mncs 0.5;
+
+// Source Profile 0.5 fixture: enums, records, and functions may be declared
+// in any order. Type declarations are not required to precede functions or
+// to be grouped by kind.
+module examples.profile05_interleaved_declarations;
+
+record Pair { left: i32, right: i32 }
+
+enum Pick { LEFT, RIGHT, TIE }
+
+fn classify(left: i32, right: i32) -> (result: Pick) {
+    let pair: Pair = Pair { left: left, right: right };
+    if pair.left > pair.right {
+        return Pick.LEFT;
+    }
+    if pair.right > pair.left {
+        return Pick.RIGHT;
+    }
+    return Pick.TIE;
+}
+
+record Tally { left: i32, right: i32 }
+
+fn tally(pick: Pick) -> (result: Tally) {
+    return match pick {
+        LEFT => Tally { left: 1, right: 0 },
+        RIGHT => Tally { left: 0, right: 1 },
+        TIE => Tally { left: 0, right: 0 },
+    };
+}
