@@ -92,6 +92,7 @@ pub fn cranelift_capabilities() -> BackendCapabilityManifest {
         .map(str::to_owned)
         .collect(),
         [
+            "record_values",
             "memory",
             "effects",
             "saturating_integer",
@@ -986,7 +987,7 @@ fn jit_scalar(
     let ptr = module.get_finalized_function(func_id);
     let mut status: i32 = 2;
     let mut value: i64 = 0;
-    let raw_args: Vec<i64> = argv_from_request(request)
+    let raw_args: Vec<i64> = argv_from_request(request)?
         .iter()
         .map(|arg| arg.parse::<i64>().unwrap_or(0))
         .collect();

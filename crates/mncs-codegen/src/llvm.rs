@@ -94,6 +94,7 @@ pub fn llvm_capabilities() -> BackendCapabilityManifest {
             "effects",
             "saturating_integer",
             "widening_integer",
+            "record_values",
             "host_effects",
         ]
         .into_iter()
@@ -848,7 +849,10 @@ pub fn execute_llvm(
         );
     }
     let driver = llvm_driver(&request.target.function, contract.inputs.len());
-    let args = argv_from_request(request);
+    let args = match argv_from_request(request) {
+        Ok(args) => args,
+        Err(reason) => return execution_failure(result, ExecutionStatus::Unsupported, &reason),
+    };
     match compile_and_run(
         &[("module.ll", ir.as_str()), ("driver.c", driver.as_str())],
         &clang,

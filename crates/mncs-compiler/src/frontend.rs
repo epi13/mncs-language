@@ -1,15 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mncs_model::{
-    finite_type_id, finite_variant_id, function_id, ArithmeticIntent, ArtifactRepresentation,
-    BodyBlock, BodyBoundedIteration, BodyCyclePolicy, BodyOperation, BodyOperationKind,
-    BodyParameter, BodyTerminator, BodyType, BodyValue, BoundedIterationCompletion,
-    CompilationStatus, CompilationStudyRequest, CompilationStudyResult, CompilerArtifactRef,
-    CompilerNodeProfile, CompilerPassExecutionObservation, ContractClause, ContractKind, Effect,
-    FailureMode, FiniteType, FiniteVariant, Function, FunctionBody, IntegerType, Program,
-    SemanticGraph, SemanticId, SemanticIdentities, TransformationEdge, TransformationStatus,
-    ValidationReport, Value, EXECUTABLE_BODY_SCHEMA_VERSION,
-    SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND, SUPPORTED_SCHEMA_VERSION,
+    finite_type_id, finite_variant_id, function_id, record_type_id, ArithmeticIntent,
+    ArtifactRepresentation, BodyBlock, BodyBoundedIteration, BodyCyclePolicy, BodyOperation,
+    BodyOperationKind, BodyParameter, BodyTerminator, BodyType, BodyValue,
+    BoundedIterationCompletion, CompilationStatus, CompilationStudyRequest, CompilationStudyResult,
+    CompilerArtifactRef, CompilerNodeProfile, CompilerPassExecutionObservation, ContractClause,
+    ContractKind, Effect, FailureMode, FiniteType, FiniteVariant, Function, FunctionBody,
+    IntegerType, Program, RecordField, RecordType, SemanticGraph, SemanticId, SemanticIdentities,
+    TransformationEdge, TransformationStatus, ValidationReport, Value,
+    EXECUTABLE_BODY_SCHEMA_VERSION, SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
+    SUPPORTED_SCHEMA_VERSION,
 };
 use mncs_syntax::{
     parse, AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstStmt, ConcreteSyntaxTree,
@@ -353,6 +354,86 @@ pub fn elaborate_program(ast: &AbstractSyntaxTree) -> Result<Program, Vec<Source
         .iter()
         .map(|finite_type| (finite_type.name.clone(), finite_type.clone()))
         .collect::<BTreeMap<_, _>>();
+    let mut record_types = Vec::new();
+    let mut record_type_names: BTreeSet<String> = BTreeSet::new();
+    for declaration in &ast.record_types {
+        if !record_type_names.insert(declaration.name.text.clone()) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE150",
+                "record type identity is duplicated in this module namespace",
+                declaration.name.span,
+            ));
+            continue;
+        }
+        if finite_types_by_name.contains_key(&declaration.name.text) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE151",
+                "record type name collides with a declared finite type",
+                declaration.name.span,
+            ));
+            continue;
+        }
+        let mut field_names: BTreeSet<String> = BTreeSet::new();
+        let mut duplicate_fields = 0_usize;
+        for field in &declaration.fields {
+            if !field_names.insert(field.name.text.clone()) {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE152",
+                    "record field identity is duplicated and could not be projected uniquely",
+                    field.name.span,
+                ));
+                duplicate_fields += 1;
+            }
+        }
+        record_types.push((declaration.clone(), duplicate_fields));
+    }
+    // Field types may name other records regardless of declaration order, so
+    // resolution runs after every valid record name is registered.
+    let provisional_names = record_types
+        .iter()
+        .map(|(declaration, _)| declaration.name.text.clone())
+        .collect::<BTreeSet<_>>();
+    let mut resolved_records = Vec::new();
+    for (declaration, duplicate_fields) in &record_types {
+        if *duplicate_fields > 0 {
+            continue;
+        }
+        let mut fields = Vec::new();
+        for field in &declaration.fields {
+            if !provisional_names.contains(&field.value_type.text)
+                && !finite_types_by_name.contains_key(&field.value_type.text)
+                && profile_scalar_supported(&field.value_type.text).is_none()
+            {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE153",
+                    "record field type does not name a supported scalar, finite, or declared record type",
+                    field.value_type.span,
+                ));
+                continue;
+            }
+            fields.push(RecordField {
+                name: field.name.text.clone(),
+                field_type: field.value_type.text.clone(),
+            });
+        }
+        fields.sort_by(|left, right| left.name.cmp(&right.name));
+        resolved_records.push(RecordType {
+            identity: record_type_id(
+                &ast.module.text,
+                &declaration.name.text,
+                &fields
+                    .iter()
+                    .map(|field| (field.name.as_str(), field.field_type.as_str()))
+                    .collect::<Vec<_>>(),
+            ),
+            name: declaration.name.text.clone(),
+            fields,
+        });
+    }
+    let record_types_by_name = resolved_records
+        .iter()
+        .map(|record| (record.name.clone(), record.clone()))
+        .collect::<BTreeMap<_, _>>();
     let mut functions = Vec::new();
     let mut names = std::collections::BTreeSet::new();
     for function in &ast.functions {
@@ -371,7 +452,13 @@ pub fn elaborate_program(ast: &AbstractSyntaxTree) -> Result<Program, Vec<Source
         .map(|function| {
             (
                 function.name.text.clone(),
-                FunctionSignature::from_ast(ast, function, &finite_types_by_name, &mut diagnostics),
+                FunctionSignature::from_ast(
+                    ast,
+                    function,
+                    &finite_types_by_name,
+                    &record_types_by_name,
+                    &mut diagnostics,
+                ),
             )
         })
         .collect::<BTreeMap<_, _>>();
@@ -383,7 +470,13 @@ pub fn elaborate_program(ast: &AbstractSyntaxTree) -> Result<Program, Vec<Source
         {
             continue;
         }
-        match elaborate_function(ast, function, &finite_types_by_name, &signatures) {
+        match elaborate_function(
+            ast,
+            function,
+            &finite_types_by_name,
+            &record_types_by_name,
+            &signatures,
+        ) {
             Ok(elaborated) => functions.push(elaborated),
             Err(mut errors) => diagnostics.append(&mut errors),
         }
@@ -393,6 +486,7 @@ pub fn elaborate_program(ast: &AbstractSyntaxTree) -> Result<Program, Vec<Source
             schema_version: SUPPORTED_SCHEMA_VERSION.to_owned(),
             module: ast.module.text.clone(),
             finite_types,
+            record_types: resolved_records,
             assumptions: Vec::new(),
             functions,
         })
@@ -405,6 +499,7 @@ fn elaborate_function(
     ast: &AbstractSyntaxTree,
     function: &AstFunction,
     finite_types: &BTreeMap<String, FiniteType>,
+    record_types: &BTreeMap<String, RecordType>,
     signatures: &BTreeMap<String, FunctionSignature>,
 ) -> Result<Function, Vec<SourceDiagnostic>> {
     let mut diagnostics = Vec::new();
@@ -442,6 +537,7 @@ fn elaborate_function(
                 &input.value_type.text,
                 input.value_type.span,
                 finite_types,
+                record_types,
                 &mut diagnostics,
             ),
         })
@@ -450,6 +546,7 @@ fn elaborate_function(
         &function.outputs[0].value_type.text,
         function.outputs[0].value_type.span,
         finite_types,
+        record_types,
         &mut diagnostics,
     );
     let mut capabilities = function
@@ -556,6 +653,7 @@ fn elaborate_function(
             output_type.clone(),
             function.name.text.clone(),
             finite_types,
+            record_types,
             signatures,
         );
         builder.elaborate_statements(&function.body.statements, &mut env, &mut diagnostics);
@@ -622,6 +720,7 @@ impl FunctionSignature {
         ast: &AbstractSyntaxTree,
         function: &AstFunction,
         finite_types: &BTreeMap<String, FiniteType>,
+        record_types: &BTreeMap<String, RecordType>,
         diagnostics: &mut Vec<SourceDiagnostic>,
     ) -> Self {
         let inputs = function
@@ -632,6 +731,7 @@ impl FunctionSignature {
                     &input.value_type.text,
                     input.value_type.span,
                     finite_types,
+                    record_types,
                     diagnostics,
                 )
             })
@@ -643,6 +743,7 @@ impl FunctionSignature {
                     &output.value_type.text,
                     output.value_type.span,
                     finite_types,
+                    record_types,
                     diagnostics,
                 )
             },
@@ -773,6 +874,15 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
                 calls_in_expr(&arm.value, calls);
             }
         }
+        AstExpr::RecordLiteral { base, fields, .. } => {
+            if let Some(base) = base {
+                calls_in_expr(base, calls);
+            }
+            for (_, value) in fields {
+                calls_in_expr(value, calls);
+            }
+        }
+        AstExpr::FieldProject { base, .. } => calls_in_expr(base, calls),
         AstExpr::Name(_)
         | AstExpr::Integer { .. }
         | AstExpr::Boolean { .. }
@@ -837,6 +947,13 @@ impl BindingEnv {
         None
     }
 
+    fn binds(&self, name: &str) -> bool {
+        self.scopes
+            .iter()
+            .rev()
+            .any(|scope| scope.contains_key(name))
+    }
+
     fn push(&mut self) {
         self.scopes.push(std::collections::BTreeMap::new());
     }
@@ -855,6 +972,7 @@ struct BodyBuilder<'a> {
     output_type: BodyType,
     function: String,
     finite_types: &'a BTreeMap<String, FiniteType>,
+    record_types: &'a BTreeMap<String, RecordType>,
     signatures: &'a BTreeMap<String, FunctionSignature>,
     in_iteration: bool,
 }
@@ -864,6 +982,7 @@ impl<'a> BodyBuilder<'a> {
         output_type: BodyType,
         function: String,
         finite_types: &'a BTreeMap<String, FiniteType>,
+        record_types: &'a BTreeMap<String, RecordType>,
         signatures: &'a BTreeMap<String, FunctionSignature>,
     ) -> Self {
         Self {
@@ -880,6 +999,7 @@ impl<'a> BodyBuilder<'a> {
             output_type,
             function,
             finite_types,
+            record_types,
             signatures,
             in_iteration: false,
         }
@@ -921,6 +1041,7 @@ impl<'a> BodyBuilder<'a> {
                     &value_type.text,
                     value_type.span,
                     self.finite_types,
+                    self.record_types,
                     diagnostics,
                 );
                 let Some(produced) = self.elaborate_expr(value, Some(&declared), env, diagnostics)
@@ -1095,6 +1216,7 @@ impl<'a> BodyBuilder<'a> {
             &state_type.text,
             state_type.span,
             self.finite_types,
+            self.record_types,
             diagnostics,
         );
         let Some(initial_value) =
@@ -1450,6 +1572,18 @@ impl<'a> BodyBuilder<'a> {
                 span,
             } => {
                 let Some(finite_type) = self.finite_types.get(&type_name.text).cloned() else {
+                    // `name.selector` is syntactically ambiguous between a
+                    // finite variant constructor and record field projection.
+                    // A lexical binding always means projection here; nominal
+                    // constructors live in the module type namespace.
+                    if env.binds(&type_name.text) {
+                        let projected = AstExpr::FieldProject {
+                            base: Box::new(AstExpr::Name(type_name.clone())),
+                            field: variant.clone(),
+                            span: *span,
+                        };
+                        return self.elaborate_expr(&projected, expected, env, diagnostics);
+                    }
                     diagnostics.push(elaboration_diagnostic(
                         "MNE123",
                         "finite constructor names an unknown nominal type",
@@ -1751,6 +1885,195 @@ impl<'a> BodyBuilder<'a> {
                     ty: result_type,
                 })
             }
+            AstExpr::RecordLiteral {
+                type_name,
+                base,
+                fields,
+                span,
+            } => {
+                let Some(record_type) = self.record_types.get(&type_name.text).cloned() else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE154",
+                        "record literal names an unknown record type",
+                        type_name.span,
+                    ));
+                    return None;
+                };
+                let ty = BodyType::Record {
+                    identity: record_type.identity.clone(),
+                    name: record_type.name.clone(),
+                };
+                if expected.is_some_and(|expected| expected != &ty) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE155",
+                        "record literal does not have the required nominal type",
+                        *span,
+                    ));
+                }
+                let mut supplied = BTreeMap::new();
+                for (name, value) in fields {
+                    if !record_type
+                        .fields
+                        .iter()
+                        .any(|field| field.name == name.text)
+                    {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE156",
+                            "record literal names a field the record does not declare",
+                            name.span,
+                        ));
+                        continue;
+                    }
+                    if supplied.insert(name.text.clone(), value).is_some() {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE157",
+                            "record literal assigns a field more than once",
+                            name.span,
+                        ));
+                    }
+                }
+                let base_value = match base {
+                    Some(base_expr) => {
+                        let value = self.elaborate_expr(base_expr, Some(&ty), env, diagnostics)?;
+                        if value.ty != ty {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE158",
+                                "functional record update base does not have the literal's record type",
+                                base_expr.span(),
+                            ));
+                            return None;
+                        }
+                        Some(value)
+                    }
+                    None => None,
+                };
+                let mut operands = Vec::new();
+                for declared_field in &record_type.fields {
+                    let operand_id = if let Some(value) = supplied.get(&declared_field.name) {
+                        let expected_field = profile_type(
+                            &declared_field.field_type,
+                            value.span(),
+                            self.finite_types,
+                            self.record_types,
+                            diagnostics,
+                        );
+                        let resolved =
+                            self.elaborate_expr(value, Some(&expected_field), env, diagnostics)?;
+                        if resolved.ty != expected_field {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE159",
+                                "record field value type does not match the declared field type",
+                                value.span(),
+                            ));
+                        }
+                        resolved.id
+                    } else {
+                        let Some(resolved_base) = &base_value else {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE160",
+                                "record literal omits a declared field and has no functional update base",
+                                *span,
+                            ));
+                            return None;
+                        };
+                        self.emit_record_project(
+                            resolved_base,
+                            &record_type,
+                            &declared_field.name,
+                            *span,
+                            diagnostics,
+                        )
+                        .id
+                    };
+                    operands.push(operand_id);
+                }
+                let id = self.new_value("rec");
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: id.clone(),
+                    kind: BodyOperationKind::RecordConstruct {
+                        type_identity: record_type.identity.clone(),
+                        field_names: record_type
+                            .fields
+                            .iter()
+                            .map(|field| field.name.clone())
+                            .collect(),
+                    },
+                    operands,
+                    results: vec![BodyValue {
+                        id: id.clone(),
+                        ty: ty.clone(),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                });
+                Some(ResolvedBinding { id, ty })
+            }
+            AstExpr::FieldProject { base, field, span } => {
+                let subject = self.elaborate_expr(base, None, env, diagnostics)?;
+                let BodyType::Record {
+                    name: type_name, ..
+                } = &subject.ty
+                else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE161",
+                        "field projection requires a value of a declared record type",
+                        base.span(),
+                    ));
+                    return None;
+                };
+                let Some(record_type) = self.record_types.get(type_name).cloned() else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE161",
+                        "field projection requires a value of a declared record type",
+                        base.span(),
+                    ));
+                    return None;
+                };
+                let Some(declared_field) = record_type
+                    .fields
+                    .iter()
+                    .find(|candidate| candidate.name == field.text)
+                else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE162",
+                        "record projection names a field the record does not declare",
+                        field.span,
+                    ));
+                    return None;
+                };
+                let result_ty = profile_type(
+                    &declared_field.field_type,
+                    field.span,
+                    self.finite_types,
+                    self.record_types,
+                    diagnostics,
+                );
+                if expected.is_some_and(|expected| expected != &result_ty) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE163",
+                        "projected field does not have the required expression type",
+                        *span,
+                    ));
+                }
+                let projected = self.emit_record_project(
+                    &subject,
+                    &record_type,
+                    &field.text,
+                    *span,
+                    diagnostics,
+                );
+                if projected.ty != result_ty {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE163",
+                        "projected field does not have the required expression type",
+                        *span,
+                    ));
+                }
+                Some(projected)
+            }
             AstExpr::Binary {
                 op, left, right, ..
             } => {
@@ -1859,6 +2182,49 @@ impl<'a> BodyBuilder<'a> {
         }
     }
 
+    fn emit_record_project(
+        &mut self,
+        subject: &ResolvedBinding,
+        record_type: &RecordType,
+        field: &str,
+        span: SourceSpan,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> ResolvedBinding {
+        let field_type = record_type
+            .fields
+            .iter()
+            .find(|candidate| candidate.name == field)
+            .map(|declared| {
+                profile_type(
+                    &declared.field_type,
+                    span,
+                    self.finite_types,
+                    self.record_types,
+                    diagnostics,
+                )
+            })
+            .unwrap_or_else(|| BodyType::Named("invalid".to_owned()));
+        let id = self.new_value("proj");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::RecordProject {
+                type_identity: record_type.identity.clone(),
+                field: field.to_owned(),
+            },
+            operands: vec![subject.id.clone()],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: field_type.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        ResolvedBinding { id, ty: field_type }
+    }
+
     fn new_value(&mut self, prefix: &str) -> String {
         let id = format!("{prefix}{}", self.next_value);
         self.next_value += 1;
@@ -1896,6 +2262,7 @@ fn profile_type(
     name: &str,
     span: SourceSpan,
     finite_types: &BTreeMap<String, FiniteType>,
+    record_types: &BTreeMap<String, RecordType>,
     diagnostics: &mut Vec<SourceDiagnostic>,
 ) -> BodyType {
     if let Some(finite_type) = finite_types.get(name) {
@@ -1904,6 +2271,23 @@ fn profile_type(
             name: finite_type.name.clone(),
         };
     }
+    if let Some(record_type) = record_types.get(name) {
+        return BodyType::Record {
+            identity: record_type.identity.clone(),
+            name: record_type.name.clone(),
+        };
+    }
+    profile_scalar_supported(name).unwrap_or_else(|| {
+        diagnostics.push(elaboration_diagnostic(
+            "MNE105",
+            "source profile supports bool, 8/16/32/64-bit integers, declared finite types, and declared record types",
+            span,
+        ));
+        BodyType::Named(name.to_owned())
+    })
+}
+
+fn profile_scalar_supported(name: &str) -> Option<BodyType> {
     let ty = BodyType::from_semantic_name(name);
     let supported = matches!(&ty, BodyType::Named(named) if named == "bool")
         || matches!(
@@ -1913,14 +2297,7 @@ fn profile_type(
                 ..
             })
         );
-    if !supported {
-        diagnostics.push(elaboration_diagnostic(
-            "MNE105",
-            "source profile supports bool, 8/16/32/64-bit integers, and declared finite types",
-            span,
-        ));
-    }
-    ty
+    supported.then_some(ty)
 }
 
 fn statement_span(statement: &AstStmt) -> SourceSpan {

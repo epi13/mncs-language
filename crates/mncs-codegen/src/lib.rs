@@ -174,6 +174,7 @@ pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
             "wrapping_integer",
             "explicit_failure",
             "semantic_bounded_iteration",
+            "immutable_record_values_intra_function_only",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -324,6 +325,7 @@ pub fn research_bytecode_capabilities() -> BackendCapabilityManifest {
             "explicit_failure",
             "bounded_control_flow",
             "semantic_bounded_iteration",
+            "immutable_record_values",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -1601,5 +1603,59 @@ mod tests {
         "00".clone_into(&mut artifact.bytes_hex);
         let executed = execute_backend(&artifact, &request(1, 1));
         assert_ne!(executed.status, ExecutionStatus::Returned);
+    }
+}
+
+#[cfg(test)]
+mod record_tests {
+    use super::*;
+    use mncs_model::{ExecutionPolicy, ExecutionTarget};
+
+    fn record_program() -> Program {
+        Program::from_json(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/executable/record-values.mncs.json"
+        )))
+        .unwrap()
+    }
+
+    fn record_request(value: i128) -> ExecutionRequest {
+        ExecutionRequest {
+            schema_version: mncs_model::EXECUTION_REQUEST_SCHEMA_VERSION.to_owned(),
+            target: ExecutionTarget {
+                module: "examples.profile05_record_values".to_owned(),
+                function: "main".to_owned(),
+            },
+            arguments: vec![ExecutionValue::Integer {
+                value,
+                ty: IntegerType {
+                    bits: 32,
+                    signed: true,
+                },
+            }],
+            step_budget: 256,
+            policy: ExecutionPolicy::default(),
+        }
+    }
+
+    #[test]
+    fn record_values_forward_through_wasm_and_agree_with_reference_execution() {
+        let program = record_program();
+        let ssa = program.lower_to_ssa().unwrap();
+        let selected = selected_ssa_ref(&ssa);
+        let plan = portable_wasm_plan(selected.clone());
+        let result = lower_selected_ssa(&program, &ssa, selected, &plan);
+        assert_eq!(result.status, TransformationStatus::Pass, "{result:?}");
+        let artifact = result.artifact.expect("wasm artifact");
+        for value in [0_i128, -5] {
+            let wasm = execute_backend(&artifact, &record_request(value));
+            assert_eq!(wasm.status, ExecutionStatus::Returned);
+            // The reference (language-owned) execution is the semantic oracle.
+            let reference = mncs_model::execute(&program, &record_request(value));
+            assert_eq!(reference.status, ExecutionStatus::Returned);
+            assert_eq!(wasm.returned, reference.returned, "value {value} agrees");
+        }
+        let overflow = execute_backend(&artifact, &record_request(i128::from(i32::MAX)));
+        assert_eq!(overflow.status, ExecutionStatus::RuntimeFailure);
     }
 }

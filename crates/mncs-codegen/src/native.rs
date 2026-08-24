@@ -11,7 +11,7 @@ use serde::Deserialize;
 
 use mncs_model::{BackendValueContract, ExecutionStatus, ExecutionValue, SemanticId};
 
-use crate::support::{argument_bits, backend_output_value_from_i128};
+use crate::support::{argument_argv, backend_output_value_from_i128};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolchainIdentity {
@@ -242,10 +242,6 @@ pub fn decode_native_value(
     backend_output_value_from_i128(contract, value).map(|value| vec![value])
 }
 
-pub fn argv_from_request(request: &mncs_model::ExecutionRequest) -> Vec<String> {
-    request
-        .arguments
-        .iter()
-        .map(|value| argument_bits(value).to_string())
-        .collect()
+pub fn argv_from_request(request: &mncs_model::ExecutionRequest) -> Result<Vec<String>, String> {
+    request.arguments.iter().map(argument_argv).collect()
 }

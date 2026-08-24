@@ -68,7 +68,9 @@ fn lower_function(
     if function.outputs.len() != 1 {
         return Err("portable WASM MVP requires exactly one result".to_owned());
     }
-    let layout = layout_function(function, function_indices)?;
+    reject_record_boundaries(function)?;
+    let mut layout = layout_function(function, function_indices)?;
+    forward_record_values(function, &mut layout)?;
     let result_ty = *layout
         .types
         .get(&function.outputs[0].identity)
@@ -115,6 +117,114 @@ fn lower_function(
         locals,
         body,
     })
+}
+
+/// Rejects record values at every point where they would have to cross the
+/// scalar parameter/result/block-parameter ABI of the portable WASM envelope.
+/// Records are realized by forwarding inside a single function body; anything
+/// that cannot be forwarded fails closed instead of being silently redefined.
+fn reject_record_boundaries(function: &SsaFunction) -> Result<(), String> {
+    let record = |ty: &IrType| match ty {
+        IrType::Record { name, .. } => Some(name.clone()),
+        _ => None,
+    };
+    for input in &function.inputs {
+        if let Some(name) = record(&input.ty) {
+            return Err(format!(
+                "record value ({name}) cannot be a function parameter of this realization"
+            ));
+        }
+    }
+    for output in &function.outputs {
+        if let Some(name) = record(&output.ty) {
+            return Err(format!(
+                "record value ({name}) cannot be a function result of this realization"
+            ));
+        }
+    }
+    for block in &function.blocks {
+        for parameter in &block.parameters {
+            if let Some(name) = record(&parameter.ty) {
+                return Err(format!(
+                    "record value ({name}) cannot be carried through a block parameter of this realization"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Rewrites SSA values produced by record construction/projection onto the
+/// local slots of their originating field operand.  Record immutability makes
+/// forwarding behavior-preserving; no record is ever materialized.
+fn forward_record_values(
+    function: &SsaFunction,
+    layout: &mut FunctionLayout,
+) -> Result<(), String> {
+    // record value identity -> canonical (field name, operand identity) pairs
+    let mut constructed: BTreeMap<SemanticId, Vec<(String, SemanticId)>> = BTreeMap::new();
+    // projected value identity -> field operand identity
+    let mut aliases: BTreeMap<SemanticId, SemanticId> = BTreeMap::new();
+    let resolve = |aliases: &BTreeMap<SemanticId, SemanticId>, id: &SemanticId| {
+        let mut current = id;
+        while let Some(next) = aliases.get(current) {
+            current = next;
+        }
+        current.clone()
+    };
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            match &instruction.kind {
+                SsaInstructionKind::RecordConstruct { field_names, .. } => {
+                    let Some(output) = instruction.outputs.first() else {
+                        return Err("record construction has no result".to_owned());
+                    };
+                    if field_names.len() != instruction.inputs.len() {
+                        return Err(
+                            "record construction fields do not match its operands".to_owned()
+                        );
+                    }
+                    constructed.insert(
+                        output.identity.clone(),
+                        field_names
+                            .iter()
+                            .cloned()
+                            .zip(instruction.inputs.iter().cloned())
+                            .collect(),
+                    );
+                }
+                SsaInstructionKind::RecordProject { field, .. } => {
+                    let Some(output) = instruction.outputs.first() else {
+                        return Err("record projection has no result".to_owned());
+                    };
+                    let Some(input) = instruction.inputs.first() else {
+                        return Err("record projection has no operand".to_owned());
+                    };
+                    let source = resolve(&aliases, input);
+                    match constructed
+                        .get(&source)
+                        .and_then(|fields| fields.iter().find(|(name, _)| name == field))
+                    {
+                        Some((_, operand)) => {
+                            aliases.insert(output.identity.clone(), operand.clone());
+                        }
+                        None => {
+                            return Err(format!(
+                                "record projection of {field:?} does not observe a locally constructed record; cross-function and block-carried records are unsupported by this realization"
+                            ));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    for (projected, operand) in aliases {
+        if let Some(slot) = layout.values.get(&operand).copied() {
+            layout.values.insert(projected, slot);
+        }
+    }
+    Ok(())
 }
 
 fn layout_function(
@@ -250,6 +360,11 @@ fn lower_instruction(
                 "runtime checks have no executable condition in the current SSA subset".to_owned(),
             );
         }
+        // Record values are never materialized: construction records nothing
+        // and projection was already forwarded onto its field operand's local
+        // slot by `forward_record_values` before instruction lowering.
+        SsaInstructionKind::RecordConstruct { .. } => {}
+        SsaInstructionKind::RecordProject { .. } => {}
     }
     Ok(())
 }
@@ -655,10 +770,13 @@ fn local(layout: &FunctionLayout, identity: &SemanticId) -> Result<u32, String> 
 fn wasm_type(ty: &IrType) -> Result<(ValType, Option<IntegerType>), String> {
     match ty {
         IrType::Finite { .. } => Ok((ValType::I32, None)),
+        // Record values are never materialized; the placeholder slot exists
+        // only because every SSA value is pre-allocated a local index.
+        IrType::Record { .. } => Ok((ValType::I32, None)),
         IrType::Named(name) if name == "bool" => Ok((ValType::I32, None)),
         IrType::Named(name) => match BodyType::from_semantic_name(name) {
             BodyType::Integer(integer) => Ok((val_type(integer)?, Some(integer))),
-            BodyType::Named(_) | BodyType::Finite { .. } => {
+            BodyType::Named(_) | BodyType::Finite { .. } | BodyType::Record { .. } => {
                 Err(format!("unsupported SSA type {name}"))
             }
         },

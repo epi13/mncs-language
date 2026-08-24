@@ -285,6 +285,12 @@ fn lower_instruction(
         SsaInstructionKind::RuntimeCheck { .. } => {
             Err("runtime checks have no executable condition in the current SSA subset".to_owned())
         }
+        SsaInstructionKind::RecordConstruct { type_identity, .. } => Err(format!(
+            "record values ({type_identity}) are unsupported by this scalar backend capability envelope"
+        )),
+        SsaInstructionKind::RecordProject { type_identity, .. } => Err(format!(
+            "record values ({type_identity}) are unsupported by this scalar backend capability envelope"
+        )),
     }
 }
 
@@ -335,6 +341,9 @@ fn scalar_value(value: &SsaValue) -> Result<ScalarValue, String> {
 pub fn scalar_ty(ty: &IrType) -> Result<ScalarTy, String> {
     match ty {
         IrType::Finite { .. } => Ok(ScalarTy::Finite),
+        IrType::Record { name, .. } => Err(format!(
+            "record values ({name}) are unsupported by this scalar backend capability envelope"
+        )),
         IrType::Named(name) if name == "bool" => Ok(ScalarTy::Bool),
         IrType::Named(name) => match BodyType::from_semantic_name(name) {
             BodyType::Integer(integer) if matches!(integer.bits, 8 | 16 | 32 | 64) => {
@@ -363,5 +372,22 @@ pub fn llvm_type(ty: ScalarTy) -> String {
     match ty {
         ScalarTy::Bool | ScalarTy::Finite => "i32".to_owned(),
         ScalarTy::Int(integer) => format!("i{}", integer.bits),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scalar_ty;
+    use mncs_model::{IrType, SemanticId};
+
+    #[test]
+    fn record_values_are_explicitly_unsupported_by_scalar_backends() {
+        let record = IrType::Record {
+            identity: SemanticId("mncs:0.2:record-type:m::R".to_owned()),
+            name: "R".to_owned(),
+        };
+        let error = scalar_ty(&record).expect_err("records must fail closed");
+        assert!(error.contains("unsupported"), "{error}");
+        assert!(error.contains('R'), "diagnostic names the record type");
     }
 }

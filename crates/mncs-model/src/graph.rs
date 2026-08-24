@@ -446,7 +446,9 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                         }
                         crate::BodyOperationKind::IntegerCompare { .. }
                         | crate::BodyOperationKind::FiniteConstruct { .. }
-                        | crate::BodyOperationKind::FiniteIsVariant { .. } => None,
+                        | crate::BodyOperationKind::FiniteIsVariant { .. }
+                        | crate::BodyOperationKind::RecordConstruct { .. }
+                        | crate::BodyOperationKind::RecordProject { .. } => None,
                         crate::BodyOperationKind::Call { .. } => {
                             Some(crate::obligations::body_obligation_id(
                                 "call-authority-closure",

@@ -189,6 +189,20 @@ pub(crate) fn argument_bits(value: &ExecutionValue) -> i128 {
         ExecutionValue::Integer { value, .. } => *value,
         ExecutionValue::Boolean { value } => i128::from(*value),
         ExecutionValue::Finite { discriminant, .. } => i128::from(*discriminant),
+        // Record values never cross a scalar process-argument boundary;
+        // callers must reject them before marshalling.
+        ExecutionValue::Record { name, .. } => {
+            panic!("record value {name} cannot marshal to a native argument")
+        }
+    }
+}
+
+pub(crate) fn argument_argv(value: &ExecutionValue) -> Result<String, String> {
+    match value {
+        ExecutionValue::Record { name, .. } => Err(format!(
+            "record value {name} cannot cross the native process argument boundary"
+        )),
+        other => Ok(argument_bits(other).to_string()),
     }
 }
 

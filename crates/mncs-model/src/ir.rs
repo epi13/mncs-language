@@ -21,6 +21,7 @@ pub const HIGH_LEVEL_IR_SCHEMA_VERSION: &str = "0.3";
 pub enum IrType {
     Named(String),
     Finite { identity: SemanticId, name: String },
+    Record { identity: SemanticId, name: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,6 +98,14 @@ pub enum IrOperationKind {
         type_identity: SemanticId,
         variant_identity: SemanticId,
         discriminant: u32,
+    },
+    RecordConstruct {
+        type_identity: SemanticId,
+        field_names: Vec<String>,
+    },
+    RecordProject {
+        type_identity: SemanticId,
+        field: String,
     },
     Call {
         function: SemanticId,
@@ -799,6 +808,32 @@ fn lower_executable_body(
                         None,
                         None,
                     ),
+                    BodyOperationKind::RecordConstruct {
+                        type_identity,
+                        field_names,
+                    } => (
+                        IrOperationKind::RecordConstruct {
+                            type_identity: type_identity.clone(),
+                            field_names: field_names.clone(),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::RecordProject {
+                        type_identity,
+                        field,
+                    } => (
+                        IrOperationKind::RecordProject {
+                            type_identity: type_identity.clone(),
+                            field: field.clone(),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
                     BodyOperationKind::Call {
                         function: callee_identity,
                         function_name,
@@ -1179,22 +1214,36 @@ fn ir_type(ty: &BodyType) -> IrType {
             identity: identity.clone(),
             name: name.clone(),
         },
+        BodyType::Record { identity, name } => IrType::Record {
+            identity: identity.clone(),
+            name: name.clone(),
+        },
         _ => IrType::Named(ty.semantic_name()),
     }
 }
 
 fn ir_type_from_semantic(program: &Program, name: &str) -> IrType {
-    program
+    if let Some(finite_type) = program
         .finite_types
         .iter()
         .find(|finite_type| finite_type.name == name)
-        .map_or_else(
-            || IrType::Named(name.to_owned()),
-            |finite_type| IrType::Finite {
-                identity: finite_type.identity.clone(),
-                name: finite_type.name.clone(),
-            },
-        )
+    {
+        return IrType::Finite {
+            identity: finite_type.identity.clone(),
+            name: finite_type.name.clone(),
+        };
+    }
+    if let Some(record_type) = program
+        .record_types
+        .iter()
+        .find(|record_type| record_type.name == name)
+    {
+        return IrType::Record {
+            identity: record_type.identity.clone(),
+            name: record_type.name.clone(),
+        };
+    }
+    IrType::Named(name.to_owned())
 }
 
 fn declared_effect_identity(

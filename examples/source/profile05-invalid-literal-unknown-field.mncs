@@ -1,0 +1,11 @@
+mncs 0.5;
+
+// Negative fixture: record literals may not invent fields.
+module examples.profile05_unknown_field;
+
+record Reading { celsius: i32 }
+
+fn main(v: i32) -> (result: i32) {
+    let reading: Reading = Reading { celsius: v, fahrenheit: 9 };
+    return reading.celsius;
+}

@@ -337,6 +337,7 @@ pub(crate) mod tests {
             schema_version: SUPPORTED_SCHEMA_VERSION.to_owned(),
             module: "Banking.Transfer".to_owned(),
             finite_types: vec![],
+            record_types: Vec::new(),
             assumptions: vec![Assumption {
                 id: "storage_durability".to_owned(),
                 statement: "committed writes survive process termination".to_owned(),

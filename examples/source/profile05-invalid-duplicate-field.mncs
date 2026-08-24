@@ -1,0 +1,10 @@
+mncs 0.5;
+
+// Negative fixture: duplicate field names cannot be projected uniquely.
+module examples.profile05_duplicate_field;
+
+record Bad { a: i32, a: i32 }
+
+fn main(v: i32) -> (result: i32) {
+    return v;
+}

@@ -10,6 +10,8 @@ pub struct Program {
     #[serde(default)]
     pub finite_types: Vec<FiniteType>,
     #[serde(default)]
+    pub record_types: Vec<RecordType>,
+    #[serde(default)]
     pub assumptions: Vec<Assumption>,
     pub functions: Vec<Function>,
 }
@@ -19,6 +21,27 @@ pub struct FiniteType {
     pub identity: crate::SemanticId,
     pub name: String,
     pub variants: Vec<FiniteVariant>,
+}
+
+/// A logical record type: a labeled product with stable semantic field
+/// identities.  Field order is canonicalized by field name so that two
+/// source declarations naming the same fields with the same types denote one
+/// logical type regardless of source order.  Logical identity never encodes
+/// physical layout; representation is a separately evidenced backend choice.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RecordType {
+    pub identity: crate::SemanticId,
+    pub name: String,
+    /// Fields sorted by name; each names a scalar, finite, or nested record
+    /// semantic type.
+    pub fields: Vec<RecordField>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RecordField {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub field_type: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
