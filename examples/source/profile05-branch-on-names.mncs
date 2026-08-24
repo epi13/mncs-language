@@ -1,0 +1,53 @@
+mncs 0.5;
+
+// Source Profile 0.5 regression fixture: `Name {` is shared between record
+// literals and every expression-followed-by-block construct. Matching on a
+// bare binding, branching on a bare bool, and starting a bounded iteration
+// from a record literal must all parse and execute exactly as they do in
+// Profiles 0.3/0.4; the record literal must still be recognized.
+module examples.profile05_branch_names;
+
+enum Status { PASS, FAIL, UNKNOWN }
+enum Verdict { ACCEPT, BLOCK, DEFER }
+
+record Tally { accept: i32, block: i32 }
+
+fn verdict_for(status: Status, fallback: Status) -> (result: Verdict) {
+    return match status {
+        PASS => Verdict.ACCEPT,
+        FAIL => Verdict.BLOCK,
+        UNKNOWN => match fallback {
+            PASS => Verdict.DEFER,
+            FAIL => Verdict.BLOCK,
+            UNKNOWN => Verdict.DEFER,
+        },
+    };
+}
+
+fn gate(open: bool) -> (result: i32) {
+    if open {
+        return 1;
+    }
+    return 0;
+}
+
+fn tally_step(acc: Tally, verdict: Verdict) -> (result: Tally) {
+    let blocked: bool = match verdict {
+        ACCEPT => false,
+        BLOCK => true,
+        DEFER => false,
+    };
+    if blocked {
+        return Tally { ..acc, block: acc.block + 1 };
+    }
+    return Tally { accept: acc.accept + 1, block: acc.block };
+}
+
+fn tally(status: Status, fallback: Status) -> (result: i32) {
+    iterate rounds up_to 3 carrying acc: Tally = Tally { accept: 0, block: 0 } {
+        let verdict: Verdict = verdict_for(status, fallback);
+        let updated: Tally = tally_step(acc, verdict);
+        next acc = updated;
+    }
+    return acc.accept * 10 + acc.block;
+}
