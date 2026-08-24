@@ -1609,3 +1609,57 @@ fn profile_05_record_negatives_are_rejected_before_execution() {
             .any(|diagnostic| diagnostic["code"] == code));
     }
 }
+
+#[test]
+fn profile_05_matches_and_branches_on_bare_names_still_lower_and_agree() {
+    // Regression: Profile 0.5 record-literal syntax originally captured any
+    // `identifier {` sequence, breaking `match name {`, `if flag {`, and
+    // record-initialized bounded iteration. The layered corpus below also
+    // exercises record-typed call arguments, which the body reference
+    // executor originally rejected while SSA and backends accepted them.
+    let source = example("source/profile05-branch-on-names.mncs");
+    let corpus = example("execution/profile05-branch-on-names-corpus.json");
+    let output = binary()
+        .args([
+            "experiment",
+            "run",
+            &source,
+            "--backend",
+            "mncs-research-bytecode",
+            "--corpus",
+            &corpus,
+        ])
+        .output()
+        .expect("run branch-on-names experiment");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&output.stdout).expect("experiment JSON");
+    // Checked integer arithmetic stays honestly unresolved.
+    assert_eq!(result["status"], "UNKNOWN");
+    for validation in result["translation_validations"].as_array().unwrap() {
+        assert_eq!(validation["judgement"], "PASS");
+    }
+    let cases = result["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 9);
+    assert!(cases
+        .iter()
+        .all(|case_| case_["status"] == "returned" && case_["expectation_met"] == true));
+    // WASM declares records-through-block-parameters outside its envelope and
+    // must refuse the same program instead of approximating it.
+    let wasm = binary()
+        .args([
+            "experiment",
+            "run",
+            &source,
+            "--backend",
+            "mncs-portable-wasm-mvp",
+            "--corpus",
+            &corpus,
+        ])
+        .output()
+        .expect("run branch-on-names on WASM");
+    assert_eq!(wasm.status.code(), Some(1));
+}

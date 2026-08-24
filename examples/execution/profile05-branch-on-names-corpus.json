@@ -1,0 +1,322 @@
+{
+ "schema_version": "0.1",
+ "name": "profile05-branch-on-names-v1",
+ "cases": [
+  {
+   "id": "verdict-pass-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile05_branch_names",
+     "function": "verdict_for"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Status::PASS",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 512
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Verdict",
+      "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Verdict::ACCEPT",
+      "discriminant": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "verdict-fail-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile05_branch_names",
+     "function": "verdict_for"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Status::FAIL",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 512
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Verdict",
+      "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Verdict::BLOCK",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "verdict-unknown-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile05_branch_names",
+     "function": "verdict_for"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 512
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Verdict",
+      "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Verdict::DEFER",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "verdict-unknown-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile05_branch_names",
+     "function": "verdict_for"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Status::FAIL",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 512
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Verdict",
+      "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Verdict::BLOCK",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "gate-open",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile05_branch_names",
+     "function": "gate"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 512
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 32,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "gate-closed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile05_branch_names",
+     "function": "gate"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 512
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 32,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "tally-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile05_branch_names",
+     "function": "tally"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Status::PASS",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 512
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 30,
+      "type": {
+       "bits": 32,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "tally-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile05_branch_names",
+     "function": "tally"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Status::FAIL",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 512
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 3,
+      "type": {
+       "bits": 32,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "tally-defer",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile05_branch_names",
+     "function": "tally"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.profile05_branch_names::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.profile05_branch_names::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 512
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 30,
+      "type": {
+       "bits": 32,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}
