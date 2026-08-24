@@ -38,7 +38,8 @@ impl Program {
     pub fn generate_obligations(&self) -> ObligationGeneration {
         let mut obligations = Vec::new();
         for function in &self.functions {
-            let function_identity = function_id(&self.module, &function.name);
+            let function_identity =
+                function_id(function.identity_namespace(&self.module), &function.name);
             let declared: BTreeSet<_> = function.capabilities.iter().cloned().collect();
             let mut occurrences = BTreeMap::<String, usize>::new();
             for effect in &function.effects {

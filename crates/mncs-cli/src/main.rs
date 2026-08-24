@@ -10,7 +10,9 @@ use mncs_codegen::{
     compare_body_ssa_and_backend, execute_backend, lower_selected_ssa, portable_wasm_plan,
     selected_ssa_ref, target_for_backend, target_is_portable_wasm,
 };
-use mncs_compiler::{native_node_profile, reference_compiler_architecture, ReferenceCompiler};
+use mncs_compiler::{
+    native_node_profile, reference_compiler_architecture, ModuleResolver, ReferenceCompiler,
+};
 use mncs_model::{
     compare_body_and_ssa, compare_execution, execute_ssa, execute_with_policy,
     ArtifactRepresentation, CandidateEvaluation, CausalSlice, ComparisonStatus, CompilationResult,
@@ -713,12 +715,16 @@ where
         source_path.clone(),
         SourceOrigin {
             kind: SourceOriginKind::Path,
-            locator: Some(source_path),
+            locator: Some(source_path.clone()),
         },
         source,
     );
-    let output =
-        ReferenceCompiler::default().run_source_study(envelope, native_node_profile(node_identity));
+    let resolver = FileModuleResolver::for_source(source_path.as_str());
+    let output = ReferenceCompiler::default().run_source_study_with_resolver(
+        envelope,
+        native_node_profile(node_identity.as_str()),
+        &resolver,
+    );
     match output.study {
         Some(study) => {
             if print_json(&study) {
@@ -1286,7 +1292,8 @@ fn prepare_experiment(options: &ExperimentOptions) -> Result<PreparedExperiment,
         }
         program
     } else {
-        let front_end = compiler.front_end(envelope.clone());
+        let resolver = FileModuleResolver::for_source(&options.source_path);
+        let front_end = compiler.front_end_with_resolver(envelope.clone(), &resolver);
         let Some(program) = front_end.program.clone().filter(|_| front_end.is_valid()) else {
             let _ = print_json(&front_end);
             return Err(ExitCode::FAILURE);
@@ -2737,6 +2744,60 @@ fn syntax_tournament(path: &str) -> ExitCode {
 
 fn per_claim_milli(value: usize, claim_count: usize) -> usize {
     value.saturating_mul(1000) / claim_count
+}
+
+/// Resolves imported module names against the directory of the root source
+/// file using the dotted-path convention: `use a.b;` loads `<root>/a/b.mncs`.
+/// The name identifies the candidate only; compatibility is established by
+/// elaborating the resolved module.
+struct FileModuleResolver {
+    root: PathBuf,
+}
+
+impl FileModuleResolver {
+    fn for_source(source_path: &str) -> Self {
+        let mut root = PathBuf::from(source_path);
+        root.pop();
+        Self { root }
+    }
+}
+
+impl ModuleResolver for FileModuleResolver {
+    fn resolve(&self, module: &str) -> Option<SourceEnvelope> {
+        if module.is_empty()
+            || !module
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_')
+            || module.starts_with('.')
+            || module.ends_with('.')
+            || module.contains("..")
+        {
+            return None;
+        }
+        // Two deterministic layouts are supported, tried in order:
+        //   1. the full dotted path beneath the importing file's directory;
+        //   2. a sibling file named after the final path segment.
+        let dotted = module.replace('.', "/");
+        let full_path = self.root.join(format!("{dotted}.mncs"));
+        let tail = module.rsplit('.').next().unwrap_or(module);
+        let sibling_path = self.root.join(format!("{tail}.mncs"));
+        let (path, source) = match fs::read_to_string(&full_path) {
+            Ok(source) => (full_path, source),
+            Err(_) => {
+                let source = fs::read_to_string(&sibling_path).ok()?;
+                (sibling_path, source)
+            }
+        };
+        Some(SourceEnvelope::new(
+            SourceArtifactKind::Program,
+            path.to_string_lossy().to_string(),
+            SourceOrigin {
+                kind: SourceOriginKind::Path,
+                locator: Some(path.to_string_lossy().to_string()),
+            },
+            source,
+        ))
+    }
 }
 
 fn read_source(path: &str) -> Result<String, ExitCode> {

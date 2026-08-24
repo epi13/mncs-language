@@ -178,7 +178,8 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
     }
 
     for function in &program.functions {
-        let function_identity = function_id(&program.module, &function.name);
+        let function_identity =
+            function_id(function.identity_namespace(&program.module), &function.name);
         edges.push(GraphEdge {
             from: program_identity.clone(),
             to: function_identity.clone(),
@@ -384,7 +385,10 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                             }
                             if let Some(callee_function) =
                                 program.functions.iter().find(|candidate| {
-                                    function_id(&program.module, &candidate.name) == *callee
+                                    function_id(
+                                        candidate.identity_namespace(&program.module),
+                                        &candidate.name,
+                                    ) == *callee
                                 })
                             {
                                 for effect in effects {

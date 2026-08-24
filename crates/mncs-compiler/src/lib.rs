@@ -8,7 +8,8 @@ mod frontend;
 mod resolution;
 
 pub use frontend::{
-    elaborate_program, elaborate_program_with_resolutions, SourceFrontEndResult, SourceStudyOutput,
+    elaborate_program, elaborate_program_with_resolutions, elaborate_program_with_resolver,
+    ModuleResolver, NullResolver, SourceFrontEndResult, SourceStudyOutput,
 };
 pub use resolution::{
     NameResolution, NameResolutionIndex, ResolvedNameKind, NAME_RESOLUTION_SCHEMA_VERSION,

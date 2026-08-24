@@ -28,6 +28,7 @@ impl std::fmt::Display for SemanticId {
 #[serde(rename_all = "snake_case")]
 pub enum IdentityKind {
     Program,
+    Module,
     FiniteType,
     FiniteVariant,
     RecordType,
@@ -404,6 +405,13 @@ pub(crate) fn program_id(module: &str) -> SemanticId {
     make_id(IdentityKind::Program, &[module])
 }
 
+/// A module namespace identity. Modules are semantic namespaces, not
+/// compatibility evidence; this identity names the namespace itself so
+/// programs can declare which modules they bind against.
+pub fn module_id(name: &str) -> SemanticId {
+    make_id(IdentityKind::Module, &[name])
+}
+
 pub fn finite_type_id(module: &str, name: &str) -> SemanticId {
     make_id(IdentityKind::FiniteType, &[module, name])
 }
@@ -526,6 +534,7 @@ pub(crate) fn diff_identities(
 fn make_id(kind: IdentityKind, components: &[&str]) -> SemanticId {
     let prefix = match kind {
         IdentityKind::Program => "program",
+        IdentityKind::Module => "module",
         IdentityKind::FiniteType => "finite-type",
         IdentityKind::FiniteVariant => "finite-variant",
         IdentityKind::RecordType => "record-type",
@@ -622,6 +631,38 @@ pub(crate) fn machine_intent_id(
         &[module, function, block, operation],
     )
 }
+
+/// Inverse of [`encode_component`]. Returns `None` when the text contains a
+/// malformed escape.
+pub fn decode_component(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = value.get(index + 1..index + 3)?;
+            let byte = u8::from_str_radix(hex, 16).ok()?;
+            out.push(byte);
+            index += 3;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+impl SemanticId {
+    /// The module namespace named by a module identity, or `None` for any
+    /// other identity kind.
+    pub fn module_name(&self) -> Option<String> {
+        let prefix = format!("{MODULE_ID_PREFIX}:");
+        let rest = self.0.strip_prefix(&prefix)?;
+        decode_component(rest)
+    }
+}
+
+const MODULE_ID_PREFIX: &str = "mncs:0.2:module";
 
 fn encode_component(value: &str) -> String {
     value
