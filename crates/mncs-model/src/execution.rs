@@ -312,7 +312,15 @@ fn execute_inner(
     if !validation.valid {
         return ExecutionResult::invalid(request, "program validation failed");
     }
-    if request.target.module != program.module {
+    // The target may name the program's own module or the home module of
+    // any linked declaration: multi-module programs keep per-module
+    // identities, and every function is executable at its own address.
+    if request.target.module != program.module
+        && !program
+            .functions
+            .iter()
+            .any(|function| function.home_module.as_deref() == Some(request.target.module.as_str()))
+    {
         return ExecutionResult::invalid(request, "execution target module does not match program");
     }
     if request.step_budget == 0 || request.step_budget > MAX_EXECUTION_BUDGET {

@@ -180,7 +180,12 @@ pub fn execute_ssa_module(
             "SSA semantic program identity does not match program",
         );
     }
-    if request.target.module != program.module {
+    if request.target.module != program.module
+        && !program
+            .functions
+            .iter()
+            .any(|function| function.home_module.as_deref() == Some(request.target.module.as_str()))
+    {
         return SsaExecutionResult::invalid(
             request,
             "execution target module does not match program",
@@ -200,7 +205,15 @@ pub fn execute_ssa_module(
     if !module_validation.valid {
         return SsaExecutionResult::invalid(request, "SSA validation failed");
     }
-    let semantic_function = function_id(&program.module, &request.target.function);
+    // Resolve the target against its home module namespace when the target
+    // names a linked declaration rather than a root-module function.
+    let target_namespace = program
+        .functions
+        .iter()
+        .find(|candidate| candidate.name == request.target.function)
+        .map(|candidate| candidate.identity_namespace(&program.module).to_owned())
+        .unwrap_or_else(|| program.module.clone());
+    let semantic_function = function_id(&target_namespace, &request.target.function);
     let Some(function) = module
         .functions
         .iter()
@@ -670,11 +683,12 @@ fn execute_instruction(
             }
         }
         SsaInstructionKind::Call { function, .. } => {
-            let Some(callee) = program
-                .functions
-                .iter()
-                .find(|candidate| function_id(&program.module, &candidate.name) == *function)
-            else {
+            let Some(callee) = program.functions.iter().find(|candidate| {
+                function_id(
+                    candidate.identity_namespace(&program.module),
+                    &candidate.name,
+                ) == *function
+            }) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     instruction_identity(instruction),
