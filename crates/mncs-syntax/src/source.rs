@@ -1007,8 +1007,10 @@ impl<'a> Parser<'a> {
         }
         // A module must declare something: a function, a type, or an import.
         // Vocabulary-only modules (shared enums/records) are legitimate.
-        let declared_anything =
-            !(functions.is_empty() && finite_types.is_empty() && record_types.is_empty());
+        let declared_anything = !(functions.is_empty()
+            && finite_types.is_empty()
+            && record_types.is_empty()
+            && uses.is_empty());
         if !declared_anything {
             self.error(
                 "MNP006",
