@@ -197,6 +197,28 @@ The MNCS Lineage project (`epi13/mncs-lineage`) now builds its succession
 semantics on these capabilities and is an active proving ground for them;
 its conversion record documents the language pressure in detail.
 
+Source Profile 0.6 (experimental) adds module imports with
+elaboration-time linking:
+
+```mncs
+mncs 0.6;
+module app.study;
+use lib.evidence;
+
+fn decide(first: Verdict) -> (result: Verdict) {
+    return combine(first, first);
+}
+```
+
+Each dependency elaborates independently against a host-provided resolver,
+exports bind under collision rules, identities stay anchored to their
+declaring module (`Function.home_module`, `Program.dependencies`), and
+authority closure applies across module boundaries. See
+`docs/source-profile-0.6.md`. MNEL (`epi13/Machine-Native-Experimental-Learning`)
+is the active proving ground for this profile: its MNCS-native
+reconstruction spans eleven linked modules, and its conversion record
+documents what multi-module programs forced the language to answer.
+
 Explore the semantic foundation with the small before/after examples:
 
 ```bash
