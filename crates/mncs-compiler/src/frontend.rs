@@ -807,6 +807,16 @@ fn elaborate_linked_module(
 
     let declarations = DeclarationSpans::from_ast(ast);
     record_annotation_type_resolutions(ast, &declarations, resolutions);
+    let declared_finite_names: BTreeSet<String> = ast
+        .finite_types
+        .iter()
+        .map(|finite| finite.name.text.clone())
+        .collect();
+    let declared_record_names: BTreeSet<String> = ast
+        .record_types
+        .iter()
+        .map(|record| record.name.text.clone())
+        .collect();
     let mut finite_types = Vec::new();
     let mut finite_type_names = BTreeSet::new();
     for declaration in &ast.finite_types {
@@ -821,22 +831,53 @@ fn elaborate_linked_module(
         let mut variant_names = BTreeSet::new();
         let mut variants = Vec::new();
         for (discriminant, variant) in declaration.variants.iter().enumerate() {
-            if !variant_names.insert(variant.text.clone()) {
+            if !variant_names.insert(variant.name.text.clone()) {
                 diagnostics.push(elaboration_diagnostic(
                     "MNE121",
                     "finite variant is duplicated and would create an unreachable match arm",
-                    variant.span,
+                    variant.name.span,
                 ));
                 continue;
             }
+            // Payload fields (Profile 0.6): canonical order, unique names,
+            // types resolvable to supported scalars, finite, or record types.
+            let mut payload_field_names = BTreeSet::new();
+            let mut payload_fields = Vec::new();
+            for field in &variant.fields {
+                if !payload_field_names.insert(field.name.text.clone()) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE170",
+                        "variant payload field identity is duplicated",
+                        field.name.span,
+                    ));
+                    continue;
+                }
+                if profile_scalar_supported(&field.value_type.text).is_none()
+                    && !declared_finite_names.contains(&field.value_type.text)
+                    && !declared_record_names.contains(&field.value_type.text)
+                {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE171",
+                        "variant payload field type does not name a supported scalar, finite, or declared record type",
+                        field.value_type.span,
+                    ));
+                    continue;
+                }
+                payload_fields.push(RecordField {
+                    name: field.name.text.clone(),
+                    field_type: field.value_type.text.clone(),
+                });
+            }
+            payload_fields.sort_by(|left, right| left.name.cmp(&right.name));
             variants.push(FiniteVariant {
                 identity: finite_variant_id(
                     &ast.module.text,
                     &declaration.name.text,
-                    &variant.text,
+                    &variant.name.text,
                 ),
-                name: variant.text.clone(),
+                name: variant.name.text.clone(),
                 discriminant: discriminant as u32,
+                payload: payload_fields,
             });
         }
         finite_types.push(FiniteType {
@@ -1028,8 +1069,8 @@ impl DeclarationSpans {
                 .insert(finite_type.name.text.clone(), finite_type.name.span);
             for variant in &finite_type.variants {
                 declarations.finite_variants.insert(
-                    (finite_type.name.text.clone(), variant.text.clone()),
-                    variant.span,
+                    (finite_type.name.text.clone(), variant.name.text.clone()),
+                    variant.name.span,
                 );
             }
         }
@@ -2273,6 +2314,7 @@ impl<'a> BodyBuilder<'a> {
             AstExpr::FiniteVariant {
                 type_name,
                 variant,
+                fields,
                 span,
             } => {
                 let Some(finite_type) = self.finite_types.get(&type_name.text).cloned() else {
@@ -2337,6 +2379,64 @@ impl<'a> BodyBuilder<'a> {
                         *span,
                     ));
                 }
+                // Payload construction (Profile 0.6): every declared payload
+                // field must be supplied exactly once; operands are emitted
+                // in canonical field order.
+                let mut supplied = BTreeMap::new();
+                for (field_name, field_value) in fields {
+                    if !declared_variant
+                        .payload
+                        .iter()
+                        .any(|field| field.name == field_name.text)
+                    {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE172",
+                            "finite constructor names a payload field the variant does not declare",
+                            field_name.span,
+                        ));
+                        continue;
+                    }
+                    if supplied
+                        .insert(field_name.text.clone(), field_value)
+                        .is_some()
+                    {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE173",
+                            "finite constructor assigns a payload field more than once",
+                            field_name.span,
+                        ));
+                    }
+                }
+                let mut operands = Vec::new();
+                let mut payload_fields = Vec::new();
+                for declared_field in &declared_variant.payload {
+                    let Some(field_value) = supplied.get(&declared_field.name) else {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE174",
+                            "finite constructor omits a declared payload field",
+                            *span,
+                        ));
+                        return None;
+                    };
+                    let expected_field = profile_type(
+                        &declared_field.field_type,
+                        field_value.span(),
+                        self.finite_types,
+                        self.record_types,
+                        diagnostics,
+                    );
+                    let resolved =
+                        self.elaborate_expr(field_value, Some(&expected_field), env, diagnostics)?;
+                    if resolved.ty != expected_field {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE175",
+                            "payload field value type does not match the declared payload field type",
+                            field_value.span(),
+                        ));
+                    }
+                    payload_fields.push(declared_field.name.clone());
+                    operands.push(resolved.id);
+                }
                 let id = self.new_value("e");
                 self.blocks[self.current].operations.push(BodyOperation {
                     id: id.clone(),
@@ -2344,8 +2444,9 @@ impl<'a> BodyBuilder<'a> {
                         type_identity: finite_type.identity.clone(),
                         variant_identity: declared_variant.identity,
                         discriminant: declared_variant.discriminant,
+                        payload_fields,
                     },
-                    operands: Vec::new(),
+                    operands,
                     results: vec![BodyValue {
                         id: id.clone(),
                         ty: ty.clone(),
@@ -2488,6 +2589,27 @@ impl<'a> BodyBuilder<'a> {
                 let mut seen = BTreeSet::new();
                 let mut resolved_arms = Vec::new();
                 for arm in arms {
+                    // A qualified pattern `Type.VARIANT` must name the
+                    // subject's own type.
+                    if let Some(qualifier) = &arm.type_name {
+                        if qualifier.text != *type_name {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE176",
+                                "qualified pattern names a different finite type than the match subject",
+                                qualifier.span,
+                            ));
+                            continue;
+                        }
+                        if let Some(&declaration) =
+                            self.declarations.finite_types.get(&qualifier.text)
+                        {
+                            self.resolutions.push(NameResolution {
+                                occurrence: qualifier.span,
+                                declaration,
+                                kind: ResolvedNameKind::FiniteType,
+                            });
+                        }
+                    }
                     let Some(variant) = finite_type
                         .variants
                         .iter()
@@ -2511,6 +2633,58 @@ impl<'a> BodyBuilder<'a> {
                             kind: ResolvedNameKind::FiniteVariant,
                         });
                     }
+                    // Payload bindings must cover the variant's declared
+                    // payload exactly once each, with no extras.
+                    let mut bindings = Vec::new();
+                    let mut bound_fields = BTreeSet::new();
+                    for (field_name, binding_name) in &arm.bindings {
+                        let Some(declared_field) = variant
+                            .payload
+                            .iter()
+                            .find(|field| field.name == field_name.text)
+                        else {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE177",
+                                "pattern binds a payload field the variant does not declare",
+                                field_name.span,
+                            ));
+                            continue;
+                        };
+                        if !bound_fields.insert(field_name.text.clone()) {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE178",
+                                "pattern binds a payload field more than once",
+                                field_name.span,
+                            ));
+                            continue;
+                        }
+                        let expected_field = profile_type(
+                            &declared_field.field_type,
+                            binding_name.span,
+                            self.finite_types,
+                            self.record_types,
+                            diagnostics,
+                        );
+                        bindings.push((
+                            field_name.text.clone(),
+                            binding_name.clone(),
+                            expected_field,
+                        ));
+                    }
+                    if !arm.ignore_payload && bindings.len() != variant.payload.len() {
+                        let supplied: BTreeSet<_> =
+                            bindings.iter().map(|(field, _, _)| field.clone()).collect();
+                        for field in &variant.payload {
+                            if !supplied.contains(&field.name) {
+                                diagnostics.push(elaboration_diagnostic(
+                                    "MNE179",
+                                    "pattern omits a declared payload field; every payload field must be bound",
+                                    arm.variant.span,
+                                ));
+                            }
+                        }
+                        continue;
+                    }
                     if !seen.insert(variant.identity.clone()) {
                         diagnostics.push(elaboration_diagnostic(
                             "MNE139",
@@ -2519,7 +2693,7 @@ impl<'a> BodyBuilder<'a> {
                         ));
                         continue;
                     }
-                    resolved_arms.push((variant.clone(), &arm.value));
+                    resolved_arms.push((variant.clone(), &arm.value, bindings));
                 }
                 let missing = finite_type
                     .variants
@@ -2551,7 +2725,7 @@ impl<'a> BodyBuilder<'a> {
                     .map(|_| self.new_block())
                     .collect::<Vec<_>>();
                 let mut dispatch = dispatch_start;
-                for (index, ((variant, _), arm_id)) in
+                for (index, ((variant, _, _), arm_id)) in
                     resolved_arms.iter().zip(&arm_ids).enumerate()
                 {
                     self.current = dispatch;
@@ -2597,9 +2771,41 @@ impl<'a> BodyBuilder<'a> {
                     id: result_id.clone(),
                     ty: result_type.clone(),
                 });
-                for ((_, arm_expr), arm_id) in resolved_arms.iter().zip(&arm_ids) {
+                for ((variant, arm_expr, bindings), arm_id) in resolved_arms.iter().zip(&arm_ids) {
                     self.current = self.index_of(arm_id);
                     env.push();
+                    // Bind each payload field to its pattern name via an
+                    // explicit payload projection inside this arm's block.
+                    for (field_name, binding_name, expected_field) in bindings {
+                        let projected = self.new_value(binding_name.text.as_str());
+                        self.blocks[self.current].operations.push(BodyOperation {
+                            id: projected.clone(),
+                            kind: BodyOperationKind::FinitePayloadProject {
+                                type_identity: type_identity.clone(),
+                                variant_identity: variant.identity.clone(),
+                                discriminant: variant.discriminant,
+                                field: field_name.clone(),
+                            },
+                            operands: vec![subject.id.clone()],
+                            results: vec![BodyValue {
+                                id: projected.clone(),
+                                ty: expected_field.clone(),
+                            }],
+                            contracts: Vec::new(),
+                            assumptions: Vec::new(),
+                            machine_intent: None,
+                            lowering: None,
+                            portability: None,
+                        });
+                        env.bind(
+                            binding_name.text.clone(),
+                            projected,
+                            expected_field.clone(),
+                            binding_name.span,
+                            BoundNameKind::Binding,
+                            diagnostics,
+                        );
+                    }
                     if let Some(value) =
                         self.elaborate_expr(arm_expr, Some(&result_type), env, diagnostics)
                     {
@@ -2868,9 +3074,47 @@ impl<'a> BodyBuilder<'a> {
                     ));
                     return None;
                 }
+                // Strict boolean operators (Profile 0.6): both operands are
+                // total bool values; evaluation is not short-circuited.
+                if matches!(op, AstBinaryOp::And | AstBinaryOp::Or) {
+                    let bool_type = BodyType::Named("bool".to_owned());
+                    if left_value.ty != bool_type || right_value.ty != bool_type {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE181",
+                            "boolean operator operands must have type bool",
+                            expr.span(),
+                        ));
+                        return None;
+                    }
+                    let id = self.new_value("b");
+                    self.blocks[self.current].operations.push(BodyOperation {
+                        id: id.clone(),
+                        kind: BodyOperationKind::BooleanOp {
+                            operator: match op {
+                                AstBinaryOp::And => "and".to_owned(),
+                                _ => "or".to_owned(),
+                            },
+                        },
+                        operands: vec![left_value.id, right_value.id],
+                        results: vec![BodyValue {
+                            id: id.clone(),
+                            ty: bool_type.clone(),
+                        }],
+                        contracts: Vec::new(),
+                        assumptions: Vec::new(),
+                        machine_intent: None,
+                        lowering: None,
+                        portability: None,
+                    });
+                    return Some(ResolvedBinding { id, ty: bool_type });
+                }
                 let id = self.new_value("v");
                 let (kind, result_ty) = match op {
-                    AstBinaryOp::Add | AstBinaryOp::Sub | AstBinaryOp::Mul => {
+                    AstBinaryOp::Add
+                    | AstBinaryOp::Sub
+                    | AstBinaryOp::Mul
+                    | AstBinaryOp::Div
+                    | AstBinaryOp::Mod => {
                         let BodyType::Integer(operand_type) = left_value.ty else {
                             diagnostics.push(elaboration_diagnostic(
                                 "MNE120",
@@ -2882,6 +3126,9 @@ impl<'a> BodyBuilder<'a> {
                         let operator = match op {
                             AstBinaryOp::Add => "add",
                             AstBinaryOp::Sub => "sub",
+                            AstBinaryOp::Mul => "mul",
+                            AstBinaryOp::Div => "div",
+                            AstBinaryOp::Mod => "mod",
                             _ => "mul",
                         };
                         (

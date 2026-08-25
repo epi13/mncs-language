@@ -63,6 +63,22 @@ impl IntegerOperation {
             "add" => self.left.checked_add(self.right),
             "sub" => self.left.checked_sub(self.right),
             "mul" => self.left.checked_mul(self.right),
+            // Division by zero and i128::MIN / -1 are the overflow/trap cases;
+            // both evaluate to None and surface as explicit runtime failures.
+            "div" => {
+                if self.right == 0 {
+                    None
+                } else {
+                    self.left.checked_div(self.right)
+                }
+            }
+            "mod" => {
+                if self.right == 0 {
+                    None
+                } else {
+                    self.left.checked_rem(self.right)
+                }
+            }
             "and" | "or" | "xor" if matches!(self.intent, ArithmeticIntent::Wrapping) => bitwise(
                 self.operator.as_str(),
                 self.operand_type,
@@ -81,6 +97,20 @@ impl IntegerOperation {
                     "add" => Some(self.left.wrapping_add(self.right)),
                     "sub" => Some(self.left.wrapping_sub(self.right)),
                     "mul" => Some(self.left.wrapping_mul(self.right)),
+                    "div" => {
+                        if self.right == 0 {
+                            None
+                        } else {
+                            Some(self.left.wrapping_div(self.right))
+                        }
+                    }
+                    "mod" => {
+                        if self.right == 0 {
+                            None
+                        } else {
+                            Some(self.left.wrapping_rem(self.right))
+                        }
+                    }
                     "and" | "or" | "xor" => raw,
                     _ => None,
                 }

@@ -51,6 +51,11 @@ pub enum ExecutionValue {
         type_identity: SemanticId,
         variant_identity: SemanticId,
         discriminant: u32,
+        /// Payload fields in canonical (sorted) name order (Profile 0.6).
+        /// Absent/empty for payload-free variants; the serialized form of
+        /// payload-free values is unchanged.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        payload: Vec<(String, ExecutionValue)>,
     },
     /// A logical record value.  Fields are kept in canonical (sorted) name
     /// order; this is the *logical* value model — no physical layout, offset,
@@ -647,19 +652,118 @@ fn execute_operation(
                 ExecutionValue::Boolean { value },
             );
         }
+        BodyOperationKind::BooleanOp { operator } => {
+            let Some((left, right)) = boolean_operands(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "boolean operation operands were unavailable or not boolean".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let value = match operator.as_str() {
+                "and" => left && right,
+                "or" => left || right,
+                _ => {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        Some(identity.clone()),
+                        format!("unsupported boolean operator {operator:?}"),
+                    );
+                    return Some(result.clone());
+                }
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Boolean { value },
+            );
+        }
         BodyOperationKind::FiniteConstruct {
             type_identity,
             variant_identity,
             discriminant,
+            payload_fields,
         } => {
+            // Payload values arrive in canonical field order via operands.
+            let mut payload = Vec::new();
+            let mut valid = true;
+            for (index, field) in payload_fields.iter().enumerate() {
+                match operation
+                    .operands
+                    .get(index)
+                    .and_then(|operand| values.get(operand))
+                {
+                    Some(value) => payload.push((field.clone(), value.clone())),
+                    None => valid = false,
+                }
+            }
+            if !valid || operation.operands.len() != payload_fields.len() {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "finite constructor payload operand was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            }
             values.insert(
                 operation.results[0].id.clone(),
                 ExecutionValue::Finite {
                     type_identity: type_identity.clone(),
                     variant_identity: variant_identity.clone(),
                     discriminant: *discriminant,
+                    payload,
                 },
             );
+        }
+        BodyOperationKind::FinitePayloadProject {
+            type_identity,
+            variant_identity,
+            discriminant,
+            field,
+        } => {
+            let Some(ExecutionValue::Finite {
+                type_identity: actual_type,
+                variant_identity: actual_variant,
+                discriminant: actual_discriminant,
+                payload,
+            }) = operation
+                .operands
+                .first()
+                .and_then(|operand| values.get(operand))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "payload projection operand was unavailable or not a finite value".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            if actual_type != type_identity
+                || actual_variant != variant_identity
+                || actual_discriminant != discriminant
+                || !valid_finite_value(program, actual_type, actual_variant, *actual_discriminant)
+            {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "payload projection operand has an invalid type/variant/discriminant"
+                        .to_owned(),
+                );
+                return Some(result.clone());
+            }
+            match payload.iter().find(|(name, _)| name == field) {
+                Some((_, value)) => {
+                    values.insert(operation.results[0].id.clone(), value.clone());
+                }
+                None => {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        format!("payload projection field {field:?} was not carried by the value"),
+                    );
+                    return Some(result.clone());
+                }
+            }
         }
         BodyOperationKind::FiniteIsVariant {
             type_identity,
@@ -670,6 +774,7 @@ fn execute_operation(
                 type_identity: actual_type,
                 variant_identity: actual_variant,
                 discriminant: actual_discriminant,
+                ..
             }) = operation
                 .operands
                 .first()
@@ -826,11 +931,13 @@ fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) 
                 type_identity,
                 variant_identity,
                 discriminant,
+                payload,
             },
             BodyType::Finite { identity, .. },
         ) => {
             type_identity == identity
                 && valid_finite_value(program, type_identity, variant_identity, *discriminant)
+                && finite_payload_matches(program, type_identity, variant_identity, payload)
         }
         (
             ExecutionValue::Record {
@@ -866,6 +973,41 @@ fn record_fields_match(
         .fields
         .iter()
         .zip(fields.iter())
+        .all(|(declared, (field_name, field_value))| {
+            field_name == &declared.name
+                && value_matches_named_type(program, field_value, &declared.field_type)
+        })
+}
+
+/// A finite value's payload matches its declared variant when the field sets
+/// agree exactly (both sides keep fields sorted by name) and every payload
+/// value matches its declared semantic type.
+fn finite_payload_matches(
+    program: &Program,
+    type_identity: &SemanticId,
+    variant_identity: &SemanticId,
+    payload: &[(String, ExecutionValue)],
+) -> bool {
+    let Some(declared_payload) = program
+        .finite_types
+        .iter()
+        .find(|decl| &decl.identity == type_identity)
+        .and_then(|finite_type| {
+            finite_type
+                .variants
+                .iter()
+                .find(|variant| &variant.identity == variant_identity)
+        })
+        .map(|variant| variant.payload.clone())
+    else {
+        return payload.is_empty();
+    };
+    if declared_payload.len() != payload.len() {
+        return false;
+    }
+    declared_payload
+        .iter()
+        .zip(payload.iter())
         .all(|(declared, (field_name, field_value))| {
             field_name == &declared.name
                 && value_matches_named_type(program, field_value, &declared.field_type)
@@ -955,10 +1097,12 @@ fn normalize_value(
                 type_identity,
                 variant_identity,
                 discriminant,
+                payload,
             },
             BodyType::Finite { identity, .. },
         ) if type_identity == identity
-            && valid_finite_value(program, type_identity, variant_identity, *discriminant) =>
+            && valid_finite_value(program, type_identity, variant_identity, *discriminant)
+            && finite_payload_matches(program, type_identity, variant_identity, payload) =>
         {
             Some(value.clone())
         }
@@ -991,6 +1135,22 @@ pub(crate) fn valid_finite_value(
                 &variant.identity == variant_identity && variant.discriminant == discriminant
             })
         })
+}
+
+fn boolean_operands(
+    operation: &BodyOperation,
+    values: &BTreeMap<String, ExecutionValue>,
+) -> Option<(bool, bool)> {
+    let [left, right] = operation.operands.as_slice() else {
+        return None;
+    };
+    let Some(ExecutionValue::Boolean { value: left }) = values.get(left) else {
+        return None;
+    };
+    let Some(ExecutionValue::Boolean { value: right }) = values.get(right) else {
+        return None;
+    };
+    Some((*left, *right))
 }
 
 fn integer_operands(
@@ -1030,7 +1190,7 @@ pub(crate) fn compare_integers(
 }
 
 pub(crate) fn integer_operator_supported(operator: &str, intent: ArithmeticIntent) -> bool {
-    matches!(operator, "add" | "sub" | "mul")
+    matches!(operator, "add" | "sub" | "mul" | "div" | "mod")
         || (matches!(operator, "and" | "or" | "xor")
             && matches!(intent, ArithmeticIntent::Wrapping))
 }

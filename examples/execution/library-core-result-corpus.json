@@ -1,0 +1,460 @@
+{
+ "schema_version": "0.1",
+ "name": "library-core-result",
+ "cases": [
+  {
+   "id": "divide-ok",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.result.v1",
+     "function": "divide"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 84,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.result.v1::Result",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.result.v1::Result::Ok",
+      "discriminant": 0,
+      "payload": [
+       [
+        "value",
+        {
+         "integer": {
+          "value": 21,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "divide-zero",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.result.v1",
+     "function": "divide"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.result.v1::Result",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.result.v1::Result::Err",
+      "discriminant": 1,
+      "payload": [
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "bounded-ok",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.result.v1",
+     "function": "bounded_divide"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 100,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.core.result.v1::Gate::floor%3Ai64%3B",
+       "name": "Gate",
+       "fields": [
+        [
+         "floor",
+         {
+          "integer": {
+           "value": 10,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.result.v1::Result",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.result.v1::Result::Ok",
+      "discriminant": 0,
+      "payload": [
+       [
+        "value",
+        {
+         "integer": {
+          "value": 20,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "bounded-below-floor",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.result.v1",
+     "function": "bounded_divide"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.core.result.v1::Gate::floor%3Ai64%3B",
+       "name": "Gate",
+       "fields": [
+        [
+         "floor",
+         {
+          "integer": {
+           "value": 10,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.result.v1::Result",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.result.v1::Result::Err",
+      "discriminant": 1,
+      "payload": [
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 2,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "value-or-ok",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.result.v1",
+     "function": "value_or"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.result.v1::Result",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.result.v1::Result::Ok",
+       "discriminant": 0,
+       "payload": [
+        [
+         "value",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "value-or-err",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.result.v1",
+     "function": "value_or"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.result.v1::Result",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.result.v1::Result::Err",
+       "discriminant": 1,
+       "payload": [
+        [
+         "reason",
+         {
+          "integer": {
+           "value": 2,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "reason-of-ok",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.result.v1",
+     "function": "reason_of"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.result.v1::Result",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.result.v1::Result::Ok",
+       "discriminant": 0,
+       "payload": [
+        [
+         "value",
+         {
+          "integer": {
+           "value": 9,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "reason-of-err",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.result.v1",
+     "function": "reason_of"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.result.v1::Result",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.result.v1::Result::Err",
+       "discriminant": 1,
+       "payload": [
+        [
+         "reason",
+         {
+          "integer": {
+           "value": 2,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

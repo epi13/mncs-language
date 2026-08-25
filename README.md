@@ -38,6 +38,7 @@ An MNCS-oriented program should make it possible to answer:
 - `crates/mncs-syntax/` — source envelopes, lossless tokens/CST, a bounded spanned AST/parser, and deterministic source-representation metrics.
 - `crates/mncs-cli/` — validation, canonicalization, identity, graph/CFG, evidence, IR, SSA, obligation, verification, comparison, diagnostic, diff, compile, backend execution, translation validation, and syntax-tournament commands.
 - `examples/` — semantic manifests, competing source candidates, canonical semantic forms, machine-intent sketches, and semantic patches.
+- `library/` — the MNCS standard library written in MNCS source itself (`mncs.core.status/logic/ordering/result.v1`, Profile 0.5/0.6), with bounded corpora under `examples/execution/library-core-*`. See [the library README](library/README.md) and [Source Profile 0.6](docs/source-profile-0.6.md).
 
 Canonical semantic JSON remains an experimental bootstrap transport. Source Profile 0.1 is an executable but intentionally narrow grammar experiment, not a selected production grammar.
 

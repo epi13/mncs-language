@@ -1,0 +1,14 @@
+mncs 0.6;
+
+// Negative fixture: the match omits the Block variant entirely, so it is
+// non-exhaustive over the declared finite type (MNE140).
+module examples.profile06_invalid_payload_match_missing;
+
+enum Verdict { Accept { score: i32 }, Block { reason: i32 }, Defer }
+
+fn severity(verdict: Verdict) -> (result: i32) {
+    return match verdict {
+        Accept { score } => score,
+        Defer { } => 1,
+    };
+}

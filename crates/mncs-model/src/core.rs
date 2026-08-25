@@ -53,6 +53,12 @@ pub struct FiniteVariant {
     pub identity: crate::SemanticId,
     pub name: String,
     pub discriminant: u32,
+    /// Payload fields (Profile 0.6 sums). Empty for payload-free variants;
+    /// serialized form of payload-free variants is unchanged. Fields are kept
+    /// in canonical (sorted) name order; logical field identity is separate
+    /// from any backend layout.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub payload: Vec<RecordField>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -620,20 +620,114 @@ fn execute_instruction(
                 values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
             }
         }
+        SsaInstructionKind::BooleanOp { operator } => {
+            let Some((left, right)) = boolean_operands(instruction, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "boolean operation operands were unavailable or not boolean",
+                );
+                return true;
+            };
+            let value = match operator.as_str() {
+                "and" => left && right,
+                "or" => left || right,
+                _ => {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        instruction_identity(instruction),
+                        format!("unsupported boolean operator {operator:?}"),
+                    );
+                    return true;
+                }
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
+            }
+        }
         SsaInstructionKind::FiniteConstruct {
             type_identity,
             variant_identity,
             discriminant,
+            payload_fields,
         } => {
             if let Some(output) = instruction.outputs.first() {
+                let mut payload = Vec::new();
+                let mut available = true;
+                for (index, field) in payload_fields.iter().enumerate() {
+                    match values.get(instruction.inputs.get(index).unwrap_or(&output.identity)) {
+                        Some(value) => payload.push((field.clone(), value.clone())),
+                        None => available = false,
+                    }
+                }
+                if !available || instruction.inputs.len() != payload_fields.len() {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "finite constructor payload operand was unavailable",
+                    );
+                    return true;
+                }
                 values.insert(
                     output.identity.clone(),
                     ExecutionValue::Finite {
                         type_identity: type_identity.clone(),
                         variant_identity: variant_identity.clone(),
                         discriminant: *discriminant,
+                        payload,
                     },
                 );
+            }
+        }
+        SsaInstructionKind::FinitePayloadProject {
+            type_identity,
+            variant_identity,
+            discriminant,
+            field,
+        } => {
+            let Some(ExecutionValue::Finite {
+                type_identity: actual_type,
+                variant_identity: actual_variant,
+                discriminant: actual_discriminant,
+                payload,
+            }) = instruction
+                .inputs
+                .first()
+                .and_then(|input| values.get(input))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "payload projection operand was unavailable or not a finite value",
+                );
+                return true;
+            };
+            if actual_type != type_identity
+                || actual_variant != variant_identity
+                || actual_discriminant != discriminant
+            {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "payload projection operand has an invalid type/variant/discriminant",
+                );
+                return true;
+            }
+            match payload.iter().find(|(name, _)| name == field) {
+                Some((_, value)) => {
+                    if let Some(output) = instruction.outputs.first() {
+                        let output_identity = output.identity.clone();
+                        values.insert(output_identity, value.clone());
+                    }
+                }
+                None => {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        format!("payload projection field {field:?} was not carried by the value"),
+                    );
+                    return true;
+                }
             }
         }
         SsaInstructionKind::FiniteIsVariant {
@@ -645,6 +739,7 @@ fn execute_instruction(
                 type_identity: actual_type,
                 variant_identity: actual_variant,
                 discriminant: actual_discriminant,
+                ..
             }) = instruction
                 .inputs
                 .first()
@@ -857,6 +952,7 @@ fn initialize_inputs(
             type_identity,
             variant_identity,
             discriminant,
+            ..
         } = argument
         {
             if !crate::execution::valid_finite_value(
@@ -902,6 +998,22 @@ fn assign_block_arguments(
         destination.insert(parameter.identity.clone(), value);
     }
     true
+}
+
+fn boolean_operands(
+    instruction: &SsaInstruction,
+    values: &BTreeMap<SemanticId, ExecutionValue>,
+) -> Option<(bool, bool)> {
+    let [left, right] = instruction.inputs.as_slice() else {
+        return None;
+    };
+    let Some(ExecutionValue::Boolean { value: left }) = values.get(left) else {
+        return None;
+    };
+    let Some(ExecutionValue::Boolean { value: right }) = values.get(right) else {
+        return None;
+    };
+    Some((*left, *right))
 }
 
 fn integer_operands(

@@ -1,0 +1,15 @@
+mncs 0.6;
+
+// Negative fixture: the pattern binds `points`, which no variant declares as
+// a payload field (MNE177).
+module examples.profile06_invalid_payload_pattern_unknown_field;
+
+enum Verdict { Accept { score: i32 }, Block { reason: i32 }, Defer }
+
+fn severity(verdict: Verdict) -> (result: i32) {
+    return match verdict {
+        Accept { points } => points,
+        Block { reason } => reason,
+        Defer { } => 1,
+    };
+}

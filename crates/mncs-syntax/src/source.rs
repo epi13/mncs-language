@@ -262,8 +262,12 @@ pub enum TokenKind {
     Plus,
     Minus,
     Star,
+    Slash,
+    Percent,
     EqEq,
     NotEq,
+    AndAnd,
+    OrOr,
     Lt,
     Gt,
     Le,
@@ -426,6 +430,10 @@ pub enum AstBinaryOp {
     Add,
     Sub,
     Mul,
+    Div,
+    Mod,
+    And,
+    Or,
     Eq,
     Ne,
     Lt,
@@ -448,6 +456,10 @@ pub enum AstExpr {
     FiniteVariant {
         type_name: SpannedText,
         variant: SpannedText,
+        /// Payload fields for qualified payload construction
+        /// (`Type.Variant { field: expr }`, Profile 0.6).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        fields: Vec<(SpannedText, AstExpr)>,
         span: SourceSpan,
     },
     Call {
@@ -498,7 +510,18 @@ impl AstExpr {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AstMatchArm {
+    /// Optional qualifying type name (`Type.VARIANT` patterns).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_name: Option<SpannedText>,
     pub variant: SpannedText,
+    /// Payload field bindings (`Variant { field: binding }` or the shorthand
+    /// `Variant { field }`). Every payload field of the matched variant must
+    /// be bound exactly once unless the wildcard `{ .. }` ignores the payload.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bindings: Vec<(SpannedText, SpannedText)>,
+    /// Set by the `{ .. }` wildcard: the payload is carried but not observed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ignore_payload: bool,
     pub value: AstExpr,
     pub span: SourceSpan,
 }
@@ -569,9 +592,18 @@ pub struct AstFunction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AstFiniteVariant {
+    pub name: SpannedText,
+    /// Payload fields (Profile 0.6). Empty for payload-free variants; the
+    /// serialized form of payload-free variants is unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<AstRecordField>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AstFiniteType {
     pub name: SpannedText,
-    pub variants: Vec<SpannedText>,
+    pub variants: Vec<AstFiniteVariant>,
     pub span: SourceSpan,
 }
 
@@ -711,6 +743,12 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
         } else if source[start..].starts_with("=>") {
             offset += 2;
             TokenKind::FatArrow
+        } else if source[start..].starts_with("&&") {
+            offset += 2;
+            TokenKind::AndAnd
+        } else if source[start..].starts_with("||") {
+            offset += 2;
+            TokenKind::OrOr
         } else if source[start..].starts_with("==") {
             offset += 2;
             TokenKind::EqEq
@@ -802,6 +840,8 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                 '+' => TokenKind::Plus,
                 '-' => TokenKind::Minus,
                 '*' => TokenKind::Star,
+                '/' => TokenKind::Slash,
+                '%' => TokenKind::Percent,
                 '<' => TokenKind::Lt,
                 '>' => TokenKind::Gt,
                 '=' => TokenKind::Equal,
@@ -1114,10 +1154,64 @@ impl<'a> Parser<'a> {
         let mut children = Vec::new();
         while self.current_kind() == Some(TokenKind::Identifier) {
             let variant_start = self.current_token_index();
+            let mut variant_fields = Vec::new();
             if let Some(variant) =
                 self.spanned(TokenKind::Identifier, "MNP073", "expected variant name")
             {
-                variants.push(variant);
+                if self.current_kind() == Some(TokenKind::LeftBrace)
+                    && matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_6)
+                {
+                    // Payload variant: `Name { field: Type, ... }` with the
+                    // same field syntax as record declarations.
+                    self.cursor += 1;
+                    while let Some(field_name) = self.spanned(
+                        TokenKind::Identifier,
+                        "MNP132",
+                        "expected payload field name",
+                    ) {
+                        self.expect(
+                            TokenKind::Colon,
+                            "MNP133",
+                            "expected ':' after payload field name",
+                        );
+                        let Some(field_type) = self.spanned(
+                            TokenKind::Identifier,
+                            "MNP134",
+                            "expected payload field type",
+                        ) else {
+                            break;
+                        };
+                        let field_span = SourceSpan::covering(
+                            &self.envelope.text,
+                            field_name.span,
+                            field_type.span,
+                        );
+                        variant_fields.push(AstRecordField {
+                            name: field_name,
+                            value_type: field_type,
+                            span: field_span,
+                        });
+                        if self.current_kind() != Some(TokenKind::Comma) {
+                            break;
+                        }
+                        self.cursor += 1;
+                    }
+                    self.expect(
+                        TokenKind::RightBrace,
+                        "MNP135",
+                        "expected '}' after payload fields",
+                    );
+                } else if self.current_kind() == Some(TokenKind::LeftBrace) {
+                    self.error(
+                        "MNP076",
+                        "payload variant fields require source profile 0.6",
+                        vec![TokenKind::RightBrace],
+                    );
+                }
+                variants.push(AstFiniteVariant {
+                    name: variant,
+                    fields: variant_fields,
+                });
             }
             let variant_end = self.previous_token_index(variant_start);
             children.push(self.node(
@@ -1716,9 +1810,55 @@ impl<'a> Parser<'a> {
                         "expected finite variant or field after '.'",
                     )?;
                     let span = SourceSpan::covering(&self.envelope.text, name.span, variant.span);
+                    // Qualified payload construction: `Type.Variant { ... }`
+                    // (Profile 0.6). The lookahead distinguishes it from a
+                    // projection chain by checking for a literal-opening '{'.
+                    if self.at_payload_construct()
+                        && matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_6)
+                    {
+                        self.cursor += 1;
+                        let mut fields = Vec::new();
+                        while self.current_kind() != Some(TokenKind::RightBrace)
+                            && self.cursor < self.significant.len()
+                        {
+                            let Some(field_name) = self.spanned(
+                                TokenKind::Identifier,
+                                "MNP140",
+                                "expected payload field name",
+                            ) else {
+                                break;
+                            };
+                            self.expect(
+                                TokenKind::Colon,
+                                "MNP141",
+                                "expected ':' after payload field name",
+                            );
+                            let field_value = self.expression()?;
+                            fields.push((field_name, field_value));
+                            if self.current_kind() != Some(TokenKind::Comma) {
+                                break;
+                            }
+                            self.cursor += 1;
+                        }
+                        let end = self
+                            .expect(
+                                TokenKind::RightBrace,
+                                "MNP142",
+                                "expected '}' after payload fields",
+                            )
+                            .and_then(|index| self.tokens.get(index))
+                            .map_or(span, |token| token.span);
+                        return Some(AstExpr::FiniteVariant {
+                            type_name: name,
+                            variant,
+                            fields,
+                            span: SourceSpan::covering(&self.envelope.text, span, end),
+                        });
+                    }
                     let base = AstExpr::FiniteVariant {
                         type_name: name,
                         variant,
+                        fields: Vec::new(),
                         span,
                     };
                     self.project_chain(base)
@@ -1834,6 +1974,20 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// After `Type.Variant`, does a `{` open a payload construction? The
+    /// first token inside must start a field list (`field:`) or close the
+    /// (possibly empty) payload, mirroring [`Self::at_record_literal`].
+    fn at_payload_construct(&self) -> bool {
+        if self.current_kind() != Some(TokenKind::LeftBrace) {
+            return false;
+        }
+        match self.peek_kind(1) {
+            Some(TokenKind::Identifier) => matches!(self.peek_kind(2), Some(TokenKind::Colon)),
+            Some(TokenKind::RightBrace) => true,
+            _ => false,
+        }
+    }
+
     fn peek_kind(&self, offset: usize) -> Option<TokenKind> {
         let index = *self.significant.get(self.cursor + offset)?;
         Some(self.tokens.get(index)?.kind)
@@ -1914,8 +2068,66 @@ impl<'a> Parser<'a> {
         );
         let mut arms = Vec::new();
         while self.current_kind() == Some(TokenKind::Identifier) {
-            let variant =
-                self.spanned(TokenKind::Identifier, "MNP082", "expected match variant")?;
+            let first = self.spanned(TokenKind::Identifier, "MNP082", "expected match variant")?;
+            // Qualified pattern `Type.VARIANT` (Profile 0.6) or the bare
+            // variant name accepted by every profile.
+            let mut type_name = None;
+            let mut variant = first;
+            if self.current_kind() == Some(TokenKind::Dot)
+                && matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_6)
+            {
+                self.cursor += 1;
+                type_name = Some(variant.clone());
+                variant = self.spanned(
+                    TokenKind::Identifier,
+                    "MNP136",
+                    "expected variant name after '.'",
+                )?;
+            }
+            // Payload bindings: `VARIANT { field: binding }` with the
+            // `{ field }` shorthand, or the wildcard `{ .. }` which ignores
+            // the whole payload. In arm-pattern position a '{' can only open
+            // bindings.
+            let mut bindings = Vec::new();
+            let mut ignore_payload = false;
+            if self.current_kind() == Some(TokenKind::LeftBrace)
+                && matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_6)
+            {
+                self.cursor += 1;
+                if self.current_kind() == Some(TokenKind::DotDot) {
+                    self.cursor += 1;
+                    ignore_payload = true;
+                }
+                while self.current_kind() == Some(TokenKind::Identifier) {
+                    let Some(field_name) = self.spanned(
+                        TokenKind::Identifier,
+                        "MNP137",
+                        "expected payload field binding",
+                    ) else {
+                        break;
+                    };
+                    let binding = if self.current_kind() == Some(TokenKind::Colon) {
+                        self.cursor += 1;
+                        self.spanned(
+                            TokenKind::Identifier,
+                            "MNP138",
+                            "expected binding name after ':'",
+                        )?
+                    } else {
+                        field_name.clone()
+                    };
+                    bindings.push((field_name, binding));
+                    if self.current_kind() != Some(TokenKind::Comma) {
+                        break;
+                    }
+                    self.cursor += 1;
+                }
+                self.expect(
+                    TokenKind::RightBrace,
+                    "MNP139",
+                    "expected '}' after payload bindings",
+                );
+            }
             self.expect(
                 TokenKind::FatArrow,
                 "MNP083",
@@ -1924,7 +2136,10 @@ impl<'a> Parser<'a> {
             let arm_value = self.expression()?;
             let span = SourceSpan::covering(&self.envelope.text, variant.span, arm_value.span());
             arms.push(AstMatchArm {
+                type_name,
                 variant,
+                bindings,
+                ignore_payload,
                 value: arm_value,
                 span,
             });
@@ -2006,16 +2221,14 @@ impl<'a> Parser<'a> {
     }
 
     fn qualified_name(&mut self) -> Option<SpannedText> {
-        let first = self.spanned(TokenKind::Identifier, "MNP030", "expected module name")?;
+        let first = self.name_segment("MNP030", "expected module name")?;
         let mut text = first.text.clone();
         let mut end = first.span;
         while self.current_kind() == Some(TokenKind::Dot) {
             self.cursor += 1;
-            let Some(segment) = self.spanned(
-                TokenKind::Identifier,
-                "MNP031",
-                "expected module name segment after '.'",
-            ) else {
+            let Some(segment) =
+                self.name_segment("MNP031", "expected module name segment after '.'")
+            else {
                 break;
             };
             text.push('.');
@@ -2026,6 +2239,27 @@ impl<'a> Parser<'a> {
             text,
             span: SourceSpan::covering(&self.envelope.text, first.span, end),
         })
+    }
+
+    /// One dotted-name segment. The header keyword `mncs` is accepted here so
+    /// standard-library modules can be named `mncs.core.*`; no earlier profile
+    /// admitted such names, so this is purely additive.
+    fn name_segment(&mut self, code: &str, message: &str) -> Option<SpannedText> {
+        match self.current_kind() {
+            Some(TokenKind::Identifier) | Some(TokenKind::MncsKeyword) => {}
+            _ => {
+                self.error(code, message, vec![TokenKind::Identifier]);
+                return None;
+            }
+        }
+        let index = self.significant[self.cursor];
+        let token = &self.tokens[index];
+        let segment = SpannedText {
+            text: token.text.clone(),
+            span: token.span,
+        };
+        self.cursor += 1;
+        Some(segment)
     }
 
     fn spanned(&mut self, kind: TokenKind, code: &str, message: &str) -> Option<SpannedText> {
@@ -2149,15 +2383,19 @@ fn is_identifier_start(value: char) -> bool {
 
 fn binary_operator(kind: Option<TokenKind>) -> Option<(AstBinaryOp, u8)> {
     Some(match kind? {
-        TokenKind::EqEq => (AstBinaryOp::Eq, 1),
-        TokenKind::NotEq => (AstBinaryOp::Ne, 1),
-        TokenKind::Lt => (AstBinaryOp::Lt, 2),
-        TokenKind::Le => (AstBinaryOp::Le, 2),
-        TokenKind::Gt => (AstBinaryOp::Gt, 2),
-        TokenKind::Ge => (AstBinaryOp::Ge, 2),
-        TokenKind::Plus => (AstBinaryOp::Add, 3),
-        TokenKind::Minus => (AstBinaryOp::Sub, 3),
-        TokenKind::Star => (AstBinaryOp::Mul, 4),
+        TokenKind::OrOr => (AstBinaryOp::Or, 1),
+        TokenKind::AndAnd => (AstBinaryOp::And, 2),
+        TokenKind::EqEq => (AstBinaryOp::Eq, 3),
+        TokenKind::NotEq => (AstBinaryOp::Ne, 3),
+        TokenKind::Lt => (AstBinaryOp::Lt, 4),
+        TokenKind::Le => (AstBinaryOp::Le, 4),
+        TokenKind::Gt => (AstBinaryOp::Gt, 4),
+        TokenKind::Ge => (AstBinaryOp::Ge, 4),
+        TokenKind::Plus => (AstBinaryOp::Add, 5),
+        TokenKind::Minus => (AstBinaryOp::Sub, 5),
+        TokenKind::Star => (AstBinaryOp::Mul, 6),
+        TokenKind::Slash => (AstBinaryOp::Div, 6),
+        TokenKind::Percent => (AstBinaryOp::Mod, 6),
         _ => return None,
     })
 }

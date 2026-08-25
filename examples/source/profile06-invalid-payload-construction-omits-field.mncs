@@ -1,0 +1,14 @@
+mncs 0.6;
+
+// Negative fixture: constructing Accept without its declared `score` payload
+// field must be rejected (MNE174).
+module examples.profile06_invalid_payload_construction_omits_field;
+
+enum Verdict { Accept { score: i32 }, Block { reason: i32 }, Defer }
+
+fn pick(flag: bool) -> (result: Verdict) {
+    if flag {
+        return Verdict.Accept { };
+    }
+    return Verdict.Defer { };
+}

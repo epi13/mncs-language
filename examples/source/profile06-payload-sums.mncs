@@ -1,0 +1,31 @@
+mncs 0.6;
+
+// Source Profile 0.6 positive fixture: payload-bearing finite variants carry
+// their data through construction, exhaustive matching with payload binders,
+// and function boundaries. This is the language-owned answer to "result with
+// reason" shapes; wide placeholder records are no longer required.
+//
+// Payload semantics are logical: a variant value is its discriminant plus a
+// canonical (name-sorted) set of payload values. No physical layout is part
+// of the meaning. Reference executors realize sums fully; scalar backends
+// refuse them explicitly for now.
+module examples.profile06_payload_sums;
+
+enum Verdict { Accept { score: i32 }, Block { reason: i32 }, Defer }
+
+record Gate { floor: i32 }
+
+fn classify(score: i32, gate: Gate) -> (result: Verdict) {
+    if score >= gate.floor + 0 {
+        return Verdict.Accept { score: score };
+    }
+    return Verdict.Block { reason: score - gate.floor };
+}
+
+fn severity(verdict: Verdict) -> (result: i32) {
+    return match verdict {
+        Verdict.Accept { score } => score,
+        Block { reason } => 0 - reason,
+        Defer { } => 1,
+    };
+}

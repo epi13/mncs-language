@@ -1,0 +1,536 @@
+{
+ "schema_version": "0.1",
+ "name": "library-core-logic",
+ "cases": [
+  {
+   "id": "not-true",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_not"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "not-false",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_not"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "and-false-false",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_and"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "or-false-false",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_or"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "implies-false-false",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_implies"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "xor-false-false",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_xor"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "and-false-true",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_and"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "or-false-true",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_or"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "implies-false-true",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_implies"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "xor-false-true",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_xor"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "and-true-false",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_and"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "or-true-false",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_or"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "implies-true-false",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_implies"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "xor-true-false",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_xor"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "and-true-true",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_and"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "or-true-true",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_or"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "implies-true-true",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_implies"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "xor-true-true",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.core.logic.v1",
+     "function": "bool_xor"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  }
+ ]
+}

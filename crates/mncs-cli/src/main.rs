@@ -408,16 +408,9 @@ where
             return ExitCode::from(2);
         }
     };
-    let program_input = match read_source(&program_path) {
-        Ok(input) => input,
-        Err(code) => return code,
-    };
-    let program = match Program::from_json(&program_input) {
+    let program = match read_program_for_execution(&program_path) {
         Ok(program) => program,
-        Err(error) => {
-            eprintln!("error: invalid semantic manifest: {error}");
-            return ExitCode::from(2);
-        }
+        Err(code) => return code,
     };
     let result = execute_with_policy(&program, &request);
     let status = result.status;
@@ -2293,6 +2286,14 @@ fn write_pretty_json(path: PathBuf, value: &impl Serialize) -> Result<(), std::i
 }
 
 fn read_program_for_execution(path: &str) -> Result<Program, ExitCode> {
+    // Source programs take the same elaboration bridge as every other
+    // manifest-consuming command.
+    if Path::new(path)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("mncs"))
+    {
+        return load_program(path);
+    }
     let input = read_source(path)?;
     Program::from_json(&input).map_err(|error| {
         eprintln!("error: {error}");

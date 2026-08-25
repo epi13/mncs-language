@@ -1,0 +1,330 @@
+{
+ "schema_version": "0.1",
+ "name": "library-core-ravel-differential",
+ "cases": [
+  {
+   "id": "ravel-dominate-pass-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "ravel.core.v1",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::PASS",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::PASS",
+      "discriminant": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "ravel-dominate-pass-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "ravel.core.v1",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::PASS",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::FAIL",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "ravel-dominate-pass-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "ravel.core.v1",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::PASS",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "ravel-dominate-fail-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "ravel.core.v1",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::FAIL",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "ravel-dominate-fail-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "ravel.core.v1",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::FAIL",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::FAIL",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "ravel-dominate-fail-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "ravel.core.v1",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::FAIL",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "ravel-dominate-unknown-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "ravel.core.v1",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "ravel-dominate-unknown-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "ravel.core.v1",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::FAIL",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "ravel-dominate-unknown-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "ravel.core.v1",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:ravel.core.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:ravel.core.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  }
+ ]
+}
