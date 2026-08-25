@@ -18,6 +18,7 @@ cranelift-frontend = "0.121"
 cranelift-module = "0.121"
 cranelift-jit = "0.121"
 cranelift-native = "0.121"
+cranelift-object = "0.121"
 
 [dev-dependencies]
 mncs-syntax = { path = "../mncs-syntax" }

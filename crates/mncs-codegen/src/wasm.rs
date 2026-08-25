@@ -456,9 +456,9 @@ impl Runtime {
     fn allocate(&mut self, bytes: u32) -> Result<i64, WasmTrap> {
         const BUMP_GLOBAL: u32 = 0;
         let current = self.globals.get(BUMP_GLOBAL as usize).copied().unwrap_or(8);
-        let aligned = i64::from((bytes + 7) / 8 * 8);
+        let aligned = i64::from(bytes.div_ceil(8) * 8);
         let next = current
-            .checked_add(i64::from(aligned))
+            .checked_add(aligned)
             .ok_or_else(|| trap(ExecutionStatus::RuntimeFailure, "arena pointer overflow"))?;
         if usize::try_from(next)
             .map(|next| next > self.memory.len())
@@ -474,65 +474,6 @@ impl Runtime {
         }
         Ok(current)
     }
-}
-
-pub fn execute_function(
-    module: &WasmModule,
-    name: &str,
-    arguments: &[ExecutionValue],
-    step_budget: u64,
-) -> Result<WasmExecution, WasmTrap> {
-    let mut runtime = Runtime::new(module);
-    execute_function_with_runtime(module, &mut runtime, name, arguments, step_budget)
-}
-
-pub fn execute_function_with_runtime(
-    module: &WasmModule,
-    runtime: &mut Runtime,
-    name: &str,
-    arguments: &[ExecutionValue],
-    step_budget: u64,
-) -> Result<WasmExecution, WasmTrap> {
-    let function_index = module
-        .functions
-        .iter()
-        .position(|function| function.name == name)
-        .ok_or_else(|| {
-            trap(
-                ExecutionStatus::InvalidRequest,
-                "backend export does not exist",
-            )
-        })?;
-    let function = &module.functions[function_index];
-    if arguments.len() != function.params.len() {
-        return Err(trap(
-            ExecutionStatus::InvalidRequest,
-            "backend argument count does not match the exported function",
-        ));
-    }
-    let mut steps = 0_u64;
-    let opcode_budget = step_budget.saturating_mul(32).max(1);
-    let raw_arguments = arguments
-        .iter()
-        .zip(&function.params)
-        .map(|(argument, ty)| value_to_local(argument, *ty))
-        .collect::<Result<Vec<_>, _>>()?;
-    let returned = execute_raw(
-        module,
-        runtime,
-        function_index,
-        raw_arguments,
-        opcode_budget,
-        &mut steps,
-        0,
-    )?;
-    let returned = function
-        .results
-        .iter()
-        .zip(returned)
-        .map(|(ty, value)| local_to_value(value, *ty))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(WasmExecution { returned, steps })
 }
 
 fn execute_raw(
@@ -1021,13 +962,6 @@ impl MarshalTy {
     fn is_boxed(&self) -> bool {
         matches!(self, Self::BoxedFinite(_) | Self::Record(_))
     }
-
-    fn expect_integer(&self) -> Option<IntegerType> {
-        match self {
-            Self::Int(integer) => Some(*integer),
-            _ => None,
-        }
-    }
 }
 
 fn write_marshal(
@@ -1286,38 +1220,6 @@ pub fn execute_function_typed(
         });
     }
     Ok(WasmExecution { returned, steps })
-}
-
-fn value_to_local(value: &ExecutionValue, ty: ValType) -> Result<i64, WasmTrap> {
-    match (value, ty) {
-        (ExecutionValue::Integer { value, .. }, ValType::I32) => Ok(*value as i32 as i64),
-        (ExecutionValue::Integer { value, .. }, ValType::I64) => Ok(*value as i64),
-        (ExecutionValue::Boolean { value }, ValType::I32) => Ok(i64::from(*value)),
-        (ExecutionValue::Finite { discriminant, .. }, ValType::I32) => Ok(i64::from(*discriminant)),
-        _ => Err(trap(
-            ExecutionStatus::InvalidRequest,
-            "backend argument does not match the WASM parameter type",
-        )),
-    }
-}
-
-fn local_to_value(value: i64, ty: ValType) -> Result<ExecutionValue, WasmTrap> {
-    match ty {
-        ValType::I32 => Ok(ExecutionValue::Integer {
-            value: i128::from(value as i32),
-            ty: IntegerType {
-                bits: 32,
-                signed: true,
-            },
-        }),
-        ValType::I64 => Ok(ExecutionValue::Integer {
-            value: i128::from(value),
-            ty: IntegerType {
-                bits: 64,
-                signed: true,
-            },
-        }),
-    }
 }
 
 fn emit_section(bytes: &mut Vec<u8>, id: u8, write: impl FnOnce(&mut Vec<u8>)) {

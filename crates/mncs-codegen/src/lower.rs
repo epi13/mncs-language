@@ -88,20 +88,6 @@ enum SlotWidth {
     W64,
 }
 
-impl SlotWidth {
-    fn bytes(self) -> u32 {
-        match self {
-            SlotWidth::W32 => 4,
-            SlotWidth::W64 => 8,
-        }
-    }
-    // Every slot occupies a full 8-byte cell so pointers stay aligned.
-    fn stride(self) -> u32 {
-        let _ = self;
-        8
-    }
-}
-
 /// Per-type realization facts derived from the language-owned program.
 #[derive(Debug, Clone, Default)]
 struct CompositeInfo {
@@ -172,7 +158,7 @@ fn lower_function(
     if function.outputs.len() != 1 {
         return Err("portable WASM MVP requires exactly one result".to_owned());
     }
-    let mut layout = layout_function(function, function_indices, composites)?;
+    let layout = layout_function(function, function_indices, composites)?;
     let result_ty = *layout
         .types
         .get(&function.outputs[0].identity)
@@ -481,7 +467,7 @@ fn lower_instruction(
                 }
                 let operand = operand_local(layout, instruction, index)?;
                 body.push(Instr::LocalGet(dest));
-                emit_offset(body, ((index * 8) as i32));
+                emit_offset(body, (index * 8) as i32);
                 body.push(Instr::LocalGet(operand));
                 store_width(*width, body);
             }
@@ -503,7 +489,7 @@ fn lower_instruction(
             let dest = dest_local(layout, instruction)?;
             let value = operand_local(layout, instruction, 0)?;
             body.push(Instr::LocalGet(value));
-            emit_offset(body, ((index * 8) as i32));
+            emit_offset(body, (index * 8) as i32);
             load_instr(fields[index].1, body);
             body.push(Instr::LocalSet(dest));
         }

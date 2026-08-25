@@ -245,3 +245,56 @@ pub fn decode_native_value(
 pub fn argv_from_request(request: &mncs_model::ExecutionRequest) -> Result<Vec<String>, String> {
     request.arguments.iter().map(argument_argv).collect()
 }
+
+/// Link a native object file against a generated C driver and execute it.
+/// Returns the driver's scalar JSON observation. A process killed by a
+/// hardware trap (for example SIGFPE from an unguarded division) classifies
+/// as a runtime failure, matching the reference executors' rejection of the
+/// same input.
+pub fn compile_object_and_run(
+    object_name: &str,
+    object_bytes: &[u8],
+    driver_name: &str,
+    driver_source: &str,
+    linker: &ToolchainIdentity,
+    args: &[String],
+) -> Result<(ExecutionStatus, i128), NativeError> {
+    let digest = crate::support::sha256_hex(object_bytes);
+    let dir = std::env::temp_dir().join(format!("mncs-aot-{}", &digest[..16]));
+    fs::create_dir_all(&dir).map_err(|error| {
+        NativeError::CompileFailed(format!("unable to create work directory: {error}"))
+    })?;
+    let object_path = dir.join(object_name);
+    let driver_path = dir.join(driver_name);
+    fs::write(&object_path, object_bytes)
+        .map_err(|error| NativeError::CompileFailed(format!("unable to write object: {error}")))?;
+    fs::write(&driver_path, driver_source)
+        .map_err(|error| NativeError::CompileFailed(format!("unable to write driver: {error}")))?;
+    let exe = dir.join("mncs-run");
+    let compiled = Command::new(&linker.path)
+        .current_dir(&dir)
+        .arg("-O0")
+        .arg("-o")
+        .arg(&exe)
+        .arg(driver_path.file_name().unwrap_or(driver_path.as_os_str()))
+        .arg(object_path.file_name().unwrap_or(object_path.as_os_str()))
+        .output()
+        .map_err(|error| {
+            NativeError::ToolchainUnavailable(format!(
+                "{} could not be executed: {error}",
+                linker.name
+            ))
+        })?;
+    if !compiled.status.success() {
+        return Err(NativeError::CompileFailed(format!(
+            "{} link failed: {}",
+            linker.name,
+            String::from_utf8_lossy(&compiled.stderr)
+        )));
+    }
+    match run_executable(&exe, args) {
+        Ok(outcome) => Ok(outcome),
+        Err(NativeError::InvalidOutput(_)) => Ok((ExecutionStatus::RuntimeFailure, 0)),
+        Err(other) => Err(other),
+    }
+}

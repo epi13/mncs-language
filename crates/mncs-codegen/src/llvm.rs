@@ -985,12 +985,10 @@ fn llvm_driver(function: &str, inputs: &[mncs_model::BackendValueContract]) -> S
                     _ => "int32_t",
                 }
             }
-            mncs_model::BackendValueContract::Finite { payloads, .. } => {
-                if payloads.is_empty() {
-                    "int32_t"
-                } else {
-                    "int64_t"
-                }
+            mncs_model::BackendValueContract::Finite { payloads, .. }
+                if payloads.is_empty() =>
+            {
+                "int32_t"
             }
             _ => "int64_t",
         }

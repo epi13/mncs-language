@@ -19,14 +19,14 @@ use std::collections::BTreeMap;
 
 use mncs_model::{
     execute_ssa_module, execute_with_policy, ArtifactRepresentation, BackendArtifact,
-    BackendCapabilityManifest, BackendConfiguration, BackendEvidence, BackendFunctionValueContract,
-    BackendIdentity, BackendResult, BackendValueContract, BodyType, CompilerArtifactRef,
-    CompilerDiagnostic, CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure,
-    ExecutionRequest, ExecutionResult, ExecutionStatus, ExecutionTarget, ExecutionValue,
-    IntegerType, Program, SemanticId, SsaModule, TargetContractRef, TargetLoweringPlan,
-    TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION, COMPILER_ARTIFACT_SCHEMA_VERSION,
-    LAYERED_EXECUTION_COMPARISON_INTERPRETATION, PORTABLE_WASM_MVP_BACKEND_NAME,
-    PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET, SSA_SCHEMA_VERSION,
+    BackendCapabilityManifest, BackendConfiguration, BackendEvidence, BackendIdentity,
+    BackendResult, BackendValueContract, BodyType, CompilerArtifactRef, CompilerDiagnostic,
+    CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure, ExecutionRequest, ExecutionResult,
+    ExecutionStatus, ExecutionTarget, ExecutionValue, IntegerType, Program, SemanticId, SsaModule,
+    TargetContractRef, TargetLoweringPlan, TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION,
+    COMPILER_ARTIFACT_SCHEMA_VERSION, LAYERED_EXECUTION_COMPARISON_INTERPRETATION,
+    PORTABLE_WASM_MVP_BACKEND_NAME, PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET,
+    SSA_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 
@@ -789,7 +789,7 @@ fn execute_portable_wasm(
         }
     }
     let (input_contracts, output_contracts) =
-        signature_contracts(&artifact, &request.target.function);
+        signature_contracts(artifact, &request.target.function);
     let param_tys = input_contracts
         .iter()
         .map(|contract| marshal_ty(contract, &artifact.composite_value_contracts))
@@ -845,7 +845,7 @@ fn execute_portable_wasm(
 fn backend_input_matches(
     contract: &BackendValueContract,
     value: &ExecutionValue,
-    composites: &BTreeMap<String, BackendValueContract>,
+    _composites: &BTreeMap<String, BackendValueContract>,
 ) -> bool {
     match (contract, value) {
         (BackendValueContract::Scalar { semantic_type }, value) => {
@@ -963,12 +963,12 @@ pub(crate) fn backend_output_value(
         BackendValueContract::Finite {
             type_identity,
             variants,
-            payloads,
+            payloads: _,
         } => {
             // Typed realizations return fully materialized finite values
             // carrying language-owned identities; legacy paths return an
             // integer discriminant.
-            if let observed @ ExecutionValue::Finite {
+            if let ExecutionValue::Finite {
                 type_identity: actual,
                 ..
             } = &value

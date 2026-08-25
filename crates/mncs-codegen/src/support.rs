@@ -345,3 +345,130 @@ pub(crate) fn integer_fits(value: i128, ty: IntegerType) -> bool {
         value >= 0 && value < (1_i128 << ty.bits)
     }
 }
+
+/// Process driver for the Cranelift realization whose ABI passes every
+/// parameter as a 64-bit register value regardless of logical width.
+pub(crate) fn process_driver_i64(function: &str, arity: usize) -> String {
+    let parse_and_args = (0..arity)
+        .map(|index| {
+            (
+                format!(
+                    "  long long a{index} = strtoll(argv[{}], 0, 10);",
+                    index + 1
+                ),
+                format!("a{index}"),
+            )
+        })
+        .collect::<Vec<_>>();
+    let parse = parse_and_args
+        .iter()
+        .map(|(parse, _)| parse.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let call_args = parse_and_args
+        .into_iter()
+        .map(|(_, arg)| arg)
+        .collect::<Vec<_>>();
+    let mut proto_parts: Vec<String> = (0..arity).map(|_| "int64_t".to_owned()).collect();
+    proto_parts.push("int32_t*".to_owned());
+    proto_parts.push("int64_t*".to_owned());
+    let proto = proto_parts.join(", ");
+    let mut call_parts = call_args;
+    call_parts.push("&status".to_owned());
+    call_parts.push("&value".to_owned());
+    let call = call_parts.join(", ");
+    format!(
+        r#"#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+void {function}({proto});
+int main(int argc, char **argv) {{
+  (void)argc;
+{parse}
+  int32_t status = 2;
+  int64_t value = 0;
+  {function}({call});
+  if (status == 0) printf("{{\"status\":\"returned\",\"value\":%lld}}\n", (long long)value);
+  else printf("{{\"status\":\"runtime_failure\"}}\n");
+  return 0;
+}}
+"#
+    )
+}
+
+pub(crate) fn process_driver(
+    function: &str,
+    inputs: &[mncs_model::BackendValueContract],
+) -> String {
+    // Parameter types follow each declared scalar so the generated prototype
+    // matches the module definition exactly (an int32/int64 mismatch would be
+    // C undefined behavior at every call boundary). Composite parameters never
+    // reach this driver: they fail closed in the execute path above.
+    fn scalar_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
+        match contract {
+            mncs_model::BackendValueContract::Scalar { semantic_type } => {
+                match mncs_model::BodyType::from_semantic_name(semantic_type) {
+                    mncs_model::BodyType::Integer(ty) if ty.bits == 64 => "int64_t",
+                    _ => "int32_t",
+                }
+            }
+            mncs_model::BackendValueContract::Finite { payloads, .. }
+                if payloads.is_empty() =>
+            {
+                "int32_t"
+            }
+            _ => "int64_t",
+        }
+    }
+    let parse_and_args = inputs
+        .iter()
+        .enumerate()
+        .map(|(index, ty)| {
+            let parse = format!(
+                "  long long a{index} = strtoll(argv[{}], 0, 10);",
+                index + 1
+            );
+            let arg = format!("({})a{index}", scalar_c_type(ty));
+            (parse, arg)
+        })
+        .collect::<Vec<_>>();
+    let parse = parse_and_args
+        .iter()
+        .map(|(parse, _)| parse.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let call_args = parse_and_args
+        .iter()
+        .map(|(_, arg)| arg.clone())
+        .collect::<Vec<_>>();
+    let proto = inputs
+        .iter()
+        .map(scalar_c_type)
+        .map(str::to_owned)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .chain(["int32_t*".to_owned(), "int64_t*".to_owned()])
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut call_parts = call_args;
+    call_parts.push("&status".to_owned());
+    call_parts.push("&value".to_owned());
+    let call = call_parts.join(", ");
+    format!(
+        r#"#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+void {function}({proto});
+int main(int argc, char **argv) {{
+  (void)argc;
+{parse}
+  int32_t status = 2;
+  int64_t value = 0;
+  {function}({call});
+  if (status == 0) printf("{{\"status\":\"returned\",\"value\":%lld}}\n", (long long)value);
+  else printf("{{\"status\":\"runtime_failure\"}}\n");
+  return 0;
+}}
+"#
+    )
+}
