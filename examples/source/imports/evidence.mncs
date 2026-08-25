@@ -1,0 +1,22 @@
+mncs 0.6;
+
+// A self-contained evidence-lattice module.
+module examples.imports.evidence;
+
+enum Verdict { PASS, FAIL, UNKNOWN }
+
+fn combine(left: Verdict, right: Verdict) -> (result: Verdict) {
+    return match left {
+        PASS => right,
+        FAIL => Verdict.FAIL,
+        UNKNOWN => demote(right),
+    };
+}
+
+fn demote(value: Verdict) -> (result: Verdict) {
+    return match value {
+        PASS => Verdict.UNKNOWN,
+        FAIL => Verdict.FAIL,
+        UNKNOWN => Verdict.UNKNOWN,
+    };
+}

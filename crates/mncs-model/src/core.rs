@@ -7,6 +7,10 @@ pub const SUPPORTED_SCHEMA_VERSION: &str = "0.1";
 pub struct Program {
     pub schema_version: String,
     pub module: String,
+    /// Semantic identities of the modules this program binds against, in
+    /// deterministic (sorted) order. Empty for self-contained programs.
+    #[serde(default)]
+    pub dependencies: Vec<crate::SemanticId>,
     #[serde(default)]
     pub finite_types: Vec<FiniteType>,
     #[serde(default)]
@@ -60,6 +64,11 @@ pub struct FiniteVariant {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Function {
     pub name: String,
+    /// Namespace of the module that declared this function. `None` means the
+    /// program's own module. Linked imports carry their declaring module so
+    /// their semantic identities stay anchored to their home namespace.
+    #[serde(default)]
+    pub home_module: Option<String>,
     #[serde(default)]
     pub inputs: Vec<Value>,
     #[serde(default)]
@@ -80,6 +89,15 @@ pub struct Function {
     /// the declaration-only 0.1 compatibility path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<crate::FunctionBody>,
+}
+
+impl Function {
+    /// The namespace this function's semantic identity is anchored to: its
+    /// declaring module when it arrived through linking, otherwise the
+    /// program's own module.
+    pub fn identity_namespace<'a>(&'a self, program_module: &'a str) -> &'a str {
+        self.home_module.as_deref().unwrap_or(program_module)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

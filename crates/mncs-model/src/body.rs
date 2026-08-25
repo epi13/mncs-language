@@ -1236,10 +1236,20 @@ fn validate_operation(
             required_capabilities,
             effects,
         } => {
+            // Call targets may live in this program's own namespace or in any
+            // bound dependency namespace; identities stay anchored to the
+            // declaring module either way.
+            let mut target_namespaces = vec![program.module.clone()];
+            for dependency in &program.dependencies {
+                if let Some(name) = dependency.module_name() {
+                    target_namespaces.push(name);
+                }
+            }
             let callee = program.functions.iter().find(|candidate| {
                 candidate.name == *function_name
-                    && crate::identity::function_id(&program.module, &candidate.name)
-                        == *callee_identity
+                    && target_namespaces.iter().any(|namespace| {
+                        crate::identity::function_id(namespace, &candidate.name) == *callee_identity
+                    })
             });
             let Some(callee) = callee else {
                 errors.push(body_diagnostic(

@@ -10,7 +10,9 @@ use mncs_codegen::{
     compare_body_ssa_and_backend, execute_backend, lower_selected_ssa, portable_wasm_plan,
     selected_ssa_ref, target_for_backend, target_is_portable_wasm,
 };
-use mncs_compiler::{native_node_profile, reference_compiler_architecture, ReferenceCompiler};
+use mncs_compiler::{
+    native_node_profile, reference_compiler_architecture, ModuleResolver, ReferenceCompiler,
+};
 use mncs_model::{
     compare_body_and_ssa, compare_execution, execute_ssa, execute_with_policy,
     ArtifactRepresentation, CandidateEvaluation, CausalSlice, ComparisonStatus, CompilationResult,
@@ -706,12 +708,16 @@ where
         source_path.clone(),
         SourceOrigin {
             kind: SourceOriginKind::Path,
-            locator: Some(source_path),
+            locator: Some(source_path.clone()),
         },
         source,
     );
-    let output =
-        ReferenceCompiler::default().run_source_study(envelope, native_node_profile(node_identity));
+    let resolver = FileModuleResolver::for_source(source_path.as_str());
+    let output = ReferenceCompiler::default().run_source_study_with_resolver(
+        envelope,
+        native_node_profile(node_identity.as_str()),
+        &resolver,
+    );
     match output.study {
         Some(study) => {
             if print_json(&study) {
@@ -744,6 +750,7 @@ struct PreparedExperiment {
     program: Program,
     definition: LanguageExperimentDefinition,
     semantic_json_source: bool,
+    source_dir: Option<PathBuf>,
 }
 
 fn experiment_command<I>(args: I) -> ExitCode
@@ -1279,7 +1286,8 @@ fn prepare_experiment(options: &ExperimentOptions) -> Result<PreparedExperiment,
         }
         program
     } else {
-        let front_end = compiler.front_end(envelope.clone());
+        let resolver = FileModuleResolver::for_source(&options.source_path);
+        let front_end = compiler.front_end_with_resolver(envelope.clone(), &resolver);
         let Some(program) = front_end.program.clone().filter(|_| front_end.is_valid()) else {
             let _ = print_json(&front_end);
             return Err(ExitCode::FAILURE);
@@ -1342,6 +1350,11 @@ fn prepare_experiment(options: &ExperimentOptions) -> Result<PreparedExperiment,
         Vec::new(),
     );
     Ok(PreparedExperiment {
+        source_dir: Some({
+            let mut dir = PathBuf::from(&options.source_path);
+            dir.pop();
+            dir
+        }),
         envelope,
         program,
         definition,
@@ -1387,10 +1400,18 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
             &prepared.program,
         )
     } else {
-        let study_output = compiler.run_source_study_with_backend(
+        let resolver = prepared
+            .source_dir
+            .clone()
+            .map(|root| FileModuleResolver { root })
+            .unwrap_or_else(|| FileModuleResolver {
+                root: PathBuf::from("."),
+            });
+        let study_output = compiler.run_source_study_with_backend_and_resolver(
             prepared.envelope.clone(),
             native_node_profile(options.node_identity),
             &options.backend,
+            &resolver,
         );
         let Some(study) = study_output.study else {
             let _ = print_json(&study_output.front_end);
@@ -2738,6 +2759,73 @@ fn syntax_tournament(path: &str) -> ExitCode {
 
 fn per_claim_milli(value: usize, claim_count: usize) -> usize {
     value.saturating_mul(1000) / claim_count
+}
+
+/// Resolves imported module names against the directory of the root source
+/// file using the dotted-path convention: `use a.b;` loads `<root>/a/b.mncs`.
+/// The name identifies the candidate only; compatibility is established by
+/// elaborating the resolved module.
+struct FileModuleResolver {
+    root: PathBuf,
+}
+
+impl FileModuleResolver {
+    fn for_source(source_path: &str) -> Self {
+        let mut root = PathBuf::from(source_path);
+        root.pop();
+        Self { root }
+    }
+}
+
+impl FileModuleResolver {
+    /// Candidate paths for one module name under one root directory:
+    /// the full dotted path, then a sibling named after the final segment.
+    fn candidates(root: &std::path::Path, module: &str) -> Vec<PathBuf> {
+        let dotted = module.replace('.', "/");
+        let tail = module.rsplit('.').next().unwrap_or(module);
+        vec![
+            root.join(format!("{dotted}.mncs")),
+            root.join(format!("{tail}.mncs")),
+        ]
+    }
+}
+
+impl ModuleResolver for FileModuleResolver {
+    fn resolve(&self, module: &str) -> Option<SourceEnvelope> {
+        if module.is_empty()
+            || !module
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_')
+            || module.starts_with('.')
+            || module.ends_with('.')
+            || module.contains("..")
+        {
+            return None;
+        }
+        // Deterministic layout search: the importing file's directory first,
+        // then its parent (so files grouped in a subdirectory can import a
+        // sibling tree rooted one level up).
+        let mut roots = vec![self.root.clone()];
+        if let Some(parent) = self.root.parent() {
+            roots.push(parent.to_path_buf());
+        }
+        for root in roots {
+            for path in Self::candidates(&root, module) {
+                if let Ok(source) = fs::read_to_string(&path) {
+                    return Some(SourceEnvelope::new(
+                        SourceArtifactKind::Program,
+                        path.to_string_lossy().to_string(),
+                        SourceOrigin {
+                            kind: SourceOriginKind::Path,
+                            locator: Some(path.to_string_lossy().to_string()),
+                        },
+                        source,
+                    ));
+                }
+            }
+        }
+        None
+    }
 }
 
 fn read_source(path: &str) -> Result<String, ExitCode> {

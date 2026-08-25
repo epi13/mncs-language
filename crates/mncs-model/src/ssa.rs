@@ -401,7 +401,8 @@ impl Program {
         let mut semantic_functions = self.functions.iter().collect::<Vec<_>>();
         semantic_functions.sort_by(|left, right| left.name.cmp(&right.name));
         for function in semantic_functions {
-            let semantic_function = function_id(&self.module, &function.name);
+            let semantic_function =
+                function_id(function.identity_namespace(&self.module), &function.name);
             let Some(body) = &function.body else {
                 functions.push(declaration_function(self, function, &semantic_function));
                 continue;
@@ -537,7 +538,8 @@ fn lower_body(
     hir_function: &crate::IrFunction,
     ir: &HighLevelIr,
 ) -> (SsaFunction, Vec<SsaTraceEntry>, Vec<TransformationRecord>) {
-    let semantic_function = function_id(&program.module, &function.name);
+    let home = function.identity_namespace(&program.module).to_owned();
+    let semantic_function = function_id(&home, &function.name);
     let function_identity = ssa_identity("function", &semantic_function, 0);
     let mut value_ids = BTreeMap::<String, SemanticId>::new();
     let inputs = body

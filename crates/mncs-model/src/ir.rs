@@ -310,7 +310,8 @@ impl Program {
                 transformations.extend(body_transformations);
                 continue;
             }
-            let semantic_function = function_id(&self.module, &function.name);
+            let semantic_function =
+                function_id(function.identity_namespace(&self.module), &function.name);
             let ir_function = ir_identity("function", &semantic_function, 0);
             trace_entry(
                 &mut trace,
@@ -600,8 +601,12 @@ fn lower_executable_body(
     obligations: &[ObligationRecord],
     trace: &mut BTreeMap<SemanticId, TraceEntry>,
 ) -> (IrFunction, Vec<IrStateRegion>, Vec<TransformationRecord>) {
-    let semantic_function = function_id(&program.module, &function.name);
-    let body_identity = body.identity(&program.module, &function.name);
+    let home = function.identity_namespace(&program.module).to_owned();
+    let semantic_function = function_id(&home, &function.name);
+    let body_identity = SemanticId(format!(
+        "{}",
+        crate::identity::body_id(&home, &function.name)
+    ));
     trace_entry(
         trace,
         &body_identity,

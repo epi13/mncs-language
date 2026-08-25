@@ -10,6 +10,25 @@ pub const SOURCE_PROFILE_VERSION_0_3: &str = "0.3";
 pub const SOURCE_PROFILE_VERSION_0_4: &str = "0.4";
 pub const SOURCE_PROFILE_VERSION_0_5: &str = "0.5";
 pub const SOURCE_PROFILE_VERSION_0_6: &str = "0.6";
+
+/// True when the active source profile declares at least `version`. Profile
+/// features are strictly additive, so a numeric comparison replaces the
+/// per-feature version lists that previously had to name every profile.
+pub fn profile_at_least(profile: &str, version: &str) -> bool {
+    let parse = |value: &str| -> Option<(u64, u64)> {
+        let mut parts = value.split('.');
+        let major = parts.next()?.parse::<u64>().ok()?;
+        let minor = parts.next()?.parse::<u64>().ok()?;
+        if parts.next().is_some() {
+            return None;
+        }
+        Some((major, minor))
+    };
+    match (parse(profile), parse(version)) {
+        (Some(active), Some(required)) => active >= required,
+        _ => false,
+    }
+}
 pub const LEXICAL_SCHEMA_VERSION: &str = "0.1";
 pub const CST_SCHEMA_VERSION: &str = "0.1";
 pub const AST_SCHEMA_VERSION: &str = "0.1";
@@ -227,6 +246,7 @@ pub enum TokenKind {
     CapabilityKeyword,
     AuthorizedKeyword,
     EnumKeyword,
+    UseKeyword,
     RecordKeyword,
     MatchKeyword,
     IterateKeyword,
@@ -337,6 +357,7 @@ pub enum CstKind {
     Document,
     Header,
     ModuleDeclaration,
+    UseDeclaration,
     FunctionDeclaration,
     FiniteTypeDeclaration,
     FiniteVariant,
@@ -600,12 +621,24 @@ pub struct AstRecordDecl {
     pub span: SourceSpan,
 }
 
+/// A module import declaration (`use other.module;`). The named module is a
+/// semantic namespace whose exported declarations bind into this module's
+/// scope; compatibility is established by elaboration of the named module,
+/// never by the name itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AstUseDecl {
+    pub module: SpannedText,
+    pub span: SourceSpan,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AbstractSyntaxTree {
     pub schema_version: String,
     pub source_identity: String,
     pub language_version: SpannedText,
     pub module: SpannedText,
+    #[serde(default)]
+    pub uses: Vec<AstUseDecl>,
     #[serde(default)]
     pub finite_types: Vec<AstFiniteType>,
     #[serde(default)]
@@ -758,6 +791,7 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                 "capability" => TokenKind::CapabilityKeyword,
                 "authorized_by" => TokenKind::AuthorizedKeyword,
                 "enum" => TokenKind::EnumKeyword,
+                "use" => TokenKind::UseKeyword,
                 "record" => TokenKind::RecordKeyword,
                 "match" => TokenKind::MatchKeyword,
                 "iterate" => TokenKind::IterateKeyword,
@@ -943,6 +977,16 @@ impl<'a> Parser<'a> {
             Vec::new(),
         );
 
+        // Module imports precede every other declaration.
+        let mut uses = Vec::new();
+        let mut use_nodes = Vec::new();
+        while self.current_kind() == Some(TokenKind::UseKeyword) {
+            let (node, use_decl) = self.use_decl();
+            use_nodes.push(node);
+            if let Some(use_decl) = use_decl {
+                uses.push(use_decl);
+            }
+        }
         // Declarations may be interleaved freely: enums, records, and
         // functions may appear in any order. Each construct remains gated by
         // its own source profile.
@@ -953,13 +997,7 @@ impl<'a> Parser<'a> {
         loop {
             match self.current_kind() {
                 Some(TokenKind::EnumKeyword)
-                    if matches!(
-                        self.profile.as_str(),
-                        SOURCE_PROFILE_VERSION_0_3
-                            | SOURCE_PROFILE_VERSION_0_4
-                            | SOURCE_PROFILE_VERSION_0_5
-                            | SOURCE_PROFILE_VERSION_0_6
-                    ) =>
+                    if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_3) =>
                 {
                     let (node, finite_type) = self.finite_type();
                     declaration_nodes.push(node);
@@ -968,10 +1006,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 Some(TokenKind::RecordKeyword) => {
-                    if !matches!(
-                        self.profile.as_str(),
-                        SOURCE_PROFILE_VERSION_0_5 | SOURCE_PROFILE_VERSION_0_6
-                    ) {
+                    if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_5) {
                         self.error(
                             "MNP120",
                             "record declarations require source profile 0.5 or later",
@@ -1005,15 +1040,21 @@ impl<'a> Parser<'a> {
         {
             self.error(
                 "MNP120",
-                "record declarations require source profile 0.5",
+                "record declarations require source profile 0.5 or later",
                 vec![TokenKind::Identifier],
             );
             self.cursor += 1;
         }
-        if functions.is_empty() {
+        // A module must declare something: a function, a type, or an import.
+        // Vocabulary-only modules (shared enums/records) are legitimate.
+        let declared_anything = !(functions.is_empty()
+            && finite_types.is_empty()
+            && record_types.is_empty()
+            && uses.is_empty());
+        if !declared_anything {
             self.error(
                 "MNP006",
-                "source profile requires at least one function",
+                "module declares nothing; expected at least one function, type, or import",
                 vec![TokenKind::FunctionKeyword],
             );
         }
@@ -1027,6 +1068,7 @@ impl<'a> Parser<'a> {
 
         let source_span = SourceSpan::at(&self.envelope.text, 0, self.envelope.text.len());
         let mut children = vec![header, module_node];
+        children.extend(use_nodes);
         children.extend(declaration_nodes);
         let root = CstNode {
             kind: CstKind::Document,
@@ -1043,12 +1085,13 @@ impl<'a> Parser<'a> {
             root,
         };
         let ast = match (header_keyword, version, module) {
-            (Some(_), Some(language_version), Some(module)) if !functions.is_empty() => {
+            (Some(_), Some(language_version), Some(module)) if declared_anything => {
                 Some(AbstractSyntaxTree {
                     schema_version: AST_SCHEMA_VERSION.to_owned(),
                     source_identity: self.envelope.identity.clone(),
                     language_version,
                     module,
+                    uses,
                     finite_types,
                     record_types,
                     functions,
@@ -1058,6 +1101,44 @@ impl<'a> Parser<'a> {
             _ => None,
         };
         (cst, ast)
+    }
+
+    /// Parses `use other.module;`. Module imports require Profile 0.6; in
+    /// earlier profiles the `use` keyword is an ordinary identifier, so the
+    /// declaration shape produces a precise diagnostic rather than silence.
+    fn use_decl(&mut self) -> (CstNode, Option<AstUseDecl>) {
+        let start = self.current_token_index();
+        self.expect(TokenKind::UseKeyword, "MNP135", "expected 'use'");
+        if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_6) {
+            self.error(
+                "MNP136",
+                "module imports require source profile 0.6 or later",
+                vec![TokenKind::UseKeyword],
+            );
+            return (
+                self.node(CstKind::UseDeclaration, start, start, Vec::new()),
+                None,
+            );
+        }
+        let module = self.qualified_name();
+        self.expect(
+            TokenKind::Semicolon,
+            "MNP137",
+            "expected ';' after imported module name",
+        );
+        let end = self.previous_token_index(start);
+        let node = self.node(CstKind::UseDeclaration, start, end, Vec::new());
+        let span = match &module {
+            Some(module) => SourceSpan::covering(&self.envelope.text, module.span, module.span),
+            None => self
+                .tokens
+                .get(*self.significant.get(start).unwrap_or(&0))
+                .map_or(SourceSpan::at(&self.envelope.text, 0, 0), |token| {
+                    token.span
+                }),
+        };
+        let decl = module.map(|module| AstUseDecl { module, span });
+        (node, decl)
     }
 
     fn finite_type(&mut self) -> (CstNode, Option<AstFiniteType>) {
@@ -1232,56 +1313,44 @@ impl<'a> Parser<'a> {
         let (input_node, inputs) = self.parameter_list("input");
         self.expect(TokenKind::Arrow, "MNP012", "expected '->' before outputs");
         let (output_node, outputs) = self.parameter_list("output");
-        let (contracts, effects, capabilities) = if matches!(
-            self.profile.as_str(),
-            SOURCE_PROFILE_VERSION_0_2
-                | SOURCE_PROFILE_VERSION_0_3
-                | SOURCE_PROFILE_VERSION_0_4
-                | SOURCE_PROFILE_VERSION_0_5
-                | SOURCE_PROFILE_VERSION_0_6
-        ) {
-            self.clauses()
-        } else {
-            (Vec::new(), Vec::new(), Vec::new())
-        };
+        let (contracts, effects, capabilities) =
+            if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_2) {
+                self.clauses()
+            } else {
+                (Vec::new(), Vec::new(), Vec::new())
+            };
         let block_start = self.current_token_index();
         self.expect(TokenKind::LeftBrace, "MNP013", "expected function body");
-        let (statements, returned_value, block_children) = if matches!(
-            self.profile.as_str(),
-            SOURCE_PROFILE_VERSION_0_2
-                | SOURCE_PROFILE_VERSION_0_3
-                | SOURCE_PROFILE_VERSION_0_4
-                | SOURCE_PROFILE_VERSION_0_5
-                | SOURCE_PROFILE_VERSION_0_6
-        ) {
-            self.statements_until_return()
-        } else {
-            let return_start = self.current_token_index();
-            self.expect(
-                TokenKind::ReturnKeyword,
-                "MNP014",
-                "expected explicit return",
-            );
-            let returned_value = self
-                .spanned(
-                    TokenKind::Identifier,
-                    "MNP015",
-                    "expected returned value name",
-                )
-                .map(AstExpr::Name);
-            self.expect(TokenKind::Semicolon, "MNP016", "expected ';' after return");
-            let return_end = self.previous_token_index(return_start);
-            (
-                Vec::new(),
-                returned_value,
-                vec![self.node(
-                    CstKind::ReturnStatement,
-                    return_start,
-                    return_end,
+        let (statements, returned_value, block_children) =
+            if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_2) {
+                self.statements_until_return()
+            } else {
+                let return_start = self.current_token_index();
+                self.expect(
+                    TokenKind::ReturnKeyword,
+                    "MNP014",
+                    "expected explicit return",
+                );
+                let returned_value = self
+                    .spanned(
+                        TokenKind::Identifier,
+                        "MNP015",
+                        "expected returned value name",
+                    )
+                    .map(AstExpr::Name);
+                self.expect(TokenKind::Semicolon, "MNP016", "expected ';' after return");
+                let return_end = self.previous_token_index(return_start);
+                (
                     Vec::new(),
-                )],
-            )
-        };
+                    returned_value,
+                    vec![self.node(
+                        CstKind::ReturnStatement,
+                        return_start,
+                        return_end,
+                        Vec::new(),
+                    )],
+                )
+            };
         self.expect(
             TokenKind::RightBrace,
             "MNP017",
@@ -1397,13 +1466,7 @@ impl<'a> Parser<'a> {
         if self.current_kind() == Some(TokenKind::ReturnKeyword) {
             let return_start = self.current_token_index();
             self.cursor += 1;
-            returned = if matches!(
-                self.profile.as_str(),
-                SOURCE_PROFILE_VERSION_0_3
-                    | SOURCE_PROFILE_VERSION_0_4
-                    | SOURCE_PROFILE_VERSION_0_5
-                    | SOURCE_PROFILE_VERSION_0_6
-            ) {
+            returned = if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_3) {
                 self.expression()
             } else {
                 self.spanned(
@@ -1525,13 +1588,7 @@ impl<'a> Parser<'a> {
             }
             Some(TokenKind::ReturnKeyword) => {
                 self.cursor += 1;
-                let value = if matches!(
-                    self.profile.as_str(),
-                    SOURCE_PROFILE_VERSION_0_3
-                        | SOURCE_PROFILE_VERSION_0_4
-                        | SOURCE_PROFILE_VERSION_0_5
-                        | SOURCE_PROFILE_VERSION_0_6
-                ) {
+                let value = if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_3) {
                     self.expression()
                 } else {
                     self.spanned(
@@ -1585,10 +1642,7 @@ impl<'a> Parser<'a> {
     }
 
     fn bounded_iteration_statement(&mut self, start: usize) -> (CstNode, Option<AstStmt>) {
-        if !matches!(
-            self.profile.as_str(),
-            SOURCE_PROFILE_VERSION_0_4 | SOURCE_PROFILE_VERSION_0_5 | SOURCE_PROFILE_VERSION_0_6
-        ) {
+        if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_4) {
             self.error(
                 "MNP090",
                 "bounded iteration requires Source Profile 0.4 or later",
@@ -1743,10 +1797,7 @@ impl<'a> Parser<'a> {
             Some(TokenKind::Identifier) => {
                 let name = self.spanned(TokenKind::Identifier, "MNP062", "expected expression")?;
                 if self.current_kind() == Some(TokenKind::LeftBrace)
-                    && matches!(
-                        self.profile.as_str(),
-                        SOURCE_PROFILE_VERSION_0_5 | SOURCE_PROFILE_VERSION_0_6
-                    )
+                    && profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_5)
                     && self.at_record_literal()
                 {
                     return self.record_literal(name);
@@ -2263,26 +2314,23 @@ impl<'a> Parser<'a> {
 
     fn current_kind(&self) -> Option<TokenKind> {
         self.current_token().map(|token| {
-            let iteration_keyword = !matches!(
-                self.profile.as_str(),
-                SOURCE_PROFILE_VERSION_0_4
-                    | SOURCE_PROFILE_VERSION_0_5
-                    | SOURCE_PROFILE_VERSION_0_6
-            ) && matches!(
-                token.kind,
-                TokenKind::IterateKeyword
-                    | TokenKind::UpToKeyword
-                    | TokenKind::CarryingKeyword
-                    | TokenKind::NextKeyword
-                    | TokenKind::WhileKeyword
-            );
-            // `record` is only reserved by Profile 0.5; earlier profiles keep
-            // treating it as an ordinary identifier.
-            let record_keyword = !matches!(
-                self.profile.as_str(),
-                SOURCE_PROFILE_VERSION_0_5 | SOURCE_PROFILE_VERSION_0_6
-            ) && token.kind == TokenKind::RecordKeyword;
-            if iteration_keyword || record_keyword {
+            let iteration_keyword = !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_4)
+                && matches!(
+                    token.kind,
+                    TokenKind::IterateKeyword
+                        | TokenKind::UpToKeyword
+                        | TokenKind::CarryingKeyword
+                        | TokenKind::NextKeyword
+                        | TokenKind::WhileKeyword
+                );
+            // `record` is reserved from Profile 0.5 onward; earlier profiles
+            // keep treating it as an ordinary identifier.
+            let record_keyword = !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_5)
+                && token.kind == TokenKind::RecordKeyword;
+            // `use` is reserved from Profile 0.6 onward.
+            let use_keyword = !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_6)
+                && token.kind == TokenKind::UseKeyword;
+            if iteration_keyword || record_keyword || use_keyword {
                 TokenKind::Identifier
             } else {
                 token.kind
