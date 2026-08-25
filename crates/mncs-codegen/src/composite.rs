@@ -30,15 +30,6 @@ pub enum SlotWidth {
     W64,
 }
 
-impl SlotWidth {
-    pub fn bytes(self) -> u64 {
-        match self {
-            Self::W32 => 4,
-            Self::W64 => 8,
-        }
-    }
-}
-
 /// One canonical field entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CellField {
@@ -97,7 +88,9 @@ impl CompositeLayout {
                     )
                 })
                 .collect::<BTreeMap<_, _>>();
-            layout.boxed_finites.insert(finite.identity.clone(), variants);
+            layout
+                .boxed_finites
+                .insert(finite.identity.clone(), variants);
         }
         layout
     }
@@ -105,26 +98,12 @@ impl CompositeLayout {
     pub fn is_boxed_finite(&self, type_identity: &SemanticId) -> bool {
         self.boxed_finites.contains_key(type_identity)
     }
+}
 
-    pub fn is_composite(&self, type_identity: &SemanticId) -> bool {
-        self.records.contains_key(type_identity)
-            || self.boxed_finites.contains_key(type_identity)
-    }
-
-    /// Total cell size in bytes for one record type.
-    pub fn record_cell_bytes(&self, type_identity: &SemanticId) -> Option<u64> {
-        self.records
-            .get(type_identity)
-            .map(|fields| fields.len() as u64 * 8)
-    }
-
-    /// Total cell size in bytes for one boxed finite variant.
-    pub fn finite_cell_bytes(&self, type_identity: &SemanticId, discriminant: u32) -> Option<u64> {
-        self.boxed_finites
-            .get(type_identity)?
-            .get(&discriminant)
-            .map(|fields| (fields.len() as u64 + 1) * 8)
-    }
+/// A finite type is boxed exactly when some variant declares payload
+/// fields; per-variant entries exist even for payload-free variants.
+pub fn finite_payloads_declare_payloads(payloads: &BTreeMap<u32, Vec<(String, String)>>) -> bool {
+    payloads.values().any(|fields| !fields.is_empty())
 }
 
 fn slot_width(semantic_type: &str) -> SlotWidth {
@@ -163,26 +142,21 @@ impl ArenaWriter {
         self.image
     }
 
-    pub fn image(&self) -> &[u8] {
-        &self.image
-    }
-
     fn align8(&mut self) -> u64 {
         let misalign = self.image.len() as u64 % 8;
         if misalign != 0 {
-            self.image.resize(self.image.len() + (8 - misalign) as usize, 0);
+            self.image
+                .resize(self.image.len() + (8 - misalign) as usize, 0);
         }
         self.image.len() as u64
     }
 
     fn put32(&mut self, offset: u64, value: u32) {
-        self.image[offset as usize..offset as usize + 4]
-            .copy_from_slice(&value.to_le_bytes());
+        self.image[offset as usize..offset as usize + 4].copy_from_slice(&value.to_le_bytes());
     }
 
     fn put64(&mut self, offset: u64, value: u64) {
-        self.image[offset as usize..offset as usize + 8]
-            .copy_from_slice(&value.to_le_bytes());
+        self.image[offset as usize..offset as usize + 8].copy_from_slice(&value.to_le_bytes());
     }
 
     /// Encode one top-level argument. Scalars and unboxed finite variants
@@ -218,27 +192,9 @@ impl ArenaWriter {
                     type_identity: identity,
                     payloads,
                     ..
-                } if identity == type_identity && !payloads.is_empty()
+                } if identity == type_identity && finite_payloads_declare_payloads(payloads)
             )
         })
-    }
-
-    fn named_contract(
-        &self,
-        declared_type: &str,
-    ) -> Option<&mncs_model::BackendValueContract> {
-        Self::resolve_contract(declared_type, &self.registry)
-    }
-
-    fn resolve_contract<'r>(
-        declared_type: &str,
-        registry: &'r BTreeMap<String, mncs_model::BackendValueContract>,
-    ) -> Option<&'r mncs_model::BackendValueContract> {
-        match mncs_model::BodyType::from_semantic_name(declared_type) {
-            mncs_model::BodyType::Integer(_) => None,
-            mncs_model::BodyType::Named(name) if name == "bool" => None,
-            _ => registry.get(declared_type),
-        }
     }
 
     /// Encode any composite value into a fresh canonical cell; returns its
@@ -256,9 +212,7 @@ impl ArenaWriter {
                 };
                 let declared = declared.clone();
                 if declared.len() != fields.len() {
-                    return Err(
-                        "record field count does not match the declared layout".to_owned()
-                    );
+                    return Err("record field count does not match the declared layout".to_owned());
                 }
                 self.image.resize(base as usize + declared.len() * 8, 0);
                 for (index, ((name, declared_type), (field_name, field_value))) in
@@ -269,11 +223,7 @@ impl ArenaWriter {
                             "record field {field_name:?} does not match the canonical layout {name:?}"
                         ));
                     }
-                    self.store_field(
-                        base + index as u64 * 8,
-                        field_value,
-                        declared_type,
-                    )?;
+                    self.store_field(base + index as u64 * 8, field_value, declared_type)?;
                 }
                 Ok(base)
             }
@@ -287,11 +237,10 @@ impl ArenaWriter {
                 };
                 let variant_fields = variant_fields.clone();
                 if variant_fields.len() != payload.len() {
-                    return Err(
-                        "payload field count does not match the declared layout".to_owned()
-                    );
+                    return Err("payload field count does not match the declared layout".to_owned());
                 }
-                self.image.resize(base as usize + (variant_fields.len() + 1) * 8, 0);
+                self.image
+                    .resize(base as usize + (variant_fields.len() + 1) * 8, 0);
                 self.put32(base, *discriminant);
                 for (index, ((name, declared_type), (field_name, field_value))) in
                     variant_fields.iter().zip(payload.iter()).enumerate()
@@ -301,11 +250,7 @@ impl ArenaWriter {
                             "payload field {field_name:?} does not match the canonical layout {name:?}"
                         ));
                     }
-                    self.store_field(
-                        base + (index as u64 + 1) * 8,
-                        field_value,
-                        declared_type,
-                    )?;
+                    self.store_field(base + (index as u64 + 1) * 8, field_value, declared_type)?;
                 }
                 Ok(base)
             }
@@ -324,12 +269,27 @@ impl ArenaWriter {
         use mncs_model::ExecutionValue as Value;
         let width = slot_width(declared_type);
         match value {
-            Value::Record { .. } | Value::Finite { .. }
-                if self.named_contract(declared_type).is_some() =>
-            {
+            Value::Record { .. } => {
+                // Records are always composite references.
                 let cell = self.encode_cell(value)?;
                 self.put64(offset, cell);
                 Ok(())
+            }
+            Value::Finite {
+                type_identity,
+                discriminant,
+                payload,
+                ..
+            } => {
+                // Boxed variants occupy cells; unboxed ones are bare tags.
+                if !payload.is_empty() || self.identity_is_boxed(type_identity) {
+                    let cell = self.encode_cell(value)?;
+                    self.put64(offset, cell);
+                    Ok(())
+                } else {
+                    self.put32(offset, *discriminant);
+                    Ok(())
+                }
             }
             Value::Integer { value, .. } => {
                 match width {
@@ -342,17 +302,6 @@ impl ArenaWriter {
                 self.put32(offset, u32::from(*value));
                 Ok(())
             }
-            Value::Finite {
-                discriminant,
-                payload,
-                ..
-            } if payload.is_empty() => {
-                self.put32(offset, *discriminant);
-                Ok(())
-            }
-            other => Err(format!(
-                "nested composite field lacks a declared layout for encoding: {other:?}"
-            )),
         }
     }
 }
@@ -361,10 +310,7 @@ fn value_record_contract<'a>(
     value: &mncs_model::ExecutionValue,
     registry: &'a BTreeMap<String, mncs_model::BackendValueContract>,
 ) -> Option<&'a mncs_model::BackendValueContract> {
-    let mncs_model::ExecutionValue::Record {
-        type_identity, ..
-    } = value
-    else {
+    let mncs_model::ExecutionValue::Record { type_identity, .. } = value else {
         return None;
     };
     registry.values().find(|contract| {
@@ -387,15 +333,13 @@ fn value_finite_payloads<'a>(
     else {
         return None;
     };
-    registry.values().find_map(|contract| {
-        match contract {
-            mncs_model::BackendValueContract::Finite {
-                type_identity: identity,
-                payloads,
-                ..
-            } if identity == type_identity => payloads.get(discriminant),
-            _ => None,
-        }
+    registry.values().find_map(|contract| match contract {
+        mncs_model::BackendValueContract::Finite {
+            type_identity: identity,
+            payloads,
+            ..
+        } if identity == type_identity => payloads.get(discriminant),
+        _ => None,
     })
 }
 
@@ -439,7 +383,9 @@ impl<'a> ArenaReader<'a> {
     ) -> Result<mncs_model::ExecutionValue, String> {
         use mncs_model::{BackendValueContract as Contract, ExecutionValue as Value};
         match contract {
-            Contract::Scalar { .. } => Err("scalar results decode outside the cell codec".to_owned()),
+            Contract::Scalar { .. } => {
+                Err("scalar results decode outside the cell codec".to_owned())
+            }
             Contract::Record {
                 type_identity,
                 name,
@@ -502,8 +448,40 @@ impl<'a> ArenaReader<'a> {
         offset: u64,
         declared_type: &str,
     ) -> Result<mncs_model::ExecutionValue, String> {
-        use mncs_model::BodyType;
-        if let Some(contract) = Self::resolve_contract(declared_type, self.registry) {
+        use mncs_model::{BackendValueContract as Contract, BodyType};
+        // Boxed finite fields hold cell references; unboxed finite fields
+        // hold bare discriminants, exactly as the writer stores them.
+        if let Some(Contract::Finite { payloads, .. }) =
+            Self::resolve_contract(declared_type, self.registry)
+        {
+            if !payloads.is_empty() {
+                let reference = self.get64(offset)?;
+                let contract =
+                    Self::resolve_contract(declared_type, self.registry).expect("resolved above");
+                return self.decode(reference, contract);
+            }
+            let discriminant = self.get32(offset)?;
+            let Some(Contract::Finite {
+                type_identity,
+                variants,
+                ..
+            }) = Self::resolve_contract(declared_type, self.registry)
+            else {
+                unreachable!("resolved above");
+            };
+            let Some(variant_identity) = variants.get(&discriminant) else {
+                return Err(format!("decoded discriminant {discriminant} is undeclared"));
+            };
+            return Ok(mncs_model::ExecutionValue::Finite {
+                type_identity: type_identity.clone(),
+                variant_identity: variant_identity.clone(),
+                discriminant,
+                payload: Vec::new(),
+            });
+        }
+        if let Some(contract @ Contract::Record { .. }) =
+            Self::resolve_contract(declared_type, self.registry)
+        {
             let reference = self.get64(offset)?;
             return self.decode(reference, contract);
         }
@@ -528,6 +506,130 @@ impl<'a> ArenaReader<'a> {
             _ => Err(format!(
                 "field type {declared_type} has no contract for decoding"
             )),
+        }
+    }
+}
+
+#[cfg(test)]
+mod codec_tests {
+    use super::*;
+    use mncs_model::{BackendValueContract, ExecutionValue, SemanticId};
+
+    fn sid(s: &str) -> SemanticId {
+        SemanticId(s.to_owned())
+    }
+
+    #[test]
+    fn status_pair_record_encodes_to_the_canonical_layout() {
+        let status = BackendValueContract::Finite {
+            type_identity: sid("T:Status"),
+            variants: BTreeMap::from([
+                (0, sid("V:PASS")),
+                (1, sid("V:FAIL")),
+                (2, sid("V:UNKNOWN")),
+            ]),
+            payloads: BTreeMap::new(),
+        };
+        let pair = BackendValueContract::Record {
+            type_identity: sid("T:StatusPair"),
+            name: "StatusPair".to_owned(),
+            fields: vec![
+                ("left".to_owned(), "Status".to_owned()),
+                ("right".to_owned(), "Status".to_owned()),
+            ],
+        };
+        let registry = BTreeMap::from([
+            ("Status".to_owned(), status.clone()),
+            ("StatusPair".to_owned(), pair),
+        ]);
+        let value = ExecutionValue::Record {
+            type_identity: sid("T:StatusPair"),
+            name: "StatusPair".to_owned(),
+            fields: vec![
+                (
+                    "left".to_owned(),
+                    ExecutionValue::Finite {
+                        type_identity: sid("T:Status"),
+                        variant_identity: sid("V:FAIL"),
+                        discriminant: 1,
+                        payload: vec![],
+                    },
+                ),
+                (
+                    "right".to_owned(),
+                    ExecutionValue::Finite {
+                        type_identity: sid("T:Status"),
+                        variant_identity: sid("V:FAIL"),
+                        discriminant: 1,
+                        payload: vec![],
+                    },
+                ),
+            ],
+        };
+        let mut writer = ArenaWriter::new(registry);
+        let boundary = writer.encode_argument(&value).expect("encodes");
+        match boundary {
+            BoundaryValue::Cell(root) => {
+                assert_eq!(root, 0, "first cell sits at offset zero");
+                let image = writer.into_image();
+                assert_eq!(image.len(), 16, "two W32 slots");
+                assert_eq!(u32::from_le_bytes(image[0..4].try_into().unwrap()), 1);
+                assert_eq!(u32::from_le_bytes(image[8..12].try_into().unwrap()), 1);
+            }
+            other => panic!("record argument must cross as a cell, got {other:?}"),
+        }
+        // Round-trip through the reader.
+        let image = {
+            let mut w = ArenaWriter::new(BTreeMap::from([
+                ("Status".to_owned(), status),
+                (
+                    "StatusPair".to_owned(),
+                    BackendValueContract::Record {
+                        type_identity: sid("T:StatusPair"),
+                        name: "StatusPair".to_owned(),
+                        fields: vec![
+                            ("left".to_owned(), "Status".to_owned()),
+                            ("right".to_owned(), "Status".to_owned()),
+                        ],
+                    },
+                ),
+            ]));
+            let _ = w.encode_argument(&value).unwrap();
+            w.into_image()
+        };
+        let empty = BTreeMap::new();
+        let reader = ArenaReader::new(&image, &empty);
+        let pair_contract = BackendValueContract::Record {
+            type_identity: sid("T:StatusPair"),
+            name: "StatusPair".to_owned(),
+            fields: vec![
+                ("left".to_owned(), "Status".to_owned()),
+                ("right".to_owned(), "Status".to_owned()),
+            ],
+        };
+        // Without a Status contract the reader cannot decode fields; with
+        // one it must round-trip both discriminants.
+        assert!(reader.decode(0, &pair_contract).is_err());
+        let status_c = BackendValueContract::Finite {
+            type_identity: sid("T:Status"),
+            variants: BTreeMap::from([
+                (0, sid("V:PASS")),
+                (1, sid("V:FAIL")),
+                (2, sid("V:UNKNOWN")),
+            ]),
+            payloads: BTreeMap::new(),
+        };
+        let registry2 = BTreeMap::from([("Status".to_owned(), status_c)]);
+        let reader2 = ArenaReader::new(&image, &registry2);
+        let decoded = reader2.decode(0, &pair_contract).expect("round-trips");
+        let mncs_model::ExecutionValue::Record { fields, .. } = decoded else {
+            panic!("decodes to a record");
+        };
+        for (_name, field) in fields {
+            let mncs_model::ExecutionValue::Finite { discriminant, .. } = field else {
+                panic!("field decodes to a finite");
+            };
+            assert_eq!(discriminant, 1);
         }
     }
 }

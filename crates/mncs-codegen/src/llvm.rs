@@ -15,7 +15,7 @@ use mncs_model::{
 };
 
 use crate::native::{
-    argv_from_request, compile_and_run, decode_native_value, host_matches_triple, host_triple,
+    argv_from_request, compile_and_run_with_call_file_full, host_matches_triple, host_triple,
     probe_clang, probe_llc,
 };
 use crate::scalar::{
@@ -86,6 +86,7 @@ pub fn llvm_capabilities() -> BackendCapabilityManifest {
             "explicit_failure",
             "semantic_bounded_iteration",
             "finite_values",
+            "canonical_composite_cells",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -94,7 +95,6 @@ pub fn llvm_capabilities() -> BackendCapabilityManifest {
             "memory",
             "effects",
             "widening_integer",
-            "record_values",
             "host_effects",
         ]
         .into_iter()
@@ -1251,96 +1251,76 @@ pub fn execute_llvm(
             "backend request violates the language-owned value contract",
         );
     }
-    let driver = llvm_driver(&request.target.function, &contract.inputs);
-    let args = match argv_from_request(request) {
-        Ok(args) => args,
-        Err(reason) => return execution_failure(result, ExecutionStatus::Unsupported, &reason),
+    // Composite arguments and results cross through the canonical call
+    // file; pure scalar calls keep the historical argv-only protocol.
+    let driver = llvm_driver(
+        &request.target.function,
+        &contract.inputs,
+        contract.outputs.first(),
+    );
+    let call_blob = match crate::support::build_call_file(
+        &request.arguments,
+        &contract.inputs,
+        contract.outputs.first(),
+        &artifact.composite_value_contracts,
+    ) {
+        Ok(blob) => blob,
+        Err(reason) => {
+            return execution_failure(result, ExecutionStatus::InvalidRequest, reason);
+        }
     };
-    match compile_and_run(
+    let call_path = call_blob.as_ref().map(|bytes| {
+        let digest = crate::support::sha256_hex(bytes);
+        let path = std::env::temp_dir().join(format!("mncs-call-{digest}.bin"));
+        let _ = std::fs::write(&path, bytes);
+        path
+    });
+    // In call-file mode every value crosses canonically; argv stays empty.
+    let args = match &call_blob {
+        Some(_) => Vec::new(),
+        None => match argv_from_request(request) {
+            Ok(args) => args,
+            Err(reason) => return execution_failure(result, ExecutionStatus::Unsupported, reason),
+        },
+    };
+    match compile_and_run_with_call_file_full(
         &[("module.ll", ir.as_str()), ("driver.c", driver.as_str())],
         &clang,
         &["-Wno-override-module", "-O0", "-no-pie"],
         &args,
+        call_path.as_deref(),
     ) {
-        Ok((value, status, toolchain)) => {
+        Ok((run, _toolchain)) => {
             result.failure = None;
-            result.status = status;
+            result.status = run.status;
             result.steps = 1;
-            match decode_native_value(Some(&contract.outputs[0]), status, value) {
+            match crate::support::decode_native_observation(
+                contract.outputs.first(),
+                run.status,
+                run.value,
+                run.arena_hex.as_deref(),
+                &artifact.composite_value_contracts,
+            ) {
                 Ok(returned) => {
                     result.returned = returned;
-                    let _ = toolchain;
                     result
                 }
-                Err(error) => execution_failure(result, error.status(), error.reason()),
+                Err(reason) => execution_failure(result, ExecutionStatus::InvalidRequest, reason),
             }
         }
         Err(error) => execution_failure(result, error.status(), error.reason()),
     }
 }
 
-fn llvm_driver(function: &str, inputs: &[mncs_model::BackendValueContract]) -> String {
-    // Parameter types follow each declared scalar so the driver prototype
-    // matches the LLVM function signature exactly; a width mismatch would be
-    // C undefined behavior at the call boundary.
-    fn scalar_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
-        match contract {
-            mncs_model::BackendValueContract::Scalar { semantic_type } => {
-                match mncs_model::BodyType::from_semantic_name(semantic_type) {
-                    mncs_model::BodyType::Integer(ty) if ty.bits == 64 => "int64_t",
-                    _ => "int32_t",
-                }
-            }
-            mncs_model::BackendValueContract::Finite { payloads, .. } if payloads.is_empty() => {
-                "int32_t"
-            }
-            _ => "int64_t",
-        }
-    }
-    let mut args = Vec::new();
-    let mut parse = Vec::new();
-    for (index, input) in inputs.iter().enumerate() {
-        args.push(format!("({})a{index}", scalar_c_type(input)));
-        parse.push(format!(
-            "  long long a{index} = strtoll(argv[{}], 0, 10);",
-            index + 1
-        ));
-    }
-    let proto_args = inputs
-        .iter()
-        .map(scalar_c_type)
-        .map(str::to_owned)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .chain(["int32_t*".to_owned(), "int64_t*".to_owned()])
-        .collect::<Vec<_>>()
-        .join(", ");
-    let call_args = args
-        .into_iter()
-        .chain(["&status".to_owned(), "&value".to_owned()])
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(
-        r#"#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-void {function}({proto_args});
-int main(int argc, char **argv) {{
-  (void)argc;
-{}
-  int32_t status = 2;
-  int64_t value = 0;
-  {function}({call_args});
-  if (status == 0) {{
-    printf("{{\"status\":\"returned\",\"value\":%lld}}\n", (long long)value);
-  }} else {{
-    printf("{{\"status\":\"runtime_failure\"}}\n");
-  }}
-  return 0;
-}}
-"#,
-        parse.join("\n")
-    )
+fn llvm_driver(
+    function: &str,
+    inputs: &[mncs_model::BackendValueContract],
+    output: Option<&mncs_model::BackendValueContract>,
+) -> String {
+    // The shared C driver template matches the LLVM function ABI exactly:
+    // typed scalar parameters, uint64_t cell offsets, and status/value
+    // out-pointers. The module realizes the same arena symbols as C11.
+    crate::support::process_driver(function, inputs, output)
 }
 
 pub fn llc_object_available() -> bool {

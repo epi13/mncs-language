@@ -126,15 +126,6 @@ struct NativeObservation {
     arena_hex: Option<String>,
 }
 
-pub fn compile_and_run(
-    sources: &[(&str, &str)],
-    compiler: &ToolchainIdentity,
-    flags: &[&str],
-    args: &[String],
-) -> Result<(i128, ExecutionStatus, String), NativeError> {
-    compile_and_run_with_call_file(sources, compiler, flags, args, None)
-}
-
 /// As `compile_and_run`, with an optional canonical call file whose path is
 /// exported to the child through `MNCS_CALL_FILE` (composite marshaling).
 /// Preserves the full observation so composite results can decode.
@@ -166,9 +157,6 @@ pub fn compile_and_run_with_call_file_full(
     }
     let exe = dir.join("mncs-run");
     let mut command = Command::new(&compiler.path);
-    if let Some(path) = call_file {
-        command.env("MNCS_CALL_FILE", path);
-    }
     command.current_dir(&dir);
     command.args(flags);
     for path in &paths {
@@ -204,7 +192,7 @@ pub fn compile_and_run_with_call_file_full(
             String::from_utf8_lossy(&compiled.stderr)
         )));
     }
-    let run = run_executable_full(&exe, args)?;
+    let run = run_executable_full(&exe, args, call_file)?;
     Ok((
         crate::support::NativeRunView {
             status: run.status,
@@ -215,29 +203,22 @@ pub fn compile_and_run_with_call_file_full(
     ))
 }
 
-pub fn compile_and_run_with_call_file(
-    sources: &[(&str, &str)],
-    compiler: &ToolchainIdentity,
-    flags: &[&str],
-    args: &[String],
-    call_file: Option<&Path>,
-) -> Result<(i128, ExecutionStatus, String), NativeError> {
-    compile_and_run_with_call_file_full(sources, compiler, flags, args, call_file)
-        .map(|(run, summary)| (run.value, run.status, summary))
-}
-
 pub(crate) struct NativeRun {
     pub status: ExecutionStatus,
     pub value: i128,
     pub arena_hex: Option<String>,
 }
 
-fn run_executable(exe: &Path, args: &[String]) -> Result<(ExecutionStatus, i128), NativeError> {
-    run_executable_full(exe, args).map(|run| (run.status, run.value))
-}
-
-fn run_executable_full(exe: &Path, args: &[String]) -> Result<NativeRun, NativeError> {
-    let output = Command::new(exe)
+fn run_executable_full(
+    exe: &Path,
+    args: &[String],
+    call_file: Option<&Path>,
+) -> Result<NativeRun, NativeError> {
+    let mut run_command = Command::new(exe);
+    if let Some(path) = call_file {
+        run_command.env("MNCS_CALL_FILE", path);
+    }
+    let output = run_command
         .args(args)
         .output()
         .map_err(|error| NativeError::ExecutionFailed(error.to_string()))?;
@@ -274,10 +255,7 @@ fn run_executable_full(exe: &Path, args: &[String]) -> Result<NativeRun, NativeE
     }
 }
 
-pub(crate) fn run_native_full(exe: &Path, args: &[String]) -> Result<NativeRun, NativeError> {
-    run_executable_full(exe, args)
-}
-
+#[allow(dead_code)]
 pub fn decode_native_value(
     contract: Option<&BackendValueContract>,
     status: ExecutionStatus,
@@ -307,6 +285,7 @@ pub fn argv_from_request(request: &mncs_model::ExecutionRequest) -> Result<Vec<S
 /// hardware trap (for example SIGFPE from an unguarded division) classifies
 /// as a runtime failure, matching the reference executors' rejection of the
 /// same input.
+#[allow(dead_code)]
 pub fn compile_object_and_run(
     object_name: &str,
     object_bytes: &[u8],
@@ -315,6 +294,29 @@ pub fn compile_object_and_run(
     linker: &ToolchainIdentity,
     args: &[String],
 ) -> Result<(ExecutionStatus, i128), NativeError> {
+    compile_object_and_run_full(
+        object_name,
+        object_bytes,
+        driver_name,
+        driver_source,
+        linker,
+        args,
+        None,
+    )
+    .map(|run| (run.status, run.value))
+}
+
+/// As `compile_object_and_run`, exporting `MNCS_CALL_FILE` to the child and
+/// preserving the full observation for composite decoding.
+pub fn compile_object_and_run_full(
+    object_name: &str,
+    object_bytes: &[u8],
+    driver_name: &str,
+    driver_source: &str,
+    linker: &ToolchainIdentity,
+    args: &[String],
+    call_file: Option<&Path>,
+) -> Result<crate::support::NativeRunView, NativeError> {
     let digest = crate::support::sha256_hex(object_bytes);
     let dir = std::env::temp_dir().join(format!("mncs-aot-{}", &digest[..16]));
     fs::create_dir_all(&dir).map_err(|error| {
@@ -348,9 +350,17 @@ pub fn compile_object_and_run(
             String::from_utf8_lossy(&compiled.stderr)
         )));
     }
-    match run_executable(&exe, args) {
-        Ok(outcome) => Ok(outcome),
-        Err(NativeError::InvalidOutput(_)) => Ok((ExecutionStatus::RuntimeFailure, 0)),
+    match run_executable_full(&exe, args, call_file) {
+        Ok(run) => Ok(crate::support::NativeRunView {
+            status: run.status,
+            value: run.value,
+            arena_hex: run.arena_hex,
+        }),
+        Err(NativeError::InvalidOutput(_)) => Ok(crate::support::NativeRunView {
+            status: ExecutionStatus::RuntimeFailure,
+            value: 0,
+            arena_hex: None,
+        }),
         Err(other) => Err(other),
     }
 }

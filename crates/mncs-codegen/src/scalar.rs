@@ -189,13 +189,12 @@ pub fn lower_to_scalar(program: &Program, ssa: &SsaModule, names: &[String]) -> 
             Err(reason) => unsupported.push(format!("{}: {reason}", function.identity.0)),
         }
     }
-    if !layout.records.is_empty() || !layout.boxed_finites.is_empty() {
-        if functions
+    if (!layout.records.is_empty() || !layout.boxed_finites.is_empty())
+        && functions
             .iter()
             .any(|function| function_uses_cells(function, &layout))
-        {
-            features.push("canonical_composite_cells".to_owned());
-        }
+    {
+        features.push("canonical_composite_cells".to_owned());
     }
     if ssa
         .functions
@@ -369,7 +368,9 @@ fn lower_instruction(
                 format!("finite variant {discriminant} has no declared payload layout")
             })?;
             if fields.len() != payload_fields.len() || fields.len() != instruction.inputs.len() {
-                return Err("payload field count does not match the declared variant layout".to_owned());
+                return Err(
+                    "payload field count does not match the declared variant layout".to_owned(),
+                );
             }
             let cell = dest.id.clone();
             let bytes = (fields.len() as u64 + 1) * 8;
@@ -421,11 +422,13 @@ fn lower_instruction(
                 width: fields[index].width,
             })
         }
-        SsaInstructionKind::FiniteIsVariant { discriminant, .. } => Ok(ScalarInst::FiniteIsVariant {
-            dest,
-            src: operand(instruction, 0)?,
-            discriminant: *discriminant,
-        }),
+        SsaInstructionKind::FiniteIsVariant { discriminant, .. } => {
+            Ok(ScalarInst::FiniteIsVariant {
+                dest,
+                src: operand(instruction, 0)?,
+                discriminant: *discriminant,
+            })
+        }
         SsaInstructionKind::Call { function, .. } => {
             let callee = callees
                 .get(function)
@@ -462,7 +465,7 @@ fn lower_instruction(
                 bytes: fields.len() as u64 * 8,
             }];
             for (index, entry) in fields.iter().enumerate() {
-                if &entry.name != &field_names[index] {
+                if entry.name != field_names[index] {
                     return Err(format!(
                         "record construction field {:?} does not match the canonical layout {:?}",
                         field_names[index], entry.name
@@ -575,15 +578,11 @@ pub fn scalar_ty_in(ty: &IrType, layout: &CompositeLayout) -> Result<ScalarTy, S
     }
 }
 
-/// Type mapping without a composite layout: records fail closed, boxed
-/// finite detection is unavailable and finite types stay unboxed.
-pub fn scalar_ty(ty: &IrType) -> Result<ScalarTy, String> {
-    scalar_ty_in(ty, &CompositeLayout::default())
-}
-
 pub fn abi_bits(ty: ScalarTy) -> u16 {
     match ty {
-        ScalarTy::Bool | ScalarTy::Finite | ScalarTy::Cell { .. } => 32,
+        // Cell references are full 64-bit arena offsets.
+        ScalarTy::Cell => 64,
+        ScalarTy::Bool | ScalarTy::Finite => 32,
         ScalarTy::Int(integer) => integer.bits.clamp(32, 64),
     }
 }
@@ -591,7 +590,7 @@ pub fn abi_bits(ty: ScalarTy) -> u16 {
 pub fn c_type(ty: ScalarTy) -> &'static str {
     match ty {
         // Cell references are unsigned byte offsets into the arena.
-        ScalarTy::Cell { .. } => "uint64_t",
+        ScalarTy::Cell => "uint64_t",
         _ => match abi_bits(ty) {
             64 => "int64_t",
             _ => "int32_t",
@@ -601,7 +600,7 @@ pub fn c_type(ty: ScalarTy) -> &'static str {
 
 pub fn llvm_type(ty: ScalarTy) -> String {
     match ty {
-        ScalarTy::Cell { .. } => "i64".to_owned(),
+        ScalarTy::Cell => "i64".to_owned(),
         ScalarTy::Bool | ScalarTy::Finite => "i32".to_owned(),
         ScalarTy::Int(integer) => format!("i{}", integer.bits),
     }
@@ -609,17 +608,18 @@ pub fn llvm_type(ty: ScalarTy) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::scalar_ty;
+    use super::{scalar_ty_in, CompositeLayout};
     use mncs_model::{IrType, SemanticId};
 
     #[test]
-    fn record_values_are_explicitly_unsupported_by_scalar_backends() {
+    fn record_values_without_a_declared_layout_fail_closed() {
         let record = IrType::Record {
             identity: SemanticId("mncs:0.2:record-type:m::R".to_owned()),
             name: "R".to_owned(),
         };
-        let error = scalar_ty(&record).expect_err("records must fail closed");
-        assert!(error.contains("unsupported"), "{error}");
+        let error =
+            scalar_ty_in(&record, &CompositeLayout::default()).expect_err("must fail closed");
+        assert!(error.contains("canonical layout"), "{error}");
         assert!(error.contains('R'), "diagnostic names the record type");
     }
 }
