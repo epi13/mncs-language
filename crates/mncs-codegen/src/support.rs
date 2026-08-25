@@ -66,8 +66,10 @@ pub(crate) fn function_names(program: &Program, ssa: &SsaModule) -> Vec<String> 
                 .functions
                 .iter()
                 .find(|function| {
-                    mncs_model::function_id(&program.module, &function.name)
-                        == ssa_function.semantic_identity
+                    mncs_model::function_id(
+                        function.identity_namespace(&program.module),
+                        &function.name,
+                    ) == ssa_function.semantic_identity
                 })
                 .map(|function| function.name.clone())
                 .unwrap_or_else(|| export_name(&ssa_function.semantic_identity.0))

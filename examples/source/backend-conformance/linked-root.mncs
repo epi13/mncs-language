@@ -1,0 +1,27 @@
+mncs 0.6;
+
+// Root of a linked two-module probe: every function executed by the corpus
+// lives in the imported module, so backend exports must resolve through
+// home-module namespaces and marshal finite values inside records faithfully.
+module conf.linked.root;
+
+use conf.linked.evidence;
+
+fn summarize(first: bool, second: bool) -> (reading: Reading) {
+    let left: Reading = classify(7, first);
+    let right: Reading = classify(11, second);
+    if presence_is(left) {
+        if presence_is(right) {
+            return Reading { value: left.value + right.value, presence: Presence.PRESENT };
+        }
+        return left;
+    }
+    return right;
+}
+
+fn presence_is(reading: Reading) -> (present: bool) {
+    return match reading.presence {
+        Presence.PRESENT => true,
+        ABSENT => false,
+    };
+}

@@ -1132,11 +1132,18 @@ fn read_slot(runtime: &Runtime, ty: &MarshalTy, address: i64) -> Result<Executio
                 ty: *integer,
             })
         }
-        MarshalTy::BareFinite { .. } => {
+        MarshalTy::BareFinite {
+            type_identity,
+            variants,
+        } => {
             let discriminant = runtime.load(address, 4)? as u32;
+            let variant_identity = variants
+                .get(&discriminant)
+                .cloned()
+                .unwrap_or_else(|| SemanticId("unresolved".to_owned()));
             Ok(ExecutionValue::Finite {
-                type_identity: SemanticId("unresolved".to_owned()),
-                variant_identity: SemanticId("unresolved".to_owned()),
+                type_identity: type_identity.clone(),
+                variant_identity,
                 discriminant,
                 payload: Vec::new(),
             })
