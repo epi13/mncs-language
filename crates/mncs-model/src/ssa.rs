@@ -46,6 +46,9 @@ pub enum SsaInstructionKind {
         predicate: String,
         operand_type: crate::IntegerType,
     },
+    BooleanOp {
+        operator: String,
+    },
     FiniteConstruct {
         type_identity: SemanticId,
         variant_identity: SemanticId,
@@ -1324,6 +1327,9 @@ fn ssa_kind(kind: &IrOperationKind) -> SsaInstructionKind {
             predicate: predicate.clone(),
             operand_type: *operand_type,
         },
+        IrOperationKind::BooleanOp { operator } => SsaInstructionKind::BooleanOp {
+            operator: operator.clone(),
+        },
         IrOperationKind::RecordConstruct {
             type_identity,
             field_names,
@@ -1411,6 +1417,9 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
         } => SsaInstructionKind::IntegerCompare {
             predicate: predicate.clone(),
             operand_type: *operand_type,
+        },
+        BodyOperationKind::BooleanOp { operator } => SsaInstructionKind::BooleanOp {
+            operator: operator.clone(),
         },
         BodyOperationKind::RecordConstruct {
             type_identity,

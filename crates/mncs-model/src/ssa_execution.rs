@@ -607,6 +607,31 @@ fn execute_instruction(
                 values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
             }
         }
+        SsaInstructionKind::BooleanOp { operator } => {
+            let Some((left, right)) = boolean_operands(instruction, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "boolean operation operands were unavailable or not boolean",
+                );
+                return true;
+            };
+            let value = match operator.as_str() {
+                "and" => left && right,
+                "or" => left || right,
+                _ => {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        instruction_identity(instruction),
+                        format!("unsupported boolean operator {operator:?}"),
+                    );
+                    return true;
+                }
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
+            }
+        }
         SsaInstructionKind::FiniteConstruct {
             type_identity,
             variant_identity,
@@ -959,6 +984,22 @@ fn assign_block_arguments(
         destination.insert(parameter.identity.clone(), value);
     }
     true
+}
+
+fn boolean_operands(
+    instruction: &SsaInstruction,
+    values: &BTreeMap<SemanticId, ExecutionValue>,
+) -> Option<(bool, bool)> {
+    let [left, right] = instruction.inputs.as_slice() else {
+        return None;
+    };
+    let Some(ExecutionValue::Boolean { value: left }) = values.get(left) else {
+        return None;
+    };
+    let Some(ExecutionValue::Boolean { value: right }) = values.get(right) else {
+        return None;
+    };
+    Some((*left, *right))
 }
 
 fn integer_operands(

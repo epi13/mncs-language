@@ -169,6 +169,11 @@ pub enum BodyOperationKind {
         predicate: String,
         operand_type: IntegerType,
     },
+    /// Strict boolean conjunction/disjunction (Profile 0.6). Both operands
+    /// are total values; evaluation is not short-circuited.
+    BooleanOp {
+        operator: String,
+    },
     FiniteConstruct {
         type_identity: SemanticId,
         variant_identity: SemanticId,
@@ -843,6 +848,43 @@ fn validate_operation(
                     "MNB042",
                     format!("{path}.results"),
                     "integer comparison result must have boolean type",
+                ));
+            }
+        }
+        BodyOperationKind::BooleanOp { operator } => {
+            if !matches!(operator.as_str(), "and" | "or") {
+                errors.push(body_diagnostic(
+                    "MNB067",
+                    format!("{path}.kind"),
+                    format!("unsupported boolean operator {:?}", operator),
+                ));
+            }
+            if operation.operands.len() != 2 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB068",
+                    path.to_owned(),
+                    "boolean operation requires two operands and one result",
+                ));
+            }
+            let bool_type = BodyType::Named("bool".to_owned());
+            for (index, operand) in operation.operands.iter().enumerate() {
+                if available.get(operand) != Some(&bool_type) {
+                    errors.push(body_diagnostic(
+                        "MNB069",
+                        format!("{path}.inputs[{index}]"),
+                        "boolean operands must have bool type",
+                    ));
+                }
+            }
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| result.ty != bool_type)
+            {
+                errors.push(body_diagnostic(
+                    "MNB070",
+                    format!("{path}.results"),
+                    "boolean operation result must have bool type",
                 ));
             }
         }

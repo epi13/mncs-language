@@ -1,0 +1,389 @@
+{
+ "schema_version": "0.1",
+ "name": "profile06-boolean-operators",
+ "cases": [
+  {
+   "id": "pick-true-true-false",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile06_boolean_operators",
+     "function": "pick"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 32,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "pick-true-false-false",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile06_boolean_operators",
+     "function": "pick"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 32,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "pick-false-false-false",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile06_boolean_operators",
+     "function": "pick"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 32,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "pick-false-false-true",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile06_boolean_operators",
+     "function": "pick"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 32,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "pick-true-true-true",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile06_boolean_operators",
+     "function": "pick"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 32,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "guard-5-1-10",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile06_boolean_operators",
+     "function": "guard"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 10,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "guard-0-1-10",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile06_boolean_operators",
+     "function": "guard"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 10,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "guard-10-1-10",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile06_boolean_operators",
+     "function": "guard"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 10,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 10,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "guard-11-1-10",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.profile06_boolean_operators",
+     "function": "guard"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 11,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 10,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  }
+ ]
+}

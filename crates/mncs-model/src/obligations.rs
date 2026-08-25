@@ -184,7 +184,8 @@ impl Program {
                         match &operation.kind {
                             BodyOperationKind::RecordConstruct { .. }
                             | BodyOperationKind::RecordProject { .. }
-                            | BodyOperationKind::FinitePayloadProject { .. } => {}
+                            | BodyOperationKind::FinitePayloadProject { .. }
+                            | BodyOperationKind::BooleanOp { .. } => {}
                             BodyOperationKind::Integer { intent, .. } => {
                                 let bounded_counter_step =
                                     body.bounded_iterations.iter().any(|iteration| {

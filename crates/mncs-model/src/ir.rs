@@ -89,6 +89,9 @@ pub enum IrOperationKind {
         predicate: String,
         operand_type: crate::IntegerType,
     },
+    BooleanOp {
+        operator: String,
+    },
     FiniteConstruct {
         type_identity: SemanticId,
         variant_identity: SemanticId,
@@ -784,6 +787,15 @@ fn lower_executable_body(
                         Vec::new(),
                         Vec::new(),
                         Some(machine_intent_links(program, function, block, operation)),
+                        None,
+                    ),
+                    BodyOperationKind::BooleanOp { operator } => (
+                        IrOperationKind::BooleanOp {
+                            operator: operator.clone(),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
                         None,
                     ),
                     BodyOperationKind::FiniteConstruct {

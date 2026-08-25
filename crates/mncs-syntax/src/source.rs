@@ -246,6 +246,8 @@ pub enum TokenKind {
     Percent,
     EqEq,
     NotEq,
+    AndAnd,
+    OrOr,
     Lt,
     Gt,
     Le,
@@ -409,6 +411,8 @@ pub enum AstBinaryOp {
     Mul,
     Div,
     Mod,
+    And,
+    Or,
     Eq,
     Ne,
     Lt,
@@ -706,6 +710,12 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
         } else if source[start..].starts_with("=>") {
             offset += 2;
             TokenKind::FatArrow
+        } else if source[start..].starts_with("&&") {
+            offset += 2;
+            TokenKind::AndAnd
+        } else if source[start..].starts_with("||") {
+            offset += 2;
+            TokenKind::OrOr
         } else if source[start..].starts_with("==") {
             offset += 2;
             TokenKind::EqEq
@@ -2325,17 +2335,19 @@ fn is_identifier_start(value: char) -> bool {
 
 fn binary_operator(kind: Option<TokenKind>) -> Option<(AstBinaryOp, u8)> {
     Some(match kind? {
-        TokenKind::EqEq => (AstBinaryOp::Eq, 1),
-        TokenKind::NotEq => (AstBinaryOp::Ne, 1),
-        TokenKind::Lt => (AstBinaryOp::Lt, 2),
-        TokenKind::Le => (AstBinaryOp::Le, 2),
-        TokenKind::Gt => (AstBinaryOp::Gt, 2),
-        TokenKind::Ge => (AstBinaryOp::Ge, 2),
-        TokenKind::Plus => (AstBinaryOp::Add, 3),
-        TokenKind::Minus => (AstBinaryOp::Sub, 3),
-        TokenKind::Star => (AstBinaryOp::Mul, 4),
-        TokenKind::Slash => (AstBinaryOp::Div, 4),
-        TokenKind::Percent => (AstBinaryOp::Mod, 4),
+        TokenKind::OrOr => (AstBinaryOp::Or, 1),
+        TokenKind::AndAnd => (AstBinaryOp::And, 2),
+        TokenKind::EqEq => (AstBinaryOp::Eq, 3),
+        TokenKind::NotEq => (AstBinaryOp::Ne, 3),
+        TokenKind::Lt => (AstBinaryOp::Lt, 4),
+        TokenKind::Le => (AstBinaryOp::Le, 4),
+        TokenKind::Gt => (AstBinaryOp::Gt, 4),
+        TokenKind::Ge => (AstBinaryOp::Ge, 4),
+        TokenKind::Plus => (AstBinaryOp::Add, 5),
+        TokenKind::Minus => (AstBinaryOp::Sub, 5),
+        TokenKind::Star => (AstBinaryOp::Mul, 6),
+        TokenKind::Slash => (AstBinaryOp::Div, 6),
+        TokenKind::Percent => (AstBinaryOp::Mod, 6),
         _ => return None,
     })
 }

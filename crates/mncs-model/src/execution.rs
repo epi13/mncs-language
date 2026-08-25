@@ -644,6 +644,32 @@ fn execute_operation(
                 ExecutionValue::Boolean { value },
             );
         }
+        BodyOperationKind::BooleanOp { operator } => {
+            let Some((left, right)) = boolean_operands(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "boolean operation operands were unavailable or not boolean".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let value = match operator.as_str() {
+                "and" => left && right,
+                "or" => left || right,
+                _ => {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        Some(identity.clone()),
+                        format!("unsupported boolean operator {operator:?}"),
+                    );
+                    return Some(result.clone());
+                }
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Boolean { value },
+            );
+        }
         BodyOperationKind::FiniteConstruct {
             type_identity,
             variant_identity,
@@ -1101,6 +1127,22 @@ pub(crate) fn valid_finite_value(
                 &variant.identity == variant_identity && variant.discriminant == discriminant
             })
         })
+}
+
+fn boolean_operands(
+    operation: &BodyOperation,
+    values: &BTreeMap<String, ExecutionValue>,
+) -> Option<(bool, bool)> {
+    let [left, right] = operation.operands.as_slice() else {
+        return None;
+    };
+    let Some(ExecutionValue::Boolean { value: left }) = values.get(left) else {
+        return None;
+    };
+    let Some(ExecutionValue::Boolean { value: right }) = values.get(right) else {
+        return None;
+    };
+    Some((*left, *right))
 }
 
 fn integer_operands(

@@ -2591,6 +2591,40 @@ impl<'a> BodyBuilder<'a> {
                     ));
                     return None;
                 }
+                // Strict boolean operators (Profile 0.6): both operands are
+                // total bool values; evaluation is not short-circuited.
+                if matches!(op, AstBinaryOp::And | AstBinaryOp::Or) {
+                    let bool_type = BodyType::Named("bool".to_owned());
+                    if left_value.ty != bool_type || right_value.ty != bool_type {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE181",
+                            "boolean operator operands must have type bool",
+                            expr.span(),
+                        ));
+                        return None;
+                    }
+                    let id = self.new_value("b");
+                    self.blocks[self.current].operations.push(BodyOperation {
+                        id: id.clone(),
+                        kind: BodyOperationKind::BooleanOp {
+                            operator: match op {
+                                AstBinaryOp::And => "and".to_owned(),
+                                _ => "or".to_owned(),
+                            },
+                        },
+                        operands: vec![left_value.id, right_value.id],
+                        results: vec![BodyValue {
+                            id: id.clone(),
+                            ty: bool_type.clone(),
+                        }],
+                        contracts: Vec::new(),
+                        assumptions: Vec::new(),
+                        machine_intent: None,
+                        lowering: None,
+                        portability: None,
+                    });
+                    return Some(ResolvedBinding { id, ty: bool_type });
+                }
                 let id = self.new_value("v");
                 let (kind, result_ty) = match op {
                     AstBinaryOp::Add

@@ -352,6 +352,21 @@ fn lower_instruction(
             body.push(Instr::I32Const(*discriminant as i32));
             body.push(Instr::LocalSet(dest));
         }
+        SsaInstructionKind::BooleanOp { operator } => {
+            // Bools are normalized 0/1 i32 locals in this realization, so
+            // strict conjunction/disjunction is a bitwise op on them.
+            let dest = dest_local(layout, instruction)?;
+            let left = operand_local(layout, instruction, 0)?;
+            let right = operand_local(layout, instruction, 1)?;
+            body.push(Instr::LocalGet(left));
+            body.push(Instr::LocalGet(right));
+            body.push(match operator.as_str() {
+                "and" => Instr::I32And,
+                "or" => Instr::I32Or,
+                other => return Err(format!("unsupported boolean operator {other}")),
+            });
+            body.push(Instr::LocalSet(dest));
+        }
         SsaInstructionKind::FinitePayloadProject { .. } => {
             return Err(
                 "payload projection is outside the current realization envelope; the reference executors realize sums fully".to_owned(),

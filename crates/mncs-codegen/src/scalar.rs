@@ -284,6 +284,9 @@ fn lower_instruction(
                 discriminant: *discriminant,
             })
         }
+        SsaInstructionKind::BooleanOp { operator } => Err(format!(
+            "boolean operator {operator:?} is outside the current scalar realization envelope"
+        )),
         SsaInstructionKind::FinitePayloadProject { .. } => Err(
             "payload projection is outside the current scalar realization envelope".to_owned(),
         ),

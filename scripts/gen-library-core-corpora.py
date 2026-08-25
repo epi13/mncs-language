@@ -333,6 +333,60 @@ def result_cases():
     return cases
 
 
+
+
+BOOL = "examples.profile06_boolean_operators"
+
+
+def boolean_operator_cases():
+    """Strict && / || through guards, layered agreement on WASM+bytecode."""
+    cases = []
+
+    def b(value):
+        return {"boolean": {"value": value}}
+
+    def i32(value):
+        return integer(value, bits=32)
+
+    def i64(value):
+        return integer(value, bits=64)
+
+    truth = [
+        ((True, True, False), 1),
+        ((True, False, False), 0),
+        ((False, False, False), 0),
+        ((False, False, True), 1),
+        ((True, True, True), 1),
+    ]
+    for (a, c, d), expected in truth:
+        tag = f"{a}-{c}-{d}".lower()
+        cases.append(
+            case(
+                f"pick-{tag}",
+                BOOL,
+                "pick",
+                [b(a), b(c), b(d)],
+                i32(expected),
+            )
+        )
+    for x, lo, hi, expected in [
+        (5, 1, 10, True),
+        (0, 1, 10, False),
+        (10, 1, 10, True),
+        (11, 1, 10, False),
+    ]:
+        cases.append(
+            case(
+                f"guard-{x}-{lo}-{hi}",
+                BOOL,
+                "guard",
+                [i64(x), i64(lo), i64(hi)],
+                {"boolean": {"value": expected}},
+            )
+        )
+    return cases
+
+
 def main():
     emit("library-core-status-corpus.json", status_cases())
     emit("library-core-logic-corpus.json", logic_cases())
@@ -341,6 +395,7 @@ def main():
     emit("library-core-status-wrong-corpus.json", status_wrong_cases())
     emit("profile06-payload-sums-corpus.json", profile06_payload_cases())
     emit("library-core-result-corpus.json", result_cases())
+    emit("profile06-boolean-operators-corpus.json", boolean_operator_cases())
 
 
 if __name__ == "__main__":

@@ -121,3 +121,25 @@ fn profile06_negative_fixtures_are_rejected_with_intended_codes() {
         "MNE175",
     );
 }
+
+/// Strict boolean operators (Profile 0.6): `a && b || c` guards and chained
+/// relational guards must agree across body, SSA, and the portable WASM
+/// realization (9/9 layered cases).
+#[test]
+fn profile06_boolean_operators_agree_across_layers() {
+    let source = example("source/profile06-boolean-operators.mncs");
+    let corpus = example("execution/profile06-boolean-operators-corpus.json");
+    let output = binary()
+        .args(["check-backend-execution", &source, &corpus])
+        .output()
+        .expect("run layered boolean check");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&output.stdout).expect("layered JSON");
+    assert_eq!(result["status"], "consistent_over_corpus");
+    assert_eq!(result["matching_cases"], 9);
+    assert_eq!(result["mismatching_cases"], 0);
+}

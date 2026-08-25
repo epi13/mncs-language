@@ -227,6 +227,7 @@ impl Program {
                                 ))
                             }
                             crate::BodyOperationKind::IntegerCompare { .. }
+                            | crate::BodyOperationKind::BooleanOp { .. }
                             | crate::BodyOperationKind::FiniteConstruct { .. }
                             | crate::BodyOperationKind::FinitePayloadProject { .. }
                             | crate::BodyOperationKind::FiniteIsVariant { .. }
