@@ -441,6 +441,10 @@ struct MergedContext {
     imported_record_types: Vec<RecordType>,
     imported_functions: Vec<Function>,
     imported_declarations: DeclarationSpans,
+    /// Transitive dependency namespaces: everything this program was linked
+    /// against, not only its own direct `use` targets. Identity validation
+    /// accepts declarations anchored to any of these namespaces.
+    imported_dependencies: BTreeSet<SemanticId>,
     finite_type_names: BTreeSet<String>,
     record_type_names: BTreeSet<String>,
     function_names: BTreeSet<String>,
@@ -610,6 +614,12 @@ fn merge_imported_declarations(
     // re-export and binds once. Only a name conflict between DIFFERENT
     // identities fails closed.
     for module in imported {
+        context
+            .imported_dependencies
+            .extend(module.program.dependencies.iter().cloned());
+        context
+            .imported_dependencies
+            .insert(mncs_model::module_id(&module.program.module));
         context
             .imported_declarations
             .merge_missing(&module.declarations);
@@ -1059,6 +1069,7 @@ fn elaborate_linked_module(
             .iter()
             .map(|use_decl| mncs_model::module_id(&use_decl.module.text))
             .collect();
+        dependencies.extend(context.imported_dependencies.iter().cloned());
         dependencies.sort();
         dependencies.dedup();
         Ok(Program {
