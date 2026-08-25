@@ -426,6 +426,25 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                 clif_ty(dest.ty)
             );
         }
+        ScalarInst::Boolean {
+            dest,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            let op = match operator.as_str() {
+                "and" => "band",
+                _ => "bor",
+            };
+            let _ = writeln!(
+                out,
+                "        {} = {} {}, {}",
+                names.value(&dest.id),
+                op,
+                names.value(lhs),
+                names.value(rhs)
+            );
+        }
         ScalarInst::Integer {
             dest,
             operator,
@@ -438,6 +457,31 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
             let lhs_n = names.value(lhs);
             let rhs_n = names.value(rhs);
             let ty = clif_ty(dest.ty);
+            if matches!(operator.as_str(), "div" | "mod") {
+                // Cranelift sdiv traps on zero and MIN / -1; srem traps on
+                // zero. That matches MNCS checked semantics; i32 division
+                // computes through i64 so traps remain well-defined.
+                let wide = format!("{} = sextend.{} {}", dest_n, "i64", lhs_n);
+                let _ = writeln!(out, "        {wide}");
+                let _ = writeln!(out, "        {dest_n}_x = sextend.i64 {rhs_n}");
+                let native = match (operator.as_str(), &*ty) {
+                    ("div", "i64") => "sdiv",
+                    ("mod", "i64") => "srem",
+                    ("div", _) => "sdiv",
+                    _ => "srem",
+                };
+                if ty == "i64" {
+                    let _ = writeln!(out, "        {dest_n} = {native} {lhs_n}, {rhs_n}");
+                } else {
+                    let _ = writeln!(
+                        out,
+                        "        {dest_n}_q = {}.i64 {dest_n}, {dest_n}_x",
+                        native
+                    );
+                    let _ = writeln!(out, "        {dest_n} = ireduce.i64 {dest_n}_q");
+                }
+                return;
+            }
             if matches!(operator.as_str(), "and" | "or" | "xor") {
                 let op = match operator.as_str() {
                     "and" => "band",
@@ -586,6 +630,7 @@ impl ClifNames {
                 let dest = match inst {
                     ScalarInst::Const { dest, .. }
                     | ScalarInst::Integer { dest, .. }
+                    | ScalarInst::Boolean { dest, .. }
                     | ScalarInst::Compare { dest, .. }
                     | ScalarInst::FiniteConstruct { dest, .. }
                     | ScalarInst::FiniteIsVariant { dest, .. }
@@ -789,6 +834,20 @@ fn jit_scalar(
                                 .iconst(types::I64, i64::try_from(*value).unwrap_or(0));
                             values.insert(dest.id.clone(), produced);
                         }
+                        ScalarInst::Boolean {
+                            dest,
+                            operator,
+                            lhs,
+                            rhs,
+                        } => {
+                            let left = values[lhs];
+                            let right = values[rhs];
+                            let produced = match operator.as_str() {
+                                "and" => builder.ins().band(left, right),
+                                _ => builder.ins().bor(left, right),
+                            };
+                            values.insert(dest.id.clone(), produced);
+                        }
                         ScalarInst::Integer {
                             dest,
                             operator,
@@ -799,6 +858,18 @@ fn jit_scalar(
                         } => {
                             let left = values[lhs];
                             let right = values[rhs];
+                            if matches!(operator.as_str(), "div" | "mod") {
+                                // Cranelift sdiv/srem trap exactly like MNCS
+                                // checked division; the host maps traps to
+                                // runtime failures.
+                                let produced = if operator == "div" {
+                                    builder.ins().sdiv(left, right)
+                                } else {
+                                    builder.ins().srem(left, right)
+                                };
+                                values.insert(dest.id.clone(), produced);
+                                continue;
+                            }
                             if matches!(operator.as_str(), "and" | "or" | "xor") {
                                 let produced = match operator.as_str() {
                                     "and" => builder.ins().band(left, right),

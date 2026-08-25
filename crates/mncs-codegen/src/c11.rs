@@ -10,7 +10,7 @@ use std::fmt::Write;
 use mncs_model::{
     ArithmeticIntent, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
     BackendIdentity, BackendResult, CompilerArtifactRef, CompilerDiagnostic,
-    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SsaModule,
+    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, ExecutionValue, Program, SsaModule,
     TargetContractRef, TargetLoweringPlan, TransformationStatus, SSA_SCHEMA_VERSION,
 };
 
@@ -477,6 +477,25 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 "mul" => "*",
                 _ => "+",
             };
+            if matches!(operator.as_str(), "div" | "mod") {
+                // Division by zero is undefined behavior in C, so every
+                // intent guards it explicitly and fails exactly like the
+                // reference executors; checked division also guards MIN/-1.
+                let slash = if operator == "div" { "/" } else { "%" };
+                let overflow_guard = if operator == "div" && signed {
+                    format!(
+                        "if ({lhs_n} == INT{bits}_MIN && {rhs_n} == -1) {{ *mncs_status = 1; *mncs_value = 0; return; }} "
+                    )
+                } else {
+                    String::new()
+                };
+                let _ = writeln!(
+                    out,
+                    "      if ({rhs_n} == 0) {{ *mncs_status = 1; *mncs_value = 0; return; }} {overflow_guard}{dest_n} = ({}){lhs_n} {slash} {rhs_n};",
+                    c_type(dest.ty)
+                );
+                return;
+            }
             if matches!(
                 intent,
                 ArithmeticIntent::Checked | ArithmeticIntent::Trapping
@@ -500,6 +519,26 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                     c_type(dest.ty)
                 );
             }
+        }
+        ScalarInst::Boolean {
+            dest,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            // Strict MNCS booleans over normalized 0/1 int32 slots.
+            let op = match operator.as_str() {
+                "and" => "&&",
+                _ => "||",
+            };
+            let _ = writeln!(
+                out,
+                "      {} = ({})({} {op} {});",
+                names.value(&dest.id),
+                c_type(dest.ty),
+                names.value(lhs),
+                names.value(rhs)
+            );
         }
         ScalarInst::Compare {
             dest,
@@ -564,6 +603,7 @@ fn inst_dest(inst: &ScalarInst) -> &crate::scalar::ScalarValue {
     match inst {
         ScalarInst::Const { dest, .. }
         | ScalarInst::Integer { dest, .. }
+        | ScalarInst::Boolean { dest, .. }
         | ScalarInst::Compare { dest, .. }
         | ScalarInst::FiniteConstruct { dest, .. }
         | ScalarInst::FiniteIsVariant { dest, .. }
@@ -647,7 +687,21 @@ pub fn execute_c11(
             "C11 execution requires a language-owned function value contract",
         );
     };
-    let driver = c_driver(&request.target.function, contract.inputs.len());
+    // Composite arguments cannot cross this process-argument realization
+    // boundary; they fail closed before any code is compiled.
+    for value in &request.arguments {
+        if !matches!(
+            value,
+            ExecutionValue::Boolean { .. } | ExecutionValue::Integer { .. }
+        ) {
+            return execution_failure(
+                result,
+                ExecutionStatus::Unsupported,
+                "composite arguments are outside the current C11 process-boundary envelope; records and payload sums realize through WASM and the research bytecode interpreter",
+            );
+        }
+    }
+    let driver = c_driver(&request.target.function, &contract.inputs);
     let argv = match argv_from_request(request) {
         Ok(argv) => argv,
         Err(reason) => return execution_failure(result, ExecutionStatus::Unsupported, &reason),
@@ -673,22 +727,60 @@ pub fn execute_c11(
     }
 }
 
-fn c_driver(function: &str, arity: usize) -> String {
-    let mut parse = Vec::new();
-    let mut args = Vec::new();
-    for index in 0..arity {
-        parse.push(format!(
-            "  long long a{index} = strtoll(argv[{}], 0, 10);",
-            index + 1
-        ));
-        args.push(format!("(int32_t)a{index}"));
+fn c_driver(function: &str, inputs: &[mncs_model::BackendValueContract]) -> String {
+    // Parameter types follow each declared scalar so the generated prototype
+    // matches the module definition exactly (an int32/int64 mismatch would be
+    // C undefined behavior at every call boundary). Composite parameters never
+    // reach this driver: they fail closed in the execute path above.
+    fn scalar_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
+        match contract {
+            mncs_model::BackendValueContract::Scalar { semantic_type } => {
+                match mncs_model::BodyType::from_semantic_name(semantic_type) {
+                    mncs_model::BodyType::Integer(ty) if ty.bits == 64 => "int64_t",
+                    _ => "int32_t",
+                }
+            }
+            mncs_model::BackendValueContract::Finite { payloads, .. } => {
+                if payloads.is_empty() {
+                    "int32_t"
+                } else {
+                    "int64_t"
+                }
+            }
+            _ => "int64_t",
+        }
     }
-    let proto = (0..arity)
-        .map(|_| "int32_t")
-        .chain(["int32_t*", "int64_t*"])
+    let parse_and_args = inputs
+        .iter()
+        .enumerate()
+        .map(|(index, ty)| {
+            let parse = format!(
+                "  long long a{index} = strtoll(argv[{}], 0, 10);",
+                index + 1
+            );
+            let arg = format!("({})a{index}", scalar_c_type(ty));
+            (parse, arg)
+        })
+        .collect::<Vec<_>>();
+    let parse = parse_and_args
+        .iter()
+        .map(|(parse, _)| parse.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let call_args = parse_and_args
+        .iter()
+        .map(|(_, arg)| arg.clone())
+        .collect::<Vec<_>>();
+    let proto = inputs
+        .iter()
+        .map(scalar_c_type)
+        .map(str::to_owned)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .chain(["int32_t*".to_owned(), "int64_t*".to_owned()])
         .collect::<Vec<_>>()
         .join(", ");
-    let call = args
+    let call = call_args
         .into_iter()
         .chain(["&status".to_owned(), "&value".to_owned()])
         .collect::<Vec<_>>()
@@ -700,7 +792,7 @@ fn c_driver(function: &str, arity: usize) -> String {
 void {function}({proto});
 int main(int argc, char **argv) {{
   (void)argc;
-{}
+{parse}
   int32_t status = 2;
   int64_t value = 0;
   {function}({call});
@@ -708,7 +800,6 @@ int main(int argc, char **argv) {{
   else printf("{{\"status\":\"runtime_failure\"}}\n");
   return 0;
 }}
-"#,
-        parse.join("\n")
+"#
     )
 }
