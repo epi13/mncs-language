@@ -133,22 +133,21 @@ impl ExternalTargetSpec {
         })?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-            return Err(if stderr.contains("unsupported") || stderr.contains("not supported") {
-                // A precise target restriction, not a broken toolchain:
-                // e.g. eBPF's upstream inability to lower signed division.
-                RealizeError {
-                    code: "CGX410",
-                    message: format!(
-                        "target restriction for {}: {stderr}",
-                        self.triple
-                    ),
-                }
-            } else {
-                RealizeError {
-                    code: "CGX400",
-                    message: format!("llc failed for {}: {stderr}", self.triple),
-                }
-            });
+            return Err(
+                if stderr.contains("unsupported") || stderr.contains("not supported") {
+                    // A precise target restriction, not a broken toolchain:
+                    // e.g. eBPF's upstream inability to lower signed division.
+                    RealizeError {
+                        code: "CGX410",
+                        message: format!("target restriction for {}: {stderr}", self.triple),
+                    }
+                } else {
+                    RealizeError {
+                        code: "CGX400",
+                        message: format!("llc failed for {}: {stderr}", self.triple),
+                    }
+                },
+            );
         }
         let bytes = std::fs::read(&out_path).map_err(|error| RealizeError {
             code: "CGX402",
@@ -180,12 +179,7 @@ fn read_u16(bytes: &[u8], at: usize) -> u16 {
 }
 
 fn read_u32(bytes: &[u8], at: usize) -> u32 {
-    u32::from_le_bytes([
-        bytes[at],
-        bytes[at + 1],
-        bytes[at + 2],
-        bytes[at + 3],
-    ])
+    u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
 }
 
 fn read_u64(bytes: &[u8], at: usize) -> u64 {
@@ -203,18 +197,17 @@ fn read_u64(bytes: &[u8], at: usize) -> u64 {
 
 fn c_str_at(bytes: &[u8], start: usize, end: usize) -> Option<&str> {
     let region = bytes.get(start..end.min(bytes.len()))?;
-    let stop = region.iter().position(|byte| *byte == 0).unwrap_or(region.len());
+    let stop = region
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(region.len());
     std::str::from_utf8(&region[..stop]).ok()
 }
 
 /// Parse and validate an ELF relocatable object against the expectations for
 /// one target triple: magic, class, endianness, type, machine identifier,
 /// `.text` presence, and a symbol table that defines every declared export.
-fn validate_elf_object(
-    bytes: &[u8],
-    triple: &str,
-    exports: &[String],
-) -> Result<String, String> {
+fn validate_elf_object(bytes: &[u8], triple: &str, exports: &[String]) -> Result<String, String> {
     const EM_RISCV: u64 = 243;
     const EM_BPF: u64 = 247;
     const SHT_SYMTAB: u32 = 2;
@@ -246,10 +239,16 @@ fn validate_elf_object(
     }
     let e_type = read_u16(bytes, 16);
     if e_type != 1 {
-        return Err(format!("ELF type {e_type} is not ET_REL (relocatable object)"));
+        return Err(format!(
+            "ELF type {e_type} is not ET_REL (relocatable object)"
+        ));
     }
     let e_machine = read_u16(bytes, 18);
-    let expected_machine = if triple == "riscv32" { EM_RISCV } else { EM_BPF };
+    let expected_machine = if triple == "riscv32" {
+        EM_RISCV
+    } else {
+        EM_BPF
+    };
     if u64::from(e_machine) != expected_machine {
         return Err(format!(
             "ELF e_machine {e_machine} does not match expected {expected_machine} for {triple}"
@@ -271,13 +270,15 @@ fn validate_elf_object(
         return Err("ELF section header table exceeds file size".to_owned());
     }
     let section_header = |index: u64| -> Result<SectionHeader, String> {
-        SectionHeader::parse(bytes, shoff as usize + index as usize * sh_entry_size, is_32)
+        SectionHeader::parse(
+            bytes,
+            shoff as usize + index as usize * sh_entry_size,
+            is_32,
+        )
     };
     // Resolve the section-name string table through its header index.
     let shstrtab = section_header(shstrndx)?;
-    if shstrtab.offset == 0
-        || shstrtab.offset + shstrtab.size > bytes.len() as u64
-    {
+    if shstrtab.offset == 0 || shstrtab.offset + shstrtab.size > bytes.len() as u64 {
         return Err("ELF object lacks a readable section-name string table".to_owned());
     }
     let mut text_found = false;
@@ -318,7 +319,7 @@ fn validate_elf_object(
     let mut defined: Vec<&str> = Vec::new();
     for index in 0..count {
         let base = sym_offset as usize + index as usize * entry_size;
-        if base + entry_size > bytes.len() as usize {
+        if base + entry_size > bytes.len() {
             break;
         }
         let (st_name, st_shndx) = if is_32 {
@@ -407,11 +408,7 @@ fn validate_ptx_module(bytes: &[u8], exports: &[String]) -> Result<String, Strin
         .and_then(|line| line.strip_prefix(".version "))
         .map(str::trim)
         .ok_or_else(|| "PTX module lacks a .version directive".to_owned())?;
-    if version.is_empty()
-        || !version
-            .chars()
-            .all(|c| c.is_ascii_digit() || c == '.')
-    {
+    if version.is_empty() || !version.chars().all(|c| c.is_ascii_digit() || c == '.') {
         return Err(format!("PTX .version directive is malformed: {version}"));
     }
     let target = text

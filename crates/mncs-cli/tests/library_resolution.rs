@@ -1,7 +1,6 @@
 use std::fs;
 use std::process::Command;
 
-use serde_json::Value;
 
 fn library_dir() -> String {
     format!("{}/../../library", env!("CARGO_MANIFEST_DIR"))
@@ -16,10 +15,7 @@ fn binary() -> Command {
 /// fail closed with a resolution diagnostic when it is not.
 #[test]
 fn external_consumer_resolves_core_through_library_path() {
-    let workspace = std::env::temp_dir().join(format!(
-        "mncs-library-path-{}",
-        std::process::id()
-    ));
+    let workspace = std::env::temp_dir().join(format!("mncs-library-path-{}", std::process::id()));
     fs::create_dir_all(&workspace).expect("workspace directory");
     let source_path = workspace.join("consumer.mncs");
     fs::write(
