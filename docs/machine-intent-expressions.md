@@ -177,3 +177,20 @@ MNCS and MNCDS retain their separate validation, evidence, and promotion authori
 
 A local compiler or Forge result cannot establish independent evaluation, protected custody,
 certification, or governance approval.
+
+## Machine-native verification consequence
+
+Machine-intent preservation has a broader consequence: downstream machines should not have to infer
+meaning again from a flattened human-facing artifact when the compiler, runtime, renderer, or other
+producer already possessed that meaning in structured form.
+
+Future verification systems should therefore be able to consume stable semantic identities,
+relationships, provenance, requirements, observations, and evidence directly where available. A
+visual verifier, for example, should prefer semantic and geometric render state over reconstructing
+all meaning from screenshots, while still allowing pixel-level or multimodal judgment for genuinely
+perceptual questions.
+
+This does not make UI or visual verification a core language feature. It is a general design
+constraint on information preservation, introspection, deterministic replay, and typed observations.
+See [Machine-native verification](machine-native-verification.md) for the broader rationale and
+forward-looking implications.
