@@ -1,7 +1,6 @@
 use std::fs;
 use std::process::Command;
 
-
 fn library_dir() -> String {
     format!("{}/../../library", env!("CARGO_MANIFEST_DIR"))
 }

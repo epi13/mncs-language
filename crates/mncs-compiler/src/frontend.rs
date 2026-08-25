@@ -3176,12 +3176,12 @@ impl<'a> BodyBuilder<'a> {
                         // the overflow obligation is discharged by semantics
                         // instead of remaining symbolically unresolved.
                         let intent = match op {
-                            AstBinaryOp::AddWrap
-                            | AstBinaryOp::SubWrap
-                            | AstBinaryOp::MulWrap => ArithmeticIntent::Wrapping,
-                            AstBinaryOp::AddSat
-                            | AstBinaryOp::SubSat
-                            | AstBinaryOp::MulSat => ArithmeticIntent::Saturating,
+                            AstBinaryOp::AddWrap | AstBinaryOp::SubWrap | AstBinaryOp::MulWrap => {
+                                ArithmeticIntent::Wrapping
+                            }
+                            AstBinaryOp::AddSat | AstBinaryOp::SubSat | AstBinaryOp::MulSat => {
+                                ArithmeticIntent::Saturating
+                            }
                             _ => ArithmeticIntent::Checked,
                         };
                         (
