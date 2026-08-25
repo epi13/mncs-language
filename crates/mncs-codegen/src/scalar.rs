@@ -268,12 +268,25 @@ fn lower_instruction(
             lhs: operand(instruction, 0)?,
             rhs: operand(instruction, 1)?,
         }),
-        SsaInstructionKind::FiniteConstruct { discriminant, .. } => {
+        SsaInstructionKind::FiniteConstruct {
+            discriminant,
+            payload_fields,
+            ..
+        } => {
+            if !payload_fields.is_empty() {
+                return Err(
+                    "payload-bearing finite construction is outside the current scalar realization envelope"
+                        .to_owned(),
+                );
+            }
             Ok(ScalarInst::FiniteConstruct {
                 dest,
                 discriminant: *discriminant,
             })
         }
+        SsaInstructionKind::FinitePayloadProject { .. } => Err(
+            "payload projection is outside the current scalar realization envelope".to_owned(),
+        ),
         SsaInstructionKind::FiniteIsVariant { discriminant, .. } => {
             Ok(ScalarInst::FiniteIsVariant {
                 dest,

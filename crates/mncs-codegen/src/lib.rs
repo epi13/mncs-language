@@ -882,6 +882,7 @@ fn backend_input_matches(contract: &BackendValueContract, value: &ExecutionValue
                 type_identity: actual_type,
                 variant_identity,
                 discriminant,
+                ..
             },
         ) => type_identity == actual_type && variants.get(discriminant) == Some(variant_identity),
         _ => false,
@@ -939,6 +940,7 @@ pub(crate) fn backend_output_value(
                 type_identity: type_identity.clone(),
                 variant_identity,
                 discriminant,
+                payload: Vec::new(),
             })
         }
     }
@@ -1277,16 +1279,19 @@ fn values_agree(left: &[ExecutionValue], right: &[ExecutionValue]) -> bool {
                     type_identity: left_type,
                     variant_identity: left_variant,
                     discriminant: left_discriminant,
+                    payload: left_payload,
                 },
                 ExecutionValue::Finite {
                     type_identity: right_type,
                     variant_identity: right_variant,
                     discriminant: right_discriminant,
+                    payload: right_payload,
                 },
             ) => {
                 left_type == right_type
                     && left_variant == right_variant
                     && left_discriminant == right_discriminant
+                    && record_values_agree(left_payload, right_payload)
             }
             (
                 ExecutionValue::Record { fields: left, .. },

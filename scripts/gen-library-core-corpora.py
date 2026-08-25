@@ -254,12 +254,54 @@ def status_wrong_cases():
     return cases
 
 
+P06 = "examples.profile06_payload_sums"
+
+
+def i32(value):
+    return integer(value, bits=32)
+
+
+def gate(floor):
+    return record(
+        P06,
+        "Gate",
+        [("floor", "i32")],
+        {"floor": i32(floor)},
+    )
+
+
+def verdict(variant, discriminant, payload=None):
+    value = {
+        "type_identity": f"mncs:0.2:finite-type:{P06}::Verdict",
+        "variant_identity": f"mncs:0.2:finite-variant:{P06}::Verdict::{variant}",
+        "discriminant": discriminant,
+    }
+    if payload is not None:
+        value["payload"] = [
+            [name, i32(number)] for name, number in sorted(payload)
+        ]
+    return {"finite": value}
+
+
+def profile06_payload_cases():
+    """Payload-bearing sums: construction, binding patterns, boundaries."""
+    return [
+        case("classify-accept", P06, "classify", [i32(50), gate(40)], verdict("Accept", 0, [("score", 50)])),
+        case("classify-block", P06, "classify", [i32(30), gate(40)], verdict("Block", 1, [("reason", -10)])),
+        case("classify-boundary", P06, "classify", [i32(40), gate(40)], verdict("Accept", 0, [("score", 40)])),
+        case("severity-accept", P06, "severity", [verdict("Accept", 0, [("score", 42)])], i32(42)),
+        case("severity-block", P06, "severity", [verdict("Block", 1, [("reason", -9)])], i32(9)),
+        case("severity-defer", P06, "severity", [verdict("Defer", 2)], i32(1)),
+    ]
+
+
 def main():
     emit("library-core-status-corpus.json", status_cases())
     emit("library-core-logic-corpus.json", logic_cases())
     emit("library-core-ordering-corpus.json", ordering_cases())
     emit("library-core-ravel-differential-corpus.json", ravel_differential_cases())
     emit("library-core-status-wrong-corpus.json", status_wrong_cases())
+    emit("profile06-payload-sums-corpus.json", profile06_payload_cases())
 
 
 if __name__ == "__main__":

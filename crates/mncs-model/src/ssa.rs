@@ -50,6 +50,14 @@ pub enum SsaInstructionKind {
         type_identity: SemanticId,
         variant_identity: SemanticId,
         discriminant: u32,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        payload_fields: Vec<String>,
+    },
+    FinitePayloadProject {
+        type_identity: SemanticId,
+        variant_identity: SemanticId,
+        discriminant: u32,
+        field: String,
     },
     FiniteIsVariant {
         type_identity: SemanticId,
@@ -1334,10 +1342,23 @@ fn ssa_kind(kind: &IrOperationKind) -> SsaInstructionKind {
             type_identity,
             variant_identity,
             discriminant,
+            payload_fields,
         } => SsaInstructionKind::FiniteConstruct {
             type_identity: type_identity.clone(),
             variant_identity: variant_identity.clone(),
             discriminant: *discriminant,
+            payload_fields: payload_fields.clone(),
+        },
+        IrOperationKind::FinitePayloadProject {
+            type_identity,
+            variant_identity,
+            discriminant,
+            field,
+        } => SsaInstructionKind::FinitePayloadProject {
+            type_identity: type_identity.clone(),
+            variant_identity: variant_identity.clone(),
+            discriminant: *discriminant,
+            field: field.clone(),
         },
         IrOperationKind::FiniteIsVariant {
             type_identity,
@@ -1409,10 +1430,23 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
             type_identity,
             variant_identity,
             discriminant,
+            payload_fields,
         } => SsaInstructionKind::FiniteConstruct {
             type_identity: type_identity.clone(),
             variant_identity: variant_identity.clone(),
             discriminant: *discriminant,
+            payload_fields: payload_fields.clone(),
+        },
+        BodyOperationKind::FinitePayloadProject {
+            type_identity,
+            variant_identity,
+            discriminant,
+            field,
+        } => SsaInstructionKind::FinitePayloadProject {
+            type_identity: type_identity.clone(),
+            variant_identity: variant_identity.clone(),
+            discriminant: *discriminant,
+            field: field.clone(),
         },
         BodyOperationKind::FiniteIsVariant {
             type_identity,

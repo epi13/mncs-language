@@ -9,6 +9,7 @@ pub const SOURCE_PROFILE_VERSION_0_2: &str = "0.2";
 pub const SOURCE_PROFILE_VERSION_0_3: &str = "0.3";
 pub const SOURCE_PROFILE_VERSION_0_4: &str = "0.4";
 pub const SOURCE_PROFILE_VERSION_0_5: &str = "0.5";
+pub const SOURCE_PROFILE_VERSION_0_6: &str = "0.6";
 pub const LEXICAL_SCHEMA_VERSION: &str = "0.1";
 pub const CST_SCHEMA_VERSION: &str = "0.1";
 pub const AST_SCHEMA_VERSION: &str = "0.1";
@@ -426,6 +427,10 @@ pub enum AstExpr {
     FiniteVariant {
         type_name: SpannedText,
         variant: SpannedText,
+        /// Payload fields for qualified payload construction
+        /// (`Type.Variant { field: expr }`, Profile 0.6).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        fields: Vec<(SpannedText, AstExpr)>,
         span: SourceSpan,
     },
     Call {
@@ -476,7 +481,15 @@ impl AstExpr {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AstMatchArm {
+    /// Optional qualifying type name (`Type.VARIANT` patterns).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_name: Option<SpannedText>,
     pub variant: SpannedText,
+    /// Payload field bindings (`Variant { field: binding }` or the shorthand
+    /// `Variant { field }`). Every payload field of the matched variant must
+    /// be bound exactly once.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bindings: Vec<(SpannedText, SpannedText)>,
     pub value: AstExpr,
     pub span: SourceSpan,
 }
@@ -547,9 +560,18 @@ pub struct AstFunction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AstFiniteVariant {
+    pub name: SpannedText,
+    /// Payload fields (Profile 0.6). Empty for payload-free variants; the
+    /// serialized form of payload-free variants is unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<AstRecordField>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AstFiniteType {
     pub name: SpannedText,
-    pub variants: Vec<SpannedText>,
+    pub variants: Vec<AstFiniteVariant>,
     pub span: SourceSpan,
 }
 
@@ -917,6 +939,7 @@ impl<'a> Parser<'a> {
                         SOURCE_PROFILE_VERSION_0_3
                             | SOURCE_PROFILE_VERSION_0_4
                             | SOURCE_PROFILE_VERSION_0_5
+                            | SOURCE_PROFILE_VERSION_0_6
                     ) =>
                 {
                     let (node, finite_type) = self.finite_type();
@@ -926,10 +949,13 @@ impl<'a> Parser<'a> {
                     }
                 }
                 Some(TokenKind::RecordKeyword) => {
-                    if !matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_5) {
+                    if !matches!(
+                        self.profile.as_str(),
+                        SOURCE_PROFILE_VERSION_0_5 | SOURCE_PROFILE_VERSION_0_6
+                    ) {
                         self.error(
                             "MNP120",
-                            "record declarations require source profile 0.5",
+                            "record declarations require source profile 0.5 or later",
                             vec![TokenKind::RecordKeyword],
                         );
                         break;
@@ -1028,10 +1054,64 @@ impl<'a> Parser<'a> {
         let mut children = Vec::new();
         while self.current_kind() == Some(TokenKind::Identifier) {
             let variant_start = self.current_token_index();
+            let mut variant_fields = Vec::new();
             if let Some(variant) =
                 self.spanned(TokenKind::Identifier, "MNP073", "expected variant name")
             {
-                variants.push(variant);
+                if self.current_kind() == Some(TokenKind::LeftBrace)
+                    && matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_6)
+                {
+                    // Payload variant: `Name { field: Type, ... }` with the
+                    // same field syntax as record declarations.
+                    self.cursor += 1;
+                    while let Some(field_name) = self.spanned(
+                        TokenKind::Identifier,
+                        "MNP132",
+                        "expected payload field name",
+                    ) {
+                        self.expect(
+                            TokenKind::Colon,
+                            "MNP133",
+                            "expected ':' after payload field name",
+                        );
+                        let Some(field_type) = self.spanned(
+                            TokenKind::Identifier,
+                            "MNP134",
+                            "expected payload field type",
+                        ) else {
+                            break;
+                        };
+                        let field_span = SourceSpan::covering(
+                            &self.envelope.text,
+                            field_name.span,
+                            field_type.span,
+                        );
+                        variant_fields.push(AstRecordField {
+                            name: field_name,
+                            value_type: field_type,
+                            span: field_span,
+                        });
+                        if self.current_kind() != Some(TokenKind::Comma) {
+                            break;
+                        }
+                        self.cursor += 1;
+                    }
+                    self.expect(
+                        TokenKind::RightBrace,
+                        "MNP135",
+                        "expected '}' after payload fields",
+                    );
+                } else if self.current_kind() == Some(TokenKind::LeftBrace) {
+                    self.error(
+                        "MNP076",
+                        "payload variant fields require source profile 0.6",
+                        vec![TokenKind::RightBrace],
+                    );
+                }
+                variants.push(AstFiniteVariant {
+                    name: variant,
+                    fields: variant_fields,
+                });
             }
             let variant_end = self.previous_token_index(variant_start);
             children.push(self.node(
@@ -1139,6 +1219,7 @@ impl<'a> Parser<'a> {
                 | SOURCE_PROFILE_VERSION_0_3
                 | SOURCE_PROFILE_VERSION_0_4
                 | SOURCE_PROFILE_VERSION_0_5
+                | SOURCE_PROFILE_VERSION_0_6
         ) {
             self.clauses()
         } else {
@@ -1152,6 +1233,7 @@ impl<'a> Parser<'a> {
                 | SOURCE_PROFILE_VERSION_0_3
                 | SOURCE_PROFILE_VERSION_0_4
                 | SOURCE_PROFILE_VERSION_0_5
+                | SOURCE_PROFILE_VERSION_0_6
         ) {
             self.statements_until_return()
         } else {
@@ -1301,6 +1383,7 @@ impl<'a> Parser<'a> {
                 SOURCE_PROFILE_VERSION_0_3
                     | SOURCE_PROFILE_VERSION_0_4
                     | SOURCE_PROFILE_VERSION_0_5
+                    | SOURCE_PROFILE_VERSION_0_6
             ) {
                 self.expression()
             } else {
@@ -1428,6 +1511,7 @@ impl<'a> Parser<'a> {
                     SOURCE_PROFILE_VERSION_0_3
                         | SOURCE_PROFILE_VERSION_0_4
                         | SOURCE_PROFILE_VERSION_0_5
+                        | SOURCE_PROFILE_VERSION_0_6
                 ) {
                     self.expression()
                 } else {
@@ -1484,7 +1568,7 @@ impl<'a> Parser<'a> {
     fn bounded_iteration_statement(&mut self, start: usize) -> (CstNode, Option<AstStmt>) {
         if !matches!(
             self.profile.as_str(),
-            SOURCE_PROFILE_VERSION_0_4 | SOURCE_PROFILE_VERSION_0_5
+            SOURCE_PROFILE_VERSION_0_4 | SOURCE_PROFILE_VERSION_0_5 | SOURCE_PROFILE_VERSION_0_6
         ) {
             self.error(
                 "MNP090",
@@ -1640,7 +1724,10 @@ impl<'a> Parser<'a> {
             Some(TokenKind::Identifier) => {
                 let name = self.spanned(TokenKind::Identifier, "MNP062", "expected expression")?;
                 if self.current_kind() == Some(TokenKind::LeftBrace)
-                    && matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_5)
+                    && matches!(
+                        self.profile.as_str(),
+                        SOURCE_PROFILE_VERSION_0_5 | SOURCE_PROFILE_VERSION_0_6
+                    )
                     && self.at_record_literal()
                 {
                     return self.record_literal(name);
@@ -1653,9 +1740,55 @@ impl<'a> Parser<'a> {
                         "expected finite variant or field after '.'",
                     )?;
                     let span = SourceSpan::covering(&self.envelope.text, name.span, variant.span);
+                    // Qualified payload construction: `Type.Variant { ... }`
+                    // (Profile 0.6). The lookahead distinguishes it from a
+                    // projection chain by checking for a literal-opening '{'.
+                    if self.at_payload_construct()
+                        && matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_6)
+                    {
+                        self.cursor += 1;
+                        let mut fields = Vec::new();
+                        while self.current_kind() != Some(TokenKind::RightBrace)
+                            && self.cursor < self.significant.len()
+                        {
+                            let Some(field_name) = self.spanned(
+                                TokenKind::Identifier,
+                                "MNP140",
+                                "expected payload field name",
+                            ) else {
+                                break;
+                            };
+                            self.expect(
+                                TokenKind::Colon,
+                                "MNP141",
+                                "expected ':' after payload field name",
+                            );
+                            let field_value = self.expression()?;
+                            fields.push((field_name, field_value));
+                            if self.current_kind() != Some(TokenKind::Comma) {
+                                break;
+                            }
+                            self.cursor += 1;
+                        }
+                        let end = self
+                            .expect(
+                                TokenKind::RightBrace,
+                                "MNP142",
+                                "expected '}' after payload fields",
+                            )
+                            .and_then(|index| self.tokens.get(index))
+                            .map_or(span, |token| token.span);
+                        return Some(AstExpr::FiniteVariant {
+                            type_name: name,
+                            variant,
+                            fields,
+                            span: SourceSpan::covering(&self.envelope.text, span, end),
+                        });
+                    }
                     let base = AstExpr::FiniteVariant {
                         type_name: name,
                         variant,
+                        fields: Vec::new(),
                         span,
                     };
                     self.project_chain(base)
@@ -1771,6 +1904,20 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// After `Type.Variant`, does a `{` open a payload construction? The
+    /// first token inside must start a field list (`field:`) or close the
+    /// (possibly empty) payload, mirroring [`Self::at_record_literal`].
+    fn at_payload_construct(&self) -> bool {
+        if self.current_kind() != Some(TokenKind::LeftBrace) {
+            return false;
+        }
+        match self.peek_kind(1) {
+            Some(TokenKind::Identifier) => matches!(self.peek_kind(2), Some(TokenKind::Colon)),
+            Some(TokenKind::RightBrace) => true,
+            _ => false,
+        }
+    }
+
     fn peek_kind(&self, offset: usize) -> Option<TokenKind> {
         let index = *self.significant.get(self.cursor + offset)?;
         Some(self.tokens.get(index)?.kind)
@@ -1851,8 +1998,60 @@ impl<'a> Parser<'a> {
         );
         let mut arms = Vec::new();
         while self.current_kind() == Some(TokenKind::Identifier) {
-            let variant =
-                self.spanned(TokenKind::Identifier, "MNP082", "expected match variant")?;
+            let first = self.spanned(TokenKind::Identifier, "MNP082", "expected match variant")?;
+            // Qualified pattern `Type.VARIANT` (Profile 0.6) or the bare
+            // variant name accepted by every profile.
+            let mut type_name = None;
+            let mut variant = first;
+            if self.current_kind() == Some(TokenKind::Dot)
+                && matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_6)
+            {
+                self.cursor += 1;
+                type_name = Some(variant.clone());
+                variant = self.spanned(
+                    TokenKind::Identifier,
+                    "MNP136",
+                    "expected variant name after '.'",
+                )?;
+            }
+            // Payload bindings: `VARIANT { field: binding }` with the
+            // `{ field }` shorthand. Every payload field must be bound.
+            // In arm-pattern position a '{' can only open bindings.
+            let mut bindings = Vec::new();
+            if self.current_kind() == Some(TokenKind::LeftBrace)
+                && matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_6)
+            {
+                self.cursor += 1;
+                while self.current_kind() == Some(TokenKind::Identifier) {
+                    let Some(field_name) = self.spanned(
+                        TokenKind::Identifier,
+                        "MNP137",
+                        "expected payload field binding",
+                    ) else {
+                        break;
+                    };
+                    let binding = if self.current_kind() == Some(TokenKind::Colon) {
+                        self.cursor += 1;
+                        self.spanned(
+                            TokenKind::Identifier,
+                            "MNP138",
+                            "expected binding name after ':'",
+                        )?
+                    } else {
+                        field_name.clone()
+                    };
+                    bindings.push((field_name, binding));
+                    if self.current_kind() != Some(TokenKind::Comma) {
+                        break;
+                    }
+                    self.cursor += 1;
+                }
+                self.expect(
+                    TokenKind::RightBrace,
+                    "MNP139",
+                    "expected '}' after payload bindings",
+                );
+            }
             self.expect(
                 TokenKind::FatArrow,
                 "MNP083",
@@ -1861,7 +2060,9 @@ impl<'a> Parser<'a> {
             let arm_value = self.expression()?;
             let span = SourceSpan::covering(&self.envelope.text, variant.span, arm_value.span());
             arms.push(AstMatchArm {
+                type_name,
                 variant,
+                bindings,
                 value: arm_value,
                 span,
             });
@@ -2038,7 +2239,9 @@ impl<'a> Parser<'a> {
         self.current_token().map(|token| {
             let iteration_keyword = !matches!(
                 self.profile.as_str(),
-                SOURCE_PROFILE_VERSION_0_4 | SOURCE_PROFILE_VERSION_0_5
+                SOURCE_PROFILE_VERSION_0_4
+                    | SOURCE_PROFILE_VERSION_0_5
+                    | SOURCE_PROFILE_VERSION_0_6
             ) && matches!(
                 token.kind,
                 TokenKind::IterateKeyword
@@ -2049,8 +2252,10 @@ impl<'a> Parser<'a> {
             );
             // `record` is only reserved by Profile 0.5; earlier profiles keep
             // treating it as an ordinary identifier.
-            let record_keyword = !matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_5)
-                && token.kind == TokenKind::RecordKeyword;
+            let record_keyword = !matches!(
+                self.profile.as_str(),
+                SOURCE_PROFILE_VERSION_0_5 | SOURCE_PROFILE_VERSION_0_6
+            ) && token.kind == TokenKind::RecordKeyword;
             if iteration_keyword || record_keyword {
                 TokenKind::Identifier
             } else {
@@ -2129,6 +2334,7 @@ pub fn source_profile_supported(version: &str) -> bool {
             | SOURCE_PROFILE_VERSION_0_3
             | SOURCE_PROFILE_VERSION_0_4
             | SOURCE_PROFILE_VERSION_0_5
+            | SOURCE_PROFILE_VERSION_0_6
     )
 }
 
@@ -2138,6 +2344,7 @@ fn infer_source_profile(text: &str) -> &'static str {
         !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with("/*")
     });
     match header {
+        Some(line) if line.trim_start().starts_with("mncs 0.6") => SOURCE_PROFILE_VERSION_0_6,
         Some(line) if line.trim_start().starts_with("mncs 0.5") => SOURCE_PROFILE_VERSION_0_5,
         Some(line) if line.trim_start().starts_with("mncs 0.4") => SOURCE_PROFILE_VERSION_0_4,
         Some(line) if line.trim_start().starts_with("mncs 0.3") => SOURCE_PROFILE_VERSION_0_3,

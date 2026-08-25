@@ -611,16 +611,85 @@ fn execute_instruction(
             type_identity,
             variant_identity,
             discriminant,
+            payload_fields,
         } => {
             if let Some(output) = instruction.outputs.first() {
+                let mut payload = Vec::new();
+                let mut available = true;
+                for (index, field) in payload_fields.iter().enumerate() {
+                    match values.get(instruction.inputs.get(index).unwrap_or(&output.identity)) {
+                        Some(value) => payload.push((field.clone(), value.clone())),
+                        None => available = false,
+                    }
+                }
+                if !available || instruction.inputs.len() != payload_fields.len() {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "finite constructor payload operand was unavailable",
+                    );
+                    return true;
+                }
                 values.insert(
                     output.identity.clone(),
                     ExecutionValue::Finite {
                         type_identity: type_identity.clone(),
                         variant_identity: variant_identity.clone(),
                         discriminant: *discriminant,
+                        payload,
                     },
                 );
+            }
+        }
+        SsaInstructionKind::FinitePayloadProject {
+            type_identity,
+            variant_identity,
+            discriminant,
+            field,
+        } => {
+            let Some(ExecutionValue::Finite {
+                type_identity: actual_type,
+                variant_identity: actual_variant,
+                discriminant: actual_discriminant,
+                payload,
+            }) = instruction
+                .inputs
+                .first()
+                .and_then(|input| values.get(input))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "payload projection operand was unavailable or not a finite value",
+                );
+                return true;
+            };
+            if actual_type != type_identity
+                || actual_variant != variant_identity
+                || actual_discriminant != discriminant
+            {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "payload projection operand has an invalid type/variant/discriminant",
+                );
+                return true;
+            }
+            match payload.iter().find(|(name, _)| name == field) {
+                Some((_, value)) => {
+                    if let Some(output) = instruction.outputs.first() {
+                        let output_identity = output.identity.clone();
+                        values.insert(output_identity, value.clone());
+                    }
+                }
+                None => {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        format!("payload projection field {field:?} was not carried by the value"),
+                    );
+                    return true;
+                }
             }
         }
         SsaInstructionKind::FiniteIsVariant {
@@ -632,6 +701,7 @@ fn execute_instruction(
                 type_identity: actual_type,
                 variant_identity: actual_variant,
                 discriminant: actual_discriminant,
+                ..
             }) = instruction
                 .inputs
                 .first()
@@ -843,6 +913,7 @@ fn initialize_inputs(
             type_identity,
             variant_identity,
             discriminant,
+            ..
         } = argument
         {
             if !crate::execution::valid_finite_value(

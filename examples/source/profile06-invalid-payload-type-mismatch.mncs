@@ -1,0 +1,14 @@
+mncs 0.6;
+
+// Negative fixture: the Accept payload field `score` is declared i32 but the
+// constructor supplies a boolean literal (MNE175).
+module examples.profile06_invalid_payload_type_mismatch;
+
+enum Verdict { Accept { score: i32 }, Block { reason: i32 }, Defer }
+
+fn classify(ok: bool) -> (result: Verdict) {
+    if ok {
+        return Verdict.Accept { score: true };
+    }
+    return Verdict.Defer { };
+}

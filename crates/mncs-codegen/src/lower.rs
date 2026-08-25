@@ -338,10 +338,24 @@ fn lower_instruction(
             body.push(compare_instr(predicate, *operand_type)?);
             body.push(Instr::LocalSet(dest));
         }
-        SsaInstructionKind::FiniteConstruct { discriminant, .. } => {
+        SsaInstructionKind::FiniteConstruct {
+            discriminant,
+            payload_fields,
+            ..
+        } => {
+            if !payload_fields.is_empty() {
+                return Err(
+                    "payload-bearing finite construction is outside the current realization envelope; the reference executors realize sums fully".to_owned(),
+                );
+            }
             let dest = dest_local(layout, instruction)?;
             body.push(Instr::I32Const(*discriminant as i32));
             body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::FinitePayloadProject { .. } => {
+            return Err(
+                "payload projection is outside the current realization envelope; the reference executors realize sums fully".to_owned(),
+            );
         }
         SsaInstructionKind::FiniteIsVariant { discriminant, .. } => {
             let dest = dest_local(layout, instruction)?;

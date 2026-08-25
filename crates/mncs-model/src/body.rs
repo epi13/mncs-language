@@ -173,11 +173,26 @@ pub enum BodyOperationKind {
         type_identity: SemanticId,
         variant_identity: SemanticId,
         discriminant: u32,
+        /// Canonical (sorted) payload field names for payload-bearing
+        /// variants (Profile 0.6). `operands[i]` carries the value of
+        /// `payload_fields[i]`. Empty (and serialized as absent) for
+        /// payload-free variants.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        payload_fields: Vec<String>,
     },
     FiniteIsVariant {
         type_identity: SemanticId,
         variant_identity: SemanticId,
         discriminant: u32,
+    },
+    /// Project one payload field out of a finite value whose variant carries
+    /// a payload (Profile 0.6). The result type is the declared field type;
+    /// the operand must be a finite value of the declared type and variant.
+    FinitePayloadProject {
+        type_identity: SemanticId,
+        variant_identity: SemanticId,
+        discriminant: u32,
+        field: String,
     },
     RecordConstruct {
         type_identity: SemanticId,
@@ -835,12 +850,13 @@ fn validate_operation(
             type_identity,
             variant_identity,
             discriminant,
+            payload_fields,
         } => {
-            if !operation.operands.is_empty() || operation.results.len() != 1 {
+            if operation.results.len() != 1 {
                 errors.push(body_diagnostic(
                     "MNB044",
                     path.to_owned(),
-                    "finite construction requires no operands and exactly one result",
+                    "finite construction requires exactly one result",
                 ));
             }
             let declared = program
@@ -858,6 +874,66 @@ fn validate_operation(
                     format!("{path}.kind"),
                     "finite constructor does not identify a declared type/variant/discriminant",
                 ));
+            }
+            // Payload integrity: names must be canonical (sorted, unique) and
+            // every declared payload field must be supplied, and nothing more.
+            if payload_fields
+                .windows(2)
+                .any(|window| window[0] >= window[1])
+            {
+                errors.push(body_diagnostic(
+                    "MNB060",
+                    format!("{path}.kind.payload_fields"),
+                    "payload field names must be canonically sorted and unique",
+                ));
+            }
+            let declared_payload = valid_variant.map(|variant| variant.payload.clone());
+            match &declared_payload {
+                Some(fields) => {
+                    let declared_names: Vec<_> =
+                        fields.iter().map(|field| field.name.clone()).collect();
+                    if declared_names != *payload_fields
+                        || operation.operands.len() != payload_fields.len()
+                    {
+                        errors.push(body_diagnostic(
+                            "MNB061",
+                            format!("{path}.kind.payload_fields"),
+                            "finite constructor payload does not match the declared variant payload fields",
+                        ));
+                    }
+                }
+                None if !payload_fields.is_empty() || !operation.operands.is_empty() => {
+                    errors.push(body_diagnostic(
+                        "MNB062",
+                        format!("{path}.kind"),
+                        "variant carries no declared payload but the construction supplies one",
+                    ));
+                }
+                None => {}
+            }
+            for (index, _operand) in operation.operands.iter().enumerate() {
+                let expected_ty = payload_fields
+                    .get(index)
+                    .and_then(|name| {
+                        valid_variant.and_then(|variant| {
+                            variant.payload.iter().find(|field| &field.name == name)
+                        })
+                    })
+                    .map(|field| semantic_record_field_type(program, field));
+                let actual_ty = operation.results.first().map(|_| ()).and_then(|()| {
+                    operation
+                        .operands
+                        .get(index)
+                        .and_then(|operand_id| available.get(operand_id))
+                        .cloned()
+                });
+                if expected_ty.is_some() && actual_ty.is_some() && expected_ty != actual_ty {
+                    errors.push(body_diagnostic(
+                        "MNB063",
+                        format!("{path}.inputs[{index}]"),
+                        "payload operand type does not match the declared payload field type",
+                    ));
+                }
             }
             if let Some(result) = operation.results.first() {
                 let expected = declared.map(|item| BodyType::Finite {
@@ -915,6 +991,64 @@ fn validate_operation(
                     format!("{path}.kind"),
                     "finite variant test is not type/variant/discriminant consistent",
                 ));
+            }
+        }
+        BodyOperationKind::FinitePayloadProject {
+            type_identity,
+            variant_identity,
+            discriminant,
+            field,
+        } => {
+            if operation.operands.len() != 1 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB064",
+                    path.to_owned(),
+                    "payload projection requires one operand and one result",
+                ));
+            }
+            let declared = program
+                .finite_types
+                .iter()
+                .find(|item| &item.identity == type_identity);
+            let valid_variant = declared.and_then(|item| {
+                item.variants.iter().find(|variant| {
+                    &variant.identity == variant_identity && variant.discriminant == *discriminant
+                })
+            });
+            let payload_field = valid_variant.and_then(|variant| {
+                variant
+                    .payload
+                    .iter()
+                    .find(|item| item.name == *field)
+                    .cloned()
+            });
+            let expected_operand = declared.map(|item| BodyType::Finite {
+                identity: item.identity.clone(),
+                name: item.name.clone(),
+            });
+            if declared.is_none()
+                || valid_variant.is_none()
+                || payload_field.is_none()
+                || operation
+                    .operands
+                    .first()
+                    .and_then(|operand| available.get(operand))
+                    != expected_operand.as_ref()
+            {
+                errors.push(body_diagnostic(
+                    "MNB065",
+                    format!("{path}.kind"),
+                    "payload projection is not consistent with a declared variant payload field",
+                ));
+            }
+            if let (Some(field), Some(result)) = (payload_field, operation.results.first()) {
+                if semantic_record_field_type(program, &field) != result.ty {
+                    errors.push(body_diagnostic(
+                        "MNB066",
+                        format!("{path}.results"),
+                        "payload projection result type does not match the declared field type",
+                    ));
+                }
             }
         }
         BodyOperationKind::RecordConstruct {

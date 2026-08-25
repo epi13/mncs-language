@@ -183,7 +183,8 @@ impl Program {
                         let subject = operation.identity(&self.module, &function.name, &block.id);
                         match &operation.kind {
                             BodyOperationKind::RecordConstruct { .. }
-                            | BodyOperationKind::RecordProject { .. } => {}
+                            | BodyOperationKind::RecordProject { .. }
+                            | BodyOperationKind::FinitePayloadProject { .. } => {}
                             BodyOperationKind::Integer { intent, .. } => {
                                 let bounded_counter_step =
                                     body.bounded_iterations.iter().any(|iteration| {
