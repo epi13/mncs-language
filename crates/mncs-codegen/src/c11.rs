@@ -75,6 +75,7 @@ pub fn c11_capabilities() -> BackendCapabilityManifest {
         [
             "checked_integer",
             "wrapping_integer",
+            "saturating_integer",
             "trapping_integer",
             "explicit_failure",
             "semantic_bounded_iteration",
@@ -87,7 +88,6 @@ pub fn c11_capabilities() -> BackendCapabilityManifest {
             "record_values",
             "memory",
             "effects",
-            "saturating_integer",
             "widening_integer",
             "undefined_behavior",
         ]
@@ -510,21 +510,64 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 );
                 return;
             }
+            let bounds = if signed {
+                let top = 1i128 << (bits - 1);
+                (-top, top - 1)
+            } else {
+                (0i128, (1i128 << bits) - 1)
+            };
+            // Decimal literals are emitted with explicit suffixes (and the
+            // signed minimum is built by subtraction) because a bare
+            // `-9223372036854775808` would first materialize an unsigned
+            // constant that does not fit `long long`.
+            let literal = |value: i128| -> String {
+                if signed {
+                    format!("{value}LL")
+                } else {
+                    format!("{value}ULL")
+                }
+            };
+            let max_text = literal(bounds.1);
+            let min_text = if signed && bounds.0 == -(1i128 << 63) {
+                "(-9223372036854775807LL - 1)".to_owned()
+            } else {
+                literal(bounds.0)
+            };
             if matches!(
                 intent,
                 ArithmeticIntent::Checked | ArithmeticIntent::Trapping
             ) && !promise.decision.permitted
             {
-                let (min, max) = if signed {
-                    let top = 1i128 << (bits - 1);
-                    ((-top).to_string(), (top - 1).to_string())
+                // The wide intermediate is 128-bit so a 64-bit overflow is
+                // still exactly detectable; narrower operands cannot overflow
+                // an int128/uint128 intermediate at all, but the guard stays
+                // uniform so failure semantics are identical at every width.
+                let wide_ty = if signed {
+                    "__int128"
                 } else {
-                    ("0".to_owned(), ((1i128 << bits) - 1).to_string())
+                    "unsigned __int128"
                 };
                 let _ = writeln!(
                     out,
-                    "      {{ int64_t mncs_wide = (int64_t){lhs_n} {op} (int64_t){rhs_n}; if (mncs_wide > {max} || mncs_wide < {min}) {{ *mncs_status = 1; *mncs_value = 0; return; }} {dest_n} = ({})mncs_wide; }}",
-                    c_type(dest.ty)
+                    "      {{ {wide_ty} mncs_wide = ({wide_ty}){lhs_n} {op} ({wide_ty}){rhs_n}; if (mncs_wide > {max} || mncs_wide < {min}) {{ *mncs_status = 1; *mncs_value = 0; return; }} {dest_n} = ({})mncs_wide; }}",
+                    c_type(dest.ty),
+                    max = max_text,
+                    min = min_text,
+                );
+            } else if matches!(intent, ArithmeticIntent::Saturating) {
+                // Total by definition: compute in the wide domain, then clamp
+                // into the declared representable range.
+                let wide_ty = if signed {
+                    "__int128"
+                } else {
+                    "unsigned __int128"
+                };
+                let _ = writeln!(
+                    out,
+                    "      {{ {wide_ty} mncs_wide = ({wide_ty}){lhs_n} {op} ({wide_ty}){rhs_n}; if (mncs_wide > {max}) {{ mncs_wide = {max}; }} if (mncs_wide < {min}) {{ mncs_wide = {min}; }} {dest_n} = ({})mncs_wide; }}",
+                    c_type(dest.ty),
+                    max = max_text,
+                    min = min_text,
                 );
             } else {
                 let _ = writeln!(

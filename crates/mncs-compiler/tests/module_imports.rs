@@ -250,3 +250,49 @@ fn null_resolver_finds_nothing_and_self_contained_profiles_still_work() {
     .expect("profile 0.5 module without imports still elaborates");
     assert_eq!(program.module, "solo");
 }
+
+/// Imported record types must be nameable in field and variant-payload type
+/// positions of the importing module: cross-module composition requires a
+/// local record or payload sum to reference an imported type.
+#[test]
+fn imported_types_are_nameable_in_field_and_payload_positions() {
+    let resolver = MapResolver::default()
+        .with(
+            "lib.shapes",
+            r#"mncs 0.6;
+
+module lib.shapes;
+
+record Point { x: i32, y: i32 }
+"#,
+        )
+        .with(
+            "app.study",
+            r#"mncs 0.6;
+
+module app.study;
+
+use lib.shapes;
+
+enum Mark { Placed { at: Point }, Cleared }
+
+record Segment { from: Point, to: Point }
+
+fn origin(segment: Segment) -> (result: Point) {
+    return segment.from;
+}
+"#,
+        );
+    let ast = parse(&resolver.envelope("app.study", resolver.modules["app.study"].clone()))
+        .ast
+        .expect("consumer parses");
+    let (result, _) = elaborate_program_with_resolver(&ast, &resolver);
+    let program = result.expect("imported types participate in field positions");
+    assert!(program.validate().valid);
+    let segment = program
+        .record_types
+        .iter()
+        .find(|record| record.name == "Segment")
+        .expect("local record");
+    assert_eq!(segment.fields.len(), 2);
+}

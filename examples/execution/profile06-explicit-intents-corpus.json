@@ -1,0 +1,660 @@
+{
+ "schema_version": "0.1",
+ "name": "profile06-explicit-intents",
+ "cases": [
+  {
+   "id": "sat-add-overflow",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "sat_add_i64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 9223372036854775807,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 9223372036854775807,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "sat-add-underflow",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "sat_add_i64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": -9223372036854775808,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -9223372036854775808,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "sat-add-in-range",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "sat_add_i64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 11,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 18,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "sat-sub-underflow",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "sat_sub_i64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": -5,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -11,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "sat-sub-min",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "sat_sub_i64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": -9223372036854775808,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -9223372036854775808,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "sat-sub-in-range",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "sat_sub_i64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 11,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 4,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "sat-mul-overflow-positive",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "sat_mul_i64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 9223372036854775807,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 9223372036854775807,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "sat-mul-overflow-negative",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "sat_mul_i64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": -9223372036854775808,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -9223372036854775808,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "sat-mul-min-minus-one",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "sat_mul_i64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": -9223372036854775808,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 9223372036854775807,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "sat-mul-in-range",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "sat_mul_i64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 42,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "wrap-add-i8-overflow",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "wrap_add_i8"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 127,
+       "type": {
+        "bits": 8,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 8,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -128,
+      "type": {
+       "bits": 8,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "wrap-add-i8-in-range",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "wrap_add_i8"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 40,
+       "type": {
+        "bits": 8,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 8,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 42,
+      "type": {
+       "bits": 8,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "wrap-sub-u16-underflow",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "wrap_sub_u16"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 16,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 16,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 65535,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "wrap-sub-u16-in-range",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "wrap_sub_u16"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 10,
+       "type": {
+        "bits": 16,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 16,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 6,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "bump-counter",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "bump_counter"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 41,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 42,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "bump-counter-saturated",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.intents",
+     "function": "bump_counter"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 9223372036854775807,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 9223372036854775807,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

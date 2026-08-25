@@ -81,6 +81,7 @@ pub fn llvm_capabilities() -> BackendCapabilityManifest {
         [
             "checked_integer",
             "wrapping_integer",
+            "saturating_integer",
             "trapping_integer",
             "explicit_failure",
             "semantic_bounded_iteration",
@@ -92,7 +93,6 @@ pub fn llvm_capabilities() -> BackendCapabilityManifest {
         [
             "memory",
             "effects",
-            "saturating_integer",
             "widening_integer",
             "record_values",
             "host_effects",
@@ -358,6 +358,14 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
             );
         }
     }
+    for width in ["i8", "i16", "i32", "i64"] {
+        for op in ["sadd", "uadd", "ssub", "usub"] {
+            let _ = writeln!(
+                out,
+                "declare {width} @llvm.{op}.sat.{width}({width}, {width})"
+            );
+        }
+    }
     out.push('\n');
     for function in &module.functions {
         emit_function(&mut out, function);
@@ -426,9 +434,16 @@ fn emit_block(
             let ty = names.ty(value);
             let bits = abi_bits(ty);
             if bits < 64 {
+                // Unsigned narrow values extend by zero so a wrapping edge
+                // value (u16 `0xFFFF`) decodes as its declared magnitude.
+                let ext = if matches!(ty, ScalarTy::Int(integer) if !integer.signed) {
+                    "zext"
+                } else {
+                    "sext"
+                };
                 let _ = writeln!(
                     out,
-                    "  %ret_ext_{} = sext {} %{loaded} to i64",
+                    "  %ret_ext_{} = {ext} {} %{loaded} to i64",
                     names.value(value),
                     llvm_type(ty)
                 );
@@ -589,6 +604,16 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 // behavior in LLVM: guard them into the shared fail block so
                 // failure statuses match the reference executors.
                 emit_checked_division(out, dest, operator, &left, &right, names, split);
+            } else if matches!(intent, ArithmeticIntent::Saturating) {
+                // Saturating arithmetic is total by definition. Add/sub use
+                // the saturating intrinsics; multiplication has no saturating
+                // intrinsic, so it computes with an exact overflow flag and
+                // selects the signed or unsigned clamp boundary.
+                if let Some(clamped) =
+                    emit_saturating(out, dest, operator, &left, &right, names, split)
+                {
+                    store_dest(out, names, dest, &clamped);
+                }
             } else if matches!(
                 intent,
                 ArithmeticIntent::Checked | ArithmeticIntent::Trapping
@@ -702,6 +727,94 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             store_dest(out, names, dest, &format!("{tmp}_v"));
         }
     }
+}
+
+/// Saturating add/sub/mul: total clamping arithmetic. Returns the temp name
+/// holding the clamped result. Add/sub lower to the saturating intrinsics;
+/// multiplication has no saturating intrinsic, so it computes with an exact
+/// overflow flag and selects between the true product and the clamp boundary.
+fn emit_saturating(
+    out: &mut String,
+    dest: &ScalarValue,
+    operator: &str,
+    lhs: &str,
+    rhs: &str,
+    _names: &NameMap,
+    split: &mut u32,
+) -> Option<String> {
+    let ty = llvm_type(dest.ty);
+    let width = ty
+        .trim_start_matches('i')
+        .parse::<u32>()
+        .unwrap_or(32)
+        .min(64);
+    let signed = matches!(dest.ty, ScalarTy::Int(integer) if integer.signed)
+        || matches!(dest.ty, ScalarTy::Bool);
+    let (min_const, max_const): (i128, i128) = if signed {
+        let top = 1_i128 << (width - 1);
+        (-top, top - 1)
+    } else {
+        (0, (1_i128 << width) - 1)
+    };
+    *split += 1;
+    let tmp = format!("sat{split}");
+    match (operator, signed) {
+        ("add", true) => {
+            let _ = writeln!(
+                out,
+                "  %{tmp} = call {ty} @llvm.sadd.sat.{ty}({ty} %{lhs}, {ty} %{rhs})"
+            );
+        }
+        ("sub", true) => {
+            let _ = writeln!(
+                out,
+                "  %{tmp} = call {ty} @llvm.ssub.sat.{ty}({ty} %{lhs}, {ty} %{rhs})"
+            );
+        }
+        ("add", false) => {
+            let _ = writeln!(
+                out,
+                "  %{tmp} = call {ty} @llvm.uadd.sat.{ty}({ty} %{lhs}, {ty} %{rhs})"
+            );
+        }
+        ("sub", false) => {
+            let _ = writeln!(
+                out,
+                "  %{tmp} = call {ty} @llvm.usub.sat.{ty}({ty} %{lhs}, {ty} %{rhs})"
+            );
+        }
+        _ => {
+            // Multiplication: exact overflow flag, then select the boundary
+            // in the overflowing direction. A signed product overflows toward
+            // MIN exactly when the operand signs differ.
+            let kind = if signed { "smul" } else { "umul" };
+            let pair = format!("mulov{tmp}");
+            let _ = writeln!(
+                out,
+                "  %{pair} = call {{{ty}, i1}} @llvm.{kind}.with.overflow.{ty}({ty} %{lhs}, {ty} %{rhs})"
+            );
+            let _ = writeln!(out, "  %{pair}_v = extractvalue {{{ty}, i1}} %{pair}, 0");
+            let _ = writeln!(out, "  %{pair}_f = extractvalue {{{ty}, i1}} %{pair}, 1");
+            if signed {
+                let _ = writeln!(out, "  %{}_a = icmp slt {ty} %{lhs}, 0", pair);
+                let _ = writeln!(out, "  %{}_b = icmp slt {ty} %{rhs}, 0", pair);
+                let _ = writeln!(out, "  %{}_dir = xor i1 %{}_a, %{}_b", pair, pair, pair);
+                let _ = writeln!(
+                    out,
+                    "  %{tmp}_b = select i1 %{pair}_dir, {ty} {min_const}, {ty} {max_const}"
+                );
+            } else {
+                // Unsigned products can only overflow upward.
+                let _ = writeln!(out, "  %{tmp}_b = add {ty} {max_const}, 0");
+            }
+            let _ = writeln!(
+                out,
+                "  %{tmp}_r = select i1 %{pair}_f, {ty} %{tmp}_b, {ty} %{pair}_v"
+            );
+            return Some(format!("{tmp}_r"));
+        }
+    }
+    Some(tmp)
 }
 
 fn emit_checked(

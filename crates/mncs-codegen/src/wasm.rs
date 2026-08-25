@@ -60,6 +60,7 @@ pub enum Instr {
     I32LeU,
     I32GeS,
     I32GeU,
+    I64Eqz,
     I64Eq,
     I64Ne,
     I64LtS,
@@ -78,10 +79,12 @@ pub enum Instr {
     I32Xor,
     I64Add,
     I64Sub,
+    Select,
     I64Mul,
     I64And,
     I64Or,
     I64Xor,
+    I64ShrS,
     I32WrapI64,
     I64ExtendI32S,
     I64ExtendI32U,
@@ -644,6 +647,23 @@ fn execute_raw(
             Instr::I64And => bin_i64(&mut stack, |left, right| left & right)?,
             Instr::I64Or => bin_i64(&mut stack, |left, right| left | right)?,
             Instr::I64Xor => bin_i64(&mut stack, |left, right| left ^ right)?,
+            Instr::I64ShrS => bin_i64(&mut stack, |left, right| {
+                left.wrapping_shr(u32::try_from(right & 63).unwrap_or(0))
+            })?,
+            Instr::I64Eqz => {
+                let value = pop(&mut stack)?;
+                stack.push(i64::from(value == 0));
+            }
+            Instr::Select => {
+                let condition = pop_i32(&mut stack)?;
+                let false_value = pop(&mut stack)?;
+                let true_value = pop(&mut stack)?;
+                stack.push(if condition != 0 {
+                    true_value
+                } else {
+                    false_value
+                });
+            }
             Instr::I32WrapI64 => {
                 let value = pop(&mut stack)?;
                 stack.push(i64::from(value as i32));
@@ -1372,6 +1392,8 @@ fn encode_instr(out: &mut Vec<u8>, instr: &Instr) {
             encode_i64(out, *value);
         }
         Instr::I32Eqz => out.push(0x45),
+        Instr::I64Eqz => out.push(0x50),
+        Instr::Select => out.push(0x1b),
         Instr::I32Eq => out.push(0x46),
         Instr::I32Ne => out.push(0x47),
         Instr::I32LtS => out.push(0x48),
@@ -1404,6 +1426,7 @@ fn encode_instr(out: &mut Vec<u8>, instr: &Instr) {
         Instr::I64And => out.push(0x83),
         Instr::I64Or => out.push(0x84),
         Instr::I64Xor => out.push(0x85),
+        Instr::I64ShrS => out.push(0x87),
         Instr::I32WrapI64 => out.push(0xa7),
         Instr::I64ExtendI32S => out.push(0xac),
         Instr::I64ExtendI32U => out.push(0xad),
@@ -1725,6 +1748,8 @@ fn decode_instr(payload: &[u8], cursor: usize) -> Result<(Instr, usize), WasmTra
             Instr::I64Const(value)
         }
         0x45 => Instr::I32Eqz,
+        0x50 => Instr::I64Eqz,
+        0x1b => Instr::Select,
         0x46 => Instr::I32Eq,
         0x47 => Instr::I32Ne,
         0x48 => Instr::I32LtS,
@@ -1757,6 +1782,7 @@ fn decode_instr(payload: &[u8], cursor: usize) -> Result<(Instr, usize), WasmTra
         0x83 => Instr::I64And,
         0x84 => Instr::I64Or,
         0x85 => Instr::I64Xor,
+        0x87 => Instr::I64ShrS,
         0x28 => {
             cursor = skip_memarg(payload, cursor)?;
             Instr::I32Load

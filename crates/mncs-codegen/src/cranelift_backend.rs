@@ -83,6 +83,7 @@ pub fn cranelift_capabilities() -> BackendCapabilityManifest {
         [
             "checked_integer",
             "wrapping_integer",
+            "saturating_integer",
             "trapping_integer",
             "explicit_failure",
             "semantic_bounded_iteration",
@@ -95,7 +96,6 @@ pub fn cranelift_capabilities() -> BackendCapabilityManifest {
             "record_values",
             "memory",
             "effects",
-            "saturating_integer",
             "widening_integer",
             "non_host_isa_jit",
         ]
@@ -1075,35 +1075,183 @@ where
                             };
                             let signed =
                                 matches!(dest.ty, ScalarTy::Int(integer) if integer.signed);
-                            let produced = match operator.as_str() {
+                            if matches!(intent, ArithmeticIntent::Saturating) {
+                                // Saturating arithmetic is total by definition:
+                                // widen to i128 so the wide result can never
+                                // wrap, clamp into the declared range, then
+                                // narrow back. This is exact at every width.
+                                let wide_ty = types::I128;
+                                let (min, max) = integer_bounds(bits, signed);
+                                let left_wide = if signed {
+                                    builder.ins().sextend(wide_ty, left)
+                                } else {
+                                    builder.ins().uextend(wide_ty, left)
+                                };
+                                let right_wide = if signed {
+                                    builder.ins().sextend(wide_ty, right)
+                                } else {
+                                    builder.ins().uextend(wide_ty, right)
+                                };
+                                let produced_wide = match operator.as_str() {
+                                    "sub" => builder.ins().isub(left_wide, right_wide),
+                                    "mul" => builder.ins().imul(left_wide, right_wide),
+                                    _ => builder.ins().iadd(left_wide, right_wide),
+                                };
+                                // Every declared range fits an i64 cell, so
+                                // boundaries are built there and widened.
+                                let max64 = builder.ins().iconst(types::I64, max);
+                                let max_v = if signed {
+                                    builder.ins().sextend(wide_ty, max64)
+                                } else {
+                                    builder.ins().uextend(wide_ty, max64)
+                                };
+                                let over = builder.ins().icmp(
+                                    if signed {
+                                        IntCC::SignedGreaterThan
+                                    } else {
+                                        IntCC::UnsignedGreaterThan
+                                    },
+                                    produced_wide,
+                                    max_v,
+                                );
+                                let min64 = builder.ins().iconst(types::I64, min);
+                                let min_v = if signed {
+                                    builder.ins().sextend(wide_ty, min64)
+                                } else {
+                                    builder.ins().uextend(wide_ty, min64)
+                                };
+                                let under = builder.ins().icmp(
+                                    if signed {
+                                        IntCC::SignedLessThan
+                                    } else {
+                                        IntCC::UnsignedLessThan
+                                    },
+                                    produced_wide,
+                                    min_v,
+                                );
+                                let clamped_high = builder.ins().select(over, max_v, produced_wide);
+                                let clamped = builder.ins().select(under, min_v, clamped_high);
+                                let narrowed = builder.ins().ireduce(types::I64, clamped);
+                                values.insert(dest.id.clone(), narrowed);
+                                continue;
+                            }
+                            let mut produced = match operator.as_str() {
                                 "sub" => builder.ins().isub(left, right),
                                 "mul" => builder.ins().imul(left, right),
                                 _ => builder.ins().iadd(left, right),
                             };
-                            if matches!(
+                            let needs_overflow_guard = matches!(
                                 intent,
                                 ArithmeticIntent::Checked | ArithmeticIntent::Trapping
-                            ) && !promise.decision.permitted
-                            {
-                                let (min, max) = integer_bounds(bits, signed);
-                                let max_v = builder.ins().iconst(types::I64, max);
-                                let min_v = builder.ins().iconst(types::I64, min);
-                                let hi =
-                                    builder
+                            ) && !promise.decision.permitted;
+                            if !needs_overflow_guard && bits < 64 {
+                                // Narrow wrapping results are normalized back
+                                // into their declared width inside the shared
+                                // i64 cell so a wrapping edge value (for
+                                // example `0 -% 1` in u16) remains
+                                // representable instead of surfacing as an
+                                // unrelated negative i64. The guard below must
+                                // observe the raw value, so normalization is
+                                // skipped when a guard will run.
+                                if signed {
+                                    let shift =
+                                        builder.ins().iconst(types::I64, i64::from(64 - bits));
+                                    let widened = builder.ins().ishl(produced, shift);
+                                    produced = builder.ins().sshr(widened, shift)
+                                } else {
+                                    let mask = builder
                                         .ins()
-                                        .icmp(IntCC::SignedGreaterThan, produced, max_v);
-                                let lo = builder.ins().icmp(IntCC::SignedLessThan, produced, min_v);
-                                let ov = builder.ins().bor(hi, lo);
-                                let cont = builder.create_block();
-                                builder.ins().brif(
-                                    ov,
-                                    fail,
-                                    &[] as &[BlockArg],
-                                    cont,
-                                    &[] as &[BlockArg],
-                                );
-                                builder.switch_to_block(cont);
-                                builder.seal_block(cont);
+                                        .iconst(types::I64, ((1i128 << bits) - 1) as i64);
+                                    produced = builder.ins().band(produced, mask)
+                                }
+                            }
+                            if needs_overflow_guard {
+                                if bits >= 64 {
+                                    // A wrapped i64 result can no longer be
+                                    // distinguished from a legal one after
+                                    // the fact; recompute in i128 where the
+                                    // overflow is exactly detectable.
+                                    let wide_ty = types::I128;
+                                    let (min, max) = integer_bounds(bits, signed);
+                                    let left_wide = if signed {
+                                        builder.ins().sextend(wide_ty, left)
+                                    } else {
+                                        builder.ins().uextend(wide_ty, left)
+                                    };
+                                    let right_wide = if signed {
+                                        builder.ins().sextend(wide_ty, right)
+                                    } else {
+                                        builder.ins().uextend(wide_ty, right)
+                                    };
+                                    let produced_wide = match operator.as_str() {
+                                        "sub" => builder.ins().isub(left_wide, right_wide),
+                                        "mul" => builder.ins().imul(left_wide, right_wide),
+                                        _ => builder.ins().iadd(left_wide, right_wide),
+                                    };
+                                    let max64 = builder.ins().iconst(types::I64, max);
+                                    let max_v = if signed {
+                                        builder.ins().sextend(wide_ty, max64)
+                                    } else {
+                                        builder.ins().uextend(wide_ty, max64)
+                                    };
+                                    let min64 = builder.ins().iconst(types::I64, min);
+                                    let min_v = if signed {
+                                        builder.ins().sextend(wide_ty, min64)
+                                    } else {
+                                        builder.ins().uextend(wide_ty, min64)
+                                    };
+                                    let hi = builder.ins().icmp(
+                                        if signed {
+                                            IntCC::SignedGreaterThan
+                                        } else {
+                                            IntCC::UnsignedGreaterThan
+                                        },
+                                        produced_wide,
+                                        max_v,
+                                    );
+                                    let lo = builder.ins().icmp(
+                                        if signed {
+                                            IntCC::SignedLessThan
+                                        } else {
+                                            IntCC::UnsignedLessThan
+                                        },
+                                        produced_wide,
+                                        min_v,
+                                    );
+                                    let ov = builder.ins().bor(hi, lo);
+                                    let cont = builder.create_block();
+                                    builder.ins().brif(
+                                        ov,
+                                        fail,
+                                        &[] as &[BlockArg],
+                                        cont,
+                                        &[] as &[BlockArg],
+                                    );
+                                    builder.switch_to_block(cont);
+                                    builder.seal_block(cont);
+                                } else {
+                                    let (min, max) = integer_bounds(bits, signed);
+                                    let max_v = builder.ins().iconst(types::I64, max);
+                                    let min_v = builder.ins().iconst(types::I64, min);
+                                    let hi = builder.ins().icmp(
+                                        IntCC::SignedGreaterThan,
+                                        produced,
+                                        max_v,
+                                    );
+                                    let lo =
+                                        builder.ins().icmp(IntCC::SignedLessThan, produced, min_v);
+                                    let ov = builder.ins().bor(hi, lo);
+                                    let cont = builder.create_block();
+                                    builder.ins().brif(
+                                        ov,
+                                        fail,
+                                        &[] as &[BlockArg],
+                                        cont,
+                                        &[] as &[BlockArg],
+                                    );
+                                    builder.switch_to_block(cont);
+                                    builder.seal_block(cont);
+                                }
                             }
                             values.insert(dest.id.clone(), produced);
                         }

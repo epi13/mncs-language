@@ -1,0 +1,35 @@
+mncs 0.6;
+
+// Profile 0.6 explicit arithmetic intents.
+//
+// `+% -% *%` are wrapping: total two's-complement arithmetic in the declared
+// width. `+| -| *|` are saturating: total clamping arithmetic at the
+// representable boundaries. Both discharge their overflow obligation by
+// semantics, so neither leaves an unresolved UNKNOWN behind.
+
+module examples.intents;
+
+fn sat_add_i64(a: i64, b: i64) -> (result: i64) {
+    return a +| b;
+}
+
+fn sat_sub_i64(a: i64, b: i64) -> (result: i64) {
+    return a -| b;
+}
+
+fn sat_mul_i64(a: i64, b: i64) -> (result: i64) {
+    return a *| b;
+}
+
+fn wrap_add_i8(a: i8, b: i8) -> (result: i8) {
+    return a +% b;
+}
+
+fn wrap_sub_u16(a: u16, b: u16) -> (result: u16) {
+    return a -% b;
+}
+
+// Saturating monotone counters: the canonical bounded-aggregation shape.
+fn bump_counter(count: i64) -> (result: i64) {
+    return count +| 1;
+}
