@@ -56,10 +56,10 @@ fn profile06_payload_sums_execute_and_agree_on_bytecode() {
     }
 }
 
-/// The scalar backends do not realize payload sums yet: they must refuse
-/// explicitly instead of silently dropping payloads.
+/// The WASM realization now materializes payload sums through linear memory;
+/// the whole payload corpus must execute with every expectation met.
 #[test]
-fn portable_wasm_refuses_payload_sums_explicitly() {
+fn portable_wasm_executes_payload_sums() {
     let source = example("source/profile06-payload-sums.mncs");
     let corpus = example("execution/profile06-payload-sums-corpus.json");
     let output = binary()
@@ -74,18 +74,18 @@ fn portable_wasm_refuses_payload_sums_explicitly() {
         ])
         .output()
         .expect("run payload sums on wasm");
-    assert_eq!(output.status.code(), Some(1));
-    let result: Value = serde_json::from_slice(&output.stdout).expect("result JSON");
-    let codes: Vec<&str> = result["diagnostics"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|diag| diag["code"].as_str())
-        .collect();
     assert!(
-        codes.contains(&"CGN302"),
-        "expected CGN302 refusal: {codes:?}"
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
+    let result: Value = serde_json::from_slice(&output.stdout).expect("result JSON");
+    // Overall UNKNOWN comes only from honest checked-arithmetic obligations.
+    assert_eq!(result["status"], "UNKNOWN");
+    for case_ in result["cases"].as_array().unwrap() {
+        assert_eq!(case_["status"], "returned", "{case_}");
+        assert_eq!(case_["expectation_met"], true, "{case_}");
+    }
 }
 
 fn expect_rejected(path: &str, expected_code: &str) {

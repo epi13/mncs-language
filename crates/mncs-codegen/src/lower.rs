@@ -25,7 +25,12 @@ struct FunctionLayout {
     functions: BTreeMap<SemanticId, u32>,
 }
 
-pub fn lower_module(ssa: &SsaModule, names: &[String]) -> LoweringOutcome {
+pub fn lower_module(
+    program: &mncs_model::Program,
+    ssa: &SsaModule,
+    names: &[String],
+) -> LoweringOutcome {
+    let composites = CompositeInfo::from_program(program);
     let mut functions = Vec::new();
     let mut exports = Vec::new();
     let mut unsupported = Vec::new();
@@ -40,7 +45,7 @@ pub fn lower_module(ssa: &SsaModule, names: &[String]) -> LoweringOutcome {
             .get(index)
             .cloned()
             .unwrap_or_else(|| export_name(&function.semantic_identity));
-        match lower_function(function, name, &function_indices) {
+        match lower_function(function, name, &function_indices, &composites) {
             Ok(wasm) => {
                 exports.push(wasm.name.clone());
                 functions.push(wasm);
@@ -49,7 +54,23 @@ pub fn lower_module(ssa: &SsaModule, names: &[String]) -> LoweringOutcome {
         }
     }
     let module = if unsupported.is_empty() && !functions.is_empty() {
-        Some(WasmModule { functions })
+        Some(if composites.uses_composites {
+            WasmModule {
+                globals: vec![crate::wasm::WasmGlobal {
+                    valtype: ValType::I32,
+                    mutable: true,
+                    init: 8,
+                }],
+                memory: Some(crate::wasm::WasmMemory { min_pages: 16 }),
+                functions,
+            }
+        } else {
+            WasmModule {
+                globals: Vec::new(),
+                memory: None,
+                functions,
+            }
+        })
     } else {
         None
     };
@@ -60,17 +81,98 @@ pub fn lower_module(ssa: &SsaModule, names: &[String]) -> LoweringOutcome {
     }
 }
 
+/// Logical slot width of one composite field cell in linear memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SlotWidth {
+    W32,
+    W64,
+}
+
+impl SlotWidth {
+    fn bytes(self) -> u32 {
+        match self {
+            SlotWidth::W32 => 4,
+            SlotWidth::W64 => 8,
+        }
+    }
+    // Every slot occupies a full 8-byte cell so pointers stay aligned.
+    fn stride(self) -> u32 {
+        let _ = self;
+        8
+    }
+}
+
+/// Per-type realization facts derived from the language-owned program.
+#[derive(Debug, Clone, Default)]
+struct CompositeInfo {
+    /// record type identity -> canonical (field name, slot width)
+    records: BTreeMap<SemanticId, Vec<(String, SlotWidth)>>,
+    /// payload-bearing finite type identity -> discriminant -> payload fields
+    boxed_finites: BTreeMap<SemanticId, BTreeMap<u32, Vec<(String, SlotWidth)>>>,
+    uses_composites: bool,
+}
+
+impl CompositeInfo {
+    fn from_program(program: &mncs_model::Program) -> Self {
+        let width_of = |semantic_type: &str| -> SlotWidth {
+            match mncs_model::BodyType::from_semantic_name(semantic_type) {
+                mncs_model::BodyType::Integer(ty) if ty.bits == 64 => SlotWidth::W64,
+                _ => SlotWidth::W32,
+            }
+        };
+        let mut info = Self::default();
+        for record in &program.record_types {
+            let fields = record
+                .fields
+                .iter()
+                .map(|field| (field.name.clone(), width_of(&field.field_type)))
+                .collect::<Vec<_>>();
+            info.records.insert(record.identity.clone(), fields);
+        }
+        for finite in &program.finite_types {
+            // A type is boxed when ANY variant carries a payload; every
+            // variant of that type gets a layout entry (possibly empty).
+            let boxed = finite
+                .variants
+                .iter()
+                .any(|variant| !variant.payload.is_empty());
+            if boxed {
+                let variants = finite
+                    .variants
+                    .iter()
+                    .map(|variant| {
+                        (
+                            variant.discriminant,
+                            variant
+                                .payload
+                                .iter()
+                                .map(|field| (field.name.clone(), width_of(&field.field_type)))
+                                .collect::<Vec<_>>(),
+                        )
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                info.boxed_finites.insert(finite.identity.clone(), variants);
+            }
+        }
+        info.uses_composites = !info.records.is_empty() || !info.boxed_finites.is_empty();
+        info
+    }
+
+    fn is_boxed_finite(&self, type_identity: &SemanticId) -> bool {
+        self.boxed_finites.contains_key(type_identity)
+    }
+}
+
 fn lower_function(
     function: &SsaFunction,
     name: String,
     function_indices: &BTreeMap<SemanticId, u32>,
+    composites: &CompositeInfo,
 ) -> Result<WasmFunction, String> {
     if function.outputs.len() != 1 {
         return Err("portable WASM MVP requires exactly one result".to_owned());
     }
-    reject_record_boundaries(function)?;
-    let mut layout = layout_function(function, function_indices)?;
-    forward_record_values(function, &mut layout)?;
+    let mut layout = layout_function(function, function_indices, composites)?;
     let result_ty = *layout
         .types
         .get(&function.outputs[0].identity)
@@ -103,7 +205,7 @@ fn lower_function(
         body.push(Instr::I32Eq);
         body.push(Instr::If);
         for instruction in &block.instructions {
-            lower_instruction(&layout, instruction, &mut body)?;
+            lower_instruction(&layout, instruction, &mut body, composites)?;
         }
         lower_terminator(&layout, &block.terminator, &mut body)?;
         body.push(Instr::End);
@@ -119,117 +221,10 @@ fn lower_function(
     })
 }
 
-/// Rejects record values at every point where they would have to cross the
-/// scalar parameter/result/block-parameter ABI of the portable WASM envelope.
-/// Records are realized by forwarding inside a single function body; anything
-/// that cannot be forwarded fails closed instead of being silently redefined.
-fn reject_record_boundaries(function: &SsaFunction) -> Result<(), String> {
-    let record = |ty: &IrType| match ty {
-        IrType::Record { name, .. } => Some(name.clone()),
-        _ => None,
-    };
-    for input in &function.inputs {
-        if let Some(name) = record(&input.ty) {
-            return Err(format!(
-                "record value ({name}) cannot be a function parameter of this realization"
-            ));
-        }
-    }
-    for output in &function.outputs {
-        if let Some(name) = record(&output.ty) {
-            return Err(format!(
-                "record value ({name}) cannot be a function result of this realization"
-            ));
-        }
-    }
-    for block in &function.blocks {
-        for parameter in &block.parameters {
-            if let Some(name) = record(&parameter.ty) {
-                return Err(format!(
-                    "record value ({name}) cannot be carried through a block parameter of this realization"
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Rewrites SSA values produced by record construction/projection onto the
-/// local slots of their originating field operand.  Record immutability makes
-/// forwarding behavior-preserving; no record is ever materialized.
-fn forward_record_values(
-    function: &SsaFunction,
-    layout: &mut FunctionLayout,
-) -> Result<(), String> {
-    // record value identity -> canonical (field name, operand identity) pairs
-    let mut constructed: BTreeMap<SemanticId, Vec<(String, SemanticId)>> = BTreeMap::new();
-    // projected value identity -> field operand identity
-    let mut aliases: BTreeMap<SemanticId, SemanticId> = BTreeMap::new();
-    let resolve = |aliases: &BTreeMap<SemanticId, SemanticId>, id: &SemanticId| {
-        let mut current = id;
-        while let Some(next) = aliases.get(current) {
-            current = next;
-        }
-        current.clone()
-    };
-    for block in &function.blocks {
-        for instruction in &block.instructions {
-            match &instruction.kind {
-                SsaInstructionKind::RecordConstruct { field_names, .. } => {
-                    let Some(output) = instruction.outputs.first() else {
-                        return Err("record construction has no result".to_owned());
-                    };
-                    if field_names.len() != instruction.inputs.len() {
-                        return Err(
-                            "record construction fields do not match its operands".to_owned()
-                        );
-                    }
-                    constructed.insert(
-                        output.identity.clone(),
-                        field_names
-                            .iter()
-                            .cloned()
-                            .zip(instruction.inputs.iter().cloned())
-                            .collect(),
-                    );
-                }
-                SsaInstructionKind::RecordProject { field, .. } => {
-                    let Some(output) = instruction.outputs.first() else {
-                        return Err("record projection has no result".to_owned());
-                    };
-                    let Some(input) = instruction.inputs.first() else {
-                        return Err("record projection has no operand".to_owned());
-                    };
-                    let source = resolve(&aliases, input);
-                    match constructed
-                        .get(&source)
-                        .and_then(|fields| fields.iter().find(|(name, _)| name == field))
-                    {
-                        Some((_, operand)) => {
-                            aliases.insert(output.identity.clone(), operand.clone());
-                        }
-                        None => {
-                            return Err(format!(
-                                "record projection of {field:?} does not observe a locally constructed record; cross-function and block-carried records are unsupported by this realization"
-                            ));
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    for (projected, operand) in aliases {
-        if let Some(slot) = layout.values.get(&operand).copied() {
-            layout.values.insert(projected, slot);
-        }
-    }
-    Ok(())
-}
-
 fn layout_function(
     function: &SsaFunction,
     function_indices: &BTreeMap<SemanticId, u32>,
+    _composites: &CompositeInfo,
 ) -> Result<FunctionLayout, String> {
     let mut values = BTreeMap::new();
     let mut types = BTreeMap::new();
@@ -297,6 +292,7 @@ fn lower_instruction(
     layout: &FunctionLayout,
     instruction: &mncs_model::SsaInstruction,
     body: &mut Vec<Instr>,
+    composites: &CompositeInfo,
 ) -> Result<(), String> {
     match &instruction.kind {
         SsaInstructionKind::Constant { value, ty } => {
@@ -339,18 +335,48 @@ fn lower_instruction(
             body.push(Instr::LocalSet(dest));
         }
         SsaInstructionKind::FiniteConstruct {
+            type_identity,
             discriminant,
             payload_fields,
             ..
         } => {
-            if !payload_fields.is_empty() {
-                return Err(
-                    "payload-bearing finite construction is outside the current realization envelope; the reference executors realize sums fully".to_owned(),
-                );
-            }
             let dest = dest_local(layout, instruction)?;
-            body.push(Instr::I32Const(*discriminant as i32));
-            body.push(Instr::LocalSet(dest));
+            match composites.boxed_finites.get(type_identity) {
+                Some(variants) => {
+                    // Boxed representation: allocate a tag cell plus one
+                    // 8-byte slot per payload field of THIS variant.
+                    let fields = variants.get(discriminant).ok_or_else(|| {
+                        format!("finite variant {discriminant} has no declared payload layout")
+                    })?;
+                    if fields.len() != payload_fields.len() {
+                        return Err(
+                            "payload field count does not match the declared variant layout"
+                                .to_owned(),
+                        );
+                    }
+                    emit_alloc(body, dest, (fields.len() as u32 + 1) * 8)?;
+                    body.push(Instr::LocalGet(dest));
+                    body.push(Instr::I32Const(*discriminant as i32));
+                    body.push(Instr::I32Store);
+                    for (index, _) in fields.iter().enumerate() {
+                        let operand = operand_local(layout, instruction, index)?;
+                        let offset = ((index + 1) * 8) as i32;
+                        body.push(Instr::LocalGet(dest));
+                        emit_offset(body, offset);
+                        body.push(Instr::LocalGet(operand));
+                        store_instr(layout, instruction, index, body)?;
+                    }
+                }
+                None => {
+                    if !payload_fields.is_empty() {
+                        return Err(
+                            "payload-bearing construction on an unboxed finite type".to_owned()
+                        );
+                    }
+                    body.push(Instr::I32Const(*discriminant as i32));
+                    body.push(Instr::LocalSet(dest));
+                }
+            }
         }
         SsaInstructionKind::BooleanOp { operator } => {
             // Bools are normalized 0/1 i32 locals in this realization, so
@@ -367,16 +393,46 @@ fn lower_instruction(
             });
             body.push(Instr::LocalSet(dest));
         }
-        SsaInstructionKind::FinitePayloadProject { .. } => {
-            return Err(
-                "payload projection is outside the current realization envelope; the reference executors realize sums fully".to_owned(),
-            );
-        }
-        SsaInstructionKind::FiniteIsVariant { discriminant, .. } => {
+        SsaInstructionKind::FinitePayloadProject {
+            type_identity,
+            discriminant,
+            field,
+            ..
+        } => {
+            let Some(variants) = composites.boxed_finites.get(type_identity) else {
+                return Err(
+                    "payload projection requires the payload-bearing realization".to_owned(),
+                );
+            };
+            let fields = variants.get(discriminant).ok_or_else(|| {
+                format!("finite variant {discriminant} has no declared payload layout")
+            })?;
+            let index = fields
+                .iter()
+                .position(|(name, _)| name == field)
+                .ok_or_else(|| format!("variant payload has no field {field:?}"))?;
             let dest = dest_local(layout, instruction)?;
             let value = operand_local(layout, instruction, 0)?;
             body.push(Instr::LocalGet(value));
-            body.push(Instr::I32Const(*discriminant as i32));
+            emit_offset(body, ((index + 1) * 8) as i32);
+            load_instr(fields[index].1, body);
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::FiniteIsVariant {
+            type_identity,
+            discriminant,
+            ..
+        } => {
+            let dest = dest_local(layout, instruction)?;
+            let value = operand_local(layout, instruction, 0)?;
+            if composites.is_boxed_finite(type_identity) {
+                body.push(Instr::LocalGet(value));
+                body.push(Instr::I32Load);
+                body.push(Instr::I32Const(*discriminant as i32));
+            } else {
+                body.push(Instr::LocalGet(value));
+                body.push(Instr::I32Const(*discriminant as i32));
+            }
             body.push(Instr::I32Eq);
             body.push(Instr::LocalSet(dest));
         }
@@ -401,11 +457,56 @@ fn lower_instruction(
                 "runtime checks have no executable condition in the current SSA subset".to_owned(),
             );
         }
-        // Record values are never materialized: construction records nothing
-        // and projection was already forwarded onto its field operand's local
-        // slot by `forward_record_values` before instruction lowering.
-        SsaInstructionKind::RecordConstruct { .. } => {}
-        SsaInstructionKind::RecordProject { .. } => {}
+        SsaInstructionKind::RecordConstruct {
+            type_identity,
+            field_names,
+            ..
+        } => {
+            let Some(fields) = composites.records.get(type_identity) else {
+                return Err(format!(
+                    "record construction names an unknown record layout {type_identity}"
+                ));
+            };
+            if fields.len() != field_names.len() || fields.len() != instruction.inputs.len() {
+                return Err("record construction does not match its declared layout".to_owned());
+            }
+            let dest = dest_local(layout, instruction)?;
+            emit_alloc(body, dest, (fields.len() as u32) * 8)?;
+            for (index, (name, width)) in fields.iter().enumerate() {
+                let declared = &field_names[index];
+                if name != declared {
+                    return Err(format!(
+                        "record construction field {declared:?} does not match the canonical layout {name:?}"
+                    ));
+                }
+                let operand = operand_local(layout, instruction, index)?;
+                body.push(Instr::LocalGet(dest));
+                emit_offset(body, ((index * 8) as i32));
+                body.push(Instr::LocalGet(operand));
+                store_width(*width, body);
+            }
+        }
+        SsaInstructionKind::RecordProject {
+            type_identity,
+            field,
+            ..
+        } => {
+            let Some(fields) = composites.records.get(type_identity) else {
+                return Err(format!(
+                    "record projection names an unknown record layout {type_identity}"
+                ));
+            };
+            let index = fields
+                .iter()
+                .position(|(name, _)| name == field)
+                .ok_or_else(|| format!("record layout has no field {field:?}"))?;
+            let dest = dest_local(layout, instruction)?;
+            let value = operand_local(layout, instruction, 0)?;
+            body.push(Instr::LocalGet(value));
+            emit_offset(body, ((index * 8) as i32));
+            load_instr(fields[index].1, body);
+            body.push(Instr::LocalSet(dest));
+        }
     }
     Ok(())
 }
@@ -515,12 +616,16 @@ fn emit_integer(
         (ValType::I32, "add") => Instr::I32Add,
         (ValType::I32, "sub") => Instr::I32Sub,
         (ValType::I32, "mul") => Instr::I32Mul,
+        (ValType::I32, "div") => Instr::I32DivS,
+        (ValType::I32, "mod") => Instr::I32RemS,
         (ValType::I32, "and") => Instr::I32And,
         (ValType::I32, "or") => Instr::I32Or,
         (ValType::I32, "xor") => Instr::I32Xor,
         (ValType::I64, "add") => Instr::I64Add,
         (ValType::I64, "sub") => Instr::I64Sub,
         (ValType::I64, "mul") => Instr::I64Mul,
+        (ValType::I64, "div") => Instr::I64DivS,
+        (ValType::I64, "mod") => Instr::I64RemS,
         (ValType::I64, "and") => Instr::I64And,
         (ValType::I64, "or") => Instr::I64Or,
         (ValType::I64, "xor") => Instr::I64Xor,
@@ -554,6 +659,69 @@ fn emit_integer(
             emit_widening(body, operator, operand_type, result_type, left, right, dest)?
         }
     }
+    Ok(())
+}
+
+/// Checked division/remainder: guard against division by zero (both) and
+/// `MIN / -1` (division only), then use the native trapping operations.
+/// Guards branch to an explicit trap so failure statuses match the reference
+/// executors' runtime-failure semantics.
+fn emit_checked_division(
+    body: &mut Vec<Instr>,
+    operator: &str,
+    ty: IntegerType,
+    wasm: ValType,
+    left: u32,
+    right: u32,
+    dest: u32,
+) -> Result<(), String> {
+    let is_div = operator == "div";
+    let _ = ty;
+    // if divisor == 0 { trap }
+    body.push(Instr::LocalGet(right));
+    body.push(Instr::I32Eqz);
+    body.push(Instr::If);
+    body.push(Instr::Unreachable);
+    body.push(Instr::End);
+    if is_div {
+        // if dividend == MIN && divisor == -1 { trap }
+        let (min_const, minus_one): (Instr, Instr) = match wasm {
+            ValType::I32 => (Instr::I32Const(i32::MIN), Instr::I32Const(-1)),
+            ValType::I64 => (Instr::I64Const(i64::MIN), Instr::I64Const(-1)),
+        };
+        let eq: Instr = match wasm {
+            ValType::I32 => Instr::I32Eq,
+            ValType::I64 => Instr::I64Eq,
+        };
+        let eq2: Instr = match wasm {
+            ValType::I32 => Instr::I32Eq,
+            ValType::I64 => Instr::I64Eq,
+        };
+        body.push(Instr::LocalGet(right));
+        body.push(minus_one);
+        body.push(eq);
+        body.push(Instr::If);
+        {
+            body.push(Instr::LocalGet(left));
+            body.push(min_const);
+            body.push(eq2);
+            body.push(Instr::If);
+            body.push(Instr::Unreachable);
+            body.push(Instr::End);
+        }
+        body.push(Instr::End);
+    }
+    body.push(Instr::LocalGet(left));
+    body.push(Instr::LocalGet(right));
+    let native = match (wasm, operator) {
+        (ValType::I32, "div") => Instr::I32DivS,
+        (ValType::I32, "mod") => Instr::I32RemS,
+        (ValType::I64, "div") => Instr::I64DivS,
+        (ValType::I64, "mod") => Instr::I64RemS,
+        _ => return Err(format!("unsupported division operator {operator}")),
+    };
+    body.push(native);
+    body.push(Instr::LocalSet(dest));
     Ok(())
 }
 
@@ -675,11 +843,16 @@ fn emit_checked(
     right: u32,
     dest: u32,
 ) -> Result<(), String> {
+    if matches!(operator, "div" | "mod") {
+        emit_checked_division(body, operator, ty, wasm, left, right, dest)?;
+        return Ok(());
+    }
     if !matches!(operator, "add" | "sub" | "mul") {
         return Err(format!(
             "checked integer operator {operator} is unsupported on the portable WASM MVP backend"
         ));
     }
+
     match wasm {
         ValType::I32 if ty.signed => {
             let max = max_signed(ty.bits);
@@ -920,11 +1093,120 @@ fn local(layout: &FunctionLayout, identity: &SemanticId) -> Result<u32, String> 
         .ok_or_else(|| format!("SSA value {} is not mapped to a WASM local", identity.0))
 }
 
+/// Emit `$mncs_alloc(bytes) -> ptr` into every module that materializes
+/// composites, plus the bump-pointer global it uses (global 0).
+const ALLOC_FUNCTION_NAME: &str = "mncs_alloc";
+
+pub fn emit_alloc_helpers(module: &mut WasmModule) {
+    if !module.globals.is_empty() && module.memory.is_some() {
+        // $mncs_alloc(bytes): bump the global pointer, keep 8-byte alignment,
+        // return the previous pointer. Appending keeps every existing callee
+        // index stable.
+        module.functions.push(WasmFunction {
+            name: ALLOC_FUNCTION_NAME.to_owned(),
+            params: vec![ValType::I32],
+            results: vec![ValType::I32],
+            locals: vec![ValType::I32],
+            body: vec![
+                Instr::GlobalGet(0),
+                Instr::LocalSet(1),
+                Instr::GlobalGet(0),
+                Instr::LocalGet(0),
+                // round the request up to an 8-byte multiple
+                Instr::I32Const(7),
+                Instr::I32Add,
+                Instr::I32Const(-8),
+                Instr::I32And,
+                Instr::I32Add,
+                Instr::GlobalSet(0),
+                Instr::LocalGet(1),
+            ],
+        });
+        let alloc_index = (module.functions.len() - 1) as u32;
+        for function in &mut module.functions {
+            rewrite_alloc_calls(function, alloc_index);
+        }
+    }
+    // Any leftover marker means a lowered function asked for allocation
+    // without composites being declared; fail loudly rather than encode it.
+    for function in &module.functions {
+        if function
+            .body
+            .iter()
+            .any(|instr| matches!(instr, crate::wasm::Instr::AllocCall))
+        {
+            panic!("AllocCall marker survived lowering without arena helpers");
+        }
+    }
+}
+
+/// Rewrite `Call(placeholder)` markers emitted during lowering into the real
+/// helper index once it is known.
+fn rewrite_alloc_calls(function: &mut WasmFunction, alloc_index: u32) {
+    for instr in &mut function.body {
+        if matches!(instr, crate::wasm::Instr::AllocCall) {
+            *instr = crate::wasm::Instr::Call(alloc_index);
+        }
+    }
+}
+
+/// Emit a call to `$mncs_alloc` with a constant byte count; result lands in
+/// `dest`. The call is emitted as an `AllocCall` marker and rewritten when the
+/// helper index is assigned at module level.
+fn emit_alloc(body: &mut Vec<Instr>, dest_local: u32, bytes: u32) -> Result<(), String> {
+    body.push(Instr::I32Const(bytes as i32));
+    body.push(Instr::AllocCall);
+    body.push(Instr::LocalSet(dest_local));
+    Ok(())
+}
+
+/// Address arithmetic: push base + offset (offset may be negative-free here;
+/// composite slot offsets are always multiples of 8).
+fn emit_offset(body: &mut Vec<Instr>, offset: i32) {
+    if offset != 0 {
+        body.push(Instr::I32Const(offset));
+        body.push(Instr::I32Add);
+    }
+}
+
+fn load_instr(width: SlotWidth, body: &mut Vec<Instr>) {
+    match width {
+        SlotWidth::W32 => body.push(Instr::I32Load),
+        SlotWidth::W64 => body.push(Instr::I64Load),
+    }
+}
+
+fn store_width(width: SlotWidth, body: &mut Vec<Instr>) {
+    match width {
+        SlotWidth::W32 => body.push(Instr::I32Store),
+        SlotWidth::W64 => body.push(Instr::I64Store),
+    }
+}
+
+/// Store instruction matching an operand's SSA value type at the top of stack.
+fn store_instr(
+    layout: &FunctionLayout,
+    instruction: &mncs_model::SsaInstruction,
+    index: usize,
+    body: &mut Vec<Instr>,
+) -> Result<(), String> {
+    let identity = instruction
+        .inputs
+        .get(index)
+        .ok_or_else(|| format!("payload operand {index} is missing"))?;
+    let valtype = layout.types.get(identity).copied().unwrap_or(ValType::I32);
+    match valtype {
+        ValType::I64 => store_width(SlotWidth::W64, body),
+        ValType::I32 => store_width(SlotWidth::W32, body),
+    }
+    Ok(())
+}
+
 fn wasm_type(ty: &IrType) -> Result<(ValType, Option<IntegerType>), String> {
     match ty {
         IrType::Finite { .. } => Ok((ValType::I32, None)),
-        // Record values are never materialized; the placeholder slot exists
-        // only because every SSA value is pre-allocated a local index.
+        // Records and payload-bearing finite variants are realized as pointers
+        // into linear memory; the value's local holds the cell address.
         IrType::Record { .. } => Ok((ValType::I32, None)),
         IrType::Named(name) if name == "bool" => Ok((ValType::I32, None)),
         IrType::Named(name) => match BodyType::from_semantic_name(name) {

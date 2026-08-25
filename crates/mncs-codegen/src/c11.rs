@@ -273,6 +273,7 @@ pub fn lower_c11(
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(function_value_contracts(program))
+    .with_composite_value_contracts(crate::support::composite_value_contracts(program))
     .with_promise_decisions(scalar.promise_decisions.clone());
     let artifact_ref = artifact_ref(&artifact);
     let evidence = BackendEvidence::new(

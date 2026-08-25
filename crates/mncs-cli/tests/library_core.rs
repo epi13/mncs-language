@@ -73,25 +73,18 @@ fn scalar_core_modules_pass_on_portable_wasm() {
     }
 }
 
+/// The WASM realization now materializes records through linear memory, so
+/// the record parameter must execute and agree with the bytecode realization
+/// instead of being refused.
 #[test]
-fn wasm_refuses_record_parameter_of_core_status_explicitly() {
+fn wasm_executes_core_status_record_parameter() {
     let (code, result, _) = run_experiment(
         &library("core/status.mncs"),
         "mncs-portable-wasm-mvp",
         &example("execution/library-core-status-corpus.json"),
     );
-    assert_eq!(code, Some(1));
-    assert_eq!(result["status"], "completed_with_unresolved_obligations");
-    let codes: Vec<&str> = result["diagnostics"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|diag| diag["code"].as_str())
-        .collect();
-    assert!(
-        codes.contains(&"CGN302"),
-        "expected CGN302 refusal: {codes:?}"
-    );
+    assert_eq!(code, Some(0), "core/status on wasm");
+    assert_eq!(result["status"], "PASS", "{:#?}", result["diagnostics"]);
 }
 
 /// Differential binding against the frozen RAVEL consumer snapshot: the

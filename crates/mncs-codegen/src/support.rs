@@ -91,10 +91,79 @@ pub(crate) fn export_name(identity: &str) -> String {
         .collect()
 }
 
+/// Logical composite types (records and payload-bearing finite variants) used
+/// by this program's signatures, keyed by semantic type name. Attached to
+/// artifacts so execution can marshal composite values without the program.
+pub(crate) fn composite_value_contracts(
+    program: &Program,
+) -> BTreeMap<String, BackendValueContract> {
+    let mut composites = BTreeMap::new();
+    for record in &program.record_types {
+        composites.insert(
+            record.name.clone(),
+            BackendValueContract::Record {
+                type_identity: record.identity.clone(),
+                name: record.name.clone(),
+                fields: record
+                    .fields
+                    .iter()
+                    .map(|field| (field.name.clone(), field.field_type.clone()))
+                    .collect(),
+            },
+        );
+    }
+    for finite in &program.finite_types {
+        // Include every declared finite type: payload-free ones are needed as
+        // field-type references inside other composites.
+        let payloads: BTreeMap<u32, Vec<(String, String)>> = finite
+            .variants
+            .iter()
+            .map(|variant| {
+                (
+                    variant.discriminant,
+                    variant
+                        .payload
+                        .iter()
+                        .map(|field| (field.name.clone(), field.field_type.clone()))
+                        .collect(),
+                )
+            })
+            .collect();
+        composites.insert(
+            finite.name.clone(),
+            BackendValueContract::Finite {
+                type_identity: finite.identity.clone(),
+                variants: finite
+                    .variants
+                    .iter()
+                    .map(|variant| (variant.discriminant, variant.identity.clone()))
+                    .collect(),
+                payloads,
+            },
+        );
+    }
+    composites
+}
+
 pub(crate) fn function_value_contracts(
     program: &Program,
 ) -> BTreeMap<String, BackendFunctionValueContract> {
     let value_contract = |name: &str| {
+        if let Some(record_type) = program
+            .record_types
+            .iter()
+            .find(|record| record.name == name)
+        {
+            return BackendValueContract::Record {
+                type_identity: record_type.identity.clone(),
+                name: record_type.name.clone(),
+                fields: record_type
+                    .fields
+                    .iter()
+                    .map(|field| (field.name.clone(), field.field_type.clone()))
+                    .collect(),
+            };
+        }
         program
             .finite_types
             .iter()
@@ -103,13 +172,38 @@ pub(crate) fn function_value_contracts(
                 || BackendValueContract::Scalar {
                     semantic_type: name.to_owned(),
                 },
-                |finite_type| BackendValueContract::Finite {
-                    type_identity: finite_type.identity.clone(),
-                    variants: finite_type
+                |finite_type| {
+                    // A type is boxed when ANY variant carries a payload;
+                    // every variant then gets a layout entry (maybe empty).
+                    let payloads = finite_type
                         .variants
                         .iter()
-                        .map(|variant| (variant.discriminant, variant.identity.clone()))
-                        .collect(),
+                        .filter(|_| {
+                            finite_type
+                                .variants
+                                .iter()
+                                .any(|variant| !variant.payload.is_empty())
+                        })
+                        .map(|variant| {
+                            (
+                                variant.discriminant,
+                                variant
+                                    .payload
+                                    .iter()
+                                    .map(|field| (field.name.clone(), field.field_type.clone()))
+                                    .collect::<Vec<_>>(),
+                            )
+                        })
+                        .collect();
+                    BackendValueContract::Finite {
+                        type_identity: finite_type.identity.clone(),
+                        variants: finite_type
+                            .variants
+                            .iter()
+                            .map(|variant| (variant.discriminant, variant.identity.clone()))
+                            .collect(),
+                        payloads,
+                    }
                 },
             )
     };
@@ -241,4 +335,13 @@ pub(crate) fn backend_output_value_from_i128(
         },
     )
     .map_err(crate::native::NativeError::InvalidOutput)
+}
+
+pub(crate) fn integer_fits(value: i128, ty: IntegerType) -> bool {
+    if ty.signed {
+        let bound = 1_i128 << (ty.bits - 1);
+        (-bound..bound).contains(&value)
+    } else {
+        value >= 0 && value < (1_i128 << ty.bits)
+    }
 }

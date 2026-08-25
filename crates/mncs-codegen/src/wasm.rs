@@ -3,7 +3,9 @@
 //! This is a research execution envelope for the supported integer/control-flow
 //! subset. It is not a general WASM engine and does not import host functions.
 
-use mncs_model::{ExecutionStatus, ExecutionValue, IntegerType};
+use std::collections::BTreeMap;
+
+use mncs_model::{ExecutionStatus, ExecutionValue, IntegerType, SemanticId};
 
 pub const WASM_MAGIC: [u8; 4] = [0x00, 0x61, 0x73, 0x6d];
 pub const WASM_VERSION: [u8; 4] = [0x01, 0x00, 0x00, 0x00];
@@ -83,6 +85,18 @@ pub enum Instr {
     I32WrapI64,
     I64ExtendI32S,
     I64ExtendI32U,
+    I32Load,
+    I64Load,
+    I32Store,
+    I64Store,
+    GlobalGet(u32),
+    GlobalSet(u32),
+    I32DivS,
+    I32RemS,
+    I64DivS,
+    I64RemS,
+    /// Lowering-time marker for the arena allocator call; never encoded.
+    AllocCall,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,9 +108,26 @@ pub struct WasmFunction {
     pub body: Vec<Instr>,
 }
 
+/// One linear-memory declaration. MNCS composites (records and payload-bearing
+/// finite variants) are realized as immutable cells in this memory; the
+/// artifact stays standard WASM MVP plus loads/stores/globals.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WasmMemory {
+    pub min_pages: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WasmGlobal {
+    pub valtype: ValType,
+    pub mutable: bool,
+    pub init: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WasmModule {
     pub functions: Vec<WasmFunction>,
+    pub memory: Option<WasmMemory>,
+    pub globals: Vec<WasmGlobal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,6 +162,33 @@ pub fn encode_module(module: &WasmModule) -> Vec<u8> {
             encode_u32(section, index as u32);
         }
     });
+    if let Some(memory) = &module.memory {
+        emit_section(&mut bytes, 5, |section| {
+            encode_u32(section, 1);
+            section.push(0x00);
+            encode_u32(section, memory.min_pages);
+        });
+    }
+    if !module.globals.is_empty() {
+        emit_section(&mut bytes, 6, |section| {
+            encode_u32(section, module.globals.len() as u32);
+            for global in &module.globals {
+                section.push(global.valtype.byte());
+                section.push(u8::from(global.mutable));
+                match global.valtype {
+                    ValType::I32 => {
+                        section.push(0x41);
+                        encode_i32(section, global.init as i32);
+                    }
+                    ValType::I64 => {
+                        section.push(0x42);
+                        encode_i64(section, global.init);
+                    }
+                }
+                section.push(0x0b);
+            }
+        });
+    }
     emit_section(&mut bytes, 7, |section| {
         encode_u32(section, module.functions.len() as u32);
         for (index, function) in module.functions.iter().enumerate() {
@@ -171,6 +229,8 @@ pub fn decode_module(bytes: &[u8]) -> Result<WasmModule, WasmTrap> {
     let mut func_types = Vec::new();
     let mut exports = Vec::new();
     let mut bodies = Vec::new();
+    let mut memory = None;
+    let mut globals = Vec::new();
     while cursor < bytes.len() {
         let id = bytes[cursor];
         cursor += 1;
@@ -188,6 +248,8 @@ pub fn decode_module(bytes: &[u8]) -> Result<WasmModule, WasmTrap> {
             0 => {}
             1 => types = decode_types(payload)?,
             3 => func_types = decode_func_types(payload)?,
+            5 => memory = decode_memory(payload)?,
+            6 => globals = decode_globals(payload)?,
             7 => exports = decode_exports(payload)?,
             10 => bodies = decode_bodies(payload)?,
             _ => {
@@ -231,11 +293,202 @@ pub fn decode_module(bytes: &[u8]) -> Result<WasmModule, WasmTrap> {
             body,
         });
     }
-    Ok(WasmModule { functions })
+    Ok(WasmModule {
+        functions,
+        memory,
+        globals,
+    })
+}
+
+fn decode_memory(payload: &[u8]) -> Result<Option<WasmMemory>, WasmTrap> {
+    let (count, cursor) = read_u32(payload, 0)?;
+    if count != 1 {
+        return Err(trap(
+            ExecutionStatus::InvalidRequest,
+            "WASM memory section must declare exactly one memory",
+        ));
+    }
+    let flags = *payload.get(cursor).ok_or_else(|| {
+        trap(
+            ExecutionStatus::InvalidRequest,
+            "WASM memory limits truncated",
+        )
+    })?;
+    if flags != 0x00 {
+        return Err(trap(
+            ExecutionStatus::InvalidRequest,
+            "WASM memory maximum/imports are outside the MVP subset",
+        ));
+    }
+    let (min_pages, _) = read_u32(payload, cursor + 1)?;
+    Ok(Some(WasmMemory { min_pages }))
+}
+
+fn decode_globals(payload: &[u8]) -> Result<Vec<WasmGlobal>, WasmTrap> {
+    let (count, mut cursor) = read_u32(payload, 0)?;
+    let mut globals = Vec::new();
+    for _ in 0..count {
+        let valtype_byte = *payload.get(cursor).ok_or_else(|| {
+            trap(
+                ExecutionStatus::InvalidRequest,
+                "WASM global type truncated",
+            )
+        })?;
+        let valtype = ValType::from_byte(valtype_byte).ok_or_else(|| {
+            trap(
+                ExecutionStatus::InvalidRequest,
+                "WASM global has an unsupported value type",
+            )
+        })?;
+        let mutable = *payload.get(cursor + 1).ok_or_else(|| {
+            trap(
+                ExecutionStatus::InvalidRequest,
+                "WASM global mutability truncated",
+            )
+        })? == 0x01;
+        cursor += 2;
+        // init expression: const opcode + value + end
+        let opcode = *payload.get(cursor).ok_or_else(|| {
+            trap(
+                ExecutionStatus::InvalidRequest,
+                "WASM global init truncated",
+            )
+        })?;
+        let init = match (opcode, valtype) {
+            (0x41, ValType::I32) => {
+                let (value, next) = read_i32(payload, cursor + 1)?;
+                cursor = next;
+                i64::from(value)
+            }
+            (0x42, ValType::I64) => {
+                let (value, next) = read_i64(payload, cursor + 1)?;
+                cursor = next;
+                value
+            }
+            _ => {
+                return Err(trap(
+                    ExecutionStatus::InvalidRequest,
+                    "WASM global init expression is unsupported",
+                ))
+            }
+        };
+        if *payload.get(cursor).ok_or_else(|| {
+            trap(
+                ExecutionStatus::InvalidRequest,
+                "WASM global init missing end",
+            )
+        })? != 0x0b
+        {
+            return Err(trap(
+                ExecutionStatus::InvalidRequest,
+                "WASM global init expression is not terminated",
+            ));
+        }
+        cursor += 1;
+        globals.push(WasmGlobal {
+            valtype,
+            mutable,
+            init,
+        });
+    }
+    Ok(globals)
+}
+
+/// Per-invocation linear memory + globals for one module execution.
+#[derive(Debug)]
+pub struct Runtime {
+    memory: Vec<u8>,
+    globals: Vec<i64>,
+}
+
+impl Runtime {
+    pub fn new(module: &WasmModule) -> Self {
+        let pages = module
+            .memory
+            .as_ref()
+            .map(|memory| memory.min_pages)
+            .unwrap_or(0);
+        Self {
+            memory: vec![0_u8; pages as usize * 65_536],
+            globals: module.globals.iter().map(|global| global.init).collect(),
+        }
+    }
+
+    fn load(&self, address: i64, width: usize) -> Result<u64, WasmTrap> {
+        let base = usize::try_from(address)
+            .map_err(|_| trap(ExecutionStatus::InvalidRequest, "negative memory address"))?;
+        let end = base
+            .checked_add(width)
+            .ok_or_else(|| trap(ExecutionStatus::InvalidRequest, "memory address overflow"))?;
+        if end > self.memory.len() {
+            return Err(trap(
+                ExecutionStatus::RuntimeFailure,
+                "backend trap: out-of-bounds memory load",
+            ));
+        }
+        let mut value = 0_u64;
+        for (index, byte) in self.memory[base..end].iter().enumerate() {
+            value |= u64::from(*byte) << (8 * index);
+        }
+        Ok(value)
+    }
+
+    fn store(&mut self, address: i64, width: usize, value: u64) -> Result<(), WasmTrap> {
+        let base = usize::try_from(address)
+            .map_err(|_| trap(ExecutionStatus::InvalidRequest, "negative memory address"))?;
+        let end = base
+            .checked_add(width)
+            .ok_or_else(|| trap(ExecutionStatus::InvalidRequest, "memory address overflow"))?;
+        if end > self.memory.len() {
+            return Err(trap(
+                ExecutionStatus::RuntimeFailure,
+                "backend trap: out-of-bounds memory store",
+            ));
+        }
+        for index in 0..width {
+            self.memory[base + index] = ((value >> (8 * index)) & 0xff) as u8;
+        }
+        Ok(())
+    }
+
+    /// Bump allocation for immutable composite cells; alignment is 8 bytes so
+    /// every slot can hold an i64 regardless of its logical field width.
+    fn allocate(&mut self, bytes: u32) -> Result<i64, WasmTrap> {
+        const BUMP_GLOBAL: u32 = 0;
+        let current = self.globals.get(BUMP_GLOBAL as usize).copied().unwrap_or(8);
+        let aligned = i64::from((bytes + 7) / 8 * 8);
+        let next = current
+            .checked_add(i64::from(aligned))
+            .ok_or_else(|| trap(ExecutionStatus::RuntimeFailure, "arena pointer overflow"))?;
+        if usize::try_from(next)
+            .map(|next| next > self.memory.len())
+            .unwrap_or(true)
+        {
+            return Err(trap(
+                ExecutionStatus::BudgetExhausted,
+                "composite arena exhausted under this step budget",
+            ));
+        }
+        if let Some(slot) = self.globals.get_mut(BUMP_GLOBAL as usize) {
+            *slot = next;
+        }
+        Ok(current)
+    }
 }
 
 pub fn execute_function(
     module: &WasmModule,
+    name: &str,
+    arguments: &[ExecutionValue],
+    step_budget: u64,
+) -> Result<WasmExecution, WasmTrap> {
+    let mut runtime = Runtime::new(module);
+    execute_function_with_runtime(module, &mut runtime, name, arguments, step_budget)
+}
+
+pub fn execute_function_with_runtime(
+    module: &WasmModule,
+    runtime: &mut Runtime,
     name: &str,
     arguments: &[ExecutionValue],
     step_budget: u64,
@@ -266,6 +519,7 @@ pub fn execute_function(
         .collect::<Result<Vec<_>, _>>()?;
     let returned = execute_raw(
         module,
+        runtime,
         function_index,
         raw_arguments,
         opcode_budget,
@@ -283,6 +537,7 @@ pub fn execute_function(
 
 fn execute_raw(
     module: &WasmModule,
+    runtime: &mut Runtime,
     function_index: usize,
     arguments: Vec<i64>,
     opcode_budget: u64,
@@ -376,6 +631,7 @@ fn execute_raw(
                 let arguments = stack.split_off(stack.len() - callee.params.len());
                 let returned = execute_raw(
                     module,
+                    runtime,
                     *callee_index as usize,
                     arguments,
                     opcode_budget,
@@ -454,6 +710,94 @@ fn execute_raw(
             Instr::I64ExtendI32U => {
                 let value = pop_i32(&mut stack)? as u32;
                 stack.push(i64::from(value));
+            }
+            Instr::I32Load => {
+                let address = pop_i32(&mut stack)?;
+                let raw = runtime.load(i64::from(address), 4)?;
+                stack.push(i64::from(raw as u32 as i32));
+            }
+            Instr::I64Load => {
+                let address = pop_i32(&mut stack)?;
+                let raw = runtime.load(i64::from(address), 8)?;
+                stack.push(raw as i64);
+            }
+            Instr::I32Store => {
+                let value = pop_i32(&mut stack)?;
+                let address = pop_i32(&mut stack)?;
+                runtime.store(i64::from(address), 4, u64::from(value as u32))?;
+            }
+            Instr::I64Store => {
+                let value = pop(&mut stack)?;
+                let address = pop_i32(&mut stack)?;
+                runtime.store(i64::from(address), 8, value as u64)?;
+            }
+            Instr::GlobalGet(index) => {
+                let value = runtime
+                    .globals
+                    .get(*index as usize)
+                    .copied()
+                    .ok_or_else(|| {
+                        trap(
+                            ExecutionStatus::InvalidRequest,
+                            "global.get index is out of range",
+                        )
+                    })?;
+                stack.push(value);
+            }
+            Instr::GlobalSet(index) => {
+                let value = pop(&mut stack)?;
+                let slot = runtime.globals.get_mut(*index as usize).ok_or_else(|| {
+                    trap(
+                        ExecutionStatus::InvalidRequest,
+                        "global.set index is out of range",
+                    )
+                })?;
+                *slot = value;
+            }
+            // WASM division traps on zero and INT_MIN / -1; both surface here
+            // as explicit MNCS runtime failures under the same conditions the
+            // reference executors reject them.
+            Instr::I32DivS => bin_try_i32(&mut stack, |left, right| {
+                if right == 0 || (left == i32::MIN && right == -1) {
+                    return Err(trap(
+                        ExecutionStatus::RuntimeFailure,
+                        "backend trap: signed integer division by zero or overflow",
+                    ));
+                }
+                Ok(left / right)
+            })?,
+            Instr::I32RemS => bin_try_i32(&mut stack, |left, right| {
+                if right == 0 {
+                    return Err(trap(
+                        ExecutionStatus::RuntimeFailure,
+                        "backend trap: integer remainder by zero",
+                    ));
+                }
+                Ok(left.wrapping_rem(right))
+            })?,
+            Instr::I64DivS => bin_try_i64(&mut stack, |left, right| {
+                if right == 0 || (left == i64::MIN && right == -1) {
+                    return Err(trap(
+                        ExecutionStatus::RuntimeFailure,
+                        "backend trap: signed integer division by zero or overflow",
+                    ));
+                }
+                Ok(left / right)
+            })?,
+            Instr::I64RemS => bin_try_i64(&mut stack, |left, right| {
+                if right == 0 {
+                    return Err(trap(
+                        ExecutionStatus::RuntimeFailure,
+                        "backend trap: integer remainder by zero",
+                    ));
+                }
+                Ok(left.wrapping_rem(right))
+            })?,
+            Instr::AllocCall => {
+                return Err(trap(
+                    ExecutionStatus::InvalidRequest,
+                    "AllocCall marker survived into execution",
+                ))
             }
         }
         ip += 1;
@@ -573,6 +917,26 @@ fn pop_i32(stack: &mut Vec<i64>) -> Result<i32, WasmTrap> {
     Ok(pop(stack)? as i32)
 }
 
+fn bin_try_i32(
+    stack: &mut Vec<i64>,
+    op: impl Fn(i32, i32) -> Result<i32, WasmTrap>,
+) -> Result<(), WasmTrap> {
+    let right = pop_i32(stack)?;
+    let left = pop_i32(stack)?;
+    stack.push(i64::from(op(left, right)?));
+    Ok(())
+}
+
+fn bin_try_i64(
+    stack: &mut Vec<i64>,
+    op: impl Fn(i64, i64) -> Result<i64, WasmTrap>,
+) -> Result<(), WasmTrap> {
+    let right = pop(stack)?;
+    let left = pop(stack)?;
+    stack.push(op(left, right)?);
+    Ok(())
+}
+
 fn bin_i32(stack: &mut Vec<i64>, op: impl Fn(i32, i32) -> i32) -> Result<(), WasmTrap> {
     let right = pop_i32(stack)?;
     let left = pop_i32(stack)?;
@@ -613,6 +977,315 @@ fn rel_u64(stack: &mut Vec<i64>, op: impl Fn(u64, u64) -> bool) -> Result<(), Wa
     let left = pop(stack)? as u64;
     stack.push(i64::from(op(left, right)));
     Ok(())
+}
+
+/// Logical marshaling descriptors for exported signatures. They carry the
+/// language-owned identities so backend observations are indistinguishable
+/// from reference-executor values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MarshalTy {
+    Bool,
+    Int(IntegerType),
+    /// Payload-free finite value carried directly as its discriminant.
+    BareFinite {
+        type_identity: SemanticId,
+        variants: BTreeMap<u32, SemanticId>,
+    },
+    /// Payload-bearing finite value carried as a pointer to a tag cell plus
+    /// one 8-byte slot per payload field of the constructed variant.
+    BoxedFinite(Box<BoxedFiniteTy>),
+    /// Record value carried as a pointer to canonical field cells.
+    Record(Box<RecordTy>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoxedFiniteTy {
+    pub type_identity: SemanticId,
+    pub variants: BTreeMap<u32, FiniteVariantTy>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FiniteVariantTy {
+    pub variant_identity: SemanticId,
+    pub fields: Vec<(String, MarshalTy)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordTy {
+    pub type_identity: SemanticId,
+    pub name: String,
+    pub fields: Vec<(String, MarshalTy)>,
+}
+
+impl MarshalTy {
+    fn is_boxed(&self) -> bool {
+        matches!(self, Self::BoxedFinite(_) | Self::Record(_))
+    }
+
+    fn expect_integer(&self) -> Option<IntegerType> {
+        match self {
+            Self::Int(integer) => Some(*integer),
+            _ => None,
+        }
+    }
+}
+
+fn write_marshal(
+    runtime: &mut Runtime,
+    value: &ExecutionValue,
+    ty: &MarshalTy,
+) -> Result<i64, WasmTrap> {
+    match (value, ty) {
+        (ExecutionValue::Boolean { value }, MarshalTy::Bool) => Ok(i64::from(*value)),
+        (ExecutionValue::Integer { value, .. }, MarshalTy::Int(integer)) => {
+            if !crate::support::integer_fits(*value, *integer) {
+                return Err(trap(
+                    ExecutionStatus::InvalidRequest,
+                    "argument is outside the declared integer type",
+                ));
+            }
+            Ok(*value as i64)
+        }
+        (ExecutionValue::Finite { discriminant, .. }, MarshalTy::BareFinite { .. }) => {
+            Ok(i64::from(*discriminant))
+        }
+        (value @ ExecutionValue::Finite { .. }, MarshalTy::BoxedFinite(layout)) => {
+            let discriminant = match value {
+                ExecutionValue::Finite { discriminant, .. } => *discriminant,
+                _ => unreachable!("matched above"),
+            };
+            let variant = layout.variants.get(&discriminant).ok_or_else(|| {
+                trap(
+                    ExecutionStatus::InvalidRequest,
+                    "finite argument has no declared payload layout",
+                )
+            })?;
+            let payload = match value {
+                ExecutionValue::Finite { payload, .. } => payload.clone(),
+                _ => Vec::new(),
+            };
+            if variant.fields.len() != payload.len() {
+                return Err(trap(
+                    ExecutionStatus::InvalidRequest,
+                    "finite argument payload does not match the declared layout",
+                ));
+            }
+            let address = runtime.allocate(((variant.fields.len() as u32) + 1) * 8)?;
+            runtime.store(address, 4, u64::from(discriminant))?;
+            for (index, (_, field_ty)) in variant.fields.iter().enumerate() {
+                let slot = address + ((index + 1) * 8) as i64;
+                write_slot(runtime, &payload[index].1, field_ty, slot)?;
+            }
+            Ok(address)
+        }
+        (value @ ExecutionValue::Record { .. }, MarshalTy::Record(layout)) => {
+            let fields = match value {
+                ExecutionValue::Record { fields, .. } => fields.clone(),
+                _ => unreachable!("matched above"),
+            };
+            if layout.fields.len() != fields.len() {
+                return Err(trap(
+                    ExecutionStatus::InvalidRequest,
+                    "record argument does not match the declared field count",
+                ));
+            }
+            let address = runtime.allocate((layout.fields.len() as u32) * 8)?;
+            for (index, (_, field_ty)) in layout.fields.iter().enumerate() {
+                let slot = address + (index * 8) as i64;
+                write_slot(runtime, &fields[index].1, field_ty, slot)?;
+            }
+            Ok(address)
+        }
+        _ => Err(trap(
+            ExecutionStatus::InvalidRequest,
+            "argument does not match the exported logical type",
+        )),
+    }
+}
+
+fn write_slot(
+    runtime: &mut Runtime,
+    value: &ExecutionValue,
+    ty: &MarshalTy,
+    address: i64,
+) -> Result<(), WasmTrap> {
+    if ty.is_boxed()
+        && matches!(
+            value,
+            ExecutionValue::Record { .. } | ExecutionValue::Finite { .. }
+        )
+    {
+        let pointer = write_marshal(runtime, value, ty)?;
+        return runtime.store(address, 4, pointer as u32 as u64);
+    }
+    match (value, ty) {
+        (ExecutionValue::Boolean { value }, MarshalTy::Bool) => {
+            runtime.store(address, 4, u64::from(*value))
+        }
+        (ExecutionValue::Integer { value, .. }, MarshalTy::Int(integer)) => {
+            if integer.bits == 64 {
+                runtime.store(address, 8, *value as u64)
+            } else {
+                runtime.store(address, 4, (*value as i32) as u32 as u64)
+            }
+        }
+        (ExecutionValue::Finite { discriminant, .. }, MarshalTy::BareFinite { .. }) => {
+            runtime.store(address, 4, u64::from(*discriminant))
+        }
+        _ => Err(trap(
+            ExecutionStatus::InvalidRequest,
+            "composite field does not match its declared logical type",
+        )),
+    }
+}
+
+fn read_slot(runtime: &Runtime, ty: &MarshalTy, address: i64) -> Result<ExecutionValue, WasmTrap> {
+    match ty {
+        MarshalTy::Bool => Ok(ExecutionValue::Boolean {
+            value: runtime.load(address, 4)? == 1,
+        }),
+        MarshalTy::Int(integer) => {
+            let raw = runtime.load(address, if integer.bits == 64 { 8 } else { 4 })?;
+            let value = if integer.bits == 64 {
+                raw as i128
+            } else {
+                i128::from(raw as u32 as i32)
+            };
+            Ok(ExecutionValue::Integer {
+                value,
+                ty: *integer,
+            })
+        }
+        MarshalTy::BareFinite { .. } => {
+            let discriminant = runtime.load(address, 4)? as u32;
+            Ok(ExecutionValue::Finite {
+                type_identity: SemanticId("unresolved".to_owned()),
+                variant_identity: SemanticId("unresolved".to_owned()),
+                discriminant,
+                payload: Vec::new(),
+            })
+        }
+        MarshalTy::BoxedFinite(_) | MarshalTy::Record(_) => {
+            let pointer = runtime.load(address, 4)? as u32 as i64;
+            read_marshal(runtime, ty, pointer)
+        }
+    }
+}
+
+fn read_marshal(
+    runtime: &Runtime,
+    ty: &MarshalTy,
+    address: i64,
+) -> Result<ExecutionValue, WasmTrap> {
+    match ty {
+        MarshalTy::BoxedFinite(layout) => {
+            let tag = runtime.load(address, 4)? as u32;
+            let variant = layout.variants.get(&tag).ok_or_else(|| {
+                trap(
+                    ExecutionStatus::RuntimeFailure,
+                    "backend returned an unknown finite discriminant",
+                )
+            })?;
+            let mut payload = Vec::new();
+            for (index, (name, field_ty)) in variant.fields.iter().enumerate() {
+                let slot = address + ((index + 1) * 8) as i64;
+                payload.push((name.clone(), read_slot(runtime, field_ty, slot)?));
+            }
+            Ok(ExecutionValue::Finite {
+                type_identity: layout.type_identity.clone(),
+                variant_identity: variant.variant_identity.clone(),
+                discriminant: tag,
+                payload,
+            })
+        }
+        MarshalTy::Record(layout) => {
+            let mut values = Vec::new();
+            for (index, (name, field_ty)) in layout.fields.iter().enumerate() {
+                let slot = address + (index * 8) as i64;
+                values.push((name.clone(), read_slot(runtime, field_ty, slot)?));
+            }
+            Ok(ExecutionValue::Record {
+                type_identity: layout.type_identity.clone(),
+                name: layout.name.clone(),
+                fields: values,
+            })
+        }
+        other => read_slot(runtime, other, address),
+    }
+}
+
+/// Execute an export with logical composite marshaling. Composite arguments
+/// are written into linear memory; results are materialized back into
+/// logical ExecutionValues carrying language-owned identities.
+pub fn execute_function_typed(
+    module: &WasmModule,
+    name: &str,
+    arguments: &[ExecutionValue],
+    param_tys: &[MarshalTy],
+    result_tys: &[MarshalTy],
+    step_budget: u64,
+) -> Result<WasmExecution, WasmTrap> {
+    let function_index = module
+        .functions
+        .iter()
+        .position(|function| function.name == name)
+        .ok_or_else(|| {
+            trap(
+                ExecutionStatus::InvalidRequest,
+                "backend export does not exist",
+            )
+        })?;
+    let function = &module.functions[function_index];
+    if arguments.len() != function.params.len() || param_tys.len() != function.params.len() {
+        return Err(trap(
+            ExecutionStatus::InvalidRequest,
+            "backend argument count does not match the exported function",
+        ));
+    }
+    let mut runtime = Runtime::new(module);
+    let mut steps = 0_u64;
+    let opcode_budget = step_budget.saturating_mul(32).max(1);
+    let mut raw_arguments = Vec::with_capacity(arguments.len());
+    for (argument, ty) in arguments.iter().zip(param_tys) {
+        raw_arguments.push(write_marshal(&mut runtime, argument, ty)?);
+    }
+    let returned_raw = execute_raw(
+        module,
+        &mut runtime,
+        function_index,
+        raw_arguments,
+        opcode_budget,
+        &mut steps,
+        0,
+    )?;
+    let mut returned = Vec::with_capacity(returned_raw.len());
+    for (raw, ty) in returned_raw.iter().zip(result_tys) {
+        returned.push(match ty {
+            MarshalTy::Bool => ExecutionValue::Boolean { value: *raw == 1 },
+            MarshalTy::Int(integer) => ExecutionValue::Integer {
+                value: i128::from(*raw),
+                ty: *integer,
+            },
+            MarshalTy::BareFinite {
+                type_identity,
+                variants,
+            } => {
+                let discriminant = *raw as u32;
+                let variant_identity = variants
+                    .get(&discriminant)
+                    .cloned()
+                    .unwrap_or_else(|| SemanticId("unresolved".to_owned()));
+                ExecutionValue::Finite {
+                    type_identity: type_identity.clone(),
+                    variant_identity,
+                    discriminant,
+                    payload: Vec::new(),
+                }
+            }
+            MarshalTy::BoxedFinite(_) | MarshalTy::Record(_) => read_marshal(&runtime, ty, *raw)?,
+        });
+    }
+    Ok(WasmExecution { returned, steps })
 }
 
 fn value_to_local(value: &ExecutionValue, ty: ValType) -> Result<i64, WasmTrap> {
@@ -783,7 +1456,32 @@ fn encode_instr(out: &mut Vec<u8>, instr: &Instr) {
         Instr::I32WrapI64 => out.push(0xa7),
         Instr::I64ExtendI32S => out.push(0xac),
         Instr::I64ExtendI32U => out.push(0xad),
+        Instr::I32Load => mem_instr(out, 0x28),
+        Instr::I64Load => mem_instr(out, 0x29),
+        Instr::I32Store => mem_instr(out, 0x36),
+        Instr::I64Store => mem_instr(out, 0x37),
+        Instr::GlobalGet(index) => {
+            out.push(0x23);
+            encode_u32(out, *index);
+        }
+        Instr::GlobalSet(index) => {
+            out.push(0x24);
+            encode_u32(out, *index);
+        }
+        Instr::I32DivS => out.push(0x6d),
+        Instr::I32RemS => out.push(0x6f),
+        Instr::I64DivS => out.push(0x7f),
+        Instr::I64RemS => out.push(0x81),
+        Instr::AllocCall => unreachable!("AllocCall must be rewritten before encoding"),
     }
+}
+
+/// Memory load/store immediate: alignment=2 (8-byte, valid for all widths we
+/// store at 8-byte slots) with a static byte offset.
+fn mem_instr(out: &mut Vec<u8>, opcode: u8) {
+    out.push(opcode);
+    out.push(0x02);
+    encode_u32(out, 0);
 }
 
 fn read_u32(bytes: &[u8], mut cursor: usize) -> Result<(u32, usize), WasmTrap> {
@@ -997,6 +1695,15 @@ fn decode_body(payload: &[u8]) -> Result<FuncBody, WasmTrap> {
     Ok((locals, body))
 }
 
+/// Memory load/store immediates carry align+offset; our emitter always writes
+/// align=2 offset=0, so skip both LEB fields.
+fn skip_memarg(payload: &[u8], mut cursor: usize) -> Result<usize, WasmTrap> {
+    let (_, next) = read_u32(payload, cursor)?;
+    cursor = next;
+    let (_, next) = read_u32(payload, cursor)?;
+    Ok(next)
+}
+
 fn decode_instr(payload: &[u8], cursor: usize) -> Result<(Instr, usize), WasmTrap> {
     let opcode = *payload.get(cursor).ok_or_else(|| {
         trap(
@@ -1095,6 +1802,36 @@ fn decode_instr(payload: &[u8], cursor: usize) -> Result<(Instr, usize), WasmTra
         0x83 => Instr::I64And,
         0x84 => Instr::I64Or,
         0x85 => Instr::I64Xor,
+        0x28 => {
+            cursor = skip_memarg(payload, cursor)?;
+            Instr::I32Load
+        }
+        0x29 => {
+            cursor = skip_memarg(payload, cursor)?;
+            Instr::I64Load
+        }
+        0x36 => {
+            cursor = skip_memarg(payload, cursor)?;
+            Instr::I32Store
+        }
+        0x37 => {
+            cursor = skip_memarg(payload, cursor)?;
+            Instr::I64Store
+        }
+        0x23 => {
+            let (index, next) = read_u32(payload, cursor)?;
+            cursor = next;
+            Instr::GlobalGet(index)
+        }
+        0x24 => {
+            let (index, next) = read_u32(payload, cursor)?;
+            cursor = next;
+            Instr::GlobalSet(index)
+        }
+        0x6d => Instr::I32DivS,
+        0x6f => Instr::I32RemS,
+        0x7f => Instr::I64DivS,
+        0x81 => Instr::I64RemS,
         0xa7 => Instr::I32WrapI64,
         0xac => Instr::I64ExtendI32S,
         0xad => Instr::I64ExtendI32U,
