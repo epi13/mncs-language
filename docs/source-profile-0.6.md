@@ -1,4 +1,4 @@
-# Source Profile 0.6 — payload sums, strict booleans, division/modulo
+# Source Profile 0.6 — payload sums, strict booleans, division/modulo, explicit arithmetic intents
 
 Status: **experimental**, introduced 2026-08 by the Ox Alpha standard-library
 tranche. Profiles 0.1–0.5 are unchanged; every 0.1–0.5 fixture still parses,
@@ -57,15 +57,46 @@ control semantics (RFC 0042 authority closure).
 div/mod machine intent. Division by zero and `MIN / -1` surface as explicit
 runtime failures under checked semantics (RFC 0021); they do not silently wrap.
 
+### Explicit arithmetic intents
+
+Default integer arithmetic is checked: an overflow becomes an explicit runtime
+failure and a symbolic obligation that stays UNKNOWN until discharged. Profile
+0.6 also admits **intent-suffixed operators** whose edge semantics are total
+by definition, so their overflow obligations are discharged by semantics
+(`language-explicit-{intent}-semantics`) rather than left unresolved:
+
+```text
+a +% b    a -% b    a *%      // wrapping: two's-complement in declared width
+a +| b    a -| b    a *| b    // saturating: clamp at representable bounds
+```
+
+- Precedence matches the unsuffixed operators (`+| -| +% -%` additive,
+  `*| *%` multiplicative); the suffix binds tighter than any comparison.
+- Wrapping and saturating are **total**: they never fail at runtime and never
+  leave an unresolved obligation. Trapping and widening remain model-level
+  intents without surface syntax.
+- Saturating direction is exact: signed products saturate toward `MIN` when
+  operand signs differ; unsigned values only saturate upward.
+- The operators are gated to Profile 0.6 (`MNP143` below it).
+- Realization: reference executors, research bytecode, portable WASM
+  (i64-cell lowering for 64-bit operands; unsigned 64-bit saturating
+  multiplication still refuses honestly), C11 (128-bit wide intermediates),
+  LLVM IR (saturating intrinsics; overflow-select multiplication), Cranelift
+  JIT/AOT (i128-widened clamps). All five agree over the boundary corpus in
+  `examples/execution/profile06-explicit-intents-corpus.json`.
+
 ## Realization envelope (observed 2026-08)
 
-| Stage | Payload sums | Boolean ops | Div/mod |
-| --- | --- | --- | --- |
-| body reference executor | realizes | realizes | realizes (checked) |
-| SSA reference executor | realizes | realizes | realizes (checked) |
-| research bytecode | realizes | realizes | refuses explicitly |
-| portable WASM MVP | refuses (CGN302) | realizes (i32 bitwise) | refuses (CGN301) |
-| C11 / LLVM / Cranelift | refuse (CGx302) | refuse (CGx302) | refuse |
+Current observed state after the backend-family expansion; the matrix command
+(`mncs experiment matrix`) remains the machine-readable source of truth.
+
+| Stage | Payload sums | Boolean ops | Div/mod | Intents |
+| --- | --- | --- | --- | --- |
+| body / SSA reference executors | realizes | realizes | realizes | realizes |
+| research bytecode | realizes | realizes | realizes | realizes |
+| portable WASM MVP | realizes | realizes | realizes | realizes (unsigned 64-bit sat mul refuses) |
+| C11 | refuse composite args (process boundary) | realizes | realizes | realizes |
+| LLVM / Cranelift | scalar envelope | realizes | realizes | realizes |
 
 Backend refusal is an intentional, evidence-backed envelope, not semantic
 disagreement. No semantic workaround was added for any backend.
@@ -139,10 +170,20 @@ The compiler core consumes imports through the `ModuleResolver` trait; it
 never touches the filesystem itself. Hosts choose their own layout rules:
 
 - the research CLI resolves names relative to the importing file's directory,
-  trying `<full.dotted.path>.mncs` then `<tail>.mncs`;
+  then its parent, trying `<full.dotted.path>.mncs`, a version-tail-stripped
+  path, an `mncs.`-prefix-stripped path, then `<tail>.mncs`;
+- after those source-local roots, the research CLI searches each directory
+  listed in the `MNCS_LIBRARY_PATH` environment variable (`:`-separated, in
+  order). This is how external consumers bind to `mncs.core.*` without
+  vendoring the standard-library tree: point `MNCS_LIBRARY_PATH` at this
+  repository's `library/` directory;
 - language-service hosts may resolve against resident workspace documents.
 
 A resolution miss is always a diagnostic (`MNE173`) in the importing module.
+Library roots are a discovery convenience only: compatibility still comes from
+elaborating the resolved module against its declared identity, so a stale
+`MNCS_LIBRARY_PATH` entry degrades into an honest miss rather than silent
+substitution.
 
 ## Non-goals for this profile
 

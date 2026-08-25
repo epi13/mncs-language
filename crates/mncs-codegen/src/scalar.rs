@@ -237,10 +237,10 @@ fn lower_instruction(
         SsaInstructionKind::Integer {
             operator, intent, ..
         } => {
-            if matches!(
-                intent,
-                ArithmeticIntent::Saturating | ArithmeticIntent::Widening { .. }
-            ) {
+            // Saturating and wrapping arithmetic are total by semantics and
+            // are realized by every scalar backend; widening still needs a
+            // wider result cell than the scalar envelope provides.
+            if matches!(intent, ArithmeticIntent::Widening { .. }) {
                 return Err(format!(
                     "arithmetic intent {intent:?} is outside the current scalar realization envelope"
                 ));

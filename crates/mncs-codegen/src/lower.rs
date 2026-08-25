@@ -639,7 +639,11 @@ fn emit_integer(
             }
         }
         ArithmeticIntent::Saturating => {
-            emit_saturating(body, operator, operand_type, result_type, left, right, dest)?
+            if matches!(val_type(result_type)?, ValType::I64) {
+                emit_saturating_wide(body, operator, operand_type, left, right, dest)?
+            } else {
+                emit_saturating(body, operator, operand_type, result_type, left, right, dest)?
+            }
         }
         ArithmeticIntent::Widening { .. } => {
             emit_widening(body, operator, operand_type, result_type, left, right, dest)?
@@ -739,6 +743,162 @@ fn emit_wide_i64_operation(
     Ok(())
 }
 
+/// 64-bit saturating arithmetic in i64 cells. The wrapping i64 result is
+/// computed first, then overflow is detected exactly:
+/// - signed add overflows when `~(l ^ r) & (l ^ w)` is negative;
+/// - signed sub overflows when `(l ^ r) & (l ^ w)` is negative;
+/// - unsigned add/sub compare the wrapped value against its inputs;
+/// - signed mul guards the divisor (`l == 0` cannot overflow, `l == -1`
+///   overflows only for `r == MIN`) before dividing, so no native trap is
+///   reachable and failure statuses stay language-owned.
+fn emit_saturating_wide(
+    body: &mut Vec<Instr>,
+    operator: &str,
+    operand: IntegerType,
+    left: u32,
+    right: u32,
+    dest: u32,
+) -> Result<(), String> {
+    if !matches!(operator, "add" | "sub" | "mul") {
+        return Err("portable WASM saturating arithmetic realizes add, sub, and mul".to_owned());
+    }
+    let signed = operand.signed;
+    let min = if signed { i64::MIN } else { 0_i64 };
+    let max = if signed { i64::MAX } else { u64::MAX as i64 };
+    body.push(Instr::LocalGet(left));
+    body.push(Instr::LocalGet(right));
+    match operator {
+        "sub" => body.push(Instr::I64Sub),
+        "mul" => body.push(Instr::I64Mul),
+        _ => body.push(Instr::I64Add),
+    }
+    body.push(Instr::LocalSet(dest));
+
+    let emit_overflow_condition = |body: &mut Vec<Instr>| {
+        match (operator, signed) {
+            ("add", true) => {
+                // ~(l ^ r) & (l ^ w) < 0
+                body.push(Instr::LocalGet(left));
+                body.push(Instr::LocalGet(right));
+                body.push(Instr::I64Xor);
+                body.push(Instr::I64Const(-1));
+                body.push(Instr::I64Xor);
+                body.push(Instr::LocalGet(left));
+                body.push(Instr::LocalGet(dest));
+                body.push(Instr::I64Xor);
+                body.push(Instr::I64And);
+                body.push(Instr::I64Const(0));
+                body.push(Instr::I64LtS);
+            }
+            ("sub", true) => {
+                // (l ^ r) & (l ^ w) < 0
+                body.push(Instr::LocalGet(left));
+                body.push(Instr::LocalGet(right));
+                body.push(Instr::I64Xor);
+                body.push(Instr::LocalGet(left));
+                body.push(Instr::LocalGet(dest));
+                body.push(Instr::I64Xor);
+                body.push(Instr::I64And);
+                body.push(Instr::I64Const(0));
+                body.push(Instr::I64LtS);
+            }
+            ("add", false) => {
+                // w < l (unsigned wraparound)
+                body.push(Instr::LocalGet(dest));
+                body.push(Instr::LocalGet(left));
+                body.push(Instr::I64LtU);
+            }
+            ("sub", false) => {
+                // r > l (unsigned underflow)
+                body.push(Instr::LocalGet(right));
+                body.push(Instr::LocalGet(left));
+                body.push(Instr::I64GtU);
+            }
+            _ => unreachable!("mul handled separately"),
+        }
+    };
+
+    if operator == "mul" {
+        if !signed {
+            return Err("portable WASM realizes 64-bit saturating multiplication for signed operands; unsigned 64-bit saturating multiplication awaits a wide-multiply lowering".to_owned());
+        }
+        // l == 0: product cannot overflow.
+        body.push(Instr::LocalGet(left));
+        body.push(Instr::I64Eqz);
+        body.push(Instr::If);
+        body.push(Instr::Else);
+        // l == -1: overflow exactly when r == MIN.
+        body.push(Instr::LocalGet(left));
+        body.push(Instr::I64Const(-1));
+        body.push(Instr::I64Eq);
+        body.push(Instr::If);
+        body.push(Instr::LocalGet(right));
+        body.push(Instr::I64Const(i64::MIN));
+        body.push(Instr::I64Eq);
+        body.push(Instr::If);
+        // Same sign (both negative): upward saturation.
+        body.push(Instr::I64Const(max));
+        body.push(Instr::LocalSet(dest));
+        body.push(Instr::End);
+        body.push(Instr::Else);
+        // Generic case: l ∉ {0, -1} so the division cannot trap;
+        // overflow iff w / l != r. Saturation direction is downward when
+        // the operand signs differ.
+        body.push(Instr::LocalGet(dest));
+        body.push(Instr::LocalGet(left));
+        body.push(Instr::I64DivS);
+        body.push(Instr::LocalGet(right));
+        body.push(Instr::I64Ne);
+        body.push(Instr::If);
+        body.push(Instr::I64Const(min));
+        body.push(Instr::I64Const(max));
+        body.push(Instr::LocalGet(left));
+        body.push(Instr::I64Const(63));
+        body.push(Instr::I64ShrS);
+        body.push(Instr::I64Const(0));
+        body.push(Instr::I64Ne);
+        body.push(Instr::LocalGet(right));
+        body.push(Instr::I64Const(63));
+        body.push(Instr::I64ShrS);
+        body.push(Instr::I64Const(0));
+        body.push(Instr::I64Ne);
+        body.push(Instr::I32Xor);
+        body.push(Instr::Select);
+        body.push(Instr::LocalSet(dest));
+        body.push(Instr::End);
+        body.push(Instr::End);
+        body.push(Instr::End);
+        return Ok(());
+    }
+
+    emit_overflow_condition(body);
+    body.push(Instr::If);
+    if signed {
+        // Direction: add saturates downward when l is negative; sub
+        // saturates downward when r is positive. Select picks the first
+        // value when its condition is nonzero.
+        let direction_source = if operator == "add" { left } else { right };
+        let downward_when_negative = operator == "add";
+        body.push(Instr::I64Const(min));
+        body.push(Instr::I64Const(max));
+        body.push(Instr::LocalGet(direction_source));
+        body.push(Instr::I64Const(63));
+        body.push(Instr::I64ShrS);
+        body.push(Instr::I64Const(0));
+        body.push(Instr::I64Ne);
+        if !downward_when_negative {
+            // For sub, positive r means downward saturation: invert.
+            body.push(Instr::I32Eqz);
+        }
+        body.push(Instr::Select);
+    } else {
+        body.push(Instr::I64Const(if operator == "add" { max } else { min }));
+    }
+    body.push(Instr::LocalSet(dest));
+    body.push(Instr::End);
+    Ok(())
+}
+
 fn emit_saturating(
     body: &mut Vec<Instr>,
     operator: &str,
@@ -753,7 +913,7 @@ fn emit_saturating(
         || (!operand.signed && operand.bits > 31)
         || !matches!(operator, "add" | "sub" | "mul")
     {
-        return Err("portable WASM saturating arithmetic requires signed 1..=32-bit or unsigned 1..=31-bit add/sub/mul".to_owned());
+        return Err("portable WASM saturating arithmetic requires signed 1..=32-bit or unsigned 1..=31-bit add/sub/mul in i32 cells".to_owned());
     }
     let (min, max) = if operand.signed {
         let top = 1_i64 << (operand.bits - 1);

@@ -712,7 +712,7 @@ where
         },
         source,
     );
-    let resolver = FileModuleResolver::for_source(source_path.as_str());
+    let resolver = FileModuleResolver::with_libraries(source_path.as_str());
     let output = ReferenceCompiler::default().run_source_study_with_resolver(
         envelope,
         native_node_profile(node_identity.as_str()),
@@ -1286,7 +1286,7 @@ fn prepare_experiment(options: &ExperimentOptions) -> Result<PreparedExperiment,
         }
         program
     } else {
-        let resolver = FileModuleResolver::for_source(&options.source_path);
+        let resolver = FileModuleResolver::with_libraries(&options.source_path);
         let front_end = compiler.front_end_with_resolver(envelope.clone(), &resolver);
         let Some(program) = front_end.program.clone().filter(|_| front_end.is_valid()) else {
             let _ = print_json(&front_end);
@@ -1400,13 +1400,13 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
             &prepared.program,
         )
     } else {
-        let resolver = prepared
-            .source_dir
-            .clone()
-            .map(|root| FileModuleResolver { root })
-            .unwrap_or_else(|| FileModuleResolver {
-                root: PathBuf::from("."),
-            });
+        let resolver = FileModuleResolver {
+            root: prepared
+                .source_dir
+                .clone()
+                .unwrap_or_else(|| PathBuf::from(".")),
+            libraries: library_roots(),
+        };
         let study_output = compiler.run_source_study_with_backend_and_resolver(
             prepared.envelope.clone(),
             native_node_profile(options.node_identity),
@@ -2027,7 +2027,8 @@ fn load_program(path: &str) -> Result<Program, ExitCode> {
             path,
             source,
         );
-        let front_end = ReferenceCompiler::default().front_end(envelope);
+        let resolver = FileModuleResolver::with_libraries(path);
+        let front_end = ReferenceCompiler::default().front_end_with_resolver(envelope, &resolver);
         let diagnostics = front_end.diagnostics.clone();
         let valid = front_end.is_valid();
         let program = front_end.program;
@@ -2763,18 +2764,44 @@ fn per_claim_milli(value: usize, claim_count: usize) -> usize {
 
 /// Resolves imported module names against the directory of the root source
 /// file using the dotted-path convention: `use a.b;` loads `<root>/a/b.mncs`.
-/// The name identifies the candidate only; compatibility is established by
-/// elaborating the resolved module.
+/// Additional standard-library roots come from `MNCS_LIBRARY_PATH`
+/// (`:`-separated directories searched after the source-local roots), so
+/// external consumers can bind to `mncs.core.*` without vendoring the library
+/// tree. The name identifies the candidate only; compatibility is established
+/// by elaborating the resolved module.
 struct FileModuleResolver {
     root: PathBuf,
+    libraries: Vec<PathBuf>,
 }
 
 impl FileModuleResolver {
     fn for_source(source_path: &str) -> Self {
         let mut root = PathBuf::from(source_path);
         root.pop();
-        Self { root }
+        Self {
+            root,
+            libraries: Vec::new(),
+        }
     }
+
+    /// Source-local resolution plus every configured standard-library root.
+    fn with_libraries(source_path: &str) -> Self {
+        let mut resolver = Self::for_source(source_path);
+        resolver.libraries = library_roots();
+        resolver
+    }
+}
+
+/// Directories that may satisfy `use` targets beyond the importing file's own
+/// directory tree. Deterministic order; missing entries are skipped so a stale
+/// path degrades into an honest resolution miss instead of an error.
+fn library_roots() -> Vec<PathBuf> {
+    std::env::var("MNCS_LIBRARY_PATH")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|entry| !entry.is_empty())
+        .map(PathBuf::from)
+        .collect()
 }
 
 impl FileModuleResolver {
@@ -2827,11 +2854,13 @@ impl ModuleResolver for FileModuleResolver {
         }
         // Deterministic layout search: the importing file's directory first,
         // then its parent (so files grouped in a subdirectory can import a
-        // sibling tree rooted one level up).
+        // sibling tree rooted one level up), then each configured
+        // standard-library root in order.
         let mut roots = vec![self.root.clone()];
         if let Some(parent) = self.root.parent() {
             roots.push(parent.to_path_buf());
         }
+        roots.extend(self.libraries.iter().cloned());
         for root in roots {
             for path in Self::candidates(&root, module) {
                 if let Ok(source) = fs::read_to_string(&path) {
