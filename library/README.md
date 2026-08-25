@@ -19,17 +19,22 @@ library/
 `std/` and `capability/` are intentionally empty until their governing language
 features exist; no placeholder syntax is invented to fill them.
 
-## Current constraint: one module per file
-
-Source Profiles 0.1–0.5 have **no import/linking form**. Every MNCS module is a
-single self-contained file (this is also how RAVEL's reconstruction modules are
-shipped). Library files therefore declare one module each:
+## Modules
 
 | File | Module | Contents |
 | --- | --- | --- |
 | `core/status.mncs` | `mncs.core.status.v1` | `Status { PASS, FAIL, UNKNOWN }`, dominance join (`dominate`), pair combination over `StatusPair`, decidedness predicate, dominance test |
 | `core/logic.mncs` | `mncs.core.logic.v1` | total boolean algebra: `bool_not/and/or/implies/xor` |
 | `core/ordering.mncs` | `mncs.core.ordering.v1` | comparison-only `min/max/clamp` for i32/i64 (no arithmetic, hence no overflow obligations) |
+| `core/result.mncs` | `mncs.core.result.v1` (Profile 0.6) | the standard Result shape with real reason payloads: `Ok { value }`, `Err { reason }`, `divide`, `bounded_divide`, `value_or`, `reason_of`; exhaustive matching with payload binders |
+
+## Current constraint: one module per file
+
+Source Profiles 0.1–0.5 have **no import/linking form**. Every MNCS module is a
+single self-contained file (this is also how RAVEL's reconstruction modules are
+shipped). Library files therefore declare one module each, listed above.
+`core/result.mncs` additionally requires the Profile 0.6 payload-sum surface;
+see `docs/source-profile-0.6.md`.
 
 ## Contracts and honesty properties
 
