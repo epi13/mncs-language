@@ -1,0 +1,11 @@
+mncs 0.6;
+
+module probe.div;
+
+fn checked_div(a: i64, b: i64) -> (result: i64) {
+    return a / b;
+}
+
+fn checked_mod(a: i32, b: i32) -> (result: i32) {
+    return a % b;
+}

@@ -33,7 +33,7 @@ An MNCS-oriented program should make it possible to answer:
 - `rfcs/` — design proposals that can evolve independently of the specification.
 - `crates/mncs-model/` — the executable semantic model, canonical representation, identities, graph/CFG, evidence manifest, invalidation logic, recursive artifacts, high-level IR, validated SSA artifact, and narrow machine-intent/verifier pilots.
 - `crates/mncs-compiler/` — the evidence-bearing reference compiler driver over the existing semantic, HIR, SSA, obligation, identity, provenance, and portable-backend APIs.
-- `crates/mncs-codegen/` — backend-neutral adapter registry plus portable WASM MVP, research bytecode, LLVM IR, C11, and Cranelift adapters.
+- `crates/mncs-codegen/` — backend-neutral adapter registry plus portable WASM MVP (records/payload sums via linear-memory arena), research bytecode, LLVM IR, C11, Cranelift (JIT plus AOT object fallback), and external-target realizations for RISC-V 32 (RV32IM ELF), eBPF, and NVIDIA PTX through the system LLVM toolchain.
 - `crates/mncs-translation-check/` — independent PASS/FAIL/UNKNOWN translation validators; generators live in a separate module and do not certify themselves.
 - `crates/mncs-syntax/` — source envelopes, lossless tokens/CST, a bounded spanned AST/parser, and deterministic source-representation metrics.
 - `crates/mncs-cli/` — validation, canonicalization, identity, graph/CFG, evidence, IR, SSA, obligation, verification, comparison, diagnostic, diff, compile, backend execution, translation validation, and syntax-tournament commands.

@@ -2783,10 +2783,33 @@ impl FileModuleResolver {
     fn candidates(root: &std::path::Path, module: &str) -> Vec<PathBuf> {
         let dotted = module.replace('.', "/");
         let tail = module.rsplit('.').next().unwrap_or(module);
-        vec![
-            root.join(format!("{dotted}.mncs")),
-            root.join(format!("{tail}.mncs")),
-        ]
+        let mut paths = vec![root.join(format!("{dotted}.mncs"))];
+        let version_tailed = Self::split_version_tail(module);
+        if let Some((head, _)) = version_tailed {
+            paths.push(root.join(format!("{}.mncs", head.replace('.', "/"))));
+        }
+        if let Some(rest) = module.strip_prefix("mncs.") {
+            paths.push(root.join(format!("{}.mncs", rest.replace('.', "/"))));
+            if let Some((head, _)) = version_tailed {
+                if let Some(stripped) = head.strip_prefix("mncs.") {
+                    paths.push(root.join(format!("{}.mncs", stripped.replace('.', "/"))));
+                }
+            }
+        }
+        paths.push(root.join(format!("{tail}.mncs")));
+        paths
+    }
+
+    fn split_version_tail(module: &str) -> Option<(&str, &str)> {
+        let (head, last) = module.rsplit_once('.')?;
+        let digits = last.strip_prefix('v')?;
+        if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        if head.is_empty() || head.contains("..") {
+            return None;
+        }
+        Some((head, last))
     }
 }
 

@@ -1,0 +1,4656 @@
+{
+ "schema_version": "0.1",
+ "name": "family-coherence-aggregate",
+ "cases": [
+  {
+   "id": "aggregate-pass-pass-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+      "discriminant": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-pass-pass-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-pass-pass-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-pass-fail-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-pass-fail-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-pass-fail-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-pass-unknown-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-pass-unknown-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-pass-unknown-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-fail-pass-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-fail-pass-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-fail-pass-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-fail-fail-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-fail-fail-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-fail-fail-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-fail-unknown-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-fail-unknown-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-fail-unknown-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-unknown-pass-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-unknown-pass-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-unknown-pass-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-unknown-fail-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-unknown-fail-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-unknown-fail-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-unknown-unknown-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-unknown-unknown-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-unknown-unknown-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-all-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-unknown-at-slot-06",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-fail-at-final-slot",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "aggregate-all-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "aggregate_checks"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::CheckVector::c01%3AStatus%3Bc02%3AStatus%3Bc03%3AStatus%3Bc04%3AStatus%3Bc05%3AStatus%3Bc06%3AStatus%3Bc07%3AStatus%3Bc08%3AStatus%3Bc09%3AStatus%3Bc10%3AStatus%3Bc11%3AStatus%3Bc12%3AStatus%3B",
+       "name": "CheckVector",
+       "fields": [
+        [
+         "c01",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c02",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c03",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c04",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c05",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c06",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c07",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c08",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c09",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c10",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c11",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "c12",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+      "discriminant": 0
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,2246 @@
+{
+ "schema_version": "0.1",
+ "name": "family-coherence-drift",
+ "cases": [
+  {
+   "id": "drift-v0f0r0x0s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::StaleReference",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v0f0r0x0s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::StaleReference",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v0f0r0x1s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::StaleReference",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v0f0r0x1s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::StaleReference",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v0f0r1x0s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::FixtureMismatch",
+      "discriminant": 4
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v0f0r1x0s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::FixtureMismatch",
+      "discriminant": 4
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v0f0r1x1s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::Clean",
+      "discriminant": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v0f0r1x1s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::Clean",
+      "discriminant": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v0f1r0x0s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::StaleReference",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v0f1r0x0s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::StaleReference",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v0f1r0x1s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::StaleReference",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v0f1r0x1s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::StaleReference",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v0f1r1x0s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::FixtureMismatch",
+      "discriminant": 4
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v0f1r1x0s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::FixtureMismatch",
+      "discriminant": 4
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v0f1r1x1s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::Clean",
+      "discriminant": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v0f1r1x1s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::Clean",
+      "discriminant": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f0r0x0s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::UndeclaredSurfaceChange",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f0r0x0s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::FingerprintDrift",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f0r0x1s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::UndeclaredSurfaceChange",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f0r0x1s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::FingerprintDrift",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f0r1x0s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::UndeclaredSurfaceChange",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f0r1x0s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::FingerprintDrift",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f0r1x1s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::UndeclaredSurfaceChange",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f0r1x1s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::FingerprintDrift",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f1r0x0s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::UndeclaredSurfaceChange",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f1r0x0s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::StaleReference",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f1r0x1s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::UndeclaredSurfaceChange",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f1r0x1s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::StaleReference",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f1r1x0s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::UndeclaredSurfaceChange",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f1r1x0s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::FixtureMismatch",
+      "discriminant": 4
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f1r1x1s0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::UndeclaredSurfaceChange",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-v1f1r1x1s1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "assess_drift"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::DriftObservation::consumer_references_resolve%3Abool%3Bfingerprint_matches%3Abool%3Bfixtures_match_declaration%3Abool%3Bsame_declared_version%3Abool%3Bsurface_unchanged%3Abool%3B",
+       "name": "DriftObservation",
+       "fields": [
+        [
+         "consumer_references_resolve",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fingerprint_matches",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "fixtures_match_declaration",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "same_declared_version",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "surface_unchanged",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::DriftKind",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::DriftKind::Clean",
+      "discriminant": 0
+     }
+    }
+   ]
+  }
+ ]
+}

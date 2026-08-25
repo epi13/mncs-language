@@ -1037,6 +1037,17 @@ pub enum BackendValueContract {
     Finite {
         type_identity: SemanticId,
         variants: BTreeMap<u32, SemanticId>,
+        /// Payload field declarations per discriminant, canonical order
+        /// (field name, declared semantic type). Empty for payload-free
+        /// finite types; serialized as absent so existing artifacts parse.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        payloads: BTreeMap<u32, Vec<(String, String)>>,
+    },
+    Record {
+        type_identity: SemanticId,
+        name: String,
+        /// Canonical (name-sorted) fields: field name -> semantic type name.
+        fields: Vec<(String, String)>,
     },
 }
 
@@ -1055,6 +1066,11 @@ pub struct BackendArtifact {
     pub exports: Vec<String>,
     #[serde(default)]
     pub function_value_contracts: BTreeMap<String, BackendFunctionValueContract>,
+    /// Logical composite types referenced by this artifact's signatures,
+    /// keyed by semantic type name. Makes artifacts self-describing so
+    /// execution can marshal record/payload values without the program.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub composite_value_contracts: BTreeMap<String, BackendValueContract>,
     pub assumptions: Vec<String>,
     pub obligations_generated: Vec<SemanticId>,
     pub execution_applicability: Vec<String>,
@@ -1137,6 +1153,7 @@ impl BackendArtifact {
             bytes_hex,
             exports,
             function_value_contracts: BTreeMap::new(),
+            composite_value_contracts: BTreeMap::new(),
             assumptions,
             obligations_generated,
             execution_applicability,
@@ -1158,6 +1175,15 @@ impl BackendArtifact {
         function_value_contracts: BTreeMap<String, BackendFunctionValueContract>,
     ) -> Self {
         self.function_value_contracts = function_value_contracts;
+        self.identity = identified("backend-artifact", &self.without_identity());
+        self
+    }
+
+    pub fn with_composite_value_contracts(
+        mut self,
+        composite_value_contracts: BTreeMap<String, BackendValueContract>,
+    ) -> Self {
+        self.composite_value_contracts = composite_value_contracts;
         self.identity = identified("backend-artifact", &self.without_identity());
         self
     }

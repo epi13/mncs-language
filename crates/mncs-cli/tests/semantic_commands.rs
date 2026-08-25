@@ -1647,8 +1647,9 @@ fn profile_05_matches_and_branches_on_bare_names_still_lower_and_agree() {
     assert!(cases
         .iter()
         .all(|case_| case_["status"] == "returned" && case_["expectation_met"] == true));
-    // WASM declares records-through-block-parameters outside its envelope and
-    // must refuse the same program instead of approximating it.
+    // WASM now materializes the record-carrying bounded iteration through
+    // linear memory, so the same program must execute and agree instead of
+    // being refused at the record boundary.
     let wasm = binary()
         .args([
             "experiment",
@@ -1661,7 +1662,17 @@ fn profile_05_matches_and_branches_on_bare_names_still_lower_and_agree() {
         ])
         .output()
         .expect("run branch-on-names on WASM");
-    assert_eq!(wasm.status.code(), Some(1));
+    assert!(
+        wasm.status.success(),
+        "{}",
+        String::from_utf8_lossy(&wasm.stderr)
+    );
+    let wasm_result: Value = serde_json::from_slice(&wasm.stdout).expect("wasm result JSON");
+    assert_eq!(wasm_result["status"], "UNKNOWN");
+    for case_ in wasm_result["cases"].as_array().unwrap() {
+        assert_eq!(case_["status"], "returned", "{case_}");
+        assert_eq!(case_["expectation_met"], true, "{case_}");
+    }
 }
 
 #[test]
@@ -1688,3 +1699,4 @@ fn backend_family_matrix_declares_profile_05_support() {
         );
     }
 }
+

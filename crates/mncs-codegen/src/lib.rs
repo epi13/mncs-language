@@ -6,6 +6,7 @@
 
 mod c11;
 mod cranelift_backend;
+mod external;
 mod llvm;
 mod lower;
 mod matrix;
@@ -19,19 +20,20 @@ use std::collections::BTreeMap;
 
 use mncs_model::{
     execute_ssa_module, execute_with_policy, ArtifactRepresentation, BackendArtifact,
-    BackendCapabilityManifest, BackendConfiguration, BackendEvidence, BackendFunctionValueContract,
-    BackendIdentity, BackendResult, BackendValueContract, BodyType, CompilerArtifactRef,
-    CompilerDiagnostic, CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure,
-    ExecutionRequest, ExecutionResult, ExecutionStatus, ExecutionTarget, ExecutionValue,
-    IntegerType, Program, SemanticId, SsaModule, TargetContractRef, TargetLoweringPlan,
-    TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION, COMPILER_ARTIFACT_SCHEMA_VERSION,
-    LAYERED_EXECUTION_COMPARISON_INTERPRETATION, PORTABLE_WASM_MVP_BACKEND_NAME,
-    PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET, SSA_SCHEMA_VERSION,
+    BackendCapabilityManifest, BackendConfiguration, BackendEvidence, BackendIdentity,
+    BackendResult, BackendValueContract, BodyType, CompilerArtifactRef, CompilerDiagnostic,
+    CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure, ExecutionRequest, ExecutionResult,
+    ExecutionStatus, ExecutionTarget, ExecutionValue, IntegerType, Program, SemanticId, SsaModule,
+    TargetContractRef, TargetLoweringPlan, TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION,
+    COMPILER_ARTIFACT_SCHEMA_VERSION, LAYERED_EXECUTION_COMPARISON_INTERPRETATION,
+    PORTABLE_WASM_MVP_BACKEND_NAME, PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET,
+    SSA_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::lower::lower_module;
-use crate::wasm::{decode_module, encode_module, execute_function, WASM_MAGIC, WASM_VERSION};
+use crate::support::function_value_contracts;
+use crate::wasm::{decode_module, encode_module, execute_function_typed, WASM_MAGIC, WASM_VERSION};
 
 pub const PORTABLE_WASM_FORMAT: &str = "application/wasm; mncs-portable-wasm-mvp-0.1";
 pub const PORTABLE_WASM_ARTIFACT_KIND: &str = "wasm_module";
@@ -78,6 +80,9 @@ pub fn backend_names() -> Vec<&'static str> {
         LLVM_BACKEND_NAME,
         C11_BACKEND_NAME,
         CRANELIFT_BACKEND_NAME,
+        external::RISCV32_SPEC.backend_name,
+        external::EBPF_SPEC.backend_name,
+        external::PTX64_SPEC.backend_name,
     ]
 }
 
@@ -90,6 +95,15 @@ pub fn backend_adapter(name: &str) -> Option<Box<dyn BackendAdapter>> {
         LLVM_BACKEND_NAME | "llvm" | "llvm-ir" => Some(Box::new(LlvmAdapter)),
         C11_BACKEND_NAME | "c11" | "portable-c" => Some(Box::new(C11Adapter)),
         CRANELIFT_BACKEND_NAME | "cranelift" => Some(Box::new(CraneliftAdapter)),
+        "mncs-riscv32" | "riscv32" => Some(Box::new(external::ExternalAdapter {
+            spec: &external::RISCV32_SPEC,
+        })),
+        "mncs-ebpf" | "ebpf" => Some(Box::new(external::ExternalAdapter {
+            spec: &external::EBPF_SPEC,
+        })),
+        "mncs-ptx64" | "ptx64" => Some(Box::new(external::ExternalAdapter {
+            spec: &external::PTX64_SPEC,
+        })),
         _ => None,
     }
 }
@@ -145,15 +159,15 @@ pub fn portable_wasm_backend_configuration() -> BackendConfiguration {
         options: BTreeMap::from([("format".to_owned(), PORTABLE_WASM_FORMAT.to_owned())]),
         target_features: [
             "mvp".to_owned(),
-            "no-memory".to_owned(),
+            "linear-memory-arena".to_owned(),
             "no-wasi".to_owned(),
         ]
         .into_iter()
         .collect(),
         linker_toolchain: None,
         assumptions: vec![
-            "WASM MVP has no linear memory in this subset".to_owned(),
-            "checked overflow traps as unreachable".to_owned(),
+            "composites (records and payload-bearing finite variants) are immutable cells in linear memory allocated from a bump arena".to_owned(),
+            "checked overflow traps as unreachable; checked division traps on zero and MIN/-1".to_owned(),
             "saturating uses explicit bounded-width clamp logic; widening uses exact i64 intermediates".to_owned(),
         ],
     }
@@ -176,7 +190,9 @@ pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
             "widening_integer_bounded_width",
             "explicit_failure",
             "semantic_bounded_iteration",
-            "immutable_record_values_intra_function_only",
+            "immutable_record_values",
+            "payload_bearing_finite_variants",
+            "strict_boolean_operators",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -199,10 +215,13 @@ pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
         ["embedded_mncs_wasm_interpreter".to_owned()]
             .into_iter()
             .collect(),
-        ["scalar_parameter_result_abi".to_owned()]
-            .into_iter()
-            .collect(),
-        "checked overflow and declared failure trap through WASM unreachable",
+        [
+            "scalar_parameter_result_abi".to_owned(),
+            "composite_pointer_abi".to_owned(),
+        ]
+        .into_iter()
+        .collect(),
+        "checked overflow, declared failure, division by zero, and MIN/-1 trap through WASM unreachable",
         true,
     )
 }
@@ -213,13 +232,11 @@ pub fn portable_wasm_target() -> TargetContractRef {
         BTreeMap::from([
             (
                 "data-layout".to_owned(),
-                "scalar two's-complement; i8/i16/i32 in wasm i32; i64 in wasm i64; no aggregates"
-                    .to_owned(),
+                "scalar two's-complement; i8/i16/i32 in wasm i32; i64 in wasm i64; composites are immutable 8-byte-slot cells in linear memory addressed by i32 pointers".to_owned(),
             ),
             (
                 "abi".to_owned(),
-                "one exported wasm function per MNCS function; parameters/results only; no memory"
-                    .to_owned(),
+                "one exported wasm function per MNCS function; scalars pass directly, composites pass as pointers to arena cells".to_owned(),
             ),
             (
                 "integer".to_owned(),
@@ -491,7 +508,10 @@ pub fn lower_selected_ssa(
                 .unwrap_or_default()
         })
         .collect::<Vec<_>>();
-    let outcome = lower_module(ssa, &names);
+    let mut outcome = lower_module(program, ssa, &names);
+    if let Some(module) = outcome.module.as_mut() {
+        crate::lower::emit_alloc_helpers(module);
+    }
     if !outcome.unsupported.is_empty() || outcome.module.is_none() {
         diagnostics.push(CompilerDiagnostic {
             code: "CGN301".to_owned(),
@@ -555,7 +575,8 @@ pub fn lower_selected_ssa(
         Vec::new(),
         TransformationStatus::Pass,
     )
-    .with_function_value_contracts(function_value_contracts(program));
+    .with_function_value_contracts(function_value_contracts(program))
+    .with_composite_value_contracts(crate::support::composite_value_contracts(program));
     let artifact_ref = CompilerArtifactRef::new(
         ArtifactRepresentation::BackendArtifact,
         BACKEND_ARTIFACT_SCHEMA_VERSION,
@@ -671,7 +692,8 @@ pub fn lower_research_bytecode(
         Vec::new(),
         TransformationStatus::Pass,
     )
-    .with_function_value_contracts(function_value_contracts(program));
+    .with_function_value_contracts(function_value_contracts(program))
+    .with_composite_value_contracts(crate::support::composite_value_contracts(program));
     let artifact_ref = CompilerArtifactRef::new(
         ArtifactRepresentation::BackendArtifact,
         BACKEND_ARTIFACT_SCHEMA_VERSION,
@@ -706,49 +728,6 @@ pub struct BackendExecutionResult {
     pub steps: u64,
     pub effects: Vec<mncs_model::ExecutionEffectEvent>,
     pub failure: Option<ExecutionFailure>,
-}
-
-fn function_value_contracts(program: &Program) -> BTreeMap<String, BackendFunctionValueContract> {
-    let value_contract = |name: &str| {
-        program
-            .finite_types
-            .iter()
-            .find(|finite_type| finite_type.name == name)
-            .map_or_else(
-                || BackendValueContract::Scalar {
-                    semantic_type: name.to_owned(),
-                },
-                |finite_type| BackendValueContract::Finite {
-                    type_identity: finite_type.identity.clone(),
-                    variants: finite_type
-                        .variants
-                        .iter()
-                        .map(|variant| (variant.discriminant, variant.identity.clone()))
-                        .collect(),
-                },
-            )
-    };
-    program
-        .functions
-        .iter()
-        .map(|function| {
-            (
-                function.name.clone(),
-                BackendFunctionValueContract {
-                    inputs: function
-                        .inputs
-                        .iter()
-                        .map(|value| value_contract(&value.value_type))
-                        .collect(),
-                    outputs: function
-                        .outputs
-                        .iter()
-                        .map(|value| value_contract(&value.value_type))
-                        .collect(),
-                },
-            )
-        })
-        .collect()
 }
 
 fn execute_portable_wasm(
@@ -811,7 +790,9 @@ fn execute_portable_wasm(
                 .inputs
                 .iter()
                 .zip(&request.arguments)
-                .all(|(contract, value)| backend_input_matches(contract, value))
+                .all(|(contract, value)| {
+                    backend_input_matches(contract, value, &artifact.composite_value_contracts)
+                })
         {
             result.failure = Some(ExecutionFailure {
                 identity: Some(artifact.identity.clone()),
@@ -820,10 +801,22 @@ fn execute_portable_wasm(
             return result;
         }
     }
-    match execute_function(
+    let (input_contracts, output_contracts) =
+        signature_contracts(artifact, &request.target.function);
+    let param_tys = input_contracts
+        .iter()
+        .map(|contract| marshal_ty(contract, &artifact.composite_value_contracts))
+        .collect::<Vec<_>>();
+    let result_tys = output_contracts
+        .iter()
+        .map(|contract| marshal_ty(contract, &artifact.composite_value_contracts))
+        .collect::<Vec<_>>();
+    match execute_function_typed(
         &module,
         &request.target.function,
         &request.arguments,
+        &param_tys,
+        &result_tys,
         request.step_budget,
     ) {
         Ok(outcome) => {
@@ -862,13 +855,17 @@ fn execute_portable_wasm(
     result
 }
 
-fn backend_input_matches(contract: &BackendValueContract, value: &ExecutionValue) -> bool {
+fn backend_input_matches(
+    contract: &BackendValueContract,
+    value: &ExecutionValue,
+    _composites: &BTreeMap<String, BackendValueContract>,
+) -> bool {
     match (contract, value) {
         (BackendValueContract::Scalar { semantic_type }, value) => {
             match (BodyType::from_semantic_name(semantic_type), value) {
                 (BodyType::Named(name), ExecutionValue::Boolean { .. }) => name == "bool",
                 (BodyType::Integer(expected), ExecutionValue::Integer { value, ty }) => {
-                    expected == *ty && integer_value_fits(*value, expected)
+                    expected == *ty && support::integer_fits(*value, expected)
                 }
                 _ => false,
             }
@@ -877,14 +874,65 @@ fn backend_input_matches(contract: &BackendValueContract, value: &ExecutionValue
             BackendValueContract::Finite {
                 type_identity,
                 variants,
+                payloads,
             },
             ExecutionValue::Finite {
                 type_identity: actual_type,
                 variant_identity,
                 discriminant,
+                payload,
+            },
+        ) => {
+            if type_identity != actual_type || variants.get(discriminant) != Some(variant_identity)
+            {
+                return false;
+            }
+            match payloads.get(discriminant) {
+                None => payload.is_empty(),
+                Some(fields) => {
+                    fields.len() == payload.len()
+                        && fields.iter().zip(payload.iter()).all(
+                            |((name, field_type), (field_name, field_value))| {
+                                name == field_name && scalar_field_matches(field_type, field_value)
+                            },
+                        )
+                }
+            }
+        }
+        (
+            BackendValueContract::Record {
+                type_identity,
+                fields,
                 ..
             },
-        ) => type_identity == actual_type && variants.get(discriminant) == Some(variant_identity),
+            ExecutionValue::Record {
+                type_identity: actual_type,
+                fields: values,
+                ..
+            },
+        ) => {
+            type_identity == actual_type
+                && fields.len() == values.len()
+                && fields.iter().zip(values.iter()).all(
+                    |((name, field_type), (field_name, field_value))| {
+                        name == field_name && scalar_field_matches(field_type, field_value)
+                    },
+                )
+        }
+        _ => false,
+    }
+}
+
+/// One-level field validation: scalars are checked exactly; named composite
+/// leaves (finite/record references) are checked structurally here and their
+/// contents were fully validated while marshaling into the realization.
+fn scalar_field_matches(semantic_type: &str, value: &ExecutionValue) -> bool {
+    match (BodyType::from_semantic_name(semantic_type), value) {
+        (BodyType::Named(name), ExecutionValue::Boolean { .. }) if name == "bool" => true,
+        (BodyType::Integer(expected), ExecutionValue::Integer { value, ty }) => {
+            expected == *ty && support::integer_fits(*value, expected)
+        }
+        (BodyType::Named(_), ExecutionValue::Finite { .. } | ExecutionValue::Record { .. }) => true,
         _ => false,
     }
 }
@@ -896,6 +944,12 @@ pub(crate) fn backend_output_value(
     match contract {
         BackendValueContract::Scalar { semantic_type } => {
             match (BodyType::from_semantic_name(semantic_type), value) {
+                // Typed realizations return booleans directly.
+                (BodyType::Named(name), observed @ ExecutionValue::Boolean { .. })
+                    if name == "bool" =>
+                {
+                    Ok(observed)
+                }
                 (BodyType::Named(name), ExecutionValue::Integer { value, .. })
                     if name == "bool" && (value == 0 || value == 1) =>
                 {
@@ -903,7 +957,7 @@ pub(crate) fn backend_output_value(
                 }
                 (BodyType::Integer(expected), ExecutionValue::Integer { value, .. }) => {
                     let value = reinterpret_backend_value(value, expected);
-                    if !integer_value_fits(value, expected) {
+                    if !support::integer_fits(value, expected) {
                         return Err(
                             "backend returned a scalar outside the language-owned integer type"
                                 .to_owned(),
@@ -922,7 +976,20 @@ pub(crate) fn backend_output_value(
         BackendValueContract::Finite {
             type_identity,
             variants,
+            payloads: _,
         } => {
+            // Typed realizations return fully materialized finite values
+            // carrying language-owned identities; legacy paths return an
+            // integer discriminant.
+            if let ExecutionValue::Finite {
+                type_identity: actual,
+                ..
+            } = &value
+            {
+                if actual == type_identity {
+                    return Ok(value);
+                }
+            }
             let ExecutionValue::Integer { value, .. } = value else {
                 return Err(
                     "backend finite result was not represented by an integer discriminant"
@@ -943,7 +1010,119 @@ pub(crate) fn backend_output_value(
                 payload: Vec::new(),
             })
         }
+        BackendValueContract::Record {
+            type_identity,
+            name,
+            ..
+        } => match &value {
+            ExecutionValue::Record {
+                type_identity: actual,
+                ..
+            } if actual == type_identity => Ok(value),
+            _ => Err(format!(
+                "backend record result does not carry the declared record identity ({name})"
+            )),
+        },
     }
+}
+
+/// Convert a logical contract into the WASM marshal descriptor tree.
+fn marshal_ty(
+    contract: &BackendValueContract,
+    composites: &BTreeMap<String, BackendValueContract>,
+) -> crate::wasm::MarshalTy {
+    use crate::wasm::{BoxedFiniteTy, FiniteVariantTy, MarshalTy, RecordTy};
+    match contract {
+        BackendValueContract::Scalar { semantic_type } => {
+            match BodyType::from_semantic_name(semantic_type) {
+                BodyType::Named(name) if name == "bool" => MarshalTy::Bool,
+                BodyType::Integer(ty) => MarshalTy::Int(ty),
+                _ => MarshalTy::Int(IntegerType {
+                    bits: 64,
+                    signed: true,
+                }),
+            }
+        }
+        BackendValueContract::Record {
+            type_identity,
+            name,
+            fields,
+        } => MarshalTy::Record(Box::new(RecordTy {
+            type_identity: type_identity.clone(),
+            name: name.clone(),
+            fields: fields
+                .iter()
+                .map(|(field_name, field_type)| {
+                    (field_name.clone(), named_marshal(field_type, composites))
+                })
+                .collect(),
+        })),
+        BackendValueContract::Finite {
+            type_identity,
+            variants,
+            payloads,
+        } => {
+            if !payloads.values().any(|fields| !fields.is_empty()) {
+                MarshalTy::BareFinite {
+                    type_identity: type_identity.clone(),
+                    variants: variants.clone(),
+                }
+            } else {
+                let variant_layouts = payloads
+                    .iter()
+                    .map(|(discriminant, fields)| {
+                        (
+                            *discriminant,
+                            FiniteVariantTy {
+                                variant_identity: variants
+                                    .get(discriminant)
+                                    .cloned()
+                                    .unwrap_or_else(|| SemanticId("unresolved".to_owned())),
+                                fields: fields
+                                    .iter()
+                                    .map(|(field_name, field_type)| {
+                                        (field_name.clone(), named_marshal(field_type, composites))
+                                    })
+                                    .collect(),
+                            },
+                        )
+                    })
+                    .collect();
+                MarshalTy::BoxedFinite(Box::new(BoxedFiniteTy {
+                    type_identity: type_identity.clone(),
+                    variants: variant_layouts,
+                }))
+            }
+        }
+    }
+}
+
+fn named_marshal(
+    semantic_type: &str,
+    composites: &BTreeMap<String, BackendValueContract>,
+) -> crate::wasm::MarshalTy {
+    if let Some(composite) = composites.get(semantic_type) {
+        return marshal_ty(composite, composites);
+    }
+    match BodyType::from_semantic_name(semantic_type) {
+        BodyType::Named(name) if name == "bool" => crate::wasm::MarshalTy::Bool,
+        BodyType::Integer(ty) => crate::wasm::MarshalTy::Int(ty),
+        _ => crate::wasm::MarshalTy::Int(IntegerType {
+            bits: 64,
+            signed: true,
+        }),
+    }
+}
+
+fn signature_contracts<'a>(
+    artifact: &'a BackendArtifact,
+    function: &str,
+) -> (&'a [BackendValueContract], &'a [BackendValueContract]) {
+    artifact
+        .function_value_contracts
+        .get(function)
+        .map(|contracts| (contracts.inputs.as_slice(), contracts.outputs.as_slice()))
+        .unwrap_or((&[], &[]))
 }
 
 fn reinterpret_backend_value(value: i128, ty: IntegerType) -> i128 {
@@ -959,15 +1138,6 @@ fn reinterpret_backend_value(value: i128, ty: IntegerType) -> i128 {
         value + (1_i128 << ty.bits)
     } else {
         value
-    }
-}
-
-fn integer_value_fits(value: i128, ty: IntegerType) -> bool {
-    if ty.signed {
-        let bound = 1_i128 << (ty.bits - 1);
-        (-bound..bound).contains(&value)
-    } else {
-        value >= 0 && value < (1_i128 << ty.bits)
     }
 }
 
@@ -1552,11 +1722,15 @@ mod tests {
             .artifact_kinds
             .contains(PORTABLE_WASM_ARTIFACT_KIND));
         let matrix = backend_family_matrix();
-        assert_eq!(matrix.backends.len(), 5);
+        // Five in-tree realizations plus three external-LLVM target families.
+        assert_eq!(matrix.backends.len(), 8);
         assert!(matrix
             .planned_unimplemented
             .iter()
             .any(|name| name.contains("spir-v")));
+        assert!(backend_adapter("mncs-riscv32").is_some());
+        assert!(backend_adapter("mncs-ebpf").is_some());
+        assert!(backend_adapter("mncs-ptx64").is_some());
         for row in &matrix.backends {
             assert!(!row.artifact_kinds.is_empty());
             assert!(!row.required_target_facts.is_empty());

@@ -1,0 +1,270 @@
+{
+ "schema_version": "0.1",
+ "name": "div-probe",
+ "cases": [
+  {
+   "id": "div-ok",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "probe.div",
+     "function": "checked_div"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 84,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 256
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 21,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "div-neg",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "probe.div",
+     "function": "checked_div"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": -84,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 256
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -21,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "div-zero",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "probe.div",
+     "function": "checked_div"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 256
+   },
+   "expected_status": "runtime_failure"
+  },
+  {
+   "id": "div-min-minus1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "probe.div",
+     "function": "checked_div"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": -9223372036854775808,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 256
+   },
+   "expected_status": "runtime_failure"
+  },
+  {
+   "id": "mod-ok",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "probe.div",
+     "function": "checked_mod"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 10,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 256
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 32,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "mod-neg",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "probe.div",
+     "function": "checked_mod"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": -10,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 256
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -1,
+      "type": {
+       "bits": 32,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "mod-zero",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "probe.div",
+     "function": "checked_mod"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 256
+   },
+   "expected_status": "runtime_failure"
+  }
+ ]
+}

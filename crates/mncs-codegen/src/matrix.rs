@@ -90,12 +90,18 @@ pub fn backend_family_matrix() -> BackendFamilyMatrix {
     BackendFamilyMatrix {
         schema_version: BACKEND_FAMILY_MATRIX_SCHEMA_VERSION.to_owned(),
         interpretation: BACKEND_FAMILY_MATRIX_INTERPRETATION.to_owned(),
+        // Implemented this campaign: riscv32, ebpf, ptx64 (external LLVM
+        // realizations with artifact validation). Still planned:
+        // SPIR-V codegen, host execution for the external families
+        // (emulators/kernel verifier/GPU runtime), bare-metal bring-up,
+        // composite signatures through the C11/LLVM/Cranelift process ABI.
         planned_unimplemented: vec![
-            "spir-v / gpu compute".to_owned(),
-            "ptx / accelerator".to_owned(),
-            "ebpf".to_owned(),
+            "spir-v / gpu compute codegen".to_owned(),
+            "riscv execution via emulator on hosts that lack one".to_owned(),
+            "eBPF kernel-verifier observations on privileged hosts".to_owned(),
+            "ptx GPU execution where a driver exists".to_owned(),
             "additional vm/bytecode formats".to_owned(),
-            "embedded bare-metal targets".to_owned(),
+            "bare-metal target bring-up (no OS runtime)".to_owned(),
         ],
         backends,
     }

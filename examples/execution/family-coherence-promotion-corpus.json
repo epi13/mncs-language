@@ -1,0 +1,1086 @@
+{
+ "schema_version": "0.1",
+ "name": "family-coherence-promotion",
+ "cases": [
+  {
+   "id": "promotion-pass-exact0-u0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Hold",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-pass-exact0-u1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Hold",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-pass-exact0-u4",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 4,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Hold",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-pass-exact1-u0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Promote",
+      "discriminant": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-pass-exact1-u1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Hold",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-pass-exact1-u4",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 4,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Hold",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-fail-exact0-u0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Reject",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-fail-exact0-u1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Reject",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-fail-exact0-u4",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 4,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Reject",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-fail-exact1-u0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Reject",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-fail-exact1-u1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Reject",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-fail-exact1-u4",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 4,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Reject",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-unknown-exact0-u0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Hold",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-unknown-exact0-u1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Hold",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-unknown-exact0-u4",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 4,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Hold",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-unknown-exact1-u0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Hold",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-unknown-exact1-u1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Hold",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "promotion-unknown-exact1-u4",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "promotion_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::PromotionCase::identities_exact%3Abool%3Bintegration%3AStatus%3Bunresolved_unknowns%3Ai32%3B",
+       "name": "PromotionCase",
+       "fields": [
+        [
+         "identities_exact",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "integration",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "unresolved_unknowns",
+         {
+          "integer": {
+           "value": 4,
+           "type": {
+            "bits": 32,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::PromotionDecision",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::PromotionDecision::Hold",
+      "discriminant": 1
+     }
+    }
+   ]
+  }
+ ]
+}

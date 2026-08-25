@@ -269,7 +269,7 @@ pub fn lower_llvm(
         }
         return unknown(diagnostics);
     }
-    let ir = emit_module(&scalar, plan);
+    let ir = emit_llvm_module(&scalar, plan);
     let mut assumptions = plan.assumptions_introduced.clone();
     assumptions.extend(
         scalar
@@ -308,6 +308,7 @@ pub fn lower_llvm(
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(function_value_contracts(program))
+    .with_composite_value_contracts(crate::support::composite_value_contracts(program))
     .with_promise_decisions(scalar.promise_decisions.clone());
     let artifact_ref = artifact_ref(&artifact);
     let evidence = BackendEvidence::new(
@@ -327,7 +328,7 @@ pub fn lower_llvm(
     }
 }
 
-fn emit_module(module: &ScalarModule, plan: &TargetLoweringPlan) -> String {
+pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan) -> String {
     let triple = plan
         .target
         .facts
@@ -554,6 +555,20 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 "add" => "add",
                 "sub" => "sub",
                 "mul" => "mul",
+                "div" => {
+                    if matches!(dest.ty, ScalarTy::Int(integer) if !integer.signed) {
+                        "udiv"
+                    } else {
+                        "sdiv"
+                    }
+                }
+                "mod" => {
+                    if matches!(dest.ty, ScalarTy::Int(integer) if !integer.signed) {
+                        "urem"
+                    } else {
+                        "srem"
+                    }
+                }
                 "and" => "and",
                 "or" => "or",
                 "xor" => "xor",
@@ -569,7 +584,12 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 .and_then(|attribute| attribute.strip_prefix("llvm."));
             let no_overflow =
                 overflow_flag.is_some() && matches!(operator.as_str(), "add" | "sub" | "mul");
-            if matches!(
+            if matches!(operator.as_str(), "div" | "mod") {
+                // Division by zero and MIN / -1 are immediate undefined
+                // behavior in LLVM: guard them into the shared fail block so
+                // failure statuses match the reference executors.
+                emit_checked_division(out, dest, operator, &left, &right, names, split);
+            } else if matches!(
                 intent,
                 ArithmeticIntent::Checked | ArithmeticIntent::Trapping
             ) && matches!(operator.as_str(), "add" | "sub" | "mul")
@@ -583,6 +603,25 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 let _ = writeln!(out, "  %{tmp} = {llvm_op}{flags} {ty} %{left}, %{right}");
                 store_dest(out, names, dest, &tmp);
             }
+        }
+        ScalarInst::Boolean {
+            dest,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            // Booleans share the i32 scalar slots; operands are normalized 0/1.
+            let left = load_value(out, names, lhs, "lhs", split);
+            let right = load_value(out, names, rhs, "rhs", split);
+            let op = match operator.as_str() {
+                "and" => "and",
+                _ => "or",
+            };
+            *split += 1;
+            let tmp = format!("bool{split}");
+            let bool_ty = llvm_type(dest.ty);
+            let _ = writeln!(out, "  %{tmp} = {op} {bool_ty} %{left}, %{right}");
+            store_dest(out, names, dest, &tmp);
         }
         ScalarInst::Compare {
             dest,
@@ -698,6 +737,56 @@ fn emit_checked(
     store_dest(out, names, dest, &format!("{tmp}_v"));
 }
 
+/// Guarded division/remainder: a zero divisor always fails; signed division
+/// by MIN / -1 fails under checked intent. Guards branch to mncs_fail so
+/// statuses match the reference executors exactly.
+fn emit_checked_division(
+    out: &mut String,
+    dest: &ScalarValue,
+    operator: &str,
+    lhs: &str,
+    rhs: &str,
+    names: &NameMap,
+    split: &mut u32,
+) {
+    let ty = llvm_type(dest.ty);
+    *split += 1;
+    let tag = *split;
+    let _ = writeln!(out, "  %dz{tag} = icmp eq {ty} %{rhs}, 0");
+    let _ = writeln!(out, "  br i1 %dz{tag}, label %mncs_fail, label %dz{tag}_ok");
+    let _ = writeln!(out, "dz{tag}_ok:");
+    let signed = matches!(dest.ty, ScalarTy::Int(integer) if integer.signed);
+    if operator == "div" && signed {
+        let min = match dest.ty {
+            ScalarTy::Int(integer) => {
+                let magnitude = 1_i128 << (integer.bits.max(1) - 1);
+                format!("-{magnitude}")
+            }
+            _ => "-2147483648".to_owned(),
+        };
+        *split += 1;
+        let inner = *split;
+        let _ = writeln!(out, "  %m1{inner} = icmp eq {ty} %{rhs}, -1");
+        let _ = writeln!(out, "  %mn{inner} = icmp eq {ty} %{lhs}, {min}");
+        let _ = writeln!(out, "  %ov{inner} = and i1 %m1{inner}, %mn{inner}");
+        let _ = writeln!(
+            out,
+            "  br i1 %ov{inner}, label %mncs_fail, label %dv{inner}_ok"
+        );
+        let _ = writeln!(out, "dv{inner}_ok:");
+    }
+    let native = match (operator, signed) {
+        ("div", false) => "udiv",
+        ("mod", false) => "urem",
+        ("mod", _) => "srem",
+        _ => "sdiv",
+    };
+    *split += 1;
+    let tmp = format!("q{}", *split);
+    let _ = writeln!(out, "  %{tmp} = {native} {ty} %{lhs}, %{rhs}");
+    store_dest(out, names, dest, &tmp);
+}
+
 fn llvm_const(value: i128, ty: ScalarTy) -> String {
     match ty {
         ScalarTy::Int(integer) if integer.bits == 64 => value.to_string(),
@@ -750,6 +839,7 @@ impl NameMap {
                 match inst {
                     ScalarInst::Const { dest, .. }
                     | ScalarInst::Integer { dest, .. }
+                    | ScalarInst::Boolean { dest, .. }
                     | ScalarInst::Compare { dest, .. }
                     | ScalarInst::FiniteConstruct { dest, .. }
                     | ScalarInst::FiniteIsVariant { dest, .. }
@@ -855,7 +945,7 @@ pub fn execute_llvm(
             "backend request violates the language-owned value contract",
         );
     }
-    let driver = llvm_driver(&request.target.function, contract.inputs.len());
+    let driver = llvm_driver(&request.target.function, &contract.inputs);
     let args = match argv_from_request(request) {
         Ok(args) => args,
         Err(reason) => return execution_failure(result, ExecutionStatus::Unsupported, &reason),
@@ -883,24 +973,44 @@ pub fn execute_llvm(
     }
 }
 
-fn llvm_driver(function: &str, arity: usize) -> String {
+fn llvm_driver(function: &str, inputs: &[mncs_model::BackendValueContract]) -> String {
+    // Parameter types follow each declared scalar so the driver prototype
+    // matches the LLVM function signature exactly; a width mismatch would be
+    // C undefined behavior at the call boundary.
+    fn scalar_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
+        match contract {
+            mncs_model::BackendValueContract::Scalar { semantic_type } => {
+                match mncs_model::BodyType::from_semantic_name(semantic_type) {
+                    mncs_model::BodyType::Integer(ty) if ty.bits == 64 => "int64_t",
+                    _ => "int32_t",
+                }
+            }
+            mncs_model::BackendValueContract::Finite { payloads, .. } if payloads.is_empty() => {
+                "int32_t"
+            }
+            _ => "int64_t",
+        }
+    }
     let mut args = Vec::new();
     let mut parse = Vec::new();
-    for index in 0..arity {
-        args.push(format!("a{index}"));
+    for (index, input) in inputs.iter().enumerate() {
+        args.push(format!("({})a{index}", scalar_c_type(input)));
         parse.push(format!(
             "  long long a{index} = strtoll(argv[{}], 0, 10);",
             index + 1
         ));
     }
-    let proto_args = (0..arity)
-        .map(|_| "int32_t")
-        .chain(["int32_t*", "int64_t*"])
+    let proto_args = inputs
+        .iter()
+        .map(scalar_c_type)
+        .map(str::to_owned)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .chain(["int32_t*".to_owned(), "int64_t*".to_owned()])
         .collect::<Vec<_>>()
         .join(", ");
     let call_args = args
-        .iter()
-        .map(|name| format!("(int32_t){name}"))
+        .into_iter()
         .chain(["&status".to_owned(), "&value".to_owned()])
         .collect::<Vec<_>>()
         .join(", ");

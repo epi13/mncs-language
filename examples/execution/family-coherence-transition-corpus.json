@@ -1,0 +1,4830 @@
+{
+ "schema_version": "0.1",
+ "name": "family-coherence-transition",
+ "cases": [
+  {
+   "id": "transition-draft-analyzeimpact",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Draft",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::AnalyzeImpact",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::ImpactAnalyzed",
+          "discriminant": 1
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-draft-beginimplementation",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Draft",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::BeginImplementation",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Draft",
+          "discriminant": 0
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-draft-submitcandidate",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Draft",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::SubmitCandidate",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Draft",
+          "discriminant": 0
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-draft-recordpass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Draft",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordPass",
+       "discriminant": 3
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Draft",
+          "discriminant": 0
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-draft-recordfail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Draft",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordFail",
+       "discriminant": 4
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Draft",
+          "discriminant": 0
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-draft-merge",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Draft",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Merge",
+       "discriminant": 5
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Draft",
+          "discriminant": 0
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-draft-promoteepoch",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Draft",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::PromoteEpoch",
+       "discriminant": 6
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Draft",
+          "discriminant": 0
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-draft-abandon",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Draft",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Abandon",
+       "discriminant": 7
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+          "discriminant": 8
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-impactanalyzed-analyzeimpact",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::ImpactAnalyzed",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::AnalyzeImpact",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::ImpactAnalyzed",
+          "discriminant": 1
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-impactanalyzed-beginimplementation",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::ImpactAnalyzed",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::BeginImplementation",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+          "discriminant": 2
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-impactanalyzed-submitcandidate",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::ImpactAnalyzed",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::SubmitCandidate",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::ImpactAnalyzed",
+          "discriminant": 1
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-impactanalyzed-recordpass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::ImpactAnalyzed",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordPass",
+       "discriminant": 3
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::ImpactAnalyzed",
+          "discriminant": 1
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-impactanalyzed-recordfail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::ImpactAnalyzed",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordFail",
+       "discriminant": 4
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::ImpactAnalyzed",
+          "discriminant": 1
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-impactanalyzed-merge",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::ImpactAnalyzed",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Merge",
+       "discriminant": 5
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::ImpactAnalyzed",
+          "discriminant": 1
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-impactanalyzed-promoteepoch",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::ImpactAnalyzed",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::PromoteEpoch",
+       "discriminant": 6
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::ImpactAnalyzed",
+          "discriminant": 1
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-impactanalyzed-abandon",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::ImpactAnalyzed",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Abandon",
+       "discriminant": 7
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+          "discriminant": 8
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-inprogress-analyzeimpact",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::AnalyzeImpact",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+          "discriminant": 2
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-inprogress-beginimplementation",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::BeginImplementation",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+          "discriminant": 2
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-inprogress-submitcandidate",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::SubmitCandidate",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::IntegrationCandidate",
+          "discriminant": 3
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-inprogress-recordpass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordPass",
+       "discriminant": 3
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+          "discriminant": 2
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-inprogress-recordfail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordFail",
+       "discriminant": 4
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+          "discriminant": 2
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-inprogress-merge",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Merge",
+       "discriminant": 5
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+          "discriminant": 2
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-inprogress-promoteepoch",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::PromoteEpoch",
+       "discriminant": 6
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+          "discriminant": 2
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-inprogress-abandon",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Abandon",
+       "discriminant": 7
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+          "discriminant": 8
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-integrationcandidate-analyzeimpact",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::IntegrationCandidate",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::AnalyzeImpact",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::IntegrationCandidate",
+          "discriminant": 3
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-integrationcandidate-beginimplementation",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::IntegrationCandidate",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::BeginImplementation",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::IntegrationCandidate",
+          "discriminant": 3
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-integrationcandidate-submitcandidate",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::IntegrationCandidate",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::SubmitCandidate",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::IntegrationCandidate",
+          "discriminant": 3
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-integrationcandidate-recordpass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::IntegrationCandidate",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordPass",
+       "discriminant": 3
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedPass",
+          "discriminant": 4
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-integrationcandidate-recordfail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::IntegrationCandidate",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordFail",
+       "discriminant": 4
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedFail",
+          "discriminant": 5
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-integrationcandidate-merge",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::IntegrationCandidate",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Merge",
+       "discriminant": 5
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::IntegrationCandidate",
+          "discriminant": 3
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-integrationcandidate-promoteepoch",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::IntegrationCandidate",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::PromoteEpoch",
+       "discriminant": 6
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::IntegrationCandidate",
+          "discriminant": 3
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-integrationcandidate-abandon",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::IntegrationCandidate",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Abandon",
+       "discriminant": 7
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+          "discriminant": 8
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedpass-analyzeimpact",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedPass",
+       "discriminant": 4
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::AnalyzeImpact",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedPass",
+          "discriminant": 4
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedpass-beginimplementation",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedPass",
+       "discriminant": 4
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::BeginImplementation",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedPass",
+          "discriminant": 4
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedpass-submitcandidate",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedPass",
+       "discriminant": 4
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::SubmitCandidate",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedPass",
+          "discriminant": 4
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedpass-recordpass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedPass",
+       "discriminant": 4
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordPass",
+       "discriminant": 3
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedPass",
+          "discriminant": 4
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedpass-recordfail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedPass",
+       "discriminant": 4
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordFail",
+       "discriminant": 4
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedPass",
+          "discriminant": 4
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedpass-merge",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedPass",
+       "discriminant": 4
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Merge",
+       "discriminant": 5
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+          "discriminant": 6
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedpass-promoteepoch",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedPass",
+       "discriminant": 4
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::PromoteEpoch",
+       "discriminant": 6
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedPass",
+          "discriminant": 4
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedpass-abandon",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedPass",
+       "discriminant": 4
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Abandon",
+       "discriminant": 7
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+          "discriminant": 8
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedfail-analyzeimpact",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedFail",
+       "discriminant": 5
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::AnalyzeImpact",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedFail",
+          "discriminant": 5
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedfail-beginimplementation",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedFail",
+       "discriminant": 5
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::BeginImplementation",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::InProgress",
+          "discriminant": 2
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedfail-submitcandidate",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedFail",
+       "discriminant": 5
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::SubmitCandidate",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedFail",
+          "discriminant": 5
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedfail-recordpass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedFail",
+       "discriminant": 5
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordPass",
+       "discriminant": 3
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedFail",
+          "discriminant": 5
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedfail-recordfail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedFail",
+       "discriminant": 5
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordFail",
+       "discriminant": 4
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedFail",
+          "discriminant": 5
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedfail-merge",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedFail",
+       "discriminant": 5
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Merge",
+       "discriminant": 5
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedFail",
+          "discriminant": 5
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedfail-promoteepoch",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedFail",
+       "discriminant": 5
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::PromoteEpoch",
+       "discriminant": 6
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedFail",
+          "discriminant": 5
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-verifiedfail-abandon",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::VerifiedFail",
+       "discriminant": 5
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Abandon",
+       "discriminant": 7
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+          "discriminant": 8
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-merged-analyzeimpact",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+       "discriminant": 6
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::AnalyzeImpact",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+          "discriminant": 6
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-merged-beginimplementation",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+       "discriminant": 6
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::BeginImplementation",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+          "discriminant": 6
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-merged-submitcandidate",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+       "discriminant": 6
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::SubmitCandidate",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+          "discriminant": 6
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-merged-recordpass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+       "discriminant": 6
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordPass",
+       "discriminant": 3
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+          "discriminant": 6
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-merged-recordfail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+       "discriminant": 6
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordFail",
+       "discriminant": 4
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+          "discriminant": 6
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-merged-merge",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+       "discriminant": 6
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Merge",
+       "discriminant": 5
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+          "discriminant": 6
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-merged-promoteepoch",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+       "discriminant": 6
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::PromoteEpoch",
+       "discriminant": 6
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+          "discriminant": 7
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-merged-abandon",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+       "discriminant": 6
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Abandon",
+       "discriminant": 7
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Merged",
+          "discriminant": 6
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-epochpromoted-analyzeimpact",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+       "discriminant": 7
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::AnalyzeImpact",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+          "discriminant": 7
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-epochpromoted-beginimplementation",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+       "discriminant": 7
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::BeginImplementation",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+          "discriminant": 7
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-epochpromoted-submitcandidate",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+       "discriminant": 7
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::SubmitCandidate",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+          "discriminant": 7
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-epochpromoted-recordpass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+       "discriminant": 7
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordPass",
+       "discriminant": 3
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+          "discriminant": 7
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-epochpromoted-recordfail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+       "discriminant": 7
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordFail",
+       "discriminant": 4
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+          "discriminant": 7
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-epochpromoted-merge",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+       "discriminant": 7
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Merge",
+       "discriminant": 5
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+          "discriminant": 7
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-epochpromoted-promoteepoch",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+       "discriminant": 7
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::PromoteEpoch",
+       "discriminant": 6
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+          "discriminant": 7
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-epochpromoted-abandon",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+       "discriminant": 7
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Abandon",
+       "discriminant": 7
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::EpochPromoted",
+          "discriminant": 7
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-abandoned-analyzeimpact",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+       "discriminant": 8
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::AnalyzeImpact",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+          "discriminant": 8
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-abandoned-beginimplementation",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+       "discriminant": 8
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::BeginImplementation",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+          "discriminant": 8
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-abandoned-submitcandidate",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+       "discriminant": 8
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::SubmitCandidate",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+          "discriminant": 8
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-abandoned-recordpass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+       "discriminant": 8
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordPass",
+       "discriminant": 3
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+          "discriminant": 8
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-abandoned-recordfail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+       "discriminant": 8
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::RecordFail",
+       "discriminant": 4
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+          "discriminant": 8
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-abandoned-merge",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+       "discriminant": 8
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Merge",
+       "discriminant": 5
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+          "discriminant": 8
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-abandoned-promoteepoch",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+       "discriminant": 8
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::PromoteEpoch",
+       "discriminant": 6
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+          "discriminant": 8
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "transition-abandoned-abandon",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+       "discriminant": 8
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetEvent::Abandon",
+       "discriminant": 7
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::Transition::accepted%3Abool%3Bfollowing%3AChangeSetState%3Breason%3Ai32%3B",
+      "name": "Transition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ChangeSetState",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ChangeSetState::Abandoned",
+          "discriminant": 8
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

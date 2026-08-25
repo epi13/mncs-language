@@ -10,7 +10,7 @@ use std::fmt::Write;
 use mncs_model::{
     ArithmeticIntent, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
     BackendIdentity, BackendResult, CompilerArtifactRef, CompilerDiagnostic,
-    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SsaModule,
+    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, ExecutionValue, Program, SsaModule,
     TargetContractRef, TargetLoweringPlan, TransformationStatus, SSA_SCHEMA_VERSION,
 };
 
@@ -273,6 +273,7 @@ pub fn lower_c11(
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(function_value_contracts(program))
+    .with_composite_value_contracts(crate::support::composite_value_contracts(program))
     .with_promise_decisions(scalar.promise_decisions.clone());
     let artifact_ref = artifact_ref(&artifact);
     let evidence = BackendEvidence::new(
@@ -476,6 +477,25 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 "mul" => "*",
                 _ => "+",
             };
+            if matches!(operator.as_str(), "div" | "mod") {
+                // Division by zero is undefined behavior in C, so every
+                // intent guards it explicitly and fails exactly like the
+                // reference executors; checked division also guards MIN/-1.
+                let slash = if operator == "div" { "/" } else { "%" };
+                let overflow_guard = if operator == "div" && signed {
+                    format!(
+                        "if ({lhs_n} == INT{bits}_MIN && {rhs_n} == -1) {{ *mncs_status = 1; *mncs_value = 0; return; }} "
+                    )
+                } else {
+                    String::new()
+                };
+                let _ = writeln!(
+                    out,
+                    "      if ({rhs_n} == 0) {{ *mncs_status = 1; *mncs_value = 0; return; }} {overflow_guard}{dest_n} = ({}){lhs_n} {slash} {rhs_n};",
+                    c_type(dest.ty)
+                );
+                return;
+            }
             if matches!(
                 intent,
                 ArithmeticIntent::Checked | ArithmeticIntent::Trapping
@@ -499,6 +519,26 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                     c_type(dest.ty)
                 );
             }
+        }
+        ScalarInst::Boolean {
+            dest,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            // Strict MNCS booleans over normalized 0/1 int32 slots.
+            let op = match operator.as_str() {
+                "and" => "&&",
+                _ => "||",
+            };
+            let _ = writeln!(
+                out,
+                "      {} = ({})({} {op} {});",
+                names.value(&dest.id),
+                c_type(dest.ty),
+                names.value(lhs),
+                names.value(rhs)
+            );
         }
         ScalarInst::Compare {
             dest,
@@ -563,6 +603,7 @@ fn inst_dest(inst: &ScalarInst) -> &crate::scalar::ScalarValue {
     match inst {
         ScalarInst::Const { dest, .. }
         | ScalarInst::Integer { dest, .. }
+        | ScalarInst::Boolean { dest, .. }
         | ScalarInst::Compare { dest, .. }
         | ScalarInst::FiniteConstruct { dest, .. }
         | ScalarInst::FiniteIsVariant { dest, .. }
@@ -646,7 +687,21 @@ pub fn execute_c11(
             "C11 execution requires a language-owned function value contract",
         );
     };
-    let driver = c_driver(&request.target.function, contract.inputs.len());
+    // Composite arguments cannot cross this process-argument realization
+    // boundary; they fail closed before any code is compiled.
+    for value in &request.arguments {
+        if !matches!(
+            value,
+            ExecutionValue::Boolean { .. } | ExecutionValue::Integer { .. }
+        ) {
+            return execution_failure(
+                result,
+                ExecutionStatus::Unsupported,
+                "composite arguments are outside the current C11 process-boundary envelope; records and payload sums realize through WASM and the research bytecode interpreter",
+            );
+        }
+    }
+    let driver = c_driver(&request.target.function, &contract.inputs);
     let argv = match argv_from_request(request) {
         Ok(argv) => argv,
         Err(reason) => return execution_failure(result, ExecutionStatus::Unsupported, &reason),
@@ -672,42 +727,4 @@ pub fn execute_c11(
     }
 }
 
-fn c_driver(function: &str, arity: usize) -> String {
-    let mut parse = Vec::new();
-    let mut args = Vec::new();
-    for index in 0..arity {
-        parse.push(format!(
-            "  long long a{index} = strtoll(argv[{}], 0, 10);",
-            index + 1
-        ));
-        args.push(format!("(int32_t)a{index}"));
-    }
-    let proto = (0..arity)
-        .map(|_| "int32_t")
-        .chain(["int32_t*", "int64_t*"])
-        .collect::<Vec<_>>()
-        .join(", ");
-    let call = args
-        .into_iter()
-        .chain(["&status".to_owned(), "&value".to_owned()])
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(
-        r#"#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-void {function}({proto});
-int main(int argc, char **argv) {{
-  (void)argc;
-{}
-  int32_t status = 2;
-  int64_t value = 0;
-  {function}({call});
-  if (status == 0) printf("{{\"status\":\"returned\",\"value\":%lld}}\n", (long long)value);
-  else printf("{{\"status\":\"runtime_failure\"}}\n");
-  return 0;
-}}
-"#,
-        parse.join("\n")
-    )
-}
+pub(crate) use crate::support::process_driver as c_driver;

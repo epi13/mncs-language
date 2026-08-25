@@ -47,6 +47,12 @@ pub enum ScalarInst {
         lhs: SemanticId,
         rhs: SemanticId,
     },
+    Boolean {
+        dest: ScalarValue,
+        operator: String,
+        lhs: SemanticId,
+        rhs: SemanticId,
+    },
     FiniteConstruct {
         dest: ScalarValue,
         discriminant: u32,
@@ -241,7 +247,7 @@ fn lower_instruction(
             }
             if !matches!(
                 operator.as_str(),
-                "add" | "sub" | "mul" | "and" | "or" | "xor"
+                "add" | "sub" | "mul" | "div" | "mod" | "and" | "or" | "xor"
             ) {
                 return Err(format!("unsupported integer operator {operator}"));
             }
@@ -284,9 +290,12 @@ fn lower_instruction(
                 discriminant: *discriminant,
             })
         }
-        SsaInstructionKind::BooleanOp { operator } => Err(format!(
-            "boolean operator {operator:?} is outside the current scalar realization envelope"
-        )),
+        SsaInstructionKind::BooleanOp { operator } => Ok(ScalarInst::Boolean {
+            dest,
+            operator: operator.clone(),
+            lhs: operand(instruction, 0)?,
+            rhs: operand(instruction, 1)?,
+        }),
         SsaInstructionKind::FinitePayloadProject { .. } => Err(
             "payload projection is outside the current scalar realization envelope".to_owned(),
         ),

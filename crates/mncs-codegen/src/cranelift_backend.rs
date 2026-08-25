@@ -299,6 +299,7 @@ pub fn lower_cranelift(
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(function_value_contracts(program))
+    .with_composite_value_contracts(crate::support::composite_value_contracts(program))
     .with_promise_decisions(scalar.promise_decisions.clone());
     let artifact_ref = artifact_ref(&artifact);
     let evidence = BackendEvidence::new(
@@ -425,6 +426,25 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                 clif_ty(dest.ty)
             );
         }
+        ScalarInst::Boolean {
+            dest,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            let op = match operator.as_str() {
+                "and" => "band",
+                _ => "bor",
+            };
+            let _ = writeln!(
+                out,
+                "        {} = {} {}, {}",
+                names.value(&dest.id),
+                op,
+                names.value(lhs),
+                names.value(rhs)
+            );
+        }
         ScalarInst::Integer {
             dest,
             operator,
@@ -437,6 +457,31 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
             let lhs_n = names.value(lhs);
             let rhs_n = names.value(rhs);
             let ty = clif_ty(dest.ty);
+            if matches!(operator.as_str(), "div" | "mod") {
+                // Cranelift sdiv traps on zero and MIN / -1; srem traps on
+                // zero. That matches MNCS checked semantics; i32 division
+                // computes through i64 so traps remain well-defined.
+                let wide = format!("{} = sextend.{} {}", dest_n, "i64", lhs_n);
+                let _ = writeln!(out, "        {wide}");
+                let _ = writeln!(out, "        {dest_n}_x = sextend.i64 {rhs_n}");
+                let native = match (operator.as_str(), ty) {
+                    ("div", "i64") => "sdiv",
+                    ("mod", "i64") => "srem",
+                    ("div", _) => "sdiv",
+                    _ => "srem",
+                };
+                if ty == "i64" {
+                    let _ = writeln!(out, "        {dest_n} = {native} {lhs_n}, {rhs_n}");
+                } else {
+                    let _ = writeln!(
+                        out,
+                        "        {dest_n}_q = {}.i64 {dest_n}, {dest_n}_x",
+                        native
+                    );
+                    let _ = writeln!(out, "        {dest_n} = ireduce.i64 {dest_n}_q");
+                }
+                return;
+            }
             if matches!(operator.as_str(), "and" | "or" | "xor") {
                 let op = match operator.as_str() {
                     "and" => "band",
@@ -585,6 +630,7 @@ impl ClifNames {
                 let dest = match inst {
                     ScalarInst::Const { dest, .. }
                     | ScalarInst::Integer { dest, .. }
+                    | ScalarInst::Boolean { dest, .. }
                     | ScalarInst::Compare { dest, .. }
                     | ScalarInst::FiniteConstruct { dest, .. }
                     | ScalarInst::FiniteIsVariant { dest, .. }
@@ -659,8 +705,72 @@ pub fn execute_cranelift(
                 Err(error) => execution_failure(result, error.status(), error.reason()),
             }
         }
-        Err(reason) => execution_failure(result, ExecutionStatus::Unsupported, reason),
+        Err(reason) => {
+            // Host JIT may be denied executable memory by policy. That is an
+            // environment restriction, not a lowering or semantic failure;
+            // fall back to the AOT object + external-link route when a
+            // toolchain is present.
+            if reason.contains("readable+executable") || reason.contains("executable memory") {
+                match aot_fallback_execute(artifact, &payload, request) {
+                    Ok((status, value)) => {
+                        result.status = status;
+                        result.steps = 1;
+                        match decode_native_value(contract.outputs.first(), status, value) {
+                            Ok(returned) => {
+                                result.returned = returned;
+                                result
+                            }
+                            Err(error) => execution_failure(result, error.status(), error.reason()),
+                        }
+                    }
+                    Err(fallback_error) => execution_failure(
+                        result,
+                        ExecutionStatus::Unsupported,
+                        format!("jit unavailable ({reason}); aot fallback: {fallback_error}"),
+                    ),
+                }
+            } else {
+                execution_failure(result, ExecutionStatus::Unsupported, reason)
+            }
+        }
     }
+}
+
+/// AOT fallback: emit a host-ISA ELF object from the same scalar lowering,
+/// link it against the shared process driver, and observe it externally.
+fn aot_fallback_execute(
+    artifact: &mncs_model::BackendArtifact,
+    payload: &CraneliftPayload,
+    request: &ExecutionRequest,
+) -> Result<(ExecutionStatus, i128), String> {
+    use crate::native::{compile_object_and_run, probe_clang, probe_gcc};
+    let Some(contract) = artifact
+        .function_value_contracts
+        .get(&request.target.function)
+    else {
+        return Err(
+            "Cranelift AOT execution requires a language-owned function value contract".to_owned(),
+        );
+    };
+    let names = function_names(&payload.program, &payload.ssa);
+    let scalar = lower_to_scalar(&payload.program, &payload.ssa, &names);
+    for value in &request.arguments {
+        if !matches!(
+            value,
+            mncs_model::ExecutionValue::Boolean { .. } | mncs_model::ExecutionValue::Integer { .. }
+        ) {
+            return Err("composite arguments are outside the current Cranelift AOT process-boundary envelope".to_owned());
+        }
+    }
+    let object = aot_object_bytes(&scalar)?;
+    let linker = probe_clang()
+        .or_else(probe_gcc)
+        .ok_or_else(|| "neither clang nor gcc is present".to_owned())?;
+    let driver =
+        crate::support::process_driver_i64(&request.target.function, contract.inputs.len());
+    let argv = argv_from_request(request)?;
+    compile_object_and_run("mncs.o", &object, "driver.c", &driver, &linker, &argv)
+        .map_err(|error| format!("{:?}: {}", error.status(), error.reason()))
 }
 
 fn jit_execute(
@@ -698,20 +808,9 @@ fn integer_bounds(bits: u16, signed: bool) -> (i64, i64) {
     }
 }
 
-fn jit_scalar(
-    scalar: &ScalarModule,
-    function_name: &str,
-    request: &ExecutionRequest,
-) -> Result<(ExecutionStatus, i128), String> {
-    use cranelift_codegen::ir::condcodes::IntCC;
-    use cranelift_codegen::ir::{types, AbiParam, BlockArg, InstBuilder, MemFlags, Value};
+/// Host ISA for JIT and AOT realizations (same target facts).
+fn host_isa() -> Result<std::sync::Arc<dyn cranelift_codegen::isa::TargetIsa>, String> {
     use cranelift_codegen::settings::{self, Configurable};
-    use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
-    use cranelift_jit::{JITBuilder, JITModule};
-    use cranelift_module::{FuncId, Linkage, Module};
-    use mncs_model::SemanticId;
-    use std::collections::BTreeMap;
-
     let mut flag_builder = settings::builder();
     flag_builder
         .set("use_colocated_libcalls", "false")
@@ -722,11 +821,49 @@ fn jit_scalar(
     let _ = flag_builder.set("enable_verifier", "true");
     let isa_builder =
         cranelift_native::builder().map_err(|error| format!("unsupported target: {error}"))?;
-    let isa = isa_builder
+    isa_builder
         .finish(settings::Flags::new(flag_builder))
+        .map_err(|error| error.to_string())
+}
+
+/// Emit a native ELF object for the host ISA from the scalar module. This is
+/// the AOT fallback used where JIT executable-memory policy blocks in-process
+/// execution; the object links against the shared process driver.
+pub fn aot_object_bytes(scalar: &ScalarModule) -> Result<Vec<u8>, String> {
+    use cranelift_object::{ObjectBuilder, ObjectModule};
+    let isa = host_isa()?;
+    let builder = ObjectBuilder::new(
+        isa,
+        "mncs".to_string().into_bytes(),
+        cranelift_module::default_libcall_names(),
+    )
+    .map_err(|error| error.to_string())?;
+    let mut object_module = ObjectModule::new(builder);
+    declare_and_build(&mut object_module, scalar)?;
+    let product = object_module.finish();
+    let mut written = Vec::new();
+    product
+        .object
+        .write_stream(&mut written)
         .map_err(|error| error.to_string())?;
-    let jit_builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
-    let mut module = JITModule::new(jit_builder);
+    Ok(written)
+}
+
+/// Build every scalar function into any Cranelift module realization.
+fn declare_and_build<M>(
+    module: &mut M,
+    scalar: &ScalarModule,
+) -> Result<std::collections::BTreeMap<String, cranelift_module::FuncId>, String>
+where
+    M: cranelift_module::Module,
+{
+    use cranelift_codegen::ir::condcodes::IntCC;
+    use cranelift_codegen::ir::{types, AbiParam, BlockArg, InstBuilder, MemFlags, Value};
+    use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
+    use cranelift_module::{FuncId, Linkage, Module};
+    use mncs_model::SemanticId;
+    use std::collections::BTreeMap;
+
     let mut declared: BTreeMap<String, FuncId> = BTreeMap::new();
     for function in &scalar.functions {
         let mut sig = module.make_signature();
@@ -788,6 +925,20 @@ fn jit_scalar(
                                 .iconst(types::I64, i64::try_from(*value).unwrap_or(0));
                             values.insert(dest.id.clone(), produced);
                         }
+                        ScalarInst::Boolean {
+                            dest,
+                            operator,
+                            lhs,
+                            rhs,
+                        } => {
+                            let left = values[lhs];
+                            let right = values[rhs];
+                            let produced = match operator.as_str() {
+                                "and" => builder.ins().band(left, right),
+                                _ => builder.ins().bor(left, right),
+                            };
+                            values.insert(dest.id.clone(), produced);
+                        }
                         ScalarInst::Integer {
                             dest,
                             operator,
@@ -798,6 +949,18 @@ fn jit_scalar(
                         } => {
                             let left = values[lhs];
                             let right = values[rhs];
+                            if matches!(operator.as_str(), "div" | "mod") {
+                                // Cranelift sdiv/srem trap exactly like MNCS
+                                // checked division; the host maps traps to
+                                // runtime failures.
+                                let produced = if operator == "div" {
+                                    builder.ins().sdiv(left, right)
+                                } else {
+                                    builder.ins().srem(left, right)
+                                };
+                                values.insert(dest.id.clone(), produced);
+                                continue;
+                            }
                             if matches!(operator.as_str(), "and" | "or" | "xor") {
                                 let produced = match operator.as_str() {
                                     "and" => builder.ins().band(left, right),
@@ -978,6 +1141,20 @@ fn jit_scalar(
             .map_err(|error| error.to_string())?;
         module.clear_context(&mut ctx);
     }
+    Ok(declared)
+}
+
+fn jit_scalar(
+    scalar: &ScalarModule,
+    function_name: &str,
+    request: &ExecutionRequest,
+) -> Result<(ExecutionStatus, i128), String> {
+    use cranelift_jit::{JITBuilder, JITModule};
+
+    let isa = host_isa()?;
+    let jit_builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+    let mut module = JITModule::new(jit_builder);
+    let declared = declare_and_build(&mut module, scalar)?;
     module
         .finalize_definitions()
         .map_err(|error| error.to_string())?;
