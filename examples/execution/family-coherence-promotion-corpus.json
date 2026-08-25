@@ -28,8 +28,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::PASS",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
            "discriminant": 0
           }
          }
@@ -88,8 +88,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::PASS",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
            "discriminant": 0
           }
          }
@@ -148,8 +148,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::PASS",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
            "discriminant": 0
           }
          }
@@ -208,8 +208,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::PASS",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
            "discriminant": 0
           }
          }
@@ -268,8 +268,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::PASS",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
            "discriminant": 0
           }
          }
@@ -328,8 +328,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::PASS",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
            "discriminant": 0
           }
          }
@@ -388,8 +388,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::FAIL",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
            "discriminant": 1
           }
          }
@@ -448,8 +448,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::FAIL",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
            "discriminant": 1
           }
          }
@@ -508,8 +508,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::FAIL",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
            "discriminant": 1
           }
          }
@@ -568,8 +568,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::FAIL",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
            "discriminant": 1
           }
          }
@@ -628,8 +628,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::FAIL",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
            "discriminant": 1
           }
          }
@@ -688,8 +688,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::FAIL",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
            "discriminant": 1
           }
          }
@@ -748,8 +748,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::UNKNOWN",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
            "discriminant": 2
           }
          }
@@ -808,8 +808,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::UNKNOWN",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
            "discriminant": 2
           }
          }
@@ -868,8 +868,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::UNKNOWN",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
            "discriminant": 2
           }
          }
@@ -928,8 +928,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::UNKNOWN",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
            "discriminant": 2
           }
          }
@@ -988,8 +988,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::UNKNOWN",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
            "discriminant": 2
           }
          }
@@ -1048,8 +1048,8 @@
          "integration",
          {
           "finite": {
-           "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::Status",
-           "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::Status::UNKNOWN",
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
            "discriminant": 2
           }
          }

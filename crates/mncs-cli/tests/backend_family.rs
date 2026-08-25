@@ -181,9 +181,8 @@ fn external_targets_produce_genuine_artifacts_and_refuse_execution_honestly() {
         let result: Value = serde_json::from_slice(&output.stdout).expect("compilation JSON");
         assert_eq!(result["status"], "completed", "{target}");
         let artifact = &result["emissions"]["backend"];
-        assert_eq!(
-            artifact["bytes_sha256"].is_null(),
-            false,
+        assert!(
+            !artifact["bytes_sha256"].is_null(),
             "{target} produced no artifact bytes"
         );
     }

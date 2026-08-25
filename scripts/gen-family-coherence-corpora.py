@@ -101,7 +101,7 @@ def status(name):
 
 
 def coherence_status(name):
-    return finite(COHERENCE, "Status", name, STATUS_DISCRIMINANT[name])
+    return finite(STATUS, "Status", name, STATUS_DISCRIMINANT[name])
 
 
 CHECK_FIELDS = [(f"c{i:02d}", "Status") for i in range(1, 13)]
