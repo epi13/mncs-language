@@ -122,6 +122,8 @@ struct NativeObservation {
     status: String,
     #[serde(default)]
     value: Option<i128>,
+    #[serde(default)]
+    arena_hex: Option<String>,
 }
 
 pub fn compile_and_run(
@@ -130,6 +132,19 @@ pub fn compile_and_run(
     flags: &[&str],
     args: &[String],
 ) -> Result<(i128, ExecutionStatus, String), NativeError> {
+    compile_and_run_with_call_file(sources, compiler, flags, args, None)
+}
+
+/// As `compile_and_run`, with an optional canonical call file whose path is
+/// exported to the child through `MNCS_CALL_FILE` (composite marshaling).
+/// Preserves the full observation so composite results can decode.
+pub fn compile_and_run_with_call_file_full(
+    sources: &[(&str, &str)],
+    compiler: &ToolchainIdentity,
+    flags: &[&str],
+    args: &[String],
+    call_file: Option<&Path>,
+) -> Result<(crate::support::NativeRunView, String), NativeError> {
     let digest = crate::support::sha256_hex(
         sources
             .iter()
@@ -151,6 +166,9 @@ pub fn compile_and_run(
     }
     let exe = dir.join("mncs-run");
     let mut command = Command::new(&compiler.path);
+    if let Some(path) = call_file {
+        command.env("MNCS_CALL_FILE", path);
+    }
     command.current_dir(&dir);
     command.args(flags);
     for path in &paths {
@@ -186,10 +204,39 @@ pub fn compile_and_run(
             String::from_utf8_lossy(&compiled.stderr)
         )));
     }
-    run_executable(&exe, args).map(|observation| (observation.1, observation.0, compiler.summary()))
+    let run = run_executable_full(&exe, args)?;
+    Ok((
+        crate::support::NativeRunView {
+            status: run.status,
+            value: run.value,
+            arena_hex: run.arena_hex,
+        },
+        compiler.summary(),
+    ))
+}
+
+pub fn compile_and_run_with_call_file(
+    sources: &[(&str, &str)],
+    compiler: &ToolchainIdentity,
+    flags: &[&str],
+    args: &[String],
+    call_file: Option<&Path>,
+) -> Result<(i128, ExecutionStatus, String), NativeError> {
+    compile_and_run_with_call_file_full(sources, compiler, flags, args, call_file)
+        .map(|(run, summary)| (run.value, run.status, summary))
+}
+
+pub(crate) struct NativeRun {
+    pub status: ExecutionStatus,
+    pub value: i128,
+    pub arena_hex: Option<String>,
 }
 
 fn run_executable(exe: &Path, args: &[String]) -> Result<(ExecutionStatus, i128), NativeError> {
+    run_executable_full(exe, args).map(|run| (run.status, run.value))
+}
+
+fn run_executable_full(exe: &Path, args: &[String]) -> Result<NativeRun, NativeError> {
     let output = Command::new(exe)
         .args(args)
         .output()
@@ -209,17 +256,26 @@ fn run_executable(exe: &Path, args: &[String]) -> Result<(ExecutionStatus, i128)
         NativeError::InvalidOutput(format!("native JSON observation is invalid: {error}"))
     })?;
     match observation.status.as_str() {
-        "returned" => Ok((
-            ExecutionStatus::Returned,
-            observation.value.ok_or_else(|| {
+        "returned" => Ok(NativeRun {
+            status: ExecutionStatus::Returned,
+            value: observation.value.ok_or_else(|| {
                 NativeError::InvalidOutput("returned observation lacks a value".to_owned())
             })?,
-        )),
-        "runtime_failure" => Ok((ExecutionStatus::RuntimeFailure, 0)),
+            arena_hex: observation.arena_hex,
+        }),
+        "runtime_failure" => Ok(NativeRun {
+            status: ExecutionStatus::RuntimeFailure,
+            value: 0,
+            arena_hex: None,
+        }),
         other => Err(NativeError::InvalidOutput(format!(
             "unknown native status {other:?}"
         ))),
     }
+}
+
+pub(crate) fn run_native_full(exe: &Path, args: &[String]) -> Result<NativeRun, NativeError> {
+    run_executable_full(exe, args)
 }
 
 pub fn decode_native_value(

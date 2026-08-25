@@ -339,6 +339,124 @@ pub(crate) fn backend_output_value_from_i128(
     .map_err(crate::native::NativeError::InvalidOutput)
 }
 
+/// Whether one value contract crosses the boundary as a canonical cell.
+pub(crate) fn contract_is_cell(contract: &BackendValueContract) -> bool {
+    match contract {
+        BackendValueContract::Record { .. } => true,
+        BackendValueContract::Finite { payloads, .. } => !payloads.is_empty(),
+        BackendValueContract::Scalar { .. } => false,
+    }
+}
+
+/// Build the canonical call file for one execution request. Returns `None`
+/// when every argument crosses as a plain scalar (no call file needed).
+pub(crate) fn build_call_file(
+    arguments: &[ExecutionValue],
+    input_contracts: &[BackendValueContract],
+    composite_contracts: &BTreeMap<String, BackendValueContract>,
+) -> Result<Option<Vec<u8>>, String> {
+    let needs_cells = arguments.iter().any(|value| match value {
+        ExecutionValue::Record { .. } => true,
+        ExecutionValue::Finite { payload, .. } => !payload.is_empty(),
+        _ => false,
+    }) || input_contracts.iter().any(contract_is_cell);
+    if !needs_cells {
+        // Pure scalar calls keep the historical argv-only protocol.
+        return Ok(None);
+    }
+    let mut writer = crate::composite::ArenaWriter::new(composite_contracts.clone());
+    let mut entries: Vec<(u64, u64)> = Vec::new();
+    for (index, value) in arguments.iter().enumerate() {
+        let contract = input_contracts.get(index);
+        let boundary = match contract {
+            Some(BackendValueContract::Record { .. }) => {
+                writer.encode_argument(value)?
+            }
+            Some(BackendValueContract::Finite { payloads, .. })
+                if !payloads.is_empty() =>
+            {
+                writer.encode_argument(value)?
+            }
+            _ => writer.encode_argument(value)?,
+        };
+        match boundary {
+            crate::composite::BoundaryValue::Bits(bits) => {
+                entries.push((0, bits));
+            }
+            crate::composite::BoundaryValue::Cell(root) => {
+                entries.push((1, root));
+            }
+        }
+    }
+    let image = writer.into_image();
+    let mut blob = Vec::new();
+    blob.extend_from_slice(&0x4d4e435331_u64.to_le_bytes()); // "MNCS1"
+    blob.extend_from_slice(&(entries.len() as u64).to_le_bytes());
+    for (kind, payload) in entries {
+        blob.extend_from_slice(&kind.to_le_bytes());
+        blob.extend_from_slice(&payload.to_le_bytes());
+    }
+    blob.extend_from_slice(&(image.len() as u64).to_le_bytes());
+    blob.extend_from_slice(&image);
+    Ok(Some(blob))
+}
+
+/// Decode one returned observation into language values, resolving
+/// composite results through the finished arena image when present.
+pub(crate) fn decode_native_observation(
+    output_contract: Option<&BackendValueContract>,
+    status: ExecutionStatus,
+    value: i128,
+    arena_hex: Option<&str>,
+    composite_contracts: &BTreeMap<String, BackendValueContract>,
+) -> Result<Vec<ExecutionValue>, String> {
+    if status != ExecutionStatus::Returned {
+        return Ok(Vec::new());
+    }
+    let composite_output = output_contract.is_some_and(contract_is_cell);
+    match (composite_output, arena_hex, output_contract) {
+        (true, Some(hex), Some(contract)) => {
+            let image = hex_decode_bytes(hex)?;
+            let reader = crate::composite::ArenaReader::new(&image, composite_contracts);
+            Ok(vec![reader.decode(value as u64, contract)?])
+        }
+        (true, _, _) => Err(
+            "composite result was returned without a decodable arena image".to_owned(),
+        ),
+        (false, ..) => match output_contract {
+            Some(contract) => backend_output_value_from_i128(contract, value)
+                .map(|decoded| vec![decoded])
+                .map_err(|error| error.reason()),
+            None => Ok(vec![ExecutionValue::Integer {
+                value,
+                ty: IntegerType {
+                    bits: 64,
+                    signed: true,
+                },
+            }]),
+        },
+    }
+}
+
+fn hex_decode_bytes(hex: &str) -> Result<Vec<u8>, String> {
+    if hex.len() % 2 != 0 {
+        return Err("arena hex has odd length".to_owned());
+    }
+    (0..hex.len() / 2)
+        .map(|index| {
+            u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16)
+                .map_err(|error| format!("arena hex is malformed: {error}"))
+        })
+        .collect()
+}
+
+/// Full native observation handed back across the process boundary.
+pub struct NativeRunView {
+    pub status: ExecutionStatus,
+    pub value: i128,
+    pub arena_hex: Option<String>,
+}
+
 pub(crate) fn integer_fits(value: i128, ty: IntegerType) -> bool {
     if ty.signed {
         let bound = 1_i128 << (ty.bits - 1);
@@ -401,11 +519,20 @@ int main(int argc, char **argv) {{
 pub(crate) fn process_driver(
     function: &str,
     inputs: &[mncs_model::BackendValueContract],
+    output: Option<&mncs_model::BackendValueContract>,
 ) -> String {
-    // Parameter types follow each declared scalar so the generated prototype
-    // matches the module definition exactly (an int32/int64 mismatch would be
-    // C undefined behavior at every call boundary). Composite parameters never
-    // reach this driver: they fail closed in the execute path above.
+    // Parameter types follow each declared contract so the generated
+    // prototype matches the module definition exactly (an int32/int64
+    // mismatch would be C undefined behavior at every call boundary).
+    // Composite parameters receive canonical cell offsets through the
+    // MNCS call file; their C type is the offset word.
+    fn is_cell(contract: &mncs_model::BackendValueContract) -> bool {
+        match contract {
+            mncs_model::BackendValueContract::Record { .. } => true,
+            mncs_model::BackendValueContract::Finite { payloads, .. } => !payloads.is_empty(),
+            mncs_model::BackendValueContract::Scalar { .. } => false,
+        }
+    }
     fn scalar_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
         match contract {
             mncs_model::BackendValueContract::Scalar { semantic_type } => {
@@ -420,50 +547,128 @@ pub(crate) fn process_driver(
             _ => "int64_t",
         }
     }
-    let parse_and_args = inputs
+    fn arg_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
+        if is_cell(contract) {
+            "uint64_t"
+        } else {
+            scalar_c_type(contract)
+        }
+    }
+    let prepare = inputs
         .iter()
         .enumerate()
         .map(|(index, ty)| {
-            let parse = format!(
-                "  long long a{index} = strtoll(argv[{}], 0, 10);",
-                index + 1
-            );
-            let arg = format!("({})a{index}", scalar_c_type(ty));
-            (parse, arg)
+            if is_cell(ty) {
+                format!(
+                    "  uint64_t a{index} = (root_count > {index}) ? roots[{index}] : 0;"
+                )
+            } else {
+                format!(
+                    "  long long a{index} = ({index} < scalar_argc) ? strtoll(scalar_argv[{index}], 0, 10) : 0;"
+                )
+            }
         })
         .collect::<Vec<_>>();
-    let parse = parse_and_args
-        .iter()
-        .map(|(parse, _)| parse.clone())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let call_args = parse_and_args
-        .iter()
-        .map(|(_, arg)| arg.clone())
-        .collect::<Vec<_>>();
+    let parse = prepare.join("\n");
     let proto = inputs
         .iter()
-        .map(scalar_c_type)
-        .map(str::to_owned)
+        .map(|contract| arg_c_type(contract).to_owned())
         .collect::<Vec<_>>()
         .into_iter()
         .chain(["int32_t*".to_owned(), "int64_t*".to_owned()])
         .collect::<Vec<_>>()
         .join(", ");
+    let call_args = (0..inputs.len())
+        .map(|index| {
+            let ctype = arg_c_type(&inputs[index]);
+            format!("({ctype})a{index}")
+        })
+        .collect::<Vec<_>>();
     let mut call_parts = call_args;
     call_parts.push("&status".to_owned());
     call_parts.push("&value".to_owned());
     let call = call_parts.join(", ");
+    let n = inputs.len();
     format!(
         r#"#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+extern unsigned char mncs_arena[4194304];
+extern uint64_t mncs_bump;
+
 void {function}({proto});
+
+static unsigned char *mncs_read_file(const char *path, long *out_len) {{
+  FILE *f = fopen(path, "rb");
+  if (!f) return 0;
+  fseek(f, 0, SEEK_END);
+  long len = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  unsigned char *blob = (unsigned char *)malloc((size_t)len);
+  if (!blob) {{ fclose(f); return 0; }}
+  if (fread(blob, 1, (size_t)len, f) != (size_t)len) {{ free(blob); fclose(f); return 0; }}
+  fclose(f);
+  *out_len = len;
+  return blob;
+}}
+
 int main(int argc, char **argv) {{
   (void)argc;
-{parse}
   int32_t status = 2;
   int64_t value = 0;
+  const char *call_path = getenv("MNCS_CALL_FILE");
+  if (call_path) {{
+    /* Canonical call file v0.1:
+       [u64 magic][u64 arg_count]{{ [u64 kind][u64 payload] }}*
+       [u64 arena_bytes][arena image]
+       kind 0 = scalar bits passed on argv as well, 1 = cell root. */
+    long flen = 0;
+    unsigned char *blob = mncs_read_file(call_path, &flen);
+    if (!blob || flen < 16) {{ free(blob); return 2; }}
+    uint64_t magic = 0, root_count = 0;
+    memcpy(&magic, blob, 8);
+    memcpy(&root_count, blob + 8, 8);
+    if (magic != 0x4d4e435331ULL) {{ free(blob); return 2; }}
+    uint64_t roots[{n}] = {{0}};
+    const unsigned char *p = blob + 16;
+    for (uint64_t i = 0; i < root_count && (long)(p - blob) + 16 <= flen; i++) {{
+      uint64_t kind = 0, payload = 0;
+      memcpy(&kind, p, 8); p += 8;
+      memcpy(&payload, p, 8); p += 8;
+      if (kind == 1 && i < {n}) roots[i] = payload;
+    }}
+    uint64_t arena_bytes = 0;
+    if ((long)(p - blob) + 8 <= flen) {{ memcpy(&arena_bytes, p, 8); p += 8; }}
+    if (arena_bytes > sizeof(mncs_arena) || (long)(p - blob) + (long)arena_bytes > flen) {{
+      free(blob); return 2;
+    }}
+    memcpy(mncs_arena, p, arena_bytes);
+    mncs_bump = arena_bytes;
+    free(blob);
+    int scalar_argc = argc - 1;
+    char **scalar_argv = argv + 1;
+    {parse}
+    {function}({call});
+    if (status != 0) {{
+      printf("{{\"status\":\"runtime_failure\"}}\n");
+      return 0;
+    }}
+    printf("{{\"status\":\"returned\",\"value\":%lld,\"arena_hex\":\"", (long long)value);
+    static const char *hex = "0123456789abcdef";
+    for (uint64_t i = 0; i < mncs_bump && i < sizeof(mncs_arena); i++) {{
+      putchar(hex[mncs_arena[i] >> 4]);
+      putchar(hex[mncs_arena[i] & 15]);
+    }}
+    printf("\"}}\n");
+    return 0;
+  }}
+  const char **scalar_argv = (const char **)argv + 1;
+  int scalar_argc = argc - 1;
+  (void)scalar_argv;
+  (void)scalar_argc;
+{parse}
   {function}({call});
   if (status == 0) printf("{{\"status\":\"returned\",\"value\":%lld}}\n", (long long)value);
   else printf("{{\"status\":\"runtime_failure\"}}\n");

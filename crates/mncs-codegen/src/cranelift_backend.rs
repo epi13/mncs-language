@@ -585,6 +585,71 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                 names.value(&dest.id)
             );
         }
+        ScalarInst::CellAlloc { dest, bytes } => {
+            let _ = writeln!(
+                out,
+                "        {} = call %mncs_cell_alloc({bytes})",
+                names.value(&dest.id)
+            );
+        }
+        ScalarInst::CellStoreDiscriminant { cell, discriminant } => {
+            let _ = writeln!(
+                out,
+                "        v_tmp = iconst.i32 {discriminant}\n        call %mncs_slot_store32({}, 0, v_tmp)",
+                names.value(cell)
+            );
+        }
+        ScalarInst::CellStore {
+            cell,
+            byte_offset,
+            width,
+            value,
+        } => match width {
+            crate::composite::SlotWidth::W32 => {
+                let _ = writeln!(
+                    out,
+                    "        call %mncs_slot_store32({}, {byte_offset}, {})",
+                    names.value(cell),
+                    names.value(value)
+                );
+            }
+            crate::composite::SlotWidth::W64 => {
+                let _ = writeln!(
+                    out,
+                    "        call %mncs_slot_store64({}, {byte_offset}, {})",
+                    names.value(cell),
+                    names.value(value)
+                );
+            }
+        },
+        ScalarInst::CellLoad {
+            dest,
+            cell,
+            byte_offset,
+            width,
+        } => match width {
+            crate::composite::SlotWidth::W32 => {
+                let _ = writeln!(
+                    out,
+                    "        {} = load.u32({}, {byte_offset})",
+                    names.value(&dest.id),
+                    names.value(cell)
+                );
+            }
+            crate::composite::SlotWidth::W64 => {
+                let _ = writeln!(
+                    out,
+                    "        {} = load.i64({}, {byte_offset})",
+                    names.value(&dest.id),
+                    names.value(cell)
+                );
+            }
+        },
+        ScalarInst::Sequence(insts) => {
+            for nested in insts {
+                emit_clif_inst(out, nested, names);
+            }
+        }
         ScalarInst::FiniteIsVariant {
             dest,
             src,
@@ -647,6 +712,35 @@ fn emit_width_normalize(
     (lhs_v, rhs_v)
 }
 
+/// Flatten sequence groups so naming and emission walk every concrete
+/// instruction exactly once.
+fn flatten_scalar(insts: &[ScalarInst]) -> Vec<&ScalarInst> {
+    let mut flat = Vec::new();
+    for inst in insts {
+        match inst {
+            ScalarInst::Sequence(nested) => flat.extend(flatten_scalar(nested)),
+            other => flat.push(other),
+        }
+    }
+    flat
+}
+
+fn scalar_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
+    match inst {
+        ScalarInst::Const { dest, .. }
+        | ScalarInst::Integer { dest, .. }
+        | ScalarInst::Boolean { dest, .. }
+        | ScalarInst::Compare { dest, .. }
+        | ScalarInst::FiniteConstruct { dest, .. }
+        | ScalarInst::CellAlloc { dest, .. }
+        | ScalarInst::CellLoad { dest, .. }
+        | ScalarInst::FiniteIsVariant { dest, .. }
+        | ScalarInst::Call { dest, .. } => Some(dest),
+        ScalarInst::CellStoreDiscriminant { .. } | ScalarInst::CellStore { .. } => None,
+        ScalarInst::Sequence(_) => None,
+    }
+}
+
 struct ClifNames {
     values: BTreeMap<mncs_model::SemanticId, String>,
     blocks: BTreeMap<mncs_model::SemanticId, String>,
@@ -670,15 +764,9 @@ impl ClifNames {
             for param in &block.params {
                 push(&param.id);
             }
-            for inst in &block.insts {
-                let dest = match inst {
-                    ScalarInst::Const { dest, .. }
-                    | ScalarInst::Integer { dest, .. }
-                    | ScalarInst::Boolean { dest, .. }
-                    | ScalarInst::Compare { dest, .. }
-                    | ScalarInst::FiniteConstruct { dest, .. }
-                    | ScalarInst::FiniteIsVariant { dest, .. }
-                    | ScalarInst::Call { dest, .. } => dest,
+            for inst in flatten_scalar(&block.insts) {
+                let Some(dest) = scalar_dest(inst) else {
+                    continue;
                 };
                 push(&dest.id);
             }
@@ -891,6 +979,36 @@ pub fn aot_object_bytes(scalar: &ScalarModule) -> Result<Vec<u8>, String> {
         .write_stream(&mut written)
         .map_err(|error| error.to_string())?;
     Ok(written)
+}
+
+/// Declare (once per function build) one of the canonical-cell runtime
+/// entry points. All share the uniform i64 signature family:
+///   mncs_cell_alloc(bytes) -> offset
+///   mncs_slot_store32/64(at, value)
+///   mncs_slot_load32/64(at) -> zero-extended value
+fn cell_libcall<M: cranelift_module::Module>(
+    module: &mut M,
+    func: &mut cranelift_codegen::ir::Function,
+    name: &'static str,
+) -> cranelift_codegen::ir::FuncRef {
+    use cranelift_codegen::ir::{types, AbiParam, Signature};
+    use cranelift_module::Linkage;
+    let mut sig = Signature::new(module.target_config().default_call_conv);
+    match name {
+        "mncs_slot_store32" | "mncs_slot_store64" => {
+            sig.params.push(AbiParam::new(types::I64));
+            sig.params.push(AbiParam::new(types::I64));
+        }
+        "mncs_cell_alloc" | "mncs_slot_load32" | "mncs_slot_load64" => {
+            sig.params.push(AbiParam::new(types::I64));
+            sig.returns.push(AbiParam::new(types::I64));
+        }
+        _ => unreachable!("unknown cell libcall {name}"),
+    }
+    let id = module
+        .declare_function(name, Linkage::Import, &sig)
+        .expect("declare cell libcall");
+    module.declare_func_in_func(id, func)
 }
 
 /// Build every scalar function into any Cranelift module realization.
@@ -1282,6 +1400,55 @@ where
                             let produced =
                                 builder.ins().iconst(types::I64, i64::from(*discriminant));
                             values.insert(dest.id.clone(), produced);
+                        }
+                        ScalarInst::CellAlloc { dest, bytes } => {
+                            let callee = cell_libcall(module, builder.func, "mncs_cell_alloc");
+                            let bytes_v = builder.ins().iconst(types::I64, *bytes as i64);
+                            let call = builder.ins().call(callee, &[bytes_v]);
+                            values.insert(dest.id.clone(), builder.inst_results(call)[0]);
+                        }
+                        ScalarInst::CellStoreDiscriminant { cell, discriminant } => {
+                            let callee =
+                                cell_libcall(module, builder.func, "mncs_slot_store32");
+                            let disc =
+                                builder.ins().iconst(types::I64, i64::from(*discriminant));
+                            let args = [values[cell], disc];
+                            builder.ins().call(callee, &args);
+                        }
+                        ScalarInst::CellStore {
+                            cell,
+                            byte_offset,
+                            width,
+                            value,
+                        } => {
+                            let name = match width {
+                                crate::composite::SlotWidth::W32 => "mncs_slot_store32",
+                                crate::composite::SlotWidth::W64 => "mncs_slot_store64",
+                            };
+                            let callee = cell_libcall(module, builder.func, name);
+                            let offset = builder.ins().iconst(types::I64, *byte_offset as i64);
+                            let args = [values[cell], offset, values[value]];
+                            builder.ins().call(callee, &args);
+                        }
+                        ScalarInst::CellLoad {
+                            dest,
+                            cell,
+                            byte_offset,
+                            width,
+                        } => {
+                            let name = match width {
+                                crate::composite::SlotWidth::W32 => "mncs_slot_load32",
+                                crate::composite::SlotWidth::W64 => "mncs_slot_load64",
+                            };
+                            let callee = cell_libcall(module, builder.func, name);
+                            let offset = builder.ins().iconst(types::I64, *byte_offset as i64);
+                            let call = builder.ins().call(callee, &[values[cell], offset]);
+                            // Load libcalls return zero-extended i64 slot
+                            // payloads in the uniform value domain.
+                            values.insert(dest.id.clone(), builder.inst_results(call)[0]);
+                        }
+                        ScalarInst::Sequence(_) => {
+                            unreachable!("Sequence must be flattened before building")
                         }
                         ScalarInst::FiniteIsVariant {
                             dest,

@@ -5,6 +5,7 @@
 //! definition of MNCS.
 
 mod c11;
+mod composite;
 mod cranelift_backend;
 mod external;
 mod llvm;

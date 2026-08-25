@@ -350,6 +350,14 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
     let _ = writeln!(out, "target datalayout = \"{layout}\"");
     let _ = writeln!(out, "target triple = \"{triple}\"");
     out.push('\n');
+    if module_uses_cells(module) {
+        // Canonical composite cell arena (MNCS cell layout v0.1): 8-byte
+        // aligned cells; slot access is plain i32/i64 load/store at 8-byte
+        // strides so alignment holds by construction.
+        out.push_str("; Canonical composite cell arena (v0.1)\n");
+        out.push_str("@mncs_arena = global [4194304 x i8] zeroinitializer\n");
+        out.push_str("@mncs_bump = global i64 0\n\n");
+    }
     for width in ["i8", "i16", "i32", "i64"] {
         for op in ["sadd", "uadd", "ssub", "usub", "smul", "umul"] {
             let _ = writeln!(
@@ -372,6 +380,32 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
         out.push('\n');
     }
     out
+}
+
+/// Whether any lowered function manipulates canonical cells.
+fn module_uses_cells(module: &ScalarModule) -> bool {
+    module.functions.iter().any(|function| {
+        function.params.iter().any(|param| param.ty.is_cell())
+            || function.result.ty.is_cell()
+            || function.blocks.iter().any(|block| {
+                block.insts.iter().any(|inst| match inst {
+                    ScalarInst::CellAlloc { .. }
+                    | ScalarInst::CellStoreDiscriminant { .. }
+                    | ScalarInst::CellStore { .. }
+                    | ScalarInst::CellLoad { .. } => true,
+                    ScalarInst::Sequence(nested) => nested.iter().any(|nested| {
+                        matches!(
+                            nested,
+                            ScalarInst::CellAlloc { .. }
+                                | ScalarInst::CellStoreDiscriminant { .. }
+                                | ScalarInst::CellStore { .. }
+                                | ScalarInst::CellLoad { .. }
+                        )
+                    }),
+                    _ => false,
+                })
+            })
+    })
 }
 
 fn emit_function(out: &mut String, function: &ScalarFunction) {
@@ -425,7 +459,7 @@ fn emit_block(
 ) {
     let label = names.block(&block.id);
     let _ = writeln!(out, "{label}:");
-    for inst in &block.insts {
+    for inst in flatten_scalar_insts(&block.insts) {
         emit_inst(out, inst, names, split);
     }
     match &block.term {
@@ -673,10 +707,145 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             );
             store_dest(out, names, dest, &tmp);
         }
+        ScalarInst::Sequence(insts) => {
+            for nested in insts {
+                emit_inst(out, nested, names, split);
+            }
+        }
         ScalarInst::FiniteConstruct { dest, discriminant } => {
             *split += 1;
             let tmp = format!("fc{split}");
             let _ = writeln!(out, "  %{tmp} = add i32 {discriminant}, 0");
+            store_dest(out, names, dest, &tmp);
+        }
+        ScalarInst::CellAlloc { dest, bytes } => {
+            // Bump allocation against the module arena, 8-byte aligned. The
+            // destination slot already exists from the entry alloca block.
+            let d = names.value(&dest.id);
+            *split += 1;
+            let bump = format!("bump{split}");
+            let bumped = format!("bb{split}");
+            let aligned = format!("al{split}");
+            let newbump = format!("nb{split}");
+            let _ = writeln!(out, "  %{bump} = load i64, ptr @mncs_bump");
+            let _ = writeln!(out, "  %{bumped} = add i64 %{bump}, 7");
+            let _ = writeln!(out, "  %{aligned} = and i64 %{bumped}, -8");
+            let _ = writeln!(out, "  %{newbump} = add i64 %{aligned}, {bytes}");
+            let _ = writeln!(out, "  store i64 %{newbump}, ptr @mncs_bump");
+            let _ = writeln!(out, "  store i64 %{aligned}, ptr %{d}_slot");
+        }
+        ScalarInst::CellStoreDiscriminant { cell, discriminant } => {
+            *split += 1;
+            let c = names.value(cell);
+            let cellv = format!("cs_cell{split}");
+            let addr = format!("cs_addr{split}");
+            let gep = format!("cs_gep{split}");
+            let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
+            let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, 0");
+            let _ = writeln!(
+                out,
+                "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
+            );
+            let _ = writeln!(out, "  store i32 {discriminant}, ptr %{gep}");
+        }
+        ScalarInst::CellStore {
+            cell,
+            byte_offset,
+            width,
+            value,
+        } => {
+            *split += 1;
+            let c = names.value(cell);
+            let v = names.value(value);
+            let cellv = format!("st_cell{split}");
+            let addr = format!("st_addr{split}");
+            let gep = format!("st_gep{split}");
+            let raw = format!("st_raw{split}");
+            match width {
+                crate::composite::SlotWidth::W32 => {
+                    let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
+                    let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
+                    let _ = writeln!(
+                        out,
+                        "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
+                    );
+                    let _ = writeln!(out, "  %{raw} = load i32, ptr %{v}_slot");
+                    let _ = writeln!(out, "  store i32 %{raw}, ptr %{gep}");
+                }
+                crate::composite::SlotWidth::W64 => {
+                    let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
+                    let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
+                    let _ = writeln!(
+                        out,
+                        "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
+                    );
+                    let _ = writeln!(out, "  %{raw} = load i64, ptr %{v}_slot");
+                    let _ = writeln!(out, "  store i64 %{raw}, ptr %{gep}");
+                }
+            }
+        }
+        ScalarInst::CellLoad {
+            dest,
+            cell,
+            byte_offset,
+            width,
+        } => {
+            *split += 1;
+            let d = names.value(&dest.id);
+            let c = names.value(cell);
+            let cellv = format!("ld_cell{split}");
+            let addr = format!("ld_addr{split}");
+            let gep = format!("ld_gep{split}");
+            match width {
+                crate::composite::SlotWidth::W32 => {
+                    let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
+                    let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
+                    let _ = writeln!(
+                        out,
+                        "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
+                    );
+                    let _ = writeln!(out, "  %{d}_v32 = load i32, ptr %{gep}");
+                    let _ = writeln!(out, "  store i32 %{d}_v32, ptr %{d}_slot");
+                }
+                crate::composite::SlotWidth::W64 => {
+                    let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
+                    let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
+                    let _ = writeln!(
+                        out,
+                        "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
+                    );
+                    let _ = writeln!(out, "  %{d}_v64 = load i64, ptr %{gep}");
+                    let _ = writeln!(out, "  store i64 %{d}_v64, ptr %{d}_slot");
+                }
+            }
+        }
+        ScalarInst::FiniteIsVariant {
+            dest,
+            src,
+            discriminant,
+        } if names.ty(src).is_cell() => {
+            // Boxed finite: compare the canonical cell's tag word.
+            let srcv = load_value(out, names, src, "src", split);
+            *split += 1;
+            let tagptr = format!("tag{split}");
+            let tag = format!("tagv{split}");
+            let _ = writeln!(
+                out,
+                "  %{tagptr} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{srcv}"
+            );
+            let _ = writeln!(out, "  %{tag} = load i32, ptr %{tagptr}");
+            let _ = writeln!(
+                out,
+                "  %cmp_{} = icmp eq i32 %{tag}, {discriminant}",
+                names.value(&dest.id)
+            );
+            let tmp = format!("isz_{}", names.value(&dest.id));
+            let _ = writeln!(
+                out,
+                "  %{tmp} = zext i1 %cmp_{} to {}",
+                names.value(&dest.id),
+                llvm_type(dest.ty)
+            );
             store_dest(out, names, dest, &tmp);
         }
         ScalarInst::FiniteIsVariant {
@@ -684,6 +853,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             src,
             discriminant,
         } => {
+            // Unboxed finite: the value itself is the bare discriminant.
             let srcv = load_value(out, names, src, "src", split);
             let _ = writeln!(
                 out,
@@ -922,6 +1092,35 @@ fn llvm_pred(predicate: &str, ty: mncs_model::IntegerType) -> &'static str {
     }
 }
 
+/// Flatten sequence groups so registration and emission see every concrete
+/// instruction exactly once.
+fn flatten_scalar_insts(insts: &[ScalarInst]) -> Vec<&ScalarInst> {
+    let mut flat = Vec::new();
+    for inst in insts {
+        match inst {
+            ScalarInst::Sequence(nested) => flat.extend(flatten_scalar_insts(nested)),
+            other => flat.push(other),
+        }
+    }
+    flat
+}
+
+fn scalar_inst_dest(inst: &ScalarInst) -> Option<&ScalarValue> {
+    match inst {
+        ScalarInst::Const { dest, .. }
+        | ScalarInst::Integer { dest, .. }
+        | ScalarInst::Boolean { dest, .. }
+        | ScalarInst::Compare { dest, .. }
+        | ScalarInst::FiniteConstruct { dest, .. }
+        | ScalarInst::CellAlloc { dest, .. }
+        | ScalarInst::CellLoad { dest, .. }
+        | ScalarInst::FiniteIsVariant { dest, .. }
+        | ScalarInst::Call { dest, .. } => Some(dest),
+        ScalarInst::CellStoreDiscriminant { .. } | ScalarInst::CellStore { .. } => None,
+        ScalarInst::Sequence(_) => None,
+    }
+}
+
 struct NameMap {
     values: BTreeMap<mncs_model::SemanticId, String>,
     types: BTreeMap<mncs_model::SemanticId, ScalarTy>,
@@ -948,15 +1147,9 @@ impl NameMap {
             for param in &block.params {
                 push(param);
             }
-            for inst in &block.insts {
-                match inst {
-                    ScalarInst::Const { dest, .. }
-                    | ScalarInst::Integer { dest, .. }
-                    | ScalarInst::Boolean { dest, .. }
-                    | ScalarInst::Compare { dest, .. }
-                    | ScalarInst::FiniteConstruct { dest, .. }
-                    | ScalarInst::FiniteIsVariant { dest, .. }
-                    | ScalarInst::Call { dest, .. } => push(dest),
+            for inst in flatten_scalar_insts(&block.insts) {
+                if let Some(dest) = scalar_inst_dest(inst) {
+                    push(dest);
                 }
             }
         }
