@@ -373,19 +373,50 @@ fn ebpf_refuses_signed_division_precisely() {
 }
 
 /// Every external target refuses host execution honestly: no emulator or GPU
-/// runtime is claimed where none exists. Cases report `unsupported` rather
-/// than fabricated returns.
+/// runtime is claimed where none exists. Where lowering succeeded, every
+/// corpus case reports `unsupported`; where the toolchain itself is absent,
+/// the command refuses with a coded diagnostic instead of any execution
+/// claim.
 #[test]
 fn external_targets_refuse_execution_honestly() {
     let source = example("source/profile06-boolean-operators.mncs");
     let corpus = example("execution/profile06-boolean-operators-corpus.json");
     for target in ["mncs-riscv32", "mncs-ebpf", "mncs-ptx64"] {
-        let result = run_experiment(&source, target, &corpus);
-        assert_eq!(result["status"], "FAIL", "{target} must not claim success");
-        let cases = result["cases"].as_array().expect("cases");
-        assert!(
-            !cases.is_empty() && cases.iter().all(|case| case["status"] == "unsupported"),
-            "{target}: every case must refuse as unsupported: {cases:#?}"
-        );
+        let output = binary()
+            .args([
+                "experiment",
+                "run",
+                &source,
+                "--backend",
+                target,
+                "--corpus",
+                &corpus,
+            ])
+            .output()
+            .expect("run experiment");
+        let result: Value = serde_json::from_slice(&output.stdout)
+            .unwrap_or_else(|error| panic!("{target}: experiment JSON: {error}"));
+        if result["cases"].is_array() {
+            // Lowering succeeded; execution must refuse per case.
+            assert_eq!(result["status"], "FAIL", "{target} must not claim success");
+            let cases = result["cases"].as_array().expect("cases");
+            assert!(
+                !cases.is_empty() && cases.iter().all(|case| case["status"] == "unsupported"),
+                "{target}: every case must refuse as unsupported: {cases:#?}"
+            );
+        } else {
+            // Toolchain absent on this host: structured refusal, no artifact,
+            // no execution claims anywhere in the response.
+            assert_eq!(
+                result["status"], "completed_with_unresolved_obligations",
+                "{target}"
+            );
+            assert!(result["emissions"]["backend"].is_null());
+            let codes = refusal_codes(&result);
+            assert!(
+                codes.iter().any(|code| code.starts_with("CGX4")),
+                "{target}: expected a coded refusal, got {codes:?}"
+            );
+        }
     }
 }
