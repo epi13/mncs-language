@@ -93,15 +93,10 @@ pub fn cranelift_capabilities() -> BackendCapabilityManifest {
         .into_iter()
         .map(str::to_owned)
         .collect(),
-        [
-            "memory",
-            "effects",
-            "widening_integer",
-            "non_host_isa_jit",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect(),
+        ["memory", "effects", "widening_integer", "non_host_isa_jit"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
         [CRANELIFT_ARTIFACT_KIND.to_owned()].into_iter().collect(),
         ["bounded_execution_agreement".to_owned()]
             .into_iter()
