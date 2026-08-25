@@ -461,4 +461,3 @@ impl BackendAdapter for ExternalAdapter {
         result
     }
 }
-

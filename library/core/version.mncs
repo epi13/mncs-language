@@ -18,6 +18,13 @@ enum Ordering { Before, Same, After }
 
 enum Envelope { Any, Exact, AtLeast, CompatibleMinor }
 
+// Total constructor. Consumers in other modules cannot spell record
+// literals for imported types, so composition must be offered here as part
+// of the contract surface.
+fn make(major: i32, minor: i32, patch: i32) -> (result: Version) {
+    return Version { major: major, minor: minor, patch: patch };
+}
+
 fn compare(left: Version, right: Version) -> (result: Ordering) {
     if left.major < right.major {
         return Ordering.Before;

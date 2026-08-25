@@ -2784,24 +2784,32 @@ impl FileModuleResolver {
         let dotted = module.replace('.', "/");
         let tail = module.rsplit('.').next().unwrap_or(module);
         let mut paths = vec![root.join(format!("{dotted}.mncs"))];
-        let mut segments = module.split('.').peekable();
-        if segments.peek() == Some(&"mncs") {
-            let rest = module.split_once('.').map(|(_, tail)| tail).unwrap_or(module);
-            if !rest.is_empty() {
-                paths.push(root.join(format!("{}.mncs", rest.replace('.', "/"))));
-            }
+        let version_tailed = Self::split_version_tail(module);
+        if let Some((head, _)) = version_tailed {
+            paths.push(root.join(format!("{}.mncs", head.replace('.', "/"))));
         }
-        if let Some((head, last)) = module.rsplit_once('.') {
-            if last.len() >= 2
-                && last.starts_with('v')
-                && last[1..].chars().all(|c| c.is_ascii_digit())
-                && !head.is_empty()
-            {
-                paths.push(root.join(format!("{}.mncs", head.replace('.', "/"))));
+        if let Some(rest) = module.strip_prefix("mncs.") {
+            paths.push(root.join(format!("{}.mncs", rest.replace('.', "/"))));
+            if let Some((head, _)) = version_tailed {
+                if let Some(stripped) = head.strip_prefix("mncs.") {
+                    paths.push(root.join(format!("{}.mncs", stripped.replace('.', "/"))));
+                }
             }
         }
         paths.push(root.join(format!("{tail}.mncs")));
         paths
+    }
+
+    fn split_version_tail(module: &str) -> Option<(&str, &str)> {
+        let (head, last) = module.rsplit_once('.')?;
+        let digits = last.strip_prefix('v')?;
+        if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        if head.is_empty() || head.contains("..") {
+            return None;
+        }
+        Some((head, last))
     }
 }
 

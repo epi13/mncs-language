@@ -50,8 +50,12 @@ enum CoherenceVerdict { Compatible, Incompatible { reason: i32 }, Unresolved { r
 
 record CompatibilityClaim {
     envelope: Envelope,
-    bound: Version,
-    actual: Version,
+    bound_major: i32,
+    bound_minor: i32,
+    bound_patch: i32,
+    actual_major: i32,
+    actual_minor: i32,
+    actual_patch: i32,
     fingerprints_match: bool,
     evidence: Status,
 }
@@ -71,7 +75,17 @@ fn evaluate_compatibility(claim: CompatibilityClaim) -> (result: CoherenceVerdic
 }
 
 fn evaluate_envelope(claim: CompatibilityClaim) -> (result: CoherenceVerdict) {
-    let satisfied: bool = satisfies(claim.envelope, claim.bound, claim.actual);
+    let bound: Version = make(
+        claim.bound_major,
+        claim.bound_minor,
+        claim.bound_patch,
+    );
+    let actual: Version = make(
+        claim.actual_major,
+        claim.actual_minor,
+        claim.actual_patch,
+    );
+    let satisfied: bool = satisfies(claim.envelope, bound, actual);
     if satisfied {
         if claim.fingerprints_match {
             return CoherenceVerdict.Compatible;
@@ -143,7 +157,7 @@ enum ChangeSetEvent {
 
 record Transition {
     accepted: bool,
-    next: ChangeSetState,
+    following: ChangeSetState,
     reason: i32,
 }
 
@@ -153,49 +167,89 @@ fn transition(state: ChangeSetState, event: ChangeSetEvent) -> (result: Transiti
     return match state {
         Draft => match event {
             AnalyzeImpact => accept(ChangeSetState.ImpactAnalyzed),
+            BeginImplementation => reject(1),
+            SubmitCandidate => reject(1),
+            RecordPass => reject(1),
+            RecordFail => reject(1),
+            Merge => reject(1),
+            PromoteEpoch => reject(1),
             Abandon => accept(ChangeSetState.Abandoned),
-            otherwise => reject(1),
         },
         ImpactAnalyzed => match event {
+            AnalyzeImpact => reject(1),
             BeginImplementation => accept(ChangeSetState.InProgress),
+            SubmitCandidate => reject(1),
+            RecordPass => reject(1),
+            RecordFail => reject(1),
+            Merge => reject(1),
+            PromoteEpoch => reject(1),
             Abandon => accept(ChangeSetState.Abandoned),
-            otherwise => reject(1),
         },
         InProgress => match event {
+            AnalyzeImpact => reject(1),
+            BeginImplementation => reject(1),
             SubmitCandidate => accept(ChangeSetState.IntegrationCandidate),
+            RecordPass => reject(1),
+            RecordFail => reject(1),
+            Merge => reject(1),
+            PromoteEpoch => reject(1),
             Abandon => accept(ChangeSetState.Abandoned),
-            otherwise => reject(1),
         },
         IntegrationCandidate => match event {
+            AnalyzeImpact => reject(1),
+            BeginImplementation => reject(1),
+            SubmitCandidate => reject(1),
             RecordPass => accept(ChangeSetState.VerifiedPass),
             RecordFail => accept(ChangeSetState.VerifiedFail),
+            Merge => reject(1),
+            PromoteEpoch => reject(1),
             Abandon => accept(ChangeSetState.Abandoned),
-            otherwise => reject(1),
         },
         VerifiedPass => match event {
+            AnalyzeImpact => reject(1),
+            BeginImplementation => reject(1),
+            SubmitCandidate => reject(1),
+            RecordPass => reject(1),
+            RecordFail => reject(1),
             Merge => accept(ChangeSetState.Merged),
+            PromoteEpoch => reject(1),
             Abandon => accept(ChangeSetState.Abandoned),
-            otherwise => reject(1),
         },
         VerifiedFail => match event {
+            AnalyzeImpact => reject(1),
             BeginImplementation => accept(ChangeSetState.InProgress),
+            SubmitCandidate => reject(1),
+            RecordPass => reject(1),
+            RecordFail => reject(1),
+            Merge => reject(1),
+            PromoteEpoch => reject(1),
             Abandon => accept(ChangeSetState.Abandoned),
-            otherwise => reject(1),
         },
         Merged => match event {
+            AnalyzeImpact => reject(1),
+            BeginImplementation => reject(1),
+            SubmitCandidate => reject(1),
+            RecordPass => reject(1),
+            RecordFail => reject(1),
+            Merge => reject(1),
             PromoteEpoch => accept(ChangeSetState.EpochPromoted),
-            otherwise => reject(1),
+            Abandon => reject(1),
         },
-        otherwise => reject(0),
+        EpochPromoted => terminal(),
+        Abandoned => terminal(),
     };
 }
 
-fn accept(next: ChangeSetState) -> (result: Transition) {
-    return Transition { accepted: true, next: next, reason: 0 };
+fn terminal() -> (result: Transition) {
+    return Transition { accepted: false, following: ChangeSetState.Draft, reason: 0 };
+}
+
+fn accept(successor: ChangeSetState) -> (result: Transition) {
+    return Transition { accepted: true, following: successor, reason: 0 };
 }
 
 fn reject(reason: i32) -> (result: Transition) {
-    return Transition { accepted: false, next: ChangeSetState.Draft, reason: reason };
+    return Transition { accepted: false, following: ChangeSetState.Draft, reason: reason };
 }
 
 enum DriftKind {
@@ -212,18 +266,23 @@ record DriftObservation {
 
 fn assess_drift(observation: DriftObservation) -> (result: DriftKind) {
     if observation.same_declared_version {
-        if !observation.surface_unchanged {
-            return DriftKind.UndeclaredSurfaceChange;
-        }
-        if !observation.fingerprint_matches {
+        if observation.surface_unchanged {
+            if observation.fingerprint_matches {
+                return drift_references(observation);
+            }
             return DriftKind.FingerprintDrift;
         }
+        return DriftKind.UndeclaredSurfaceChange;
     }
-    if !observation.consumer_references_resolve {
-        return DriftKind.StaleReference;
-    }
-    if !observation.fixtures_match_declaration {
+    return drift_references(observation);
+}
+
+fn drift_references(observation: DriftObservation) -> (result: DriftKind) {
+    if observation.consumer_references_resolve {
+        if observation.fixtures_match_declaration {
+            return DriftKind.Clean;
+        }
         return DriftKind.FixtureMismatch;
     }
-    return DriftKind.Clean;
+    return DriftKind.StaleReference;
 }
