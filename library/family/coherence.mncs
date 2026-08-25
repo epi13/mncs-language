@@ -1,0 +1,229 @@
+mncs 0.6;
+
+// mncs.family.coherence — the MNCS-native decision core of the family
+// coherence system.
+//
+// Every tri-state judgment the family-level tooling is allowed to make on its
+// own authority lives here: evidence aggregation over required checks,
+// compatibility-envelope evaluation, impact classification, epoch promotion,
+// change-set transition legality, and drift assessment. Host orchestrators
+// may gather facts (filesystem, git, manifests) but must obtain these
+// verdicts by executing this module; reimplementing them host-side would
+// launder authority.
+//
+// Dominance discipline is inherited from mncs.core.status: no operation in
+// this module can turn UNKNOWN into PASS or delete FAIL. Promotion in
+// particular refuses while any unresolved UNKNOWN remains.
+//
+// Bounded shape note: required-check aggregation uses a fixed twelve-slot
+// vector because the language does not yet expose sized sequences. Unused
+// slots must be padded with PASS, the neutral element of dominance; padding
+// can never weaken a claim.
+
+module mncs.family.coherence.v01;
+
+use mncs.core.status.v1;
+use mncs.core.version.v1;
+
+record CheckVector {
+    c01: Status, c02: Status, c03: Status, c04: Status,
+    c05: Status, c06: Status, c07: Status, c08: Status,
+    c09: Status, c10: Status, c11: Status, c12: Status,
+}
+
+fn aggregate_checks(vector: CheckVector) -> (result: Status) {
+    let s01: Status = dominate(vector.c01, vector.c02);
+    let s02: Status = dominate(s01, vector.c03);
+    let s03: Status = dominate(s02, vector.c04);
+    let s04: Status = dominate(s03, vector.c05);
+    let s05: Status = dominate(s04, vector.c06);
+    let s06: Status = dominate(s05, vector.c07);
+    let s07: Status = dominate(s06, vector.c08);
+    let s08: Status = dominate(s07, vector.c09);
+    let s09: Status = dominate(s08, vector.c10);
+    let s10: Status = dominate(s09, vector.c11);
+    let s11: Status = dominate(s10, vector.c12);
+    return s11;
+}
+
+enum CoherenceVerdict { Compatible, Incompatible { reason: i32 }, Unresolved { reason: i32 } }
+
+record CompatibilityClaim {
+    envelope: Envelope,
+    bound: Version,
+    actual: Version,
+    fingerprints_match: bool,
+    evidence: Status,
+}
+
+// Reason codes are contract:
+//   1 declared evidence rejects the claim
+//   2 declared evidence is unresolved
+//   3 candidate violates the declared envelope
+//   4 envelope satisfied but fingerprint drifted at the same declared
+//     version; compatibility stays unresolved until re-evidenced
+fn evaluate_compatibility(claim: CompatibilityClaim) -> (result: CoherenceVerdict) {
+    return match claim.evidence {
+        FAIL => CoherenceVerdict.Incompatible { reason: 1 },
+        UNKNOWN => CoherenceVerdict.Unresolved { reason: 2 },
+        PASS => evaluate_envelope(claim),
+    };
+}
+
+fn evaluate_envelope(claim: CompatibilityClaim) -> (result: CoherenceVerdict) {
+    let satisfied: bool = satisfies(claim.envelope, claim.bound, claim.actual);
+    if satisfied {
+        if claim.fingerprints_match {
+            return CoherenceVerdict.Compatible;
+        }
+        return CoherenceVerdict.Unresolved { reason: 4 };
+    }
+    return CoherenceVerdict.Incompatible { reason: 3 };
+}
+
+enum ImpactClass { DefinitelyAffected, PotentiallyAffected, Unaffected, UnknownGap }
+
+record ImpactObservation {
+    direct_consumer: bool,
+    transitive_consumer: bool,
+    manifest_found: bool,
+    contract_declared: bool,
+}
+
+fn classify_impact(observation: ImpactObservation) -> (result: ImpactClass) {
+    if observation.manifest_found {
+        if observation.contract_declared {
+            if observation.direct_consumer {
+                return ImpactClass.DefinitelyAffected;
+            }
+            if observation.transitive_consumer {
+                return ImpactClass.PotentiallyAffected;
+            }
+            return ImpactClass.Unaffected;
+        }
+    }
+    return ImpactClass.UnknownGap;
+}
+
+enum PromotionDecision { Promote, Hold, Reject }
+
+record PromotionCase {
+    integration: Status,
+    identities_exact: bool,
+    unresolved_unknowns: i32,
+}
+
+fn promotion_decision(subject: PromotionCase) -> (result: PromotionDecision) {
+    return match subject.integration {
+        FAIL => PromotionDecision.Reject,
+        UNKNOWN => PromotionDecision.Hold,
+        PASS => assess_promotion_readiness(subject),
+    };
+}
+
+fn assess_promotion_readiness(subject: PromotionCase) -> (result: PromotionDecision) {
+    if subject.identities_exact {
+        if subject.unresolved_unknowns == 0 {
+            return PromotionDecision.Promote;
+        }
+        return PromotionDecision.Hold;
+    }
+    return PromotionDecision.Hold;
+}
+
+enum ChangeSetState {
+    Draft, ImpactAnalyzed, InProgress, IntegrationCandidate,
+    VerifiedPass, VerifiedFail, Merged, EpochPromoted, Abandoned,
+}
+
+enum ChangeSetEvent {
+    AnalyzeImpact, BeginImplementation, SubmitCandidate,
+    RecordPass, RecordFail, Merge, PromoteEpoch, Abandon,
+}
+
+record Transition {
+    accepted: bool,
+    next: ChangeSetState,
+    reason: i32,
+}
+
+// Rejection reasons are contract: 0 terminal state, 1 event not legal for
+// the current state.
+fn transition(state: ChangeSetState, event: ChangeSetEvent) -> (result: Transition) {
+    return match state {
+        Draft => match event {
+            AnalyzeImpact => accept(ChangeSetState.ImpactAnalyzed),
+            Abandon => accept(ChangeSetState.Abandoned),
+            otherwise => reject(1),
+        },
+        ImpactAnalyzed => match event {
+            BeginImplementation => accept(ChangeSetState.InProgress),
+            Abandon => accept(ChangeSetState.Abandoned),
+            otherwise => reject(1),
+        },
+        InProgress => match event {
+            SubmitCandidate => accept(ChangeSetState.IntegrationCandidate),
+            Abandon => accept(ChangeSetState.Abandoned),
+            otherwise => reject(1),
+        },
+        IntegrationCandidate => match event {
+            RecordPass => accept(ChangeSetState.VerifiedPass),
+            RecordFail => accept(ChangeSetState.VerifiedFail),
+            Abandon => accept(ChangeSetState.Abandoned),
+            otherwise => reject(1),
+        },
+        VerifiedPass => match event {
+            Merge => accept(ChangeSetState.Merged),
+            Abandon => accept(ChangeSetState.Abandoned),
+            otherwise => reject(1),
+        },
+        VerifiedFail => match event {
+            BeginImplementation => accept(ChangeSetState.InProgress),
+            Abandon => accept(ChangeSetState.Abandoned),
+            otherwise => reject(1),
+        },
+        Merged => match event {
+            PromoteEpoch => accept(ChangeSetState.EpochPromoted),
+            otherwise => reject(1),
+        },
+        otherwise => reject(0),
+    };
+}
+
+fn accept(next: ChangeSetState) -> (result: Transition) {
+    return Transition { accepted: true, next: next, reason: 0 };
+}
+
+fn reject(reason: i32) -> (result: Transition) {
+    return Transition { accepted: false, next: ChangeSetState.Draft, reason: reason };
+}
+
+enum DriftKind {
+    Clean, UndeclaredSurfaceChange, FingerprintDrift, StaleReference, FixtureMismatch,
+}
+
+record DriftObservation {
+    same_declared_version: bool,
+    fingerprint_matches: bool,
+    consumer_references_resolve: bool,
+    fixtures_match_declaration: bool,
+    surface_unchanged: bool,
+}
+
+fn assess_drift(observation: DriftObservation) -> (result: DriftKind) {
+    if observation.same_declared_version {
+        if !observation.surface_unchanged {
+            return DriftKind.UndeclaredSurfaceChange;
+        }
+        if !observation.fingerprint_matches {
+            return DriftKind.FingerprintDrift;
+        }
+    }
+    if !observation.consumer_references_resolve {
+        return DriftKind.StaleReference;
+    }
+    if !observation.fixtures_match_declaration {
+        return DriftKind.FixtureMismatch;
+    }
+    return DriftKind.Clean;
+}

@@ -76,20 +76,20 @@ fn satisfies(envelope: Envelope, bound: Version, candidate: Version) -> (result:
 // component bump is already breaking. A 0.0.x line treats any change as
 // breaking. This is the family's declared evolution rule until a successor
 // contract supersedes it.
-fn is_breaking_upgrade(previous: Version, next: Version) -> (result: bool) {
-    if previous.major != next.major {
+fn is_breaking_upgrade(previous: Version, successor: Version) -> (result: bool) {
+    if previous.major != successor.major {
         return true;
     }
     if previous.major > 0 {
         return false;
     }
-    if previous.minor != next.minor {
+    if previous.minor != successor.minor {
         return true;
     }
     if previous.minor > 0 {
         return false;
     }
-    if previous.patch != next.patch {
+    if previous.patch != successor.patch {
         return true;
     }
     return false;

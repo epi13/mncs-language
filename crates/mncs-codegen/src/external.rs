@@ -462,12 +462,3 @@ impl BackendAdapter for ExternalAdapter {
     }
 }
 
-pub fn external_adapters() -> Vec<ExternalAdapter> {
-    vec![
-        ExternalAdapter {
-            spec: &RISCV32_SPEC,
-        },
-        ExternalAdapter { spec: &EBPF_SPEC },
-        ExternalAdapter { spec: &PTX64_SPEC },
-    ]
-}

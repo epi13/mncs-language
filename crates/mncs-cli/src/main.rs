@@ -2786,7 +2786,7 @@ impl FileModuleResolver {
         let mut paths = vec![root.join(format!("{dotted}.mncs"))];
         let mut segments = module.split('.').peekable();
         if segments.peek() == Some(&"mncs") {
-            let rest = module.splitn(2, '.').nth(1).unwrap_or(module);
+            let rest = module.split_once('.').map(|(_, tail)| tail).unwrap_or(module);
             if !rest.is_empty() {
                 paths.push(root.join(format!("{}.mncs", rest.replace('.', "/"))));
             }
