@@ -8,7 +8,8 @@ mncs 0.6;
 // fields exist, and matching is exhaustive by construction.
 //
 // Realization envelope (2026-08): reference executors and research bytecode
-// realize sums fully; scalar backends refuse them explicitly.
+// realize sums fully; since canonical composite cells landed, C11, LLVM IR,
+// portable WASM, and Cranelift realize them identically as well.
 module mncs.core.result.v1;
 
 enum Result { Ok { value: i64 }, Err { reason: i64 } }
