@@ -71,6 +71,7 @@ pub fn backend_family_matrix() -> BackendFamilyMatrix {
                 "0.2".to_owned(),
                 "0.3".to_owned(),
                 "0.4".to_owned(),
+                "0.5".to_owned(),
             ],
             cre1: "untested_in_this_matrix".to_owned(),
             cre2: "untested_in_this_matrix".to_owned(),
