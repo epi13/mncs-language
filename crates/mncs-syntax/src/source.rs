@@ -264,6 +264,12 @@ pub enum TokenKind {
     Star,
     Slash,
     Percent,
+    PlusPercent,
+    MinusPercent,
+    StarPercent,
+    PlusPipe,
+    MinusPipe,
+    StarPipe,
     EqEq,
     NotEq,
     AndAnd,
@@ -432,6 +438,12 @@ pub enum AstBinaryOp {
     Mul,
     Div,
     Mod,
+    AddWrap,
+    SubWrap,
+    MulWrap,
+    AddSat,
+    SubSat,
+    MulSat,
     And,
     Or,
     Eq,
@@ -837,9 +849,39 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                 ')' => TokenKind::RightParen,
                 '{' => TokenKind::LeftBrace,
                 '}' => TokenKind::RightBrace,
-                '+' => TokenKind::Plus,
-                '-' => TokenKind::Minus,
-                '*' => TokenKind::Star,
+                '+' => {
+                    if source[offset..].starts_with('%') {
+                        offset += 1;
+                        TokenKind::PlusPercent
+                    } else if source[offset..].starts_with('|') {
+                        offset += 1;
+                        TokenKind::PlusPipe
+                    } else {
+                        TokenKind::Plus
+                    }
+                }
+                '-' => {
+                    if source[offset..].starts_with('%') {
+                        offset += 1;
+                        TokenKind::MinusPercent
+                    } else if source[offset..].starts_with('|') {
+                        offset += 1;
+                        TokenKind::MinusPipe
+                    } else {
+                        TokenKind::Minus
+                    }
+                }
+                '*' => {
+                    if source[offset..].starts_with('%') {
+                        offset += 1;
+                        TokenKind::StarPercent
+                    } else if source[offset..].starts_with('|') {
+                        offset += 1;
+                        TokenKind::StarPipe
+                    } else {
+                        TokenKind::Star
+                    }
+                }
                 '/' => TokenKind::Slash,
                 '%' => TokenKind::Percent,
                 '<' => TokenKind::Lt,
@@ -1779,6 +1821,27 @@ impl<'a> Parser<'a> {
             if precedence < minimum_precedence {
                 break;
             }
+            // Explicit arithmetic intents (`+% -% *%` wrapping, `+| -| *|`
+            // saturating) are Profile 0.6 features; earlier profiles fail
+            // closed with a precise diagnostic instead of silently binding
+            // the operator to default checked semantics.
+            if matches!(
+                op,
+                AstBinaryOp::AddWrap
+                    | AstBinaryOp::SubWrap
+                    | AstBinaryOp::MulWrap
+                    | AstBinaryOp::AddSat
+                    | AstBinaryOp::SubSat
+                    | AstBinaryOp::MulSat
+            ) && !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_6)
+            {
+                self.error(
+                    "MNP143",
+                    "explicit arithmetic intents require source profile 0.6 or later",
+                    vec![self.current_kind().unwrap_or(TokenKind::Unknown)],
+                );
+                return None;
+            }
             self.cursor += 1;
             let right = self.binary_expression(precedence + 1)?;
             let span = SourceSpan::covering(&self.envelope.text, left.span(), right.span());
@@ -2393,7 +2456,13 @@ fn binary_operator(kind: Option<TokenKind>) -> Option<(AstBinaryOp, u8)> {
         TokenKind::Ge => (AstBinaryOp::Ge, 4),
         TokenKind::Plus => (AstBinaryOp::Add, 5),
         TokenKind::Minus => (AstBinaryOp::Sub, 5),
+        TokenKind::PlusPercent => (AstBinaryOp::AddWrap, 5),
+        TokenKind::MinusPercent => (AstBinaryOp::SubWrap, 5),
+        TokenKind::PlusPipe => (AstBinaryOp::AddSat, 5),
+        TokenKind::MinusPipe => (AstBinaryOp::SubSat, 5),
         TokenKind::Star => (AstBinaryOp::Mul, 6),
+        TokenKind::StarPercent => (AstBinaryOp::MulWrap, 6),
+        TokenKind::StarPipe => (AstBinaryOp::MulSat, 6),
         TokenKind::Slash => (AstBinaryOp::Div, 6),
         TokenKind::Percent => (AstBinaryOp::Mod, 6),
         _ => return None,

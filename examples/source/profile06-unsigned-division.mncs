@@ -1,0 +1,7 @@
+mncs 0.6;
+
+module probe.unsign;
+
+fn half(a: u32, b: u32) -> (result: u32) {
+    return a / b;
+}

@@ -92,9 +92,13 @@ pub enum Instr {
     GlobalGet(u32),
     GlobalSet(u32),
     I32DivS,
+    I32DivU,
     I32RemS,
+    I32RemU,
     I64DivS,
+    I64DivU,
     I64RemS,
+    I64RemU,
     /// Lowering-time marker for the arena allocator call; never encoded.
     AllocCall,
 }
@@ -707,6 +711,17 @@ fn execute_raw(
                 }
                 Ok(left / right)
             })?,
+            // Unsigned division has no MIN / -1 overflow case; only a zero
+            // divisor fails, matching the reference executors.
+            Instr::I32DivU => bin_try_i32(&mut stack, |left, right| {
+                if right == 0 {
+                    return Err(trap(
+                        ExecutionStatus::RuntimeFailure,
+                        "backend trap: unsigned integer division by zero",
+                    ));
+                }
+                Ok((left as u32 / right as u32) as i32)
+            })?,
             Instr::I32RemS => bin_try_i32(&mut stack, |left, right| {
                 if right == 0 {
                     return Err(trap(
@@ -715,6 +730,15 @@ fn execute_raw(
                     ));
                 }
                 Ok(left.wrapping_rem(right))
+            })?,
+            Instr::I32RemU => bin_try_i32(&mut stack, |left, right| {
+                if right == 0 {
+                    return Err(trap(
+                        ExecutionStatus::RuntimeFailure,
+                        "backend trap: integer remainder by zero",
+                    ));
+                }
+                Ok((left as u32 % right as u32) as i32)
             })?,
             Instr::I64DivS => bin_try_i64(&mut stack, |left, right| {
                 if right == 0 || (left == i64::MIN && right == -1) {
@@ -725,6 +749,15 @@ fn execute_raw(
                 }
                 Ok(left / right)
             })?,
+            Instr::I64DivU => bin_try_i64(&mut stack, |left, right| {
+                if right == 0 {
+                    return Err(trap(
+                        ExecutionStatus::RuntimeFailure,
+                        "backend trap: unsigned integer division by zero",
+                    ));
+                }
+                Ok((left as u64 / right as u64) as i64)
+            })?,
             Instr::I64RemS => bin_try_i64(&mut stack, |left, right| {
                 if right == 0 {
                     return Err(trap(
@@ -733,6 +766,15 @@ fn execute_raw(
                     ));
                 }
                 Ok(left.wrapping_rem(right))
+            })?,
+            Instr::I64RemU => bin_try_i64(&mut stack, |left, right| {
+                if right == 0 {
+                    return Err(trap(
+                        ExecutionStatus::RuntimeFailure,
+                        "backend trap: integer remainder by zero",
+                    ));
+                }
+                Ok((left as u64 % right as u64) as i64)
             })?,
             Instr::AllocCall => {
                 return Err(trap(
@@ -1090,11 +1132,18 @@ fn read_slot(runtime: &Runtime, ty: &MarshalTy, address: i64) -> Result<Executio
                 ty: *integer,
             })
         }
-        MarshalTy::BareFinite { .. } => {
+        MarshalTy::BareFinite {
+            type_identity,
+            variants,
+        } => {
             let discriminant = runtime.load(address, 4)? as u32;
+            let variant_identity = variants
+                .get(&discriminant)
+                .cloned()
+                .unwrap_or_else(|| SemanticId("unresolved".to_owned()));
             Ok(ExecutionValue::Finite {
-                type_identity: SemanticId("unresolved".to_owned()),
-                variant_identity: SemanticId("unresolved".to_owned()),
+                type_identity: type_identity.clone(),
+                variant_identity,
                 discriminant,
                 payload: Vec::new(),
             })
@@ -1371,9 +1420,13 @@ fn encode_instr(out: &mut Vec<u8>, instr: &Instr) {
             encode_u32(out, *index);
         }
         Instr::I32DivS => out.push(0x6d),
+        Instr::I32DivU => out.push(0x6e),
         Instr::I32RemS => out.push(0x6f),
+        Instr::I32RemU => out.push(0x70),
         Instr::I64DivS => out.push(0x7f),
+        Instr::I64DivU => out.push(0x80),
         Instr::I64RemS => out.push(0x81),
+        Instr::I64RemU => out.push(0x82),
         Instr::AllocCall => unreachable!("AllocCall must be rewritten before encoding"),
     }
 }
@@ -1731,9 +1784,13 @@ fn decode_instr(payload: &[u8], cursor: usize) -> Result<(Instr, usize), WasmTra
             Instr::GlobalSet(index)
         }
         0x6d => Instr::I32DivS,
+        0x6e => Instr::I32DivU,
         0x6f => Instr::I32RemS,
+        0x70 => Instr::I32RemU,
         0x7f => Instr::I64DivS,
+        0x80 => Instr::I64DivU,
         0x81 => Instr::I64RemS,
+        0x82 => Instr::I64RemU,
         0xa7 => Instr::I32WrapI64,
         0xac => Instr::I64ExtendI32S,
         0xad => Instr::I64ExtendI32U,

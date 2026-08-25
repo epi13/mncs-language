@@ -129,7 +129,7 @@ pub fn cranelift_target() -> TargetContractRef {
             ),
             (
                 "integer".to_owned(),
-                "wrapping iadd/isub/imul; checked via i64 range tests".to_owned(),
+                "wrapping iadd/isub/imul; checked via i64 range tests; division guards zero divisor and signed MIN / -1 into the structured failure path; unsigned operands use udiv/urem".to_owned(),
             ),
             ("trap".to_owned(), "status=1".to_owned()),
             ("isa".to_owned(), host_triple().to_owned()),
@@ -155,7 +155,8 @@ pub fn cranelift_plan(selected_ssa: CompilerArtifactRef) -> TargetLoweringPlan {
             ),
             (
                 "checked".to_owned(),
-                "i64 range test then status=1".to_owned(),
+                "i64 range test then status=1; division guards zero divisor and signed MIN / -1"
+                    .to_owned(),
             ),
         ]),
         BTreeMap::from([
@@ -458,28 +459,41 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
             let rhs_n = names.value(rhs);
             let ty = clif_ty(dest.ty);
             if matches!(operator.as_str(), "div" | "mod") {
-                // Cranelift sdiv traps on zero and MIN / -1; srem traps on
-                // zero. That matches MNCS checked semantics; i32 division
-                // computes through i64 so traps remain well-defined.
-                let wide = format!("{} = sextend.{} {}", dest_n, "i64", lhs_n);
-                let _ = writeln!(out, "        {wide}");
-                let _ = writeln!(out, "        {dest_n}_x = sextend.i64 {rhs_n}");
-                let native = match (operator.as_str(), ty) {
-                    ("div", "i64") => "sdiv",
-                    ("mod", "i64") => "srem",
-                    ("div", _) => "sdiv",
-                    _ => "srem",
+                // Division never relies on native traps: a zero divisor and
+                // (for signed division) MIN / -1 are guarded into the shared
+                // structured-failure path, identical to the reference
+                // executors and to the JIT/AOT builders. Unsigned operands
+                // use the unsigned division forms.
+                let signed = matches!(dest.ty, ScalarTy::Int(integer) if integer.signed);
+                let bits = match dest.ty {
+                    ScalarTy::Int(integer) => integer.bits,
+                    _ => 32,
                 };
-                if ty == "i64" {
-                    let _ = writeln!(out, "        {dest_n} = {native} {lhs_n}, {rhs_n}");
-                } else {
-                    let _ = writeln!(
-                        out,
-                        "        {dest_n}_q = {}.i64 {dest_n}, {dest_n}_x",
-                        native
-                    );
-                    let _ = writeln!(out, "        {dest_n} = ireduce.i64 {dest_n}_q");
+                let (lhs_norm, rhs_norm) =
+                    emit_width_normalize(out, lhs_n, rhs_n, bits, signed, dest_n);
+                let _ = writeln!(out, "        {dest_n}_dz = icmp eq {rhs_norm}, 0");
+                let _ = writeln!(out, "        brnz {dest_n}_dz, fail_div_{dest_n}");
+                if operator == "div" && signed {
+                    let min = -(1_i128 << (bits - 1));
+                    let _ = writeln!(out, "        {dest_n}_m1 = icmp eq {rhs_norm}, -1");
+                    let _ = writeln!(out, "        {dest_n}_mn = icmp eq {lhs_norm}, {min}");
+                    let _ = writeln!(out, "        {dest_n}_ov = band {dest_n}_m1, {dest_n}_mn");
+                    let _ = writeln!(out, "        brnz {dest_n}_ov, fail_div_{dest_n}");
                 }
+                let native = match (operator.as_str(), signed) {
+                    ("div", false) => "udiv",
+                    ("mod", false) => "urem",
+                    ("mod", true) => "srem",
+                    _ => "sdiv",
+                };
+                let _ = writeln!(out, "        {dest_n} = {native} {lhs_norm}, {rhs_norm}");
+                let _ = writeln!(out, "        jump ok_div_{dest_n}");
+                let _ = writeln!(out, "    fail_div_{dest_n}:");
+                out.push_str("        v_bad = iconst.i32 1\n        v_z = iconst.i64 0\n");
+                out.push_str(
+                    "        store.i32 v_bad, st\n        store.i64 v_z, val\n        return\n",
+                );
+                let _ = writeln!(out, "    ok_div_{dest_n}:");
                 return;
             }
             if matches!(operator.as_str(), "and" | "or" | "xor") {
@@ -601,6 +615,36 @@ fn clif_ty(ty: ScalarTy) -> &'static str {
         ScalarTy::Int(integer) if integer.bits == 64 => "i64",
         _ => "i32",
     }
+}
+
+/// Emit width normalization for division operands in CLIF text: every value
+/// slot is i64, so narrow operands are canonicalized to their declared width
+/// (sign-extended for signed types, masked for unsigned) before the guards
+/// and the native division. Returns the normalized operand names.
+fn emit_width_normalize(
+    out: &mut String,
+    lhs_n: &str,
+    rhs_n: &str,
+    bits: u16,
+    signed: bool,
+    dest_n: &str,
+) -> (String, String) {
+    if bits >= 64 {
+        return (lhs_n.to_owned(), rhs_n.to_owned());
+    }
+    let (lhs_v, rhs_v) = (format!("{dest_n}_ln"), format!("{dest_n}_rn"));
+    if signed {
+        let shift = 64 - i64::from(bits);
+        let _ = writeln!(out, "        {lhs_v} = ishl_imm.i64 {lhs_n}, {shift}");
+        let _ = writeln!(out, "        {lhs_v} = sshr_imm.i64 {lhs_v}, {shift}");
+        let _ = writeln!(out, "        {rhs_v} = ishl_imm.i64 {rhs_n}, {shift}");
+        let _ = writeln!(out, "        {rhs_v} = sshr_imm.i64 {rhs_v}, {shift}");
+    } else {
+        let mask = (1_i128 << bits) - 1;
+        let _ = writeln!(out, "        {lhs_v} = band {lhs_n}, {mask}");
+        let _ = writeln!(out, "        {rhs_v} = band {rhs_n}, {mask}");
+    }
+    (lhs_v, rhs_v)
 }
 
 struct ClifNames {
@@ -950,13 +994,68 @@ where
                             let left = values[lhs];
                             let right = values[rhs];
                             if matches!(operator.as_str(), "div" | "mod") {
-                                // Cranelift sdiv/srem trap exactly like MNCS
-                                // checked division; the host maps traps to
-                                // runtime failures.
-                                let produced = if operator == "div" {
-                                    builder.ins().sdiv(left, right)
-                                } else {
-                                    builder.ins().srem(left, right)
+                                // Division never relies on native traps. A
+                                // zero divisor and, for signed division,
+                                // MIN / -1 branch to the structured failure
+                                // block; unsigned operands use the unsigned
+                                // division forms after width normalization.
+                                // This keeps JIT and AOT realizations
+                                // semantically identical to the reference
+                                // executors instead of killing the host
+                                // process on a hardware trap.
+                                let integer_ty = match dest.ty {
+                                    ScalarTy::Int(integer) => integer,
+                                    _ => mncs_model::IntegerType {
+                                        bits: 32,
+                                        signed: true,
+                                    },
+                                };
+                                let (left_n, right_n) = normalize_width(
+                                    &mut builder,
+                                    left,
+                                    right,
+                                    integer_ty.bits,
+                                    integer_ty.signed,
+                                );
+                                let zero = builder.ins().iconst(types::I64, 0);
+                                let dz = builder.ins().icmp(IntCC::Equal, right_n, zero);
+                                let cont = builder.create_block();
+                                builder.ins().brif(
+                                    dz,
+                                    fail,
+                                    &[] as &[BlockArg],
+                                    cont,
+                                    &[] as &[BlockArg],
+                                );
+                                builder.switch_to_block(cont);
+                                builder.seal_block(cont);
+                                if operator == "div" && integer_ty.signed {
+                                    let minus_one = builder.ins().iconst(types::I64, -1);
+                                    let min = if integer_ty.bits >= 64 {
+                                        i64::MIN
+                                    } else {
+                                        -(1_i64 << (integer_ty.bits - 1))
+                                    };
+                                    let min = builder.ins().iconst(types::I64, min);
+                                    let m1 = builder.ins().icmp(IntCC::Equal, right_n, minus_one);
+                                    let mn = builder.ins().icmp(IntCC::Equal, left_n, min);
+                                    let ov = builder.ins().band(m1, mn);
+                                    let cont = builder.create_block();
+                                    builder.ins().brif(
+                                        ov,
+                                        fail,
+                                        &[] as &[BlockArg],
+                                        cont,
+                                        &[] as &[BlockArg],
+                                    );
+                                    builder.switch_to_block(cont);
+                                    builder.seal_block(cont);
+                                }
+                                let produced = match (operator.as_str(), integer_ty.signed) {
+                                    ("div", false) => builder.ins().udiv(left_n, right_n),
+                                    ("mod", false) => builder.ins().urem(left_n, right_n),
+                                    ("mod", true) => builder.ins().srem(left_n, right_n),
+                                    _ => builder.ins().sdiv(left_n, right_n),
                                 };
                                 values.insert(dest.id.clone(), produced);
                                 continue;
@@ -1144,6 +1243,43 @@ where
     Ok(declared)
 }
 
+/// Canonicalize i64 value slots to their declared integer width before
+/// division: signed narrow types are sign-extended from their low bits,
+/// unsigned narrow types are masked, and 64-bit values pass through. This
+/// mirrors the reference executors' typed-slot behavior.
+fn normalize_width(
+    builder: &mut cranelift_frontend::FunctionBuilder<'_>,
+    left: cranelift_codegen::ir::Value,
+    right: cranelift_codegen::ir::Value,
+    bits: u16,
+    signed: bool,
+) -> (cranelift_codegen::ir::Value, cranelift_codegen::ir::Value) {
+    let left_n = normalize_one(builder, left, bits, signed);
+    let right_n = normalize_one(builder, right, bits, signed);
+    (left_n, right_n)
+}
+
+fn normalize_one(
+    builder: &mut cranelift_frontend::FunctionBuilder<'_>,
+    value: cranelift_codegen::ir::Value,
+    bits: u16,
+    signed: bool,
+) -> cranelift_codegen::ir::Value {
+    use cranelift_codegen::ir::types;
+    use cranelift_codegen::ir::InstBuilder;
+    if bits >= 64 {
+        return value;
+    }
+    if signed {
+        let shift = 64 - i64::from(bits);
+        let widened = builder.ins().ishl_imm(value, shift);
+        builder.ins().sshr_imm(widened, shift)
+    } else {
+        let mask = builder.ins().iconst(types::I64, (1_i64 << bits) - 1);
+        builder.ins().band(value, mask)
+    }
+}
+
 fn jit_scalar(
     scalar: &ScalarModule,
     function_name: &str,
@@ -1205,5 +1341,85 @@ fn jit_scalar(
         Ok((ExecutionStatus::Returned, i128::from(value)))
     } else {
         Ok((ExecutionStatus::RuntimeFailure, 0))
+    }
+}
+
+#[cfg(test)]
+mod guarded_division_tests {
+    use super::*;
+    use mncs_model::{ExecutionPolicy, ExecutionTarget, ExecutionValue, IntegerType};
+
+    fn div_program() -> Program {
+        Program::from_json(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/executable/checked-div.mncs.json"
+        )))
+        .unwrap()
+    }
+
+    fn request(function: &str, a: i128, b: i128, bits: u16, signed: bool) -> ExecutionRequest {
+        ExecutionRequest {
+            schema_version: mncs_model::EXECUTION_REQUEST_SCHEMA_VERSION.to_owned(),
+            target: ExecutionTarget {
+                module: "probe.div".to_owned(),
+                function: function.to_owned(),
+            },
+            arguments: vec![
+                ExecutionValue::Integer {
+                    value: a,
+                    ty: IntegerType { bits, signed },
+                },
+                ExecutionValue::Integer {
+                    value: b,
+                    ty: IntegerType { bits, signed },
+                },
+            ],
+            step_budget: 64,
+            policy: ExecutionPolicy::default(),
+        }
+    }
+
+    /// Where host policy allows JIT executable memory (as on the Linux and
+    /// Windows CI hosts), checked division must classify zero divisor and
+    /// MIN / -1 as structured runtime failures inside this process instead
+    /// of raising SIGFPE against the compiler. Hosts whose policy denies
+    /// executable memory skip honestly; their AOT realization is covered by
+    /// the backend-family integration tests.
+    #[test]
+    fn jit_guarded_division_never_traps_the_host_process() {
+        let program = div_program();
+        let ssa = program.lower_to_ssa().unwrap();
+        let names = vec!["checked_div".to_owned(), "checked_mod".to_owned()];
+        let scalar = lower_to_scalar(&program, &ssa, &names);
+        assert!(scalar.unsupported.is_empty(), "{:?}", scalar.unsupported);
+        let cases = [
+            ("checked_div", vec![84_i128, 4], true, 21),
+            ("checked_div", vec![-84, 4], true, -21),
+            ("checked_div", vec![5, 0], false, 0),
+            ("checked_div", vec![i64::MIN as i128, -1], false, 0),
+            ("checked_mod", vec![10, 3], true, 1),
+            ("checked_mod", vec![7, 0], false, 0),
+        ];
+        for (function, arguments, returns, expected) in cases {
+            let request = request(function, arguments[0], arguments[1], 64, true);
+            let outcome = jit_scalar(&scalar, function, &request);
+            match outcome {
+                Err(reason)
+                    if reason.contains("readable+executable")
+                        || reason.contains("executable memory") =>
+                {
+                    // JIT denied by host policy; AOT conformance covers it.
+                }
+                Err(reason) => panic!("unexpected JIT failure: {reason}"),
+                Ok((status, value)) => {
+                    if returns {
+                        assert_eq!(status, ExecutionStatus::Returned);
+                        assert_eq!(value, expected);
+                    } else {
+                        assert_eq!(status, ExecutionStatus::RuntimeFailure);
+                    }
+                }
+            }
+        }
     }
 }

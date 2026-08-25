@@ -1,0 +1,126 @@
+{
+ "schema_version": "0.1",
+ "name": "linked-module backend conformance",
+ "cases": [
+  {
+   "id": "evidence-classify-present",
+   "request": {
+    "schema_version": "0.1",
+    "target": {"module": "conf.linked.evidence", "function": "classify"},
+    "arguments": [
+     {"integer": {"value": 7, "type": {"bits": 64, "signed": true}}},
+     {"boolean": {"value": true}}
+    ],
+    "step_budget": 256
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:conf.linked.evidence::Reading::presence%3APresence%3Bvalue%3Ai64%3B",
+      "name": "Reading",
+      "fields": [
+       ["presence", {"finite": {"type_identity": "mncs:0.2:finite-type:conf.linked.evidence::Presence", "variant_identity": "mncs:0.2:finite-variant:conf.linked.evidence::Presence::PRESENT", "discriminant": 0}}],
+       ["value", {"integer": {"value": 7, "type": {"bits": 64, "signed": true}}}]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "evidence-classify-absent",
+   "request": {
+    "schema_version": "0.1",
+    "target": {"module": "conf.linked.evidence", "function": "classify"},
+    "arguments": [
+     {"integer": {"value": 9, "type": {"bits": 64, "signed": true}}},
+     {"boolean": {"value": false}}
+    ],
+    "step_budget": 256
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:conf.linked.evidence::Reading::presence%3APresence%3Bvalue%3Ai64%3B",
+      "name": "Reading",
+      "fields": [
+       ["presence", {"finite": {"type_identity": "mncs:0.2:finite-type:conf.linked.evidence::Presence", "variant_identity": "mncs:0.2:finite-variant:conf.linked.evidence::Presence::ABSENT", "discriminant": 1}}],
+       ["value", {"integer": {"value": 0, "type": {"bits": 64, "signed": true}}}]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "root-summarize-both-present",
+   "request": {
+    "schema_version": "0.1",
+    "target": {"module": "conf.linked.root", "function": "summarize"},
+    "arguments": [
+     {"boolean": {"value": true}},
+     {"boolean": {"value": true}}
+    ],
+    "step_budget": 512
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:conf.linked.evidence::Reading::presence%3APresence%3Bvalue%3Ai64%3B",
+      "name": "Reading",
+      "fields": [
+       ["presence", {"finite": {"type_identity": "mncs:0.2:finite-type:conf.linked.evidence::Presence", "variant_identity": "mncs:0.2:finite-variant:conf.linked.evidence::Presence::PRESENT", "discriminant": 0}}],
+       ["value", {"integer": {"value": 18, "type": {"bits": 64, "signed": true}}}]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "root-summarize-left-only",
+   "request": {
+    "schema_version": "0.1",
+    "target": {"module": "conf.linked.root", "function": "summarize"},
+    "arguments": [
+     {"boolean": {"value": true}},
+     {"boolean": {"value": false}}
+    ],
+    "step_budget": 512
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:conf.linked.evidence::Reading::presence%3APresence%3Bvalue%3Ai64%3B",
+      "name": "Reading",
+      "fields": [
+       ["presence", {"finite": {"type_identity": "mncs:0.2:finite-type:conf.linked.evidence::Presence", "variant_identity": "mncs:0.2:finite-variant:conf.linked.evidence::Presence::PRESENT", "discriminant": 0}}],
+       ["value", {"integer": {"value": 7, "type": {"bits": 64, "signed": true}}}]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "root-summarize-none",
+   "request": {
+    "schema_version": "0.1",
+    "target": {"module": "conf.linked.root", "function": "summarize"},
+    "arguments": [
+     {"boolean": {"value": false}},
+     {"boolean": {"value": false}}
+    ],
+    "step_budget": 512
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:conf.linked.evidence::Reading::presence%3APresence%3Bvalue%3Ai64%3B",
+      "name": "Reading",
+      "fields": [
+       ["presence", {"finite": {"type_identity": "mncs:0.2:finite-type:conf.linked.evidence::Presence", "variant_identity": "mncs:0.2:finite-variant:conf.linked.evidence::Presence::ABSENT", "discriminant": 1}}],
+       ["value", {"integer": {"value": 0, "type": {"bits": 64, "signed": true}}}]
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

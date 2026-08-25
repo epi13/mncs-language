@@ -481,6 +481,8 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 // Division by zero is undefined behavior in C, so every
                 // intent guards it explicitly and fails exactly like the
                 // reference executors; checked division also guards MIN/-1.
+                // Unsigned operands divide in their own modular domain, not
+                // through the signed C variable type.
                 let slash = if operator == "div" { "/" } else { "%" };
                 let overflow_guard = if operator == "div" && signed {
                     format!(
@@ -489,9 +491,21 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 } else {
                     String::new()
                 };
+                let unsigned_cast = |name: &str| {
+                    if bits >= 64 {
+                        format!("(uint64_t){name}")
+                    } else {
+                        format!("(uint32_t){name}")
+                    }
+                };
+                let quotient = if signed {
+                    format!("{lhs_n} {slash} {rhs_n}")
+                } else {
+                    format!("{} {slash} {}", unsigned_cast(lhs_n), unsigned_cast(rhs_n))
+                };
                 let _ = writeln!(
                     out,
-                    "      if ({rhs_n} == 0) {{ *mncs_status = 1; *mncs_value = 0; return; }} {overflow_guard}{dest_n} = ({}){lhs_n} {slash} {rhs_n};",
+                    "      if ({rhs_n} == 0) {{ *mncs_status = 1; *mncs_value = 0; return; }} {overflow_guard}{dest_n} = ({}){quotient};",
                     c_type(dest.ty)
                 );
                 return;

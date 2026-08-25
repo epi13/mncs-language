@@ -5,6 +5,17 @@ was exercised on this host during this run; host-dependent limits are named as
 such. Nothing here is production-readiness, universal equivalence, or a claim
 that external tool success constitutes semantic proof.
 
+> **Correction (2026-08-25, stabilization tranche):** two claims in this
+> record did not survive CI and were fixed in
+> `docs/development-evidence/backend-family-stabilization-2026-08.md`.
+> First, Cranelift checked division relied on native `sdiv`/`srem` hardware
+> traps; that only appeared safe on hosts where JIT executable memory was
+> denied (AOT child-process route) and killed the CLI under working JIT.
+> Second, the external-target "validation" spawned `llvm-readobj` without
+> inspecting the artifact; validation now parses the emitted bytes directly,
+> and unsigned division was additionally found miscompiled on C11 and WASM.
+> See the stabilization record for the corrected behavior and evidence.
+
 ## Starting condition
 
 `main` at `7fc73d9` (Ox Alpha Profile 0.6 + core library tranche, squashed)

@@ -36,6 +36,33 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install LLVM toolchain for external-target backends (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          if ! command -v llc >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends llvm
+          fi
+          llc --version | head -2
+      - name: Install LLVM toolchain for external-target backends (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command llc -ErrorAction SilentlyContinue)) {
+            choco install llvm -y --no-progress
+          }
+          $llc = Get-Command llc -ErrorAction SilentlyContinue
+          if (-not $llc) {
+            $candidates = Get-ChildItem "C:\Program Files\LLVM\bin\llc.exe" -ErrorAction SilentlyContinue
+            if ($candidates) {
+              Add-Content $env:GITHUB_PATH "C:\Program Files\LLVM\bin"
+              exit 0
+            }
+            Write-Host "::warning::llc unavailable; external-target tests will assert structured refusals"
+          } else {
+            llc --version | Select-Object -First 2
+          }
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable

@@ -1,0 +1,18 @@
+mncs 0.6;
+
+// Shared verdict vocabulary for the multi-module backend-conformance probe.
+module conf.linked.evidence;
+
+enum Presence { PRESENT, ABSENT }
+
+record Reading {
+    value: i64,
+    presence: Presence,
+}
+
+fn classify(value: i64, present: bool) -> (reading: Reading) {
+    if present {
+        return Reading { value: value, presence: Presence.PRESENT };
+    }
+    return Reading { value: 0, presence: Presence.ABSENT };
+}
