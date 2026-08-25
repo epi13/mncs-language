@@ -1699,3 +1699,28 @@ fn backend_family_matrix_declares_profile_05_support() {
         );
     }
 }
+
+#[test]
+fn backend_family_matrix_declares_profile_05_support() {
+    // Regression: the matrix hard-coded 0.1..0.4 while Profile 0.5 sources
+    // elaborate and execute; the declaration must not lag the adapters.
+    let output = binary()
+        .args(["experiment", "matrix"])
+        .output()
+        .expect("run experiment matrix");
+    assert!(output.status.success());
+    let matrix: Value = serde_json::from_slice(&output.stdout).expect("matrix JSON");
+    for backend in matrix["backends"].as_array().unwrap() {
+        let profiles = backend["supported_source_profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert!(
+            profiles.iter().any(|profile| profile == "0.5"),
+            "backend {} does not declare Profile 0.5: {profiles:?}",
+            backend["backend"]
+        );
+    }
+}
