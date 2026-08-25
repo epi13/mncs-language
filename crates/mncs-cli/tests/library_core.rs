@@ -193,3 +193,21 @@ fn wrong_status_mutant_fails_on_the_unknown_unknown_cell() {
         .collect();
     assert_eq!(failed, vec!["dominate-unknown-unknown"]);
 }
+
+/// mncs.core.result: the standard Result shape with real reason payloads must
+/// execute end to end on the bytecode realization; the overall status stays
+/// UNKNOWN because the fixture uses checked arithmetic (honest obligations).
+#[test]
+fn core_result_module_executes_payload_sums_on_bytecode() {
+    let (_, result, _) = run_experiment(
+        &library("core/result.mncs"),
+        "mncs-research-bytecode",
+        &example("execution/library-core-result-corpus.json"),
+    );
+    assert_eq!(result["status"], "UNKNOWN", "{:#?}", result["cases"]);
+    let cases = result["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 8);
+    assert!(cases
+        .iter()
+        .all(|case_| case_["status"] == "returned" && case_["expectation_met"] == true));
+}

@@ -750,7 +750,7 @@ fn validate_operation(
         } => {
             if !matches!(
                 operator.as_str(),
-                "add" | "sub" | "mul" | "and" | "or" | "xor"
+                "add" | "sub" | "mul" | "div" | "mod" | "and" | "or" | "xor"
             ) {
                 errors.push(body_diagnostic(
                     "MNB015",

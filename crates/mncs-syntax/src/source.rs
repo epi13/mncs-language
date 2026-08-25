@@ -242,6 +242,8 @@ pub enum TokenKind {
     Plus,
     Minus,
     Star,
+    Slash,
+    Percent,
     EqEq,
     NotEq,
     Lt,
@@ -405,6 +407,8 @@ pub enum AstBinaryOp {
     Add,
     Sub,
     Mul,
+    Div,
+    Mod,
     Eq,
     Ne,
     Lt,
@@ -487,9 +491,12 @@ pub struct AstMatchArm {
     pub variant: SpannedText,
     /// Payload field bindings (`Variant { field: binding }` or the shorthand
     /// `Variant { field }`). Every payload field of the matched variant must
-    /// be bound exactly once.
+    /// be bound exactly once unless the wildcard `{ .. }` ignores the payload.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bindings: Vec<(SpannedText, SpannedText)>,
+    /// Set by the `{ .. }` wildcard: the payload is carried but not observed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ignore_payload: bool,
     pub value: AstExpr,
     pub span: SourceSpan,
 }
@@ -789,6 +796,8 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                 '+' => TokenKind::Plus,
                 '-' => TokenKind::Minus,
                 '*' => TokenKind::Star,
+                '/' => TokenKind::Slash,
+                '%' => TokenKind::Percent,
                 '<' => TokenKind::Lt,
                 '>' => TokenKind::Gt,
                 '=' => TokenKind::Equal,
@@ -2015,13 +2024,19 @@ impl<'a> Parser<'a> {
                 )?;
             }
             // Payload bindings: `VARIANT { field: binding }` with the
-            // `{ field }` shorthand. Every payload field must be bound.
-            // In arm-pattern position a '{' can only open bindings.
+            // `{ field }` shorthand, or the wildcard `{ .. }` which ignores
+            // the whole payload. In arm-pattern position a '{' can only open
+            // bindings.
             let mut bindings = Vec::new();
+            let mut ignore_payload = false;
             if self.current_kind() == Some(TokenKind::LeftBrace)
                 && matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_6)
             {
                 self.cursor += 1;
+                if self.current_kind() == Some(TokenKind::DotDot) {
+                    self.cursor += 1;
+                    ignore_payload = true;
+                }
                 while self.current_kind() == Some(TokenKind::Identifier) {
                     let Some(field_name) = self.spanned(
                         TokenKind::Identifier,
@@ -2063,6 +2078,7 @@ impl<'a> Parser<'a> {
                 type_name,
                 variant,
                 bindings,
+                ignore_payload,
                 value: arm_value,
                 span,
             });
@@ -2318,6 +2334,8 @@ fn binary_operator(kind: Option<TokenKind>) -> Option<(AstBinaryOp, u8)> {
         TokenKind::Plus => (AstBinaryOp::Add, 3),
         TokenKind::Minus => (AstBinaryOp::Sub, 3),
         TokenKind::Star => (AstBinaryOp::Mul, 4),
+        TokenKind::Slash => (AstBinaryOp::Div, 4),
+        TokenKind::Percent => (AstBinaryOp::Mod, 4),
         _ => return None,
     })
 }

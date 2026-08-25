@@ -1,0 +1,47 @@
+mncs 0.6;
+
+// mncs.core.result — the standard Result shape with a real reason payload.
+//
+// Before Profile 0.6, result-with-reason shapes degraded into wide records
+// with placeholder fields. This module defines the authoritative logical sum:
+// Ok carries the produced value; Err carries a reason code. No placeholder
+// fields exist, and matching is exhaustive by construction.
+//
+// Realization envelope (2026-08): reference executors and research bytecode
+// realize sums fully; scalar backends refuse them explicitly.
+module mncs.core.result.v1;
+
+enum Result { Ok { value: i64 }, Err { reason: i64 } }
+
+record Gate { floor: i64 }
+
+fn divide(numerator: i64, denominator: i64) -> (result: Result) {
+    if denominator == 0 {
+        return Result.Err { reason: 1 };
+    }
+    return Result.Ok { value: numerator / denominator };
+}
+
+fn bounded_divide(numerator: i64, denominator: i64, gate: Gate) -> (result: Result) {
+    if numerator < gate.floor {
+        return Result.Err { reason: 2 };
+    }
+    return divide(numerator, denominator);
+}
+
+// Reason codes are part of the contract: 1 = division by zero,
+// 2 = numerator below the required floor. Matching must stay exhaustive so a
+// new reason variant can never be silently dropped.
+fn reason_of(result: Result) -> (result_code: i64) {
+    return match result {
+        Result.Err { reason } => reason,
+        Ok { .. } => 0,
+    };
+}
+
+fn value_or(result: Result, fallback: i64) -> (result: i64) {
+    return match result {
+        Ok { value } => value,
+        Err { .. } => fallback,
+    };
+}

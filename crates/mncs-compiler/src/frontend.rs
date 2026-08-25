@@ -2188,7 +2188,7 @@ impl<'a> BodyBuilder<'a> {
                             expected_field,
                         ));
                     }
-                    if bindings.len() != variant.payload.len() {
+                    if !arm.ignore_payload && bindings.len() != variant.payload.len() {
                         let supplied: BTreeSet<_> =
                             bindings.iter().map(|(field, _, _)| field.clone()).collect();
                         for field in &variant.payload {
@@ -2593,7 +2593,11 @@ impl<'a> BodyBuilder<'a> {
                 }
                 let id = self.new_value("v");
                 let (kind, result_ty) = match op {
-                    AstBinaryOp::Add | AstBinaryOp::Sub | AstBinaryOp::Mul => {
+                    AstBinaryOp::Add
+                    | AstBinaryOp::Sub
+                    | AstBinaryOp::Mul
+                    | AstBinaryOp::Div
+                    | AstBinaryOp::Mod => {
                         let BodyType::Integer(operand_type) = left_value.ty else {
                             diagnostics.push(elaboration_diagnostic(
                                 "MNE120",
@@ -2605,6 +2609,9 @@ impl<'a> BodyBuilder<'a> {
                         let operator = match op {
                             AstBinaryOp::Add => "add",
                             AstBinaryOp::Sub => "sub",
+                            AstBinaryOp::Mul => "mul",
+                            AstBinaryOp::Div => "div",
+                            AstBinaryOp::Mod => "mod",
                             _ => "mul",
                         };
                         (

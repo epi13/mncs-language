@@ -1140,7 +1140,7 @@ pub(crate) fn compare_integers(
 }
 
 pub(crate) fn integer_operator_supported(operator: &str, intent: ArithmeticIntent) -> bool {
-    matches!(operator, "add" | "sub" | "mul")
+    matches!(operator, "add" | "sub" | "mul" | "div" | "mod")
         || (matches!(operator, "and" | "or" | "xor")
             && matches!(intent, ArithmeticIntent::Wrapping))
 }

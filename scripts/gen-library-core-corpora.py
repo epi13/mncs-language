@@ -295,6 +295,44 @@ def profile06_payload_cases():
     ]
 
 
+
+
+RESULT = "mncs.core.result.v1"
+
+
+def i64(value):
+    return integer(value, bits=64)
+
+
+def result_value(variant, discriminant, payload=None):
+    value = {
+        "type_identity": f"mncs:0.2:finite-type:{RESULT}::Result",
+        "variant_identity": f"mncs:0.2:finite-variant:{RESULT}::Result::{variant}",
+        "discriminant": discriminant,
+    }
+    if payload is not None:
+        value["payload"] = [[name, i64(number)] for name, number in sorted(payload)]
+    return {"finite": value}
+
+
+def gate64(floor):
+    return record(RESULT, "Gate", [("floor", "i64")], {"floor": i64(floor)})
+
+
+def result_cases():
+    cases = [
+        case("divide-ok", RESULT, "divide", [i64(84), i64(4)], result_value("Ok", 0, [("value", 21)])),
+        case("divide-zero", RESULT, "divide", [i64(5), i64(0)], result_value("Err", 1, [("reason", 1)])),
+        case("bounded-ok", RESULT, "bounded_divide", [i64(100), i64(5), gate64(10)], result_value("Ok", 0, [("value", 20)])),
+        case("bounded-below-floor", RESULT, "bounded_divide", [i64(3), i64(5), gate64(10)], result_value("Err", 1, [("reason", 2)])),
+        case("value-or-ok", RESULT, "value_or", [result_value("Ok", 0, [("value", 7)]), i64(-1)], i64(7)),
+        case("value-or-err", RESULT, "value_or", [result_value("Err", 1, [("reason", 2)]), i64(-1)], i64(-1)),
+        case("reason-of-ok", RESULT, "reason_of", [result_value("Ok", 0, [("value", 9)])], i64(0)),
+        case("reason-of-err", RESULT, "reason_of", [result_value("Err", 1, [("reason", 2)])], i64(2)),
+    ]
+    return cases
+
+
 def main():
     emit("library-core-status-corpus.json", status_cases())
     emit("library-core-logic-corpus.json", logic_cases())
@@ -302,6 +340,7 @@ def main():
     emit("library-core-ravel-differential-corpus.json", ravel_differential_cases())
     emit("library-core-status-wrong-corpus.json", status_wrong_cases())
     emit("profile06-payload-sums-corpus.json", profile06_payload_cases())
+    emit("library-core-result-corpus.json", result_cases())
 
 
 if __name__ == "__main__":
