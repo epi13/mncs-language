@@ -1,0 +1,21 @@
+mncs 0.5;
+
+// Deliberately wrong library mutant (negative fixture): combining UNKNOWN
+// with UNKNOWN yields PASS, laundering an undecided claim into a decided one.
+// The corpus encodes the authoritative lattice; this module must FAIL the
+// (unknown, unknown) case and therefore the whole experiment.
+module examples.library_core.status_wrong;
+
+enum Status { PASS, FAIL, UNKNOWN }
+
+fn dominate(left: Status, right: Status) -> (result: Status) {
+    return match left {
+        PASS => right,
+        FAIL => Status.FAIL,
+        UNKNOWN => match right {
+            PASS => Status.UNKNOWN,
+            FAIL => Status.FAIL,
+            UNKNOWN => Status.PASS,
+        },
+    };
+}

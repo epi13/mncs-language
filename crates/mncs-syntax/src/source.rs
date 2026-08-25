@@ -1943,16 +1943,14 @@ impl<'a> Parser<'a> {
     }
 
     fn qualified_name(&mut self) -> Option<SpannedText> {
-        let first = self.spanned(TokenKind::Identifier, "MNP030", "expected module name")?;
+        let first = self.name_segment("MNP030", "expected module name")?;
         let mut text = first.text.clone();
         let mut end = first.span;
         while self.current_kind() == Some(TokenKind::Dot) {
             self.cursor += 1;
-            let Some(segment) = self.spanned(
-                TokenKind::Identifier,
-                "MNP031",
-                "expected module name segment after '.'",
-            ) else {
+            let Some(segment) =
+                self.name_segment("MNP031", "expected module name segment after '.'")
+            else {
                 break;
             };
             text.push('.');
@@ -1963,6 +1961,27 @@ impl<'a> Parser<'a> {
             text,
             span: SourceSpan::covering(&self.envelope.text, first.span, end),
         })
+    }
+
+    /// One dotted-name segment. The header keyword `mncs` is accepted here so
+    /// standard-library modules can be named `mncs.core.*`; no earlier profile
+    /// admitted such names, so this is purely additive.
+    fn name_segment(&mut self, code: &str, message: &str) -> Option<SpannedText> {
+        match self.current_kind() {
+            Some(TokenKind::Identifier) | Some(TokenKind::MncsKeyword) => {}
+            _ => {
+                self.error(code, message, vec![TokenKind::Identifier]);
+                return None;
+            }
+        }
+        let index = self.significant[self.cursor];
+        let token = &self.tokens[index];
+        let segment = SpannedText {
+            text: token.text.clone(),
+            span: token.span,
+        };
+        self.cursor += 1;
+        Some(segment)
     }
 
     fn spanned(&mut self, kind: TokenKind, code: &str, message: &str) -> Option<SpannedText> {

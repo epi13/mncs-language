@@ -1,0 +1,330 @@
+{
+ "schema_version": "0.1",
+ "name": "library-core-status-wrong",
+ "cases": [
+  {
+   "id": "dominate-pass-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.library_core.status_wrong",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::PASS",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+      "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::PASS",
+      "discriminant": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "dominate-pass-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.library_core.status_wrong",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::PASS",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::FAIL",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+      "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "dominate-pass-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.library_core.status_wrong",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::PASS",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+      "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "dominate-fail-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.library_core.status_wrong",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::FAIL",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+      "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "dominate-fail-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.library_core.status_wrong",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::FAIL",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::FAIL",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+      "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "dominate-fail-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.library_core.status_wrong",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::FAIL",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+      "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "dominate-unknown-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.library_core.status_wrong",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+      "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "dominate-unknown-fail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.library_core.status_wrong",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::FAIL",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+      "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "dominate-unknown-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.library_core.status_wrong",
+     "function": "dominate"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+       "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:examples.library_core.status_wrong::Status",
+      "variant_identity": "mncs:0.2:finite-variant:examples.library_core.status_wrong::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  }
+ ]
+}
