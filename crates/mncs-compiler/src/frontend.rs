@@ -405,13 +405,19 @@ pub fn elaborate_program_with_resolver(
     let mut diagnostics = Vec::new();
     let mut resolutions = Vec::new();
     let mut elaborated = BTreeMap::new();
+    let mut declaration_spans = BTreeMap::new();
     let mut visiting = BTreeSet::new();
-    if let Err(mut errors) = elaborate_import_closure(ast, resolver, &mut elaborated, &mut visiting)
-    {
+    if let Err(mut errors) = elaborate_import_closure(
+        ast,
+        resolver,
+        &mut elaborated,
+        &mut declaration_spans,
+        &mut visiting,
+    ) {
         diagnostics.append(&mut errors);
         return (Err(diagnostics), resolutions);
     }
-    match link_module_with_closure(ast, &elaborated, &mut resolutions) {
+    match link_module_with_closure(ast, &elaborated, &declaration_spans, &mut resolutions) {
         Ok(program) => (Ok(program), resolutions),
         Err(mut errors) => {
             diagnostics.append(&mut errors);
@@ -423,6 +429,7 @@ pub fn elaborate_program_with_resolver(
 #[derive(Debug, Clone)]
 struct ImportedModule {
     program: Program,
+    declarations: DeclarationSpans,
 }
 
 #[derive(Default)]
@@ -433,6 +440,7 @@ struct MergedContext {
     imported_finite_types: Vec<FiniteType>,
     imported_record_types: Vec<RecordType>,
     imported_functions: Vec<Function>,
+    imported_declarations: DeclarationSpans,
     finite_type_names: BTreeSet<String>,
     record_type_names: BTreeSet<String>,
     function_names: BTreeSet<String>,
@@ -445,12 +453,14 @@ fn elaborate_import_closure(
     ast: &AbstractSyntaxTree,
     resolver: &dyn ModuleResolver,
     elaborated: &mut BTreeMap<String, Program>,
+    declaration_spans: &mut BTreeMap<String, DeclarationSpans>,
     visiting: &mut BTreeSet<String>,
 ) -> Result<(), Vec<SourceDiagnostic>> {
     let name = ast.module.text.clone();
     if elaborated.contains_key(&name) {
         return Ok(());
     }
+    declaration_spans.insert(name.clone(), DeclarationSpans::from_ast(ast));
     if !visiting.insert(name.clone()) {
         return Err(vec![elaboration_diagnostic(
             "MNE171",
@@ -491,9 +501,19 @@ fn elaborate_import_closure(
                 use_decl.module.span,
             )]);
         };
-        elaborate_import_closure(&dependency_ast, resolver, elaborated, visiting)?;
-        let dependency_program =
-            link_module_with_closure(&dependency_ast, elaborated, &mut Vec::new());
+        elaborate_import_closure(
+            &dependency_ast,
+            resolver,
+            elaborated,
+            declaration_spans,
+            visiting,
+        )?;
+        let dependency_program = link_module_with_closure(
+            &dependency_ast,
+            elaborated,
+            declaration_spans,
+            &mut Vec::new(),
+        );
         let dependency_program = dependency_program.map_err(|errors| {
             vec![elaboration_diagnostic(
                 "MNE172",
@@ -518,6 +538,7 @@ fn elaborate_import_closure(
 fn link_module_with_closure(
     ast: &AbstractSyntaxTree,
     elaborated: &BTreeMap<String, Program>,
+    declaration_spans: &BTreeMap<String, DeclarationSpans>,
     resolutions: &mut Vec<NameResolution>,
 ) -> Result<Program, Vec<SourceDiagnostic>> {
     let mut diagnostics = Vec::new();
@@ -537,6 +558,7 @@ fn link_module_with_closure(
         match elaborated.get(&name) {
             Some(program) => imported.push(ImportedModule {
                 program: program.clone(),
+                declarations: declaration_spans.get(&name).cloned().unwrap_or_default(),
             }),
             None => diagnostics.push(elaboration_diagnostic(
                 "MNE173",
@@ -588,6 +610,9 @@ fn merge_imported_declarations(
     // re-export and binds once. Only a name conflict between DIFFERENT
     // identities fails closed.
     for module in imported {
+        context
+            .imported_declarations
+            .merge_missing(&module.declarations);
         for finite_type in &module.program.finite_types {
             // A local declaration sharing a name with an import is always a
             // collision; the module declared both under one namespace.
@@ -805,7 +830,8 @@ fn elaborate_linked_module(
         }
     }
 
-    let declarations = DeclarationSpans::from_ast(ast);
+    let mut declarations = DeclarationSpans::from_ast(ast);
+    declarations.merge_missing(&context.imported_declarations);
     record_annotation_type_resolutions(ast, &declarations, resolutions);
     let declared_finite_names: BTreeSet<String> = ast
         .finite_types
@@ -1092,6 +1118,24 @@ impl DeclarationSpans {
         }
         declarations
     }
+
+    fn merge_missing(&mut self, imported: &Self) {
+        for (name, span) in &imported.functions {
+            self.functions.entry(name.clone()).or_insert(*span);
+        }
+        for (name, span) in &imported.finite_types {
+            self.finite_types.entry(name.clone()).or_insert(*span);
+        }
+        for (name, span) in &imported.finite_variants {
+            self.finite_variants.entry(name.clone()).or_insert(*span);
+        }
+        for (name, span) in &imported.record_types {
+            self.record_types.entry(name.clone()).or_insert(*span);
+        }
+        for (name, span) in &imported.record_fields {
+            self.record_fields.entry(name.clone()).or_insert(*span);
+        }
+    }
 }
 
 /// Record type-annotation occurrences (parameter, output, binding, and carried
@@ -1104,54 +1148,45 @@ fn record_annotation_type_resolutions(
 ) {
     for function in &ast.functions {
         for parameter in function.inputs.iter().chain(&function.outputs) {
-            record_annotation(&parameter.value_type, ast, declarations, resolutions);
+            record_annotation(&parameter.value_type, declarations, resolutions);
         }
-        record_annotation_block(&function.body.statements, ast, declarations, resolutions);
+        record_annotation_block(&function.body.statements, declarations, resolutions);
     }
 }
 
 fn record_annotation_block(
     statements: &[AstStmt],
-    ast: &AbstractSyntaxTree,
     declarations: &DeclarationSpans,
     resolutions: &mut Vec<NameResolution>,
 ) {
     for statement in statements {
         match statement {
             AstStmt::Let { value_type, .. } => {
-                record_annotation(value_type, ast, declarations, resolutions);
+                record_annotation(value_type, declarations, resolutions);
             }
             AstStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                record_annotation_block(then_body, ast, declarations, resolutions);
-                record_annotation_block(else_body, ast, declarations, resolutions);
+                record_annotation_block(then_body, declarations, resolutions);
+                record_annotation_block(else_body, declarations, resolutions);
             }
             AstStmt::BoundedIteration {
                 state_type, body, ..
             } => {
-                record_annotation(state_type, ast, declarations, resolutions);
-                record_annotation_block(body, ast, declarations, resolutions);
+                record_annotation(state_type, declarations, resolutions);
+                record_annotation_block(body, declarations, resolutions);
             }
             AstStmt::Fail { .. } | AstStmt::Return { .. } => {}
         }
     }
 }
 
-fn annotation_kind(name: &str, ast: &AbstractSyntaxTree) -> Option<ResolvedNameKind> {
-    if ast
-        .finite_types
-        .iter()
-        .any(|declared| declared.name.text == name)
-    {
+fn annotation_kind(name: &str, declarations: &DeclarationSpans) -> Option<ResolvedNameKind> {
+    if declarations.finite_types.contains_key(name) {
         Some(ResolvedNameKind::FiniteType)
-    } else if ast
-        .record_types
-        .iter()
-        .any(|declared| declared.name.text == name)
-    {
+    } else if declarations.record_types.contains_key(name) {
         Some(ResolvedNameKind::RecordType)
     } else {
         None
@@ -1160,11 +1195,10 @@ fn annotation_kind(name: &str, ast: &AbstractSyntaxTree) -> Option<ResolvedNameK
 
 fn record_annotation(
     name: &SpannedText,
-    ast: &AbstractSyntaxTree,
     declarations: &DeclarationSpans,
     resolutions: &mut Vec<NameResolution>,
 ) {
-    let Some(kind) = annotation_kind(&name.text, ast) else {
+    let Some(kind) = annotation_kind(&name.text, declarations) else {
         return;
     };
     let declaration = match kind {

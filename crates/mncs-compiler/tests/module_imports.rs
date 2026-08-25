@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use mncs_compiler::{elaborate_program_with_resolver, ModuleResolver, NullResolver};
+use mncs_compiler::{
+    elaborate_program_with_resolver, ModuleResolver, NullResolver, ReferenceCompiler,
+    ResolvedNameKind,
+};
 use mncs_syntax::{parse, SourceArtifactKind, SourceEnvelope};
 
 #[derive(Default)]
@@ -206,6 +209,34 @@ fn evaluate(v: Local) -> (r: Local) { return v; }
     )
     .unwrap_err();
     assert!(errors.contains(&"MNE176".to_owned()), "got {errors:?}");
+}
+
+#[test]
+fn imported_name_resolutions_retain_the_declaring_source_span() {
+    let resolver = MapResolver::default().with(
+        "lib.evidence",
+        "mncs 0.6;\nmodule lib.evidence;\nfn demote(value: i64) -> (result: i64) { return value; }\n",
+    );
+    let source = "mncs 0.6;\nmodule app.study;\nuse lib.evidence;\nfn soften(value: i64) -> (result: i64) { return demote(value); }\n";
+    let root = resolver.envelope("root", source.to_owned());
+    let dependency = resolver
+        .modules
+        .get("lib.evidence")
+        .expect("dependency text");
+    let dependency_ast = parse(&resolver.envelope("lib.evidence", dependency.clone()))
+        .ast
+        .expect("dependency parses");
+    let declaration = dependency_ast.functions[0].name.span;
+    let front_end = ReferenceCompiler::default().front_end_with_resolver(root, &resolver);
+    let demote_offset = source.find("demote").expect("call site");
+    let resolution = front_end
+        .name_resolutions
+        .at_offset(demote_offset)
+        .next()
+        .expect("imported call is resolved");
+    assert_eq!(resolution.kind, ResolvedNameKind::Function);
+    assert_eq!(resolution.declaration, declaration);
+    assert_eq!(resolution.occurrence.start, demote_offset);
 }
 
 #[test]
