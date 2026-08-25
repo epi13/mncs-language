@@ -6,6 +6,7 @@
 
 mod c11;
 mod cranelift_backend;
+mod external;
 mod llvm;
 mod lower;
 mod matrix;
@@ -79,6 +80,9 @@ pub fn backend_names() -> Vec<&'static str> {
         LLVM_BACKEND_NAME,
         C11_BACKEND_NAME,
         CRANELIFT_BACKEND_NAME,
+        external::RISCV32_SPEC.backend_name,
+        external::EBPF_SPEC.backend_name,
+        external::PTX64_SPEC.backend_name,
     ]
 }
 
@@ -91,6 +95,15 @@ pub fn backend_adapter(name: &str) -> Option<Box<dyn BackendAdapter>> {
         LLVM_BACKEND_NAME | "llvm" | "llvm-ir" => Some(Box::new(LlvmAdapter)),
         C11_BACKEND_NAME | "c11" | "portable-c" => Some(Box::new(C11Adapter)),
         CRANELIFT_BACKEND_NAME | "cranelift" => Some(Box::new(CraneliftAdapter)),
+        "mncs-riscv32" | "riscv32" => Some(Box::new(external::ExternalAdapter {
+            spec: &external::RISCV32_SPEC,
+        })),
+        "mncs-ebpf" | "ebpf" => Some(Box::new(external::ExternalAdapter {
+            spec: &external::EBPF_SPEC,
+        })),
+        "mncs-ptx64" | "ptx64" => Some(Box::new(external::ExternalAdapter {
+            spec: &external::PTX64_SPEC,
+        })),
         _ => None,
     }
 }
@@ -1709,11 +1722,15 @@ mod tests {
             .artifact_kinds
             .contains(PORTABLE_WASM_ARTIFACT_KIND));
         let matrix = backend_family_matrix();
-        assert_eq!(matrix.backends.len(), 5);
+        // Five in-tree realizations plus three external-LLVM target families.
+        assert_eq!(matrix.backends.len(), 8);
         assert!(matrix
             .planned_unimplemented
             .iter()
             .any(|name| name.contains("spir-v")));
+        assert!(backend_adapter("mncs-riscv32").is_some());
+        assert!(backend_adapter("mncs-ebpf").is_some());
+        assert!(backend_adapter("mncs-ptx64").is_some());
         for row in &matrix.backends {
             assert!(!row.artifact_kinds.is_empty());
             assert!(!row.required_target_facts.is_empty());

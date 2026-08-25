@@ -2783,10 +2783,25 @@ impl FileModuleResolver {
     fn candidates(root: &std::path::Path, module: &str) -> Vec<PathBuf> {
         let dotted = module.replace('.', "/");
         let tail = module.rsplit('.').next().unwrap_or(module);
-        vec![
-            root.join(format!("{dotted}.mncs")),
-            root.join(format!("{tail}.mncs")),
-        ]
+        let mut paths = vec![root.join(format!("{dotted}.mncs"))];
+        let mut segments = module.split('.').peekable();
+        if segments.peek() == Some(&"mncs") {
+            let rest = module.splitn(2, '.').nth(1).unwrap_or(module);
+            if !rest.is_empty() {
+                paths.push(root.join(format!("{}.mncs", rest.replace('.', "/"))));
+            }
+        }
+        if let Some((head, last)) = module.rsplit_once('.') {
+            if last.len() >= 2
+                && last.starts_with('v')
+                && last[1..].chars().all(|c| c.is_ascii_digit())
+                && !head.is_empty()
+            {
+                paths.push(root.join(format!("{}.mncs", head.replace('.', "/"))));
+            }
+        }
+        paths.push(root.join(format!("{tail}.mncs")));
+        paths
     }
 }
 

@@ -269,7 +269,7 @@ pub fn lower_llvm(
         }
         return unknown(diagnostics);
     }
-    let ir = emit_module(&scalar, plan);
+    let ir = emit_llvm_module(&scalar, plan);
     let mut assumptions = plan.assumptions_introduced.clone();
     assumptions.extend(
         scalar
@@ -328,7 +328,7 @@ pub fn lower_llvm(
     }
 }
 
-fn emit_module(module: &ScalarModule, plan: &TargetLoweringPlan) -> String {
+pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan) -> String {
     let triple = plan
         .target
         .facts
@@ -985,9 +985,7 @@ fn llvm_driver(function: &str, inputs: &[mncs_model::BackendValueContract]) -> S
                     _ => "int32_t",
                 }
             }
-            mncs_model::BackendValueContract::Finite { payloads, .. }
-                if payloads.is_empty() =>
-            {
+            mncs_model::BackendValueContract::Finite { payloads, .. } if payloads.is_empty() => {
                 "int32_t"
             }
             _ => "int64_t",

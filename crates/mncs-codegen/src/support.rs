@@ -412,9 +412,7 @@ pub(crate) fn process_driver(
                     _ => "int32_t",
                 }
             }
-            mncs_model::BackendValueContract::Finite { payloads, .. }
-                if payloads.is_empty() =>
-            {
+            mncs_model::BackendValueContract::Finite { payloads, .. } if payloads.is_empty() => {
                 "int32_t"
             }
             _ => "int64_t",

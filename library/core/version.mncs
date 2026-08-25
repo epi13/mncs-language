@@ -1,0 +1,96 @@
+mncs 0.6;
+
+// mncs.core.version — canonical version identities and compatibility envelopes.
+//
+// Versions are total triples of bounded integers. Comparison uses no
+// arithmetic, so no overflow obligation can arise anywhere in this module.
+// Envelopes are the sanctioned compatibility vocabulary for family contracts
+// declared against this module; declared versions alone are explicitly not
+// sufficient evidence of coherence, which is why fingerprint drift keeps its
+// own verdict path in every consumer of this contract
+// (see mncs.family.coherence).
+
+module mncs.core.version.v1;
+
+record Version { major: i32, minor: i32, patch: i32 }
+
+enum Ordering { Before, Same, After }
+
+enum Envelope { Any, Exact, AtLeast, CompatibleMinor }
+
+fn compare(left: Version, right: Version) -> (result: Ordering) {
+    if left.major < right.major {
+        return Ordering.Before;
+    }
+    if left.major > right.major {
+        return Ordering.After;
+    }
+    if left.minor < right.minor {
+        return Ordering.Before;
+    }
+    if left.minor > right.minor {
+        return Ordering.After;
+    }
+    if left.patch < right.patch {
+        return Ordering.Before;
+    }
+    if left.patch > right.patch {
+        return Ordering.After;
+    }
+    return Ordering.Same;
+}
+
+// Envelope semantics:
+// Any             every candidate satisfies.
+// Exact           candidate identical to bound in all three components.
+// AtLeast         candidate at or after bound.
+// CompatibleMinor same major as bound and at or after bound.
+fn order_satisfies(envelope: Envelope, order: Ordering, majors_agree: bool) -> (result: bool) {
+    return match envelope {
+        Any => true,
+        Exact => match order {
+            Same => true,
+            Before => false,
+            After => false,
+        },
+        AtLeast => match order {
+            Same => true,
+            After => true,
+            Before => false,
+        },
+        CompatibleMinor => match order {
+            Same => true,
+            After => majors_agree,
+            Before => false,
+        },
+    };
+}
+
+fn satisfies(envelope: Envelope, bound: Version, candidate: Version) -> (result: bool) {
+    let order: Ordering = compare(bound, candidate);
+    let majors_agree: bool = bound.major == candidate.major;
+    return order_satisfies(envelope, order, majors_agree);
+}
+
+// Pre-1.0 discipline: while the leading component is zero, a smaller nonzero
+// component bump is already breaking. A 0.0.x line treats any change as
+// breaking. This is the family's declared evolution rule until a successor
+// contract supersedes it.
+fn is_breaking_upgrade(previous: Version, next: Version) -> (result: bool) {
+    if previous.major != next.major {
+        return true;
+    }
+    if previous.major > 0 {
+        return false;
+    }
+    if previous.minor != next.minor {
+        return true;
+    }
+    if previous.minor > 0 {
+        return false;
+    }
+    if previous.patch != next.patch {
+        return true;
+    }
+    return false;
+}

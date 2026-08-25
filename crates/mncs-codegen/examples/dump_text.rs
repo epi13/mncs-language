@@ -28,10 +28,7 @@ fn main() -> Result<(), String> {
     };
     match result.artifact {
         Some(artifact) => {
-            print!(
-                "{}",
-                String::from_utf8_lossy(&artifact.bytes().map_err(|e| e)?)
-            );
+            print!("{}", String::from_utf8_lossy(&artifact.bytes()?));
             Ok(())
         }
         None => {
