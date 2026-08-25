@@ -87,16 +87,24 @@ impl ExternalTargetSpec {
 
     /// Invoke the system `llc` against the shared LLVM lowering output.
     /// Returns the genuine target artifact bytes plus the toolchain identity.
-    fn realize(&self, ir: &str) -> Result<(Vec<u8>, String), String> {
-        let llc = crate::native::probe_llc()
-            .ok_or_else(|| "unavailable toolchain: llc is not present".to_owned())?;
+    fn realize(&self, ir: &str) -> Result<(Vec<u8>, String), RealizeError> {
+        let llc = crate::native::probe_llc().ok_or_else(|| RealizeError {
+            code: "CGX401",
+            message: "unavailable toolchain: llc is not present on this host".to_owned(),
+        })?;
         let dir = std::env::temp_dir().join(format!(
             "mncs-external-{}",
             &crate::support::sha256_hex(format!("{}{ir}", self.triple).as_bytes())[..16]
         ));
-        std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        std::fs::create_dir_all(&dir).map_err(|error| RealizeError {
+            code: "CGX402",
+            message: format!("unable to create work directory: {error}"),
+        })?;
         let ir_path = dir.join("module.ll");
-        std::fs::write(&ir_path, ir.as_bytes()).map_err(|error| error.to_string())?;
+        std::fs::write(&ir_path, ir.as_bytes()).map_err(|error| RealizeError {
+            code: "CGX402",
+            message: format!("unable to write LLVM IR input: {error}"),
+        })?;
         let out_path = dir.join(if self.filetype == "obj" {
             "module.o"
         } else {
@@ -108,60 +116,329 @@ impl ExternalTargetSpec {
         if !self.features.is_empty() {
             command.arg("-mattr").arg(self.features.join(","));
         }
+        if self.triple == "nvptx64" {
+            // The declared target contract is sm_60; realize exactly that
+            // shader model instead of the toolchain default.
+            command.arg("-mcpu=sm_60");
+        }
         command
             .arg("-filetype")
             .arg(self.filetype)
             .arg("-o")
             .arg(&out_path)
             .arg(ir_path.file_name().unwrap_or(ir_path.as_os_str()));
-        let output = command.output().map_err(|error| error.to_string())?;
+        let output = command.output().map_err(|error| RealizeError {
+            code: "CGX400",
+            message: format!("llc could not be executed: {error}"),
+        })?;
         if !output.status.success() {
-            return Err(format!(
-                "llc failed for {}: {}",
-                self.triple,
-                String::from_utf8_lossy(&output.stderr)
-            ));
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+            return Err(if stderr.contains("unsupported") || stderr.contains("not supported") {
+                // A precise target restriction, not a broken toolchain:
+                // e.g. eBPF's upstream inability to lower signed division.
+                RealizeError {
+                    code: "CGX410",
+                    message: format!(
+                        "target restriction for {}: {stderr}",
+                        self.triple
+                    ),
+                }
+            } else {
+                RealizeError {
+                    code: "CGX400",
+                    message: format!("llc failed for {}: {stderr}", self.triple),
+                }
+            });
         }
-        let bytes = std::fs::read(&out_path).map_err(|error| error.to_string())?;
+        let bytes = std::fs::read(&out_path).map_err(|error| RealizeError {
+            code: "CGX402",
+            message: format!("unable to read produced artifact: {error}"),
+        })?;
         Ok((bytes, llc.summary()))
     }
 
-    /// Self-contained structural validation of the produced artifact.
-    fn validate_artifact_bytes(&self, bytes: &[u8]) -> Result<String, String> {
+    /// Self-contained structural validation of the produced artifact. The
+    /// emitted bytes are parsed directly so the observation is deterministic
+    /// and does not depend on optional host tools.
+    fn validate_artifact_bytes(&self, bytes: &[u8], exports: &[String]) -> Result<String, String> {
         match self.filetype {
-            "obj" => {
-                let elf_magic = [0x7f, b'E', b'L', b'F'];
-                if bytes.len() < 20 || bytes[..4] != elf_magic {
-                    return Err("ELF object lacks a valid magic header".to_owned());
-                }
-                let class = match bytes[4] {
-                    1 => "ELF32",
-                    2 => "ELF64",
-                    other => return Err(format!("unknown ELF class {other}")),
-                };
-                // External observation: readelf/llvm-readobj when present.
-                let external = std::process::Command::new("llvm-readobj")
-                    .arg("--file-headers")
-                    .arg("-")
-                    .stdin(std::process::Stdio::null())
-                    .output()
-                    .ok()
-                    .map(|_| ());
-                Ok(format!(
-                    "{class} object validated; external readelf observation: {}",
-                    external.is_some()
-                ))
-            }
-            _ => {
-                let head = String::from_utf8_lossy(&bytes[..bytes.len().min(64)]);
-                if head.contains(".version") && head.contains(".target") {
-                    Ok("PTX module header validated".to_owned())
-                } else {
-                    Err("PTX module lacks a version/target header".to_owned())
-                }
-            }
+            "obj" => validate_elf_object(bytes, self.triple, exports),
+            _ => validate_ptx_module(bytes, exports),
         }
     }
+}
+
+/// A lowering refusal with its own diagnostic identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RealizeError {
+    pub code: &'static str,
+    pub message: String,
+}
+
+fn read_u16(bytes: &[u8], at: usize) -> u16 {
+    u16::from_le_bytes([bytes[at], bytes[at + 1]])
+}
+
+fn read_u32(bytes: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes([
+        bytes[at],
+        bytes[at + 1],
+        bytes[at + 2],
+        bytes[at + 3],
+    ])
+}
+
+fn read_u64(bytes: &[u8], at: usize) -> u64 {
+    u64::from_le_bytes([
+        bytes[at],
+        bytes[at + 1],
+        bytes[at + 2],
+        bytes[at + 3],
+        bytes[at + 4],
+        bytes[at + 5],
+        bytes[at + 6],
+        bytes[at + 7],
+    ])
+}
+
+fn c_str_at(bytes: &[u8], start: usize, end: usize) -> Option<&str> {
+    let region = bytes.get(start..end.min(bytes.len()))?;
+    let stop = region.iter().position(|byte| *byte == 0).unwrap_or(region.len());
+    std::str::from_utf8(&region[..stop]).ok()
+}
+
+/// Parse and validate an ELF relocatable object against the expectations for
+/// one target triple: magic, class, endianness, type, machine identifier,
+/// `.text` presence, and a symbol table that defines every declared export.
+fn validate_elf_object(
+    bytes: &[u8],
+    triple: &str,
+    exports: &[String],
+) -> Result<String, String> {
+    const EM_RISCV: u64 = 243;
+    const EM_BPF: u64 = 247;
+    const SHT_SYMTAB: u32 = 2;
+    if triple != "riscv32" && triple != "bpfel" {
+        return Err(format!("no ELF validation contract for triple {triple}"));
+    }
+    if bytes.len() < 64 {
+        return Err("ELF object is too short to contain a header".to_owned());
+    }
+    if bytes[..4] != [0x7f, b'E', b'L', b'F'] {
+        return Err("ELF object lacks a valid magic header".to_owned());
+    }
+    let (class_name, expected_class) = if triple.starts_with("riscv32") {
+        ("ELF32", 1_u8)
+    } else {
+        ("ELF64", 2_u8)
+    };
+    if bytes[4] != expected_class {
+        return Err(format!(
+            "unexpected ELF class {}; {triple} requires class {expected_class} ({class_name})",
+            bytes[4]
+        ));
+    }
+    if bytes[5] != 1 {
+        return Err(format!(
+            "unexpected ELF data encoding {} (big-endian); {triple} artifacts are little-endian",
+            bytes[5]
+        ));
+    }
+    let e_type = read_u16(bytes, 16);
+    if e_type != 1 {
+        return Err(format!("ELF type {e_type} is not ET_REL (relocatable object)"));
+    }
+    let e_machine = read_u16(bytes, 18);
+    let expected_machine = if triple == "riscv32" { EM_RISCV } else { EM_BPF };
+    if u64::from(e_machine) != expected_machine {
+        return Err(format!(
+            "ELF e_machine {e_machine} does not match expected {expected_machine} for {triple}"
+        ));
+    }
+    let is_32 = expected_class == 1;
+    let shoff = if is_32 {
+        u64::from(read_u32(bytes, 32))
+    } else {
+        read_u64(bytes, 40)
+    };
+    let sh_entry_size = if is_32 { 40 } else { 64 };
+    let shnum = read_u16(bytes, if is_32 { 48 } else { 60 }) as u64;
+    let shstrndx = read_u16(bytes, if is_32 { 50 } else { 62 }) as u64;
+    if shnum == 0 || shoff == 0 {
+        return Err("ELF object declares no section header table".to_owned());
+    }
+    if shoff + shnum * sh_entry_size as u64 > bytes.len() as u64 {
+        return Err("ELF section header table exceeds file size".to_owned());
+    }
+    let section_header = |index: u64| -> Result<SectionHeader, String> {
+        SectionHeader::parse(bytes, shoff as usize + index as usize * sh_entry_size, is_32)
+    };
+    // Resolve the section-name string table through its header index.
+    let shstrtab = section_header(shstrndx)?;
+    if shstrtab.offset == 0
+        || shstrtab.offset + shstrtab.size > bytes.len() as u64
+    {
+        return Err("ELF object lacks a readable section-name string table".to_owned());
+    }
+    let mut text_found = false;
+    let mut symtab: Option<(u64, u64, u64, u64)> = None; // offset, size, entsize, link
+    for index in 0..shnum {
+        let header = section_header(index)?;
+        let name = c_str_at(
+            bytes,
+            shstrtab.offset as usize + header.name as usize,
+            (shstrtab.offset + shstrtab.size) as usize,
+        )
+        .unwrap_or("");
+        match (name, header.section_type) {
+            (".text", _) => text_found = true,
+            (".symtab", SHT_SYMTAB) => {
+                symtab = Some((header.offset, header.size, header.entsize, header.link));
+            }
+            _ => {}
+        }
+    }
+    if !text_found {
+        return Err("ELF object has no .text section".to_owned());
+    }
+    let Some((sym_offset, sym_size, sym_entsize, sym_link)) = symtab else {
+        return Err("ELF object lacks a symbol table".to_owned());
+    };
+    if sym_entsize == 0 {
+        return Err("ELF symbol table declares a zero entry size".to_owned());
+    }
+    // The string table linked from the symbol table holds symbol names.
+    let strtab = section_header(sym_link)?;
+    if strtab.offset == 0 || strtab.offset + strtab.size > bytes.len() as u64 {
+        return Err("symbol table is not linked to a valid string table".to_owned());
+    }
+    // Collect defined symbol names.
+    let entry_size = if is_32 { 16 } else { 24 };
+    let count = sym_size / entry_size.max(1) as u64;
+    let mut defined: Vec<&str> = Vec::new();
+    for index in 0..count {
+        let base = sym_offset as usize + index as usize * entry_size;
+        if base + entry_size > bytes.len() as usize {
+            break;
+        }
+        let (st_name, st_shndx) = if is_32 {
+            (read_u32(bytes, base), read_u16(bytes, base + 12))
+        } else {
+            (read_u32(bytes, base), read_u16(bytes, base + 6))
+        };
+        if st_shndx == 0 {
+            continue; // undefined symbol reference
+        }
+        if let Some(name) = c_str_at(
+            bytes,
+            strtab.offset as usize + st_name as usize,
+            (strtab.offset + strtab.size) as usize,
+        ) {
+            defined.push(name);
+        }
+    }
+    for export in exports {
+        if !defined.contains(&export.as_str()) {
+            return format_err(format!(
+                "exported symbol {export} is absent from the artifact symbol table"
+            ));
+        }
+    }
+    Ok(format!(
+        "{class_name} little-endian ET_REL object; e_machine={e_machine}; \
+         .text present; symbol table defines all {} declared exports",
+        exports.len()
+    ))
+}
+
+fn format_err(message: String) -> Result<String, String> {
+    Err(message)
+}
+
+/// Parsed fields of one ELF section header, normalized to 64-bit widths.
+struct SectionHeader {
+    name: u32,
+    section_type: u32,
+    offset: u64,
+    size: u64,
+    link: u64,
+    entsize: u64,
+}
+
+impl SectionHeader {
+    fn parse(bytes: &[u8], base: usize, is_32: bool) -> Result<Self, String> {
+        let entry = if is_32 { 40 } else { 64 };
+        if base + entry > bytes.len() {
+            return Err(format!(
+                "ELF section header is truncated (base {base} + {entry} > {})",
+                bytes.len()
+            ));
+        }
+        Ok(if is_32 {
+            Self {
+                name: read_u32(bytes, base),
+                section_type: read_u32(bytes, base + 4),
+                offset: u64::from(read_u32(bytes, base + 16)),
+                size: u64::from(read_u32(bytes, base + 20)),
+                link: u64::from(read_u32(bytes, base + 24)),
+                entsize: u64::from(read_u32(bytes, base + 36)),
+            }
+        } else {
+            Self {
+                name: read_u32(bytes, base),
+                section_type: read_u32(bytes, base + 4),
+                offset: read_u64(bytes, base + 24),
+                size: read_u64(bytes, base + 32),
+                link: u64::from(read_u32(bytes, base + 40)),
+                entsize: read_u64(bytes, base + 56),
+            }
+        })
+    }
+}
+
+/// Validate PTX module text: version and target headers plus a visible
+/// function definition naming every declared export.
+fn validate_ptx_module(bytes: &[u8], exports: &[String]) -> Result<String, String> {
+    let text = String::from_utf8_lossy(bytes);
+    let version = text
+        .lines()
+        .map(str::trim_start)
+        .find(|line| line.starts_with(".version "))
+        .and_then(|line| line.strip_prefix(".version "))
+        .map(str::trim)
+        .ok_or_else(|| "PTX module lacks a .version directive".to_owned())?;
+    if version.is_empty()
+        || !version
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '.')
+    {
+        return Err(format!("PTX .version directive is malformed: {version}"));
+    }
+    let target = text
+        .lines()
+        .map(str::trim_start)
+        .find(|line| line.starts_with(".target "))
+        .and_then(|line| line.strip_prefix(".target "))
+        .map(str::trim)
+        .ok_or_else(|| "PTX module lacks a .target directive".to_owned())?;
+    if !target.starts_with("sm_") {
+        return Err(format!("PTX .target directive is malformed: {target}"));
+    }
+    if !text.contains(".address_size 64") {
+        return Err("PTX module does not declare 64-bit addressing".to_owned());
+    }
+    for export in exports {
+        let needle = format!(".visible .func {export}(");
+        if !text.contains(&needle) {
+            return Err(format!(
+                "PTX module lacks a visible definition for export {export}"
+            ));
+        }
+    }
+    Ok(format!(
+        "PTX module; version {version}; target {target}; all {} declared exports visibly defined",
+        exports.len()
+    ))
 }
 
 pub fn external_plan(
@@ -273,17 +550,28 @@ pub fn lower_external(
         }
         return unknown(diagnostics);
     }
+    let export_names: Vec<String> = scalar
+        .functions
+        .iter()
+        .map(|function| function.export_name.clone())
+        .collect();
     // The shared LLVM lowering is the source IR for every external target.
     let ir = crate::llvm::emit_llvm_module(&scalar, plan);
     let (bytes, toolchain) = match spec.realize(&ir) {
         Ok(outcome) => outcome,
-        Err(reason) => {
-            return execution_failure_owned(spec, reason);
-        }
+        Err(error) => return realize_failure(spec, error),
     };
-    let validation = match spec.validate_artifact_bytes(&bytes) {
+    let validation = match spec.validate_artifact_bytes(&bytes, &export_names) {
         Ok(observation) => observation,
-        Err(reason) => return execution_failure_owned(spec, reason),
+        Err(reason) => {
+            return realize_failure(
+                spec,
+                RealizeError {
+                    code: "CGX411",
+                    message: format!("artifact failed structural validation: {reason}"),
+                },
+            )
+        }
     };
     let mut assumptions = vec![
         format!("realized through system LLVM toolchain: {toolchain}"),
@@ -298,11 +586,7 @@ pub fn lower_external(
         spec.artifact_kind,
         spec.format,
         &bytes,
-        scalar
-            .functions
-            .iter()
-            .map(|function| function.export_name.clone())
-            .collect(),
+        export_names,
         assumptions.clone(),
         Vec::new(),
         vec![
@@ -333,16 +617,24 @@ pub fn lower_external(
     }
 }
 
-fn execution_failure_owned(spec: &ExternalTargetSpec, reason: String) -> BackendResult {
+/// Convert a realization refusal into the structured backend result: an
+/// honest Unknown transformation state with a precise, coded diagnostic.
+/// Toolchain absence (CGX401), tool failure (CGX400/402), target
+/// restrictions (CGX410), and invalid artifacts (CGX411) are distinct.
+fn realize_failure(spec: &ExternalTargetSpec, error: RealizeError) -> BackendResult {
+    let kind = match error.code {
+        "CGX410" => CompilerDiagnosticKind::UnsupportedTargetRealization,
+        _ => CompilerDiagnosticKind::ExternalToolFailure,
+    };
     BackendResult {
         status: TransformationStatus::Unknown,
         artifact: None,
         artifact_ref: None,
         evidence: None,
         diagnostics: vec![CompilerDiagnostic::new(
-            "CGX400",
-            CompilerDiagnosticKind::MissingTargetEvidence,
-            format!("{}: {reason}", spec.backend_name),
+            error.code,
+            kind,
+            format!("{}: {}", spec.backend_name, error.message),
         )],
     }
 }

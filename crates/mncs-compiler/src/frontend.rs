@@ -3148,7 +3148,13 @@ impl<'a> BodyBuilder<'a> {
                     | AstBinaryOp::Sub
                     | AstBinaryOp::Mul
                     | AstBinaryOp::Div
-                    | AstBinaryOp::Mod => {
+                    | AstBinaryOp::Mod
+                    | AstBinaryOp::AddWrap
+                    | AstBinaryOp::SubWrap
+                    | AstBinaryOp::MulWrap
+                    | AstBinaryOp::AddSat
+                    | AstBinaryOp::SubSat
+                    | AstBinaryOp::MulSat => {
                         let BodyType::Integer(operand_type) = left_value.ty else {
                             diagnostics.push(elaboration_diagnostic(
                                 "MNE120",
@@ -3158,18 +3164,31 @@ impl<'a> BodyBuilder<'a> {
                             return None;
                         };
                         let operator = match op {
-                            AstBinaryOp::Add => "add",
-                            AstBinaryOp::Sub => "sub",
-                            AstBinaryOp::Mul => "mul",
+                            AstBinaryOp::Add | AstBinaryOp::AddWrap | AstBinaryOp::AddSat => "add",
+                            AstBinaryOp::Sub | AstBinaryOp::SubWrap | AstBinaryOp::SubSat => "sub",
+                            AstBinaryOp::Mul | AstBinaryOp::MulWrap | AstBinaryOp::MulSat => "mul",
                             AstBinaryOp::Div => "div",
                             AstBinaryOp::Mod => "mod",
                             _ => "mul",
+                        };
+                        // Explicit arithmetic intents (Profile 0.6): the
+                        // operator token names the total edge semantics, so
+                        // the overflow obligation is discharged by semantics
+                        // instead of remaining symbolically unresolved.
+                        let intent = match op {
+                            AstBinaryOp::AddWrap
+                            | AstBinaryOp::SubWrap
+                            | AstBinaryOp::MulWrap => ArithmeticIntent::Wrapping,
+                            AstBinaryOp::AddSat
+                            | AstBinaryOp::SubSat
+                            | AstBinaryOp::MulSat => ArithmeticIntent::Saturating,
+                            _ => ArithmeticIntent::Checked,
                         };
                         (
                             BodyOperationKind::Integer {
                                 operator: operator.to_owned(),
                                 operand_type,
-                                intent: ArithmeticIntent::Checked,
+                                intent,
                             },
                             BodyType::Integer(operand_type),
                         )

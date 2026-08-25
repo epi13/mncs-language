@@ -139,10 +139,20 @@ The compiler core consumes imports through the `ModuleResolver` trait; it
 never touches the filesystem itself. Hosts choose their own layout rules:
 
 - the research CLI resolves names relative to the importing file's directory,
-  trying `<full.dotted.path>.mncs` then `<tail>.mncs`;
+  then its parent, trying `<full.dotted.path>.mncs`, a version-tail-stripped
+  path, an `mncs.`-prefix-stripped path, then `<tail>.mncs`;
+- after those source-local roots, the research CLI searches each directory
+  listed in the `MNCS_LIBRARY_PATH` environment variable (`:`-separated, in
+  order). This is how external consumers bind to `mncs.core.*` without
+  vendoring the standard-library tree: point `MNCS_LIBRARY_PATH` at this
+  repository's `library/` directory;
 - language-service hosts may resolve against resident workspace documents.
 
 A resolution miss is always a diagnostic (`MNE173`) in the importing module.
+Library roots are a discovery convenience only: compatibility still comes from
+elaborating the resolved module against its declared identity, so a stale
+`MNCS_LIBRARY_PATH` entry degrades into an honest miss rather than silent
+substitution.
 
 ## Non-goals for this profile
 

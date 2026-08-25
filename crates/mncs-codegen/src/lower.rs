@@ -598,23 +598,28 @@ fn emit_integer(
 ) -> Result<(), String> {
     let [left, right, dest] = locals;
     let wasm = val_type(operand_type)?;
-    let wrapping = match (wasm, operator) {
-        (ValType::I32, "add") => Instr::I32Add,
-        (ValType::I32, "sub") => Instr::I32Sub,
-        (ValType::I32, "mul") => Instr::I32Mul,
-        (ValType::I32, "div") => Instr::I32DivS,
-        (ValType::I32, "mod") => Instr::I32RemS,
-        (ValType::I32, "and") => Instr::I32And,
-        (ValType::I32, "or") => Instr::I32Or,
-        (ValType::I32, "xor") => Instr::I32Xor,
-        (ValType::I64, "add") => Instr::I64Add,
-        (ValType::I64, "sub") => Instr::I64Sub,
-        (ValType::I64, "mul") => Instr::I64Mul,
-        (ValType::I64, "div") => Instr::I64DivS,
-        (ValType::I64, "mod") => Instr::I64RemS,
-        (ValType::I64, "and") => Instr::I64And,
-        (ValType::I64, "or") => Instr::I64Or,
-        (ValType::I64, "xor") => Instr::I64Xor,
+    let unsigned = !operand_type.signed;
+    let wrapping = match (wasm, operator, unsigned) {
+        (ValType::I32, "add", _) => Instr::I32Add,
+        (ValType::I32, "sub", _) => Instr::I32Sub,
+        (ValType::I32, "mul", _) => Instr::I32Mul,
+        (ValType::I32, "div", false) => Instr::I32DivS,
+        (ValType::I32, "div", true) => Instr::I32DivU,
+        (ValType::I32, "mod", false) => Instr::I32RemS,
+        (ValType::I32, "mod", true) => Instr::I32RemU,
+        (ValType::I32, "and", _) => Instr::I32And,
+        (ValType::I32, "or", _) => Instr::I32Or,
+        (ValType::I32, "xor", _) => Instr::I32Xor,
+        (ValType::I64, "add", _) => Instr::I64Add,
+        (ValType::I64, "sub", _) => Instr::I64Sub,
+        (ValType::I64, "mul", _) => Instr::I64Mul,
+        (ValType::I64, "div", false) => Instr::I64DivS,
+        (ValType::I64, "div", true) => Instr::I64DivU,
+        (ValType::I64, "mod", false) => Instr::I64RemS,
+        (ValType::I64, "mod", true) => Instr::I64RemU,
+        (ValType::I64, "and", _) => Instr::I64And,
+        (ValType::I64, "or", _) => Instr::I64Or,
+        (ValType::I64, "xor", _) => Instr::I64Xor,
         _ => return Err(format!("unsupported integer operator {operator}")),
     };
     match intent {
@@ -662,14 +667,16 @@ fn emit_checked_division(
     dest: u32,
 ) -> Result<(), String> {
     let is_div = operator == "div";
-    let _ = ty;
+    // MIN / -1 is a signed-only overflow case; unsigned division has no
+    // such corner and must not trap on it.
+    let signed = ty.signed;
     // if divisor == 0 { trap }
     body.push(Instr::LocalGet(right));
     body.push(Instr::I32Eqz);
     body.push(Instr::If);
     body.push(Instr::Unreachable);
     body.push(Instr::End);
-    if is_div {
+    if is_div && signed {
         // if dividend == MIN && divisor == -1 { trap }
         let (min_const, minus_one): (Instr, Instr) = match wasm {
             ValType::I32 => (Instr::I32Const(i32::MIN), Instr::I32Const(-1)),
@@ -699,11 +706,17 @@ fn emit_checked_division(
     }
     body.push(Instr::LocalGet(left));
     body.push(Instr::LocalGet(right));
-    let native = match (wasm, operator) {
-        (ValType::I32, "div") => Instr::I32DivS,
-        (ValType::I32, "mod") => Instr::I32RemS,
-        (ValType::I64, "div") => Instr::I64DivS,
-        (ValType::I64, "mod") => Instr::I64RemS,
+    // `signed` selects the signed-division instructions; unsigned operands
+    // must use div.u/rem.u so their modular domain is preserved.
+    let native = match (wasm, operator, signed) {
+        (ValType::I32, "div", true) => Instr::I32DivS,
+        (ValType::I32, "div", false) => Instr::I32DivU,
+        (ValType::I32, "mod", true) => Instr::I32RemS,
+        (ValType::I32, "mod", false) => Instr::I32RemU,
+        (ValType::I64, "div", true) => Instr::I64DivS,
+        (ValType::I64, "div", false) => Instr::I64DivU,
+        (ValType::I64, "mod", true) => Instr::I64RemS,
+        (ValType::I64, "mod", false) => Instr::I64RemU,
         _ => return Err(format!("unsupported division operator {operator}")),
     };
     body.push(native);

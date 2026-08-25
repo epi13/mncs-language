@@ -187,3 +187,4 @@ fn external_targets_produce_genuine_artifacts_and_refuse_execution_honestly() {
         );
     }
 }
+

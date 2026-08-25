@@ -1,0 +1,122 @@
+{
+ "schema_version": "0.1",
+ "name": "unsign-probe",
+ "cases": [
+  {
+   "id": "udiv-basic",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "probe.unsign",
+     "function": "half"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 84,
+       "type": {
+        "bits": 32,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 32,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 256
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 42,
+      "type": {
+       "bits": 32,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "udiv-high-bit",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "probe.unsign",
+     "function": "half"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 4294967295,
+       "type": {
+        "bits": 32,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 32,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 256
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2147483647,
+      "type": {
+       "bits": 32,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "udiv-zero",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "probe.unsign",
+     "function": "half"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 256
+   },
+   "expected_status": "runtime_failure"
+  }
+ ]
+}
