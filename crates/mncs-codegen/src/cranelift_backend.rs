@@ -155,7 +155,8 @@ pub fn cranelift_plan(selected_ssa: CompilerArtifactRef) -> TargetLoweringPlan {
             ),
             (
                 "checked".to_owned(),
-                "i64 range test then status=1; division guards zero divisor and signed MIN / -1".to_owned(),
+                "i64 range test then status=1; division guards zero divisor and signed MIN / -1"
+                    .to_owned(),
             ),
         ]),
         BTreeMap::from([
@@ -469,30 +470,15 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                     _ => 32,
                 };
                 let (lhs_norm, rhs_norm) =
-                    emit_width_normalize(out, lhs_n, rhs_n, bits, signed, &dest_n);
-                let _ = writeln!(
-                    out,
-                    "        {dest_n}_dz = icmp eq {rhs_norm}, 0"
-                );
-                let _ = writeln!(
-                    out,
-                    "        brnz {dest_n}_dz, fail_div_{dest_n}"
-                );
+                    emit_width_normalize(out, lhs_n, rhs_n, bits, signed, dest_n);
+                let _ = writeln!(out, "        {dest_n}_dz = icmp eq {rhs_norm}, 0");
+                let _ = writeln!(out, "        brnz {dest_n}_dz, fail_div_{dest_n}");
                 if operator == "div" && signed {
                     let min = -(1_i128 << (bits - 1));
                     let _ = writeln!(out, "        {dest_n}_m1 = icmp eq {rhs_norm}, -1");
-                    let _ = writeln!(
-                        out,
-                        "        {dest_n}_mn = icmp eq {lhs_norm}, {min}"
-                    );
-                    let _ = writeln!(
-                        out,
-                        "        {dest_n}_ov = band {dest_n}_m1, {dest_n}_mn"
-                    );
-                    let _ = writeln!(
-                        out,
-                        "        brnz {dest_n}_ov, fail_div_{dest_n}"
-                    );
+                    let _ = writeln!(out, "        {dest_n}_mn = icmp eq {lhs_norm}, {min}");
+                    let _ = writeln!(out, "        {dest_n}_ov = band {dest_n}_m1, {dest_n}_mn");
+                    let _ = writeln!(out, "        brnz {dest_n}_ov, fail_div_{dest_n}");
                 }
                 let native = match (operator.as_str(), signed) {
                     ("div", false) => "udiv",
@@ -500,10 +486,7 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                     ("mod", true) => "srem",
                     _ => "sdiv",
                 };
-                let _ = writeln!(
-                    out,
-                    "        {dest_n} = {native} {lhs_norm}, {rhs_norm}"
-                );
+                let _ = writeln!(out, "        {dest_n} = {native} {lhs_norm}, {rhs_norm}");
                 let _ = writeln!(out, "        jump ok_div_{dest_n}");
                 let _ = writeln!(out, "    fail_div_{dest_n}:");
                 out.push_str("        v_bad = iconst.i32 1\n        v_z = iconst.i64 0\n");
@@ -1035,10 +1018,7 @@ where
                                     integer_ty.signed,
                                 );
                                 let zero = builder.ins().iconst(types::I64, 0);
-                                let dz =
-                                    builder
-                                        .ins()
-                                        .icmp(IntCC::Equal, right_n, zero);
+                                let dz = builder.ins().icmp(IntCC::Equal, right_n, zero);
                                 let cont = builder.create_block();
                                 builder.ins().brif(
                                     dz,
@@ -1364,7 +1344,6 @@ fn jit_scalar(
     }
 }
 
-
 #[cfg(test)]
 mod guarded_division_tests {
     use super::*;
@@ -1412,32 +1391,17 @@ mod guarded_division_tests {
         let ssa = program.lower_to_ssa().unwrap();
         let names = vec!["checked_div".to_owned(), "checked_mod".to_owned()];
         let scalar = lower_to_scalar(&program, &ssa, &names);
-        assert!(
-            scalar.unsupported.is_empty(),
-            "{:?}",
-            scalar.unsupported
-        );
+        assert!(scalar.unsupported.is_empty(), "{:?}", scalar.unsupported);
         let cases = [
             ("checked_div", vec![84_i128, 4], true, 21),
             ("checked_div", vec![-84, 4], true, -21),
-            (
-                "checked_div",
-                vec![5, 0],
-                false,
-                0,
-            ),
-            (
-                "checked_div",
-                vec![i64::MIN as i128, -1],
-                false,
-                0,
-            ),
+            ("checked_div", vec![5, 0], false, 0),
+            ("checked_div", vec![i64::MIN as i128, -1], false, 0),
             ("checked_mod", vec![10, 3], true, 1),
             ("checked_mod", vec![7, 0], false, 0),
         ];
         for (function, arguments, returns, expected) in cases {
-            let request =
-                request(function, arguments[0], arguments[1], 64, true);
+            let request = request(function, arguments[0], arguments[1], 64, true);
             let outcome = jit_scalar(&scalar, function, &request);
             match outcome {
                 Err(reason)
