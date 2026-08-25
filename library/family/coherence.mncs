@@ -167,89 +167,91 @@ fn transition(state: ChangeSetState, event: ChangeSetEvent) -> (result: Transiti
     return match state {
         Draft => match event {
             AnalyzeImpact => accept(ChangeSetState.ImpactAnalyzed),
-            BeginImplementation => reject(1),
-            SubmitCandidate => reject(1),
-            RecordPass => reject(1),
-            RecordFail => reject(1),
-            Merge => reject(1),
-            PromoteEpoch => reject(1),
+            BeginImplementation => hold(state, 1),
+            SubmitCandidate => hold(state, 1),
+            RecordPass => hold(state, 1),
+            RecordFail => hold(state, 1),
+            Merge => hold(state, 1),
+            PromoteEpoch => hold(state, 1),
             Abandon => accept(ChangeSetState.Abandoned),
         },
         ImpactAnalyzed => match event {
-            AnalyzeImpact => reject(1),
+            AnalyzeImpact => hold(state, 1),
             BeginImplementation => accept(ChangeSetState.InProgress),
-            SubmitCandidate => reject(1),
-            RecordPass => reject(1),
-            RecordFail => reject(1),
-            Merge => reject(1),
-            PromoteEpoch => reject(1),
+            SubmitCandidate => hold(state, 1),
+            RecordPass => hold(state, 1),
+            RecordFail => hold(state, 1),
+            Merge => hold(state, 1),
+            PromoteEpoch => hold(state, 1),
             Abandon => accept(ChangeSetState.Abandoned),
         },
         InProgress => match event {
-            AnalyzeImpact => reject(1),
-            BeginImplementation => reject(1),
+            AnalyzeImpact => hold(state, 1),
+            BeginImplementation => hold(state, 1),
             SubmitCandidate => accept(ChangeSetState.IntegrationCandidate),
-            RecordPass => reject(1),
-            RecordFail => reject(1),
-            Merge => reject(1),
-            PromoteEpoch => reject(1),
+            RecordPass => hold(state, 1),
+            RecordFail => hold(state, 1),
+            Merge => hold(state, 1),
+            PromoteEpoch => hold(state, 1),
             Abandon => accept(ChangeSetState.Abandoned),
         },
         IntegrationCandidate => match event {
-            AnalyzeImpact => reject(1),
-            BeginImplementation => reject(1),
-            SubmitCandidate => reject(1),
+            AnalyzeImpact => hold(state, 1),
+            BeginImplementation => hold(state, 1),
+            SubmitCandidate => hold(state, 1),
             RecordPass => accept(ChangeSetState.VerifiedPass),
             RecordFail => accept(ChangeSetState.VerifiedFail),
-            Merge => reject(1),
-            PromoteEpoch => reject(1),
+            Merge => hold(state, 1),
+            PromoteEpoch => hold(state, 1),
             Abandon => accept(ChangeSetState.Abandoned),
         },
         VerifiedPass => match event {
-            AnalyzeImpact => reject(1),
-            BeginImplementation => reject(1),
-            SubmitCandidate => reject(1),
-            RecordPass => reject(1),
-            RecordFail => reject(1),
+            AnalyzeImpact => hold(state, 1),
+            BeginImplementation => hold(state, 1),
+            SubmitCandidate => hold(state, 1),
+            RecordPass => hold(state, 1),
+            RecordFail => hold(state, 1),
             Merge => accept(ChangeSetState.Merged),
-            PromoteEpoch => reject(1),
+            PromoteEpoch => hold(state, 1),
             Abandon => accept(ChangeSetState.Abandoned),
         },
         VerifiedFail => match event {
-            AnalyzeImpact => reject(1),
+            AnalyzeImpact => hold(state, 1),
             BeginImplementation => accept(ChangeSetState.InProgress),
-            SubmitCandidate => reject(1),
-            RecordPass => reject(1),
-            RecordFail => reject(1),
-            Merge => reject(1),
-            PromoteEpoch => reject(1),
+            SubmitCandidate => hold(state, 1),
+            RecordPass => hold(state, 1),
+            RecordFail => hold(state, 1),
+            Merge => hold(state, 1),
+            PromoteEpoch => hold(state, 1),
             Abandon => accept(ChangeSetState.Abandoned),
         },
         Merged => match event {
-            AnalyzeImpact => reject(1),
-            BeginImplementation => reject(1),
-            SubmitCandidate => reject(1),
-            RecordPass => reject(1),
-            RecordFail => reject(1),
-            Merge => reject(1),
+            AnalyzeImpact => hold(state, 1),
+            BeginImplementation => hold(state, 1),
+            SubmitCandidate => hold(state, 1),
+            RecordPass => hold(state, 1),
+            RecordFail => hold(state, 1),
+            Merge => hold(state, 1),
             PromoteEpoch => accept(ChangeSetState.EpochPromoted),
-            Abandon => reject(1),
+            Abandon => hold(state, 1),
         },
-        EpochPromoted => terminal(),
-        Abandoned => terminal(),
+        EpochPromoted => hold(state, 0),
+        Abandoned => hold(state, 0),
     };
 }
 
-fn terminal() -> (result: Transition) {
-    return Transition { accepted: false, following: ChangeSetState.Draft, reason: 0 };
+
+
+fn hold(at: ChangeSetState, reason: i32) -> (result: Transition) {
+    return Transition { accepted: false, following: at, reason: reason };
 }
 
 fn accept(successor: ChangeSetState) -> (result: Transition) {
     return Transition { accepted: true, following: successor, reason: 0 };
 }
 
-fn reject(reason: i32) -> (result: Transition) {
-    return Transition { accepted: false, following: ChangeSetState.Draft, reason: reason };
+fn reject(at: ChangeSetState, reason: i32) -> (result: Transition) {
+    return Transition { accepted: false, following: at, reason: reason };
 }
 
 enum DriftKind {

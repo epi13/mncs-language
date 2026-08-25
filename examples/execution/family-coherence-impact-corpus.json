@@ -1,0 +1,998 @@
+{
+ "schema_version": "0.1",
+ "name": "family-coherence-impact",
+ "cases": [
+  {
+   "id": "impact-d0t0m0c0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::UnknownGap",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "impact-d0t0m0c1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::UnknownGap",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "impact-d0t0m1c0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::UnknownGap",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "impact-d0t0m1c1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::Unaffected",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "impact-d0t1m0c0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::UnknownGap",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "impact-d0t1m0c1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::UnknownGap",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "impact-d0t1m1c0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::UnknownGap",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "impact-d0t1m1c1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::PotentiallyAffected",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "impact-d1t0m0c0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::UnknownGap",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "impact-d1t0m0c1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::UnknownGap",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "impact-d1t0m1c0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::UnknownGap",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "impact-d1t0m1c1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::DefinitelyAffected",
+      "discriminant": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "impact-d1t1m0c0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::UnknownGap",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "impact-d1t1m0c1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::UnknownGap",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "impact-d1t1m1c0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::UnknownGap",
+      "discriminant": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "impact-d1t1m1c1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.coherence.v01",
+     "function": "classify_impact"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.coherence.v01::ImpactObservation::contract_declared%3Abool%3Bdirect_consumer%3Abool%3Bmanifest_found%3Abool%3Btransitive_consumer%3Abool%3B",
+       "name": "ImpactObservation",
+       "fields": [
+        [
+         "contract_declared",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "direct_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "manifest_found",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "transitive_consumer",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.coherence.v01::ImpactClass",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.coherence.v01::ImpactClass::DefinitelyAffected",
+      "discriminant": 0
+     }
+    }
+   ]
+  }
+ ]
+}
