@@ -952,6 +952,13 @@ the residual maturity items are documented as post-0.5 work rather than silently
 
 **Status: Planned / research-only**, with a syntax laboratory already exercising tournaments. Grammar selection is deliberately deferred.
 
+> Note (2026-08): *Source* Profile 0.6 — payload-bearing sums, strict boolean
+> operators, checked division/modulo — landed experimentally via the
+> standard-library tranche (`docs/source-profile-0.6.md`,
+> `docs/development-evidence/ox-alpha-tranche-2026-08.md`). That source-profile
+> numbering is independent of this roadmap section, which concerns grammar
+> selection and self-description experiments.
+
 - expand the syntax tournament to a representative corpus;
 - implement parsers and canonical formatters for at least two competing source candidates;
 - include machine-intent expressions in syntax and semantic-density comparisons;
