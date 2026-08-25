@@ -154,12 +154,12 @@ fn ravel_snapshot_agrees_with_core_status_lattice_on_bytecode() {
 /// (fingerprint computed at tranche time from both files).
 #[test]
 fn ravel_snapshot_is_canonically_identical_to_upstream() {
-    for path in [
-        example("consumers/ravel-core-snapshot.mncs"),
-        std::env::var("RAVEL_UPSTREAM_CORE")
-            .map(|path| path)
-            .unwrap_or_else(|_| example("consumers/ravel-core-snapshot.mncs")),
-    ] {
+    let mut paths = vec![example("consumers/ravel-core-snapshot.mncs")];
+    // When the sibling checkout is available, compare against it directly.
+    if let Ok(upstream) = std::env::var("RAVEL_UPSTREAM_CORE") {
+        paths.push(upstream);
+    }
+    for path in paths {
         let output = binary()
             .args(["canonicalize", &path])
             .output()
