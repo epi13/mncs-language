@@ -989,6 +989,14 @@ fn elaborate_linked_module(
             if !provisional_names.contains(&field.value_type.text)
                 && !finite_types_by_name.contains_key(&field.value_type.text)
                 && profile_scalar_supported(&field.value_type.text).is_none()
+                // Bounded-sequence spellings (Profile 0.7) resolve against
+                // the same provisional namespaces as their element types.
+                && profile_sequence_type(
+                    &field.value_type.text,
+                    &finite_types_by_name,
+                    &context.record_types_by_name,
+                )
+                .is_none()
             {
                 diagnostics.push(elaboration_diagnostic(
                     "MNE153",

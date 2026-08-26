@@ -16,13 +16,25 @@ Use these labels mechanically. Adjacent infrastructure is not completion.
 | **Planned** | Intended, not started. |
 | **Research-only / RFC-defined** | Design exists; not an executable claim. |
 
-Source Profiles (**0.1–0.5** language envelopes) are **not** project roadmap milestones (0.1–0.7). Source Profile 0.4 does not mean roadmap 0.4 is the current completion gate, and Source Profile 0.5 does not complete roadmap milestone 0.5.
+Source Profiles (**0.1–0.7** language envelopes) are **not** project roadmap
+milestones (0.1–0.7). Source Profile 0.4 does not mean roadmap 0.4 is the
+current completion gate, and Source Profile 0.5 does not complete roadmap
+milestone 0.5.
 
 ## Current implementation snapshot (2026-08)
 
 ### Language
 
-Source Profiles **0.1–0.5** exist and remain additive. Programs can express modules, functions, contracts/effects/capabilities, scalar integers with wrapping/checked intent, finite enums, exhaustive match, calls with authority closure, and Profile 0.4 bounded iteration (`iterate … up_to N carrying …`, bound 1–32). **Profile 0.5 adds logical record values** (RFC 0019): nominal record declarations with canonical field identity (`record_type_id` hashes sorted `name:type;` pairs — declaration order never changes the logical type), construction with exact field coverage, functional update from a base value, and field projection. Records are values without physical layout; record equality operators are explicitly **not defined** in 0.5. Records cannot yet carry through bounded-iteration state or cross module boundaries beyond calls.
+Source Profiles **0.1–0.7** exist and remain additive. Profiles 0.6 (payload
+sums, strict booleans, checked division, explicit arithmetic intents, module
+imports) and 0.7 (bounded data: `byte`, fixed sequences `[E; N]`, bounded
+views `[E; up_to M]` with runtime length observations, three-state bounds
+evidence on element observation, checked view ranges, bounded sequence
+traversal, explicit total conversions, integer shifts) are described in
+their profile documents and RFC 0044. Earlier-profile programs keep their
+semantics and canonical identities.
+
+Profiles 0.1–0.5 remain as originally summarized below. Programs can express modules, functions, contracts/effects/capabilities, scalar integers with wrapping/checked intent, finite enums, exhaustive match, calls with authority closure, and Profile 0.4 bounded iteration (`iterate … up_to N carrying …`, bound 1–32). **Profile 0.5 adds logical record values** (RFC 0019): nominal record declarations with canonical field identity (`record_type_id` hashes sorted `name:type;` pairs — declaration order never changes the logical type), construction with exact field coverage, functional update from a base value, and field projection. Records are values without physical layout; record equality operators are explicitly **not defined** in 0.5. Records cannot yet carry through bounded-iteration state or cross module boundaries beyond calls.
 
 ### Compiler
 
@@ -30,14 +42,20 @@ Executable stages: source envelope → CST/AST → semantic program → HIR → 
 
 ### Backends
 
-| Realization | Exists | Local execute | External tools | Status |
+| Realization | Exists | Local execute | External tools | Status (2026-08) |
 | --- | --- | --- | --- | --- |
-| portable WASM MVP | yes | embedded interpreter | no | implemented / exercised; records realized by intra-function forwarding (never materialized); record-typed parameters/results/block-params fail closed |
-| research bytecode | yes | SSA interpreter | no | implemented / exercised; records supported as logical SSA values |
-| LLVM IR | yes | no in-process interpreter | clang/llc | implemented / exercised; records unsupported (`record_values` in capability envelope) |
-| C11 | yes | no in-process interpreter | clang/gcc | implemented / exercised; records unsupported |
-| Cranelift CLIF/JIT | yes | host JIT for the scalar envelope | host ISA and executable-memory policy | implemented; execution may report host-scoped `UNSUPPORTED`; records and saturating/widening are outside its declared envelope |
-| SPIR-V, PTX, eBPF, extra VMs | no | n/a | n/a | planned |
+| portable WASM MVP | yes | embedded interpreter | no | records, payload sums, bytes, fixed sequences/views (internal), traversal realized; sequence-typed boundary crossings fail closed |
+| research bytecode | yes | SSA interpreter | no | full language envelope including sequence-typed language-level signatures |
+| LLVM IR | yes | external clang | clang/llc | records, payload sums, bytes, internal sequences/views realized through canonical cells + packed view descriptors |
+| C11 | yes | external clang/gcc | clang/gcc | same composite/sequence envelope as LLVM; process-boundary marshal still refuses composites |
+| Cranelift CLIF/JIT/AOT | yes | host JIT for the scalar envelope | host ISA and executable-memory policy | composite cells via libcalls; guarded division into structured failure; saturating/widening per declared promises |
+| RISC-V 32 / eBPF / PTX | yes | artifact generation only | llc (+ target tools) | RV32IM ELF and PTX modules produced + structurally validated; execution honestly unavailable on hosts without emulators/GPUs; eBPF refuses >5-register signatures precisely (`CGX410`) |
+| SPIR-V, extra VMs | no | n/a | n/a | planned |
+
+All five executable backends agree over the Profile 0.7 bounded-data and
+serialization differential corpora (layered body/SSA/backend validation
+PASS); overall experiment status stays UNKNOWN where runtime-checked view
+ranges and dynamic indexes retain unresolved obligations — by design.
 
 WASM is one realization. Generic orchestration is adapter-neutral.
 
