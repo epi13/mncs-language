@@ -38,7 +38,7 @@ An MNCS-oriented program should make it possible to answer:
 - `crates/mncs-syntax/` — source envelopes, lossless tokens/CST, a bounded spanned AST/parser, and deterministic source-representation metrics.
 - `crates/mncs-cli/` — validation, canonicalization, identity, graph/CFG, evidence, IR, SSA, obligation, verification, comparison, diagnostic, diff, compile, backend execution, translation validation, and syntax-tournament commands.
 - `examples/` — semantic manifests, competing source candidates, canonical semantic forms, machine-intent sketches, and semantic patches.
-- `library/` — the MNCS standard library written in MNCS source itself (`mncs.core.status/logic/ordering/result.v1`, Profile 0.5/0.6; `mncs.core.sequences/bytes.v1` and `mncs.std.encoding.v1`, Profile 0.7), with bounded corpora under `examples/execution/library-core-*`. See [the library README](library/README.md) and [Source Profile 0.7](docs/source-profile-0.7.md).
+- `library/` — the MNCS standard library written in MNCS source itself (`mncs.core.status/logic/ordering/result.v1`, Profile 0.5/0.6; bounded data and encoding in Profile 0.7; vector/mask kernels in Profile 0.8), with bounded corpora under `examples/execution/`. See [the library README](library/README.md), [Source Profile 0.7](docs/source-profile-0.7.md), and [Source Profile 0.8](docs/source-profile-0.8.md).
 
 Canonical semantic JSON remains an experimental bootstrap transport. Source Profile 0.1 is an executable but intentionally narrow grammar experiment, not a selected production grammar.
 
@@ -242,10 +242,16 @@ fn checksum(data: [byte; 8]) -> (result: u64) {
 Bounds facts survive body, HIR, SSA, obligations, and backend lowering;
 runtime-checked accesses keep explicit UNKNOWN obligations rather than
 erasing them. All five executable backends agree over the bounded-data
-and serialization corpora; see `docs/source-profile-0.7.md`,
-RFC 0044, and the [bounded-data evidence record](docs/development-evidence/bounded-data-2026-08.md).
+and serialization corpora; see `docs/source-profile-0.7.md`, RFC 0044, and
+the [bounded-data evidence record](docs/development-evidence/bounded-data-2026-08.md).
 RAVEL's new `ravel.identity.v1` module is the first family consumer of
 the substrate.
+
+Source Profile 0.8 (experimental) adds semantic branchless selection,
+`vec<T, N>`, logical `mask<N>`, explicit-intent integer lane operations,
+comparisons, masked selection, and fixed-order reductions. Five executable
+backends agree through reference or conservative scalarized realizations; no
+native-SIMD or constant-time claim is implied. See `docs/source-profile-0.8.md`.
 
 Explore the semantic foundation with the small before/after examples:
 

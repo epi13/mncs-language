@@ -1,0 +1,32 @@
+mncs 0.8;
+
+// mncs.core.vector — small, portable integer-vector building blocks.
+//
+// vec<T, N> and mask<N> are logical values. These helpers do not name a
+// register width or storage layout; the selected backend may use reference
+// lanes, packed masks, scalar lanes, or a later native SIMD realization.
+module mncs.core.vector.v1;
+
+fn dot4_wrap(
+    a0: i32, a1: i32, a2: i32, a3: i32,
+    b0: i32, b1: i32, b2: i32, b3: i32
+) -> (result: i32) {
+    let left: vec<i32, 4> = vector(a0, a1, a2, a3);
+    let right: vec<i32, 4> = vector(b0, b1, b2, b3);
+    let products: vec<i32, 4> = vec_mul_wrap(left, right);
+    return reduce_sum_wrap(products);
+}
+
+fn positive_sum4(a: i32, b: i32, c: i32, d: i32) -> (result: i32) {
+    let values: vec<i32, 4> = vector(a, b, c, d);
+    let zero: vec<i32, 4> = splat(0);
+    let positive: mask<4> = vec_gt(values, zero);
+    let selected: vec<i32, 4> = select(positive, values, zero);
+    return reduce_sum_wrap(selected);
+}
+
+fn replace2(value: i32) -> (result: i32) {
+    let base: vec<i32, 4> = vector(0, 0, 0, 0);
+    let updated: vec<i32, 4> = replace_lane(base, 2, value);
+    return extract_lane(updated, 2);
+}

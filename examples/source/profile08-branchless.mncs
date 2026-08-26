@@ -1,0 +1,20 @@
+mncs 0.8;
+
+// Profile 0.8 branchless selection and immutable bounded-sequence update.
+module examples.profile08_branchless;
+
+fn choose(condition: bool, when_true: i32, when_false: i32) -> (result: i32) {
+    return select(condition, when_true, when_false);
+}
+
+fn replace_then_read(index: u64, replacement: i32) -> (result: i32) {
+    let values: [i32; 4] = [10, 20, 30, 40];
+    let updated: [i32; 4] = replace(values, index, replacement);
+    return updated[index];
+}
+
+fn original_is_immutable(index: u64, replacement: i32) -> (result: i32) {
+    let values: [i32; 4] = [10, 20, 30, 40];
+    let updated: [i32; 4] = replace(values, index, replacement);
+    return values[index] + updated[index];
+}

@@ -1,0 +1,72 @@
+mncs 0.8;
+
+module examples.profile08_vectors;
+
+fn masked_sum(a0: i32, a1: i32, a2: i32, a3: i32, limit: i32) -> (result: i32) {
+    let values: vec<i32, 4> = vector(a0, a1, a2, a3);
+    let threshold: vec<i32, 4> = splat(limit);
+    let zero: vec<i32, 4> = splat(0);
+    let active: mask<4> = vec_gt(values, threshold);
+    let selected: vec<i32, 4> = select(active, values, zero);
+    return reduce_sum_wrap(selected);
+}
+
+fn mask_logic(a0: i32, a1: i32, a2: i32, a3: i32) -> (result: bool) {
+    let values: vec<i32, 4> = vector(a0, a1, a2, a3);
+    let zero: vec<i32, 4> = splat(0);
+    let positive: mask<4> = vec_gt(values, zero);
+    let nonzero: mask<4> = vec_ne(values, zero);
+    let negative: mask<4> = mask_and(nonzero, mask_not(positive));
+    return mask_any(negative);
+}
+
+fn replace_extract(value: i32) -> (result: i32) {
+    let base: vec<i32, 4> = vector(1, 2, 3, 4);
+    let updated: vec<i32, 4> = replace_lane(base, 2, value);
+    return extract_lane(updated, 2);
+}
+
+fn mul_reduce(a: i32, b: i32) -> (result: i32) {
+    let left: vec<i32, 4> = vector(a, b, a, b);
+    let right: vec<i32, 4> = vector(b, a, b, a);
+    let products: vec<i32, 4> = vec_mul_wrap(left, right);
+    return reduce_max(products);
+}
+
+fn mul_extract(a: i32, b: i32) -> (result: i32) {
+    let left: vec<i32, 4> = vector(a, b, a, b);
+    let right: vec<i32, 4> = vector(b, a, b, a);
+    let products: vec<i32, 4> = vec_mul_wrap(left, right);
+    return extract_lane(products, 0);
+}
+
+fn mul_extract_at(a: i32, b: i32, lane: u64) -> (result: i32) {
+    let left: vec<i32, 4> = vector(a, b, a, b);
+    let right: vec<i32, 4> = vector(b, a, b, a);
+    let products: vec<i32, 4> = vec_mul_wrap(left, right);
+    return extract_lane(products, lane);
+}
+
+fn construct_extract_at(a: i32, b: i32, lane: u64) -> (result: i32) {
+    let values: vec<i32, 4> = vector(a, b, a, b);
+    return extract_lane(values, lane);
+}
+
+fn splat_extract_at(value: i32, lane: u64) -> (result: i32) {
+    let values: vec<i32, 4> = splat(value);
+    return extract_lane(values, lane);
+}
+
+fn add_reduce(a: i32, b: i32) -> (result: i32) {
+    let left: vec<i32, 4> = vector(a, b, a, b);
+    let right: vec<i32, 4> = vector(b, a, b, a);
+    return reduce_sum_wrap(vec_add_wrap(left, right));
+}
+
+fn mask_reductions(a: i32, b: i32, c: i32, d: i32) -> (result: bool) {
+    let values: vec<i32, 4> = vector(a, b, c, d);
+    let zero: vec<i32, 4> = splat(0);
+    let nonnegative: mask<4> = vec_ge(values, zero);
+    let negative: mask<4> = vec_lt(values, zero);
+    return mask_all(nonnegative) && mask_none(negative);
+}

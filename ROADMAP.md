@@ -16,8 +16,8 @@ Use these labels mechanically. Adjacent infrastructure is not completion.
 | **Planned** | Intended, not started. |
 | **Research-only / RFC-defined** | Design exists; not an executable claim. |
 
-Source Profiles (**0.1–0.7** language envelopes) are **not** project roadmap
-milestones (0.1–0.7). Source Profile 0.4 does not mean roadmap 0.4 is the
+Source Profiles (**0.1–0.8** language envelopes) are **not** project roadmap
+milestones (0.1–0.8). Source Profile 0.4 does not mean roadmap 0.4 is the
 current completion gate, and Source Profile 0.5 does not complete roadmap
 milestone 0.5.
 
@@ -25,13 +25,14 @@ milestone 0.5.
 
 ### Language
 
-Source Profiles **0.1–0.7** exist and remain additive. Profiles 0.6 (payload
+Source Profiles **0.1–0.8** exist and remain additive. Profiles 0.6 (payload
 sums, strict booleans, checked division, explicit arithmetic intents, module
 imports) and 0.7 (bounded data: `byte`, fixed sequences `[E; N]`, bounded
 views `[E; up_to M]` with runtime length observations, three-state bounds
 evidence on element observation, checked view ranges, bounded sequence
-traversal, explicit total conversions, integer shifts) are described in
-their profile documents and RFC 0044. Earlier-profile programs keep their
+traversal, explicit total conversions, integer shifts), and 0.8 (branchless
+selection, integer vectors, logical masks, and fixed-order reductions) are
+described in their profile documents. Earlier-profile programs keep their
 semantics and canonical identities.
 
 Profiles 0.1–0.5 remain as originally summarized below. Programs can express modules, functions, contracts/effects/capabilities, scalar integers with wrapping/checked intent, finite enums, exhaustive match, calls with authority closure, and Profile 0.4 bounded iteration (`iterate … up_to N carrying …`, bound 1–32). **Profile 0.5 adds logical record values** (RFC 0019): nominal record declarations with canonical field identity (`record_type_id` hashes sorted `name:type;` pairs — declaration order never changes the logical type), construction with exact field coverage, functional update from a base value, and field projection. Records are values without physical layout; record equality operators are explicitly **not defined** in 0.5. Records cannot yet carry through bounded-iteration state or cross module boundaries beyond calls.

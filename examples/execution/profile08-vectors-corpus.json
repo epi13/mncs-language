@@ -1,0 +1,183 @@
+{
+  "schema_version": "0.2",
+  "name": "profile08-vectors",
+  "cases": [
+    {
+      "id": "masked-sum",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_vectors", "function": "masked_sum" },
+        "arguments": [
+          { "integer": { "value": -2, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 7, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 3, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 10, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 4, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 17, "type": { "bits": 32, "signed": true } } }]
+    },
+    {
+      "id": "negative-mask",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_vectors", "function": "mask_logic" },
+        "arguments": [
+          { "integer": { "value": 0, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 4, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": -1, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 8, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "replace-extract",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_vectors", "function": "replace_extract" },
+        "arguments": [{ "integer": { "value": 91, "type": { "bits": 32, "signed": true } } }],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 91, "type": { "bits": 32, "signed": true } } }]
+    },
+    {
+      "id": "mul-max",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_vectors", "function": "mul_reduce" },
+        "arguments": [
+          { "integer": { "value": 6, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": -7, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": -42, "type": { "bits": 32, "signed": true } } }]
+    },
+    {
+      "id": "mul-extract",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_vectors", "function": "mul_extract" },
+        "arguments": [
+          { "integer": { "value": 6, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": -7, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": -42, "type": { "bits": 32, "signed": true } } }]
+    },
+    {
+      "id": "mul-max-positive",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_vectors", "function": "mul_reduce" },
+        "arguments": [
+          { "integer": { "value": 6, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 7, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 42, "type": { "bits": 32, "signed": true } } }]
+    },
+    {
+      "id": "mul-extract-last",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_vectors", "function": "mul_extract_at" },
+        "arguments": [
+          { "integer": { "value": 6, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": -7, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 3, "type": { "bits": 64, "signed": false } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": -42, "type": { "bits": 32, "signed": true } } }]
+    },
+    {
+      "id": "construct-extract-last",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_vectors", "function": "construct_extract_at" },
+        "arguments": [
+          { "integer": { "value": 6, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": -7, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 3, "type": { "bits": 64, "signed": false } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": -7, "type": { "bits": 32, "signed": true } } }]
+    },
+    {
+      "id": "splat-extract-last",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_vectors", "function": "splat_extract_at" },
+        "arguments": [
+          { "integer": { "value": -9, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 3, "type": { "bits": 64, "signed": false } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": -9, "type": { "bits": 32, "signed": true } } }]
+    },
+    {
+      "id": "add-reduce",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_vectors", "function": "add_reduce" },
+        "arguments": [
+          { "integer": { "value": 3, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 5, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 32, "type": { "bits": 32, "signed": true } } }]
+    },
+    {
+      "id": "mask-all-none-true",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_vectors", "function": "mask_reductions" },
+        "arguments": [
+          { "integer": { "value": 0, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 1, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 2, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 3, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "mask-all-none-false",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_vectors", "function": "mask_reductions" },
+        "arguments": [
+          { "integer": { "value": 0, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": -1, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 2, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 3, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": false } }]
+    }
+  ],
+  "properties": []
+}

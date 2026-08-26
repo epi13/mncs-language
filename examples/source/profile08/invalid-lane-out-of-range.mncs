@@ -1,0 +1,8 @@
+mncs 0.8;
+
+module examples.invalid_lane_out_of_range;
+
+fn invalid() -> (result: i32) {
+    let values: vec<i32, 4> = vector(1, 2, 3, 4);
+    return extract_lane(values, 4);
+}

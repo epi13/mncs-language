@@ -1,0 +1,73 @@
+{
+  "schema_version": "0.2",
+  "name": "profile08-branchless",
+  "cases": [
+    {
+      "id": "select-true",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_branchless", "function": "choose" },
+        "arguments": [
+          { "boolean": { "value": true } },
+          { "integer": { "value": 17, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": -9, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        { "integer": { "value": 17, "type": { "bits": 32, "signed": true } } }
+      ]
+    },
+    {
+      "id": "select-false",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_branchless", "function": "choose" },
+        "arguments": [
+          { "boolean": { "value": false } },
+          { "integer": { "value": 17, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": -9, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        { "integer": { "value": -9, "type": { "bits": 32, "signed": true } } }
+      ]
+    },
+    {
+      "id": "replace-middle",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_branchless", "function": "replace_then_read" },
+        "arguments": [
+          { "integer": { "value": 2, "type": { "bits": 64, "signed": false } } },
+          { "integer": { "value": 99, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        { "integer": { "value": 99, "type": { "bits": 32, "signed": true } } }
+      ]
+    },
+    {
+      "id": "replace-preserves-source",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile08_branchless", "function": "original_is_immutable" },
+        "arguments": [
+          { "integer": { "value": 1, "type": { "bits": 64, "signed": false } } },
+          { "integer": { "value": 7, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        { "integer": { "value": 27, "type": { "bits": 32, "signed": true } } }
+      ]
+    }
+  ],
+  "properties": []
+}
