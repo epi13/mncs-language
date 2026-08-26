@@ -200,6 +200,11 @@ pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
             "bounded_sequences_internal",
             "bounded_views_internal",
             "sequence_traversal",
+            "semantic_branchless_select",
+            "semantic_integer_vectors",
+            "semantic_masks",
+            "packed_mask_realization",
+            "scalarized_vector_realization",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -369,6 +374,10 @@ pub fn research_bytecode_capabilities() -> BackendCapabilityManifest {
             "bounded_sequences",
             "bounded_views",
             "sequence_traversal",
+            "semantic_branchless_select",
+            "semantic_integer_vectors",
+            "semantic_masks",
+            "reference_vector_realization",
         ]
         .into_iter()
         .map(str::to_owned)

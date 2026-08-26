@@ -6,12 +6,12 @@ use mncs_model::{
     BodyOperationKind, BodyParameter, BodyTerminator, BodyType, BodyValue,
     BoundedIterationCompletion, CompilationStatus, CompilationStudyRequest, CompilationStudyResult,
     CompilerArtifactRef, CompilerNodeProfile, CompilerPassExecutionObservation, ContractClause,
-    ContractKind, Effect, EvidenceFreshness, FailureMode, Fact, FiniteType, FiniteVariant,
-    Function, FunctionBody, IntegerType, Intent, IterationDomain, MachineIntentSpec,
-    MachinePreference, Obligation, ObligationStatus, Program, RecordField, RecordType,
-    Requirement, SemanticGraph, SemanticId, SemanticIdentities, TransformationEdge,
-    TransformationStatus, ValidationReport, Value, EXECUTABLE_BODY_SCHEMA_VERSION,
-    SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND, SUPPORTED_SCHEMA_VERSION,
+    ContractKind, Effect, FailureMode, FiniteType, FiniteVariant, Function, FunctionBody,
+    IntegerType, Intent, IterationDomain, MachineIntentSpec, MachinePreference, Program,
+    RecordField, RecordType, Requirement, SemanticGraph, SemanticId, SemanticIdentities,
+    TransformationEdge, TransformationStatus, ValidationReport, Value,
+    EXECUTABLE_BODY_SCHEMA_VERSION, SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
+    SUPPORTED_SCHEMA_VERSION,
 };
 use mncs_syntax::{
     parse, AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstStmt, ConcreteSyntaxTree,
@@ -1677,6 +1677,11 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
             calls_in_expr(sequence, calls);
             calls_in_expr(index, calls);
             calls_in_expr(element, calls);
+        }
+        AstExpr::VectorIntrinsic { arguments, .. } => {
+            for argument in arguments {
+                calls_in_expr(argument, calls);
+            }
         }
         AstExpr::SequenceLiteral { elements, .. } => {
             for element in elements {
@@ -3356,32 +3361,23 @@ impl<'a> BodyBuilder<'a> {
                 condition,
                 when_true,
                 when_false,
-                span,
+                span: _,
             } => {
-                let condition_binding =
-                    self.elaborate_expr(condition, None, env, diagnostics)?;
-                let boolean_type = BodyType::Named("bool".to_owned());
-                if condition_binding.ty != boolean_type {
-                    diagnostics.push(elaboration_diagnostic(
-                        "MNE195",
-                        "selection condition must have boolean type",
-                        condition.span(),
-                    ));
-                    return None;
-                }
+                let condition_binding = self.elaborate_expr(condition, None, env, diagnostics)?;
                 // The operand type is the expected type when known; otherwise
                 // the first candidate establishes it and the second must
                 // agree. Both candidates are values of one selection.
-                let operand_type = match expected {
-                    Some(candidate) => candidate.clone(),
+                let (operand_type, true_binding) = match expected {
+                    Some(candidate) => {
+                        let binding =
+                            self.elaborate_expr(when_true, Some(candidate), env, diagnostics)?;
+                        (candidate.clone(), binding)
+                    }
                     None => {
-                        let first =
-                            self.elaborate_expr(when_true, None, env, diagnostics)?;
-                        first.ty
+                        let binding = self.elaborate_expr(when_true, None, env, diagnostics)?;
+                        (binding.ty.clone(), binding)
                     }
                 };
-                let true_binding =
-                    self.elaborate_expr(when_true, Some(&operand_type), env, diagnostics)?;
                 if true_binding.ty != operand_type {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE196",
@@ -3397,6 +3393,18 @@ impl<'a> BodyBuilder<'a> {
                         "MNE196",
                         "selection candidates must have the same type",
                         when_false.span(),
+                    ));
+                    return None;
+                }
+                let required_condition = match &operand_type {
+                    BodyType::Vector { lanes, .. } => BodyType::Mask { lanes: *lanes },
+                    _ => BodyType::Named("bool".to_owned()),
+                };
+                if condition_binding.ty != required_condition {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE195",
+                        "selection condition must be bool, or a lane-matched mask for vector selection",
+                        condition.span(),
                     ));
                     return None;
                 }
@@ -3436,11 +3444,7 @@ impl<'a> BodyBuilder<'a> {
                     kind: BodyOperationKind::Select {
                         operand_type: Box::new(operand_type.clone()),
                     },
-                    operands: vec![
-                        condition_binding.id,
-                        true_binding.id,
-                        false_binding.id,
-                    ],
+                    operands: vec![condition_binding.id, true_binding.id, false_binding.id],
                     results: vec![BodyValue {
                         id: id.clone(),
                         ty: operand_type.clone(),
@@ -3570,6 +3574,18 @@ impl<'a> BodyBuilder<'a> {
                     ty: result_type,
                 })
             }
+            AstExpr::VectorIntrinsic {
+                name,
+                arguments,
+                span,
+            } => self.elaborate_vector_intrinsic(
+                &name.text,
+                arguments,
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
             AstExpr::SequenceLiteral { elements, span } => {
                 let BodyType::Sequence {
                     element: element_type,
@@ -4116,6 +4132,433 @@ impl<'a> BodyBuilder<'a> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn elaborate_vector_intrinsic(
+        &mut self,
+        name: &str,
+        arguments: &[AstExpr],
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let arity = |wanted: usize, diagnostics: &mut Vec<SourceDiagnostic>| {
+            if arguments.len() == wanted {
+                true
+            } else {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE201",
+                    format!("{name} requires exactly {wanted} argument(s)"),
+                    span,
+                ));
+                false
+            }
+        };
+        let counter = BodyType::Integer(IntegerType {
+            bits: 64,
+            signed: false,
+        });
+        let lane_evidence = |expr: &AstExpr, lanes: u32| match expr {
+            AstExpr::Integer { value, .. }
+                if *value >= 0 && (*value as u128) < u128::from(lanes) =>
+            {
+                mncs_model::BoundsEvidence::StaticExact
+            }
+            _ => mncs_model::BoundsEvidence::RuntimeChecked {
+                failure: FailureMode::Isolated,
+            },
+        };
+
+        if name == "vector" {
+            let Some(BodyType::Vector { element, lanes }) = expected else {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE202",
+                    "vector construction requires an expected vec<T, N> type",
+                    span,
+                ));
+                return None;
+            };
+            if arguments.len() != *lanes as usize {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE203",
+                    format!("vector construction requires exactly {lanes} lane values"),
+                    span,
+                ));
+                return None;
+            }
+            let mut operands = Vec::with_capacity(arguments.len());
+            for argument in arguments {
+                let binding = self.elaborate_expr(argument, Some(element), env, diagnostics)?;
+                if binding.ty != **element {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE204",
+                        "vector lane does not match the declared element type",
+                        argument.span(),
+                    ));
+                    return None;
+                }
+                operands.push(binding.id);
+            }
+            return Some(
+                self.emit_profile08_value(
+                    "vec",
+                    BodyOperationKind::VectorConstruct {
+                        element_type: element.clone(),
+                        lanes: *lanes,
+                    },
+                    operands,
+                    expected
+                        .cloned()
+                        .unwrap_or_else(|| BodyType::Named("invalid".to_owned())),
+                ),
+            );
+        }
+
+        if name == "splat" {
+            if !arity(1, diagnostics) {
+                return None;
+            }
+            let Some(BodyType::Vector { element, lanes }) = expected else {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE205",
+                    "vector splat requires an expected vec<T, N> type",
+                    span,
+                ));
+                return None;
+            };
+            let value = self.elaborate_expr(&arguments[0], Some(element), env, diagnostics)?;
+            return Some(
+                self.emit_profile08_value(
+                    "splat",
+                    BodyOperationKind::VectorSplat {
+                        element_type: element.clone(),
+                        lanes: *lanes,
+                    },
+                    vec![value.id],
+                    expected
+                        .cloned()
+                        .unwrap_or_else(|| BodyType::Named("invalid".to_owned())),
+                ),
+            );
+        }
+
+        if matches!(name, "extract_lane" | "replace_lane") {
+            let wanted = if name == "extract_lane" { 2 } else { 3 };
+            if !arity(wanted, diagnostics) {
+                return None;
+            }
+            let vector = self.elaborate_expr(&arguments[0], None, env, diagnostics)?;
+            let BodyType::Vector { element, lanes } = vector.ty.clone() else {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE206",
+                    "lane operation requires a vector operand",
+                    arguments[0].span(),
+                ));
+                return None;
+            };
+            if let AstExpr::Integer { value, .. } = &arguments[1] {
+                if *value < 0 || *value >= i128::from(lanes) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE207",
+                        format!("lane {value} is outside the vector domain 0..{lanes}"),
+                        arguments[1].span(),
+                    ));
+                    return None;
+                }
+            }
+            let index = self.elaborate_expr(&arguments[1], Some(&counter), env, diagnostics)?;
+            let evidence = lane_evidence(&arguments[1], lanes);
+            if name == "extract_lane" {
+                return Some(self.emit_profile08_value(
+                    "lane",
+                    BodyOperationKind::VectorExtract {
+                        element_type: element.clone(),
+                        lanes,
+                        evidence,
+                    },
+                    vec![vector.id, index.id],
+                    *element,
+                ));
+            }
+            let value = self.elaborate_expr(&arguments[2], Some(&element), env, diagnostics)?;
+            return Some(self.emit_profile08_value(
+                "vrep",
+                BodyOperationKind::VectorReplace {
+                    element_type: element.clone(),
+                    lanes,
+                    evidence,
+                },
+                vec![vector.id, index.id, value.id],
+                BodyType::Vector { element, lanes },
+            ));
+        }
+
+        if name.starts_with("vec_")
+            && !matches!(
+                name,
+                "vec_eq" | "vec_ne" | "vec_lt" | "vec_le" | "vec_gt" | "vec_ge"
+            )
+        {
+            if !arity(2, diagnostics) {
+                return None;
+            }
+            let left = self.elaborate_expr(&arguments[0], expected, env, diagnostics)?;
+            let BodyType::Vector { element, lanes } = left.ty.clone() else {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE208",
+                    "vector binary operation requires a vector operand",
+                    arguments[0].span(),
+                ));
+                return None;
+            };
+            if !matches!(element.as_ref(), BodyType::Integer(_)) {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE209",
+                    "initial vector arithmetic supports integer lanes",
+                    arguments[0].span(),
+                ));
+                return None;
+            }
+            let vector_type = BodyType::Vector {
+                element: element.clone(),
+                lanes,
+            };
+            let right = self.elaborate_expr(&arguments[1], Some(&vector_type), env, diagnostics)?;
+            if right.ty != vector_type {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE210",
+                    "vector operands must have identical type and lane count",
+                    arguments[1].span(),
+                ));
+                return None;
+            }
+            let (operator, intent) = match name {
+                "vec_add_wrap" => ("add", ArithmeticIntent::Wrapping),
+                "vec_add_checked" => ("add", ArithmeticIntent::Checked),
+                "vec_add_sat" => ("add", ArithmeticIntent::Saturating),
+                "vec_sub_wrap" => ("sub", ArithmeticIntent::Wrapping),
+                "vec_sub_checked" => ("sub", ArithmeticIntent::Checked),
+                "vec_sub_sat" => ("sub", ArithmeticIntent::Saturating),
+                "vec_mul_wrap" => ("mul", ArithmeticIntent::Wrapping),
+                "vec_mul_checked" => ("mul", ArithmeticIntent::Checked),
+                "vec_mul_sat" => ("mul", ArithmeticIntent::Saturating),
+                "vec_and" => ("and", ArithmeticIntent::Wrapping),
+                "vec_or" => ("or", ArithmeticIntent::Wrapping),
+                "vec_xor" => ("xor", ArithmeticIntent::Wrapping),
+                "vec_shl" => ("shl", ArithmeticIntent::Wrapping),
+                "vec_shr" => ("shr", ArithmeticIntent::Wrapping),
+                "vec_min" => ("min", ArithmeticIntent::Wrapping),
+                "vec_max" => ("max", ArithmeticIntent::Wrapping),
+                _ => {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE211",
+                        "unknown vector operation",
+                        span,
+                    ));
+                    return None;
+                }
+            };
+            return Some(self.emit_profile08_value(
+                "vop",
+                BodyOperationKind::VectorBinary {
+                    operator: operator.to_owned(),
+                    element_type: element,
+                    lanes,
+                    intent,
+                },
+                vec![left.id, right.id],
+                vector_type,
+            ));
+        }
+
+        if matches!(
+            name,
+            "vec_eq" | "vec_ne" | "vec_lt" | "vec_le" | "vec_gt" | "vec_ge"
+        ) {
+            if !arity(2, diagnostics) {
+                return None;
+            }
+            let left = self.elaborate_expr(&arguments[0], None, env, diagnostics)?;
+            let BodyType::Vector { element, lanes } = left.ty.clone() else {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE212",
+                    "vector comparison requires a vector operand",
+                    arguments[0].span(),
+                ));
+                return None;
+            };
+            let vector_type = BodyType::Vector {
+                element: element.clone(),
+                lanes,
+            };
+            let right = self.elaborate_expr(&arguments[1], Some(&vector_type), env, diagnostics)?;
+            if right.ty != vector_type {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE210",
+                    "vector operands must have identical type and lane count",
+                    arguments[1].span(),
+                ));
+                return None;
+            }
+            return Some(self.emit_profile08_value(
+                "mask",
+                BodyOperationKind::VectorCompare {
+                    predicate: name.trim_start_matches("vec_").to_owned(),
+                    element_type: element,
+                    lanes,
+                },
+                vec![left.id, right.id],
+                BodyType::Mask { lanes },
+            ));
+        }
+
+        if matches!(name, "mask_and" | "mask_or" | "mask_xor") {
+            if !arity(2, diagnostics) {
+                return None;
+            }
+            let left = self.elaborate_expr(&arguments[0], None, env, diagnostics)?;
+            let BodyType::Mask { lanes } = left.ty else {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE213",
+                    "mask operation requires mask operands",
+                    arguments[0].span(),
+                ));
+                return None;
+            };
+            let mask_type = BodyType::Mask { lanes };
+            let right = self.elaborate_expr(&arguments[1], Some(&mask_type), env, diagnostics)?;
+            if right.ty != mask_type {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE214",
+                    "mask operands must have identical lane counts",
+                    arguments[1].span(),
+                ));
+                return None;
+            }
+            return Some(self.emit_profile08_value(
+                "mask",
+                BodyOperationKind::MaskBinary {
+                    operator: name.trim_start_matches("mask_").to_owned(),
+                    lanes,
+                },
+                vec![left.id, right.id],
+                mask_type,
+            ));
+        }
+
+        if name == "mask_not" {
+            if !arity(1, diagnostics) {
+                return None;
+            }
+            let value = self.elaborate_expr(&arguments[0], None, env, diagnostics)?;
+            let BodyType::Mask { lanes } = value.ty else {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE213",
+                    "mask operation requires a mask operand",
+                    arguments[0].span(),
+                ));
+                return None;
+            };
+            return Some(self.emit_profile08_value(
+                "mask",
+                BodyOperationKind::MaskNot { lanes },
+                vec![value.id],
+                BodyType::Mask { lanes },
+            ));
+        }
+
+        if matches!(name, "mask_any" | "mask_all" | "mask_none") {
+            if !arity(1, diagnostics) {
+                return None;
+            }
+            let value = self.elaborate_expr(&arguments[0], None, env, diagnostics)?;
+            let BodyType::Mask { lanes } = value.ty else {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE215",
+                    "mask reduction requires a mask operand",
+                    arguments[0].span(),
+                ));
+                return None;
+            };
+            return Some(self.emit_profile08_value(
+                "mred",
+                BodyOperationKind::MaskReduce {
+                    operator: name.trim_start_matches("mask_").to_owned(),
+                    lanes,
+                },
+                vec![value.id],
+                BodyType::Named("bool".to_owned()),
+            ));
+        }
+
+        if matches!(
+            name,
+            "reduce_sum_wrap" | "reduce_sum_checked" | "reduce_min" | "reduce_max"
+        ) {
+            if !arity(1, diagnostics) {
+                return None;
+            }
+            let value = self.elaborate_expr(&arguments[0], None, env, diagnostics)?;
+            let BodyType::Vector { element, lanes } = value.ty else {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE216",
+                    "vector reduction requires a vector operand",
+                    arguments[0].span(),
+                ));
+                return None;
+            };
+            let (operator, intent) = match name {
+                "reduce_sum_wrap" => ("sum", ArithmeticIntent::Wrapping),
+                "reduce_sum_checked" => ("sum", ArithmeticIntent::Checked),
+                "reduce_min" => ("min", ArithmeticIntent::Wrapping),
+                _ => ("max", ArithmeticIntent::Wrapping),
+            };
+            return Some(self.emit_profile08_value(
+                "vred",
+                BodyOperationKind::VectorReduce {
+                    operator: operator.to_owned(),
+                    element_type: element.clone(),
+                    lanes,
+                    intent,
+                },
+                vec![value.id],
+                *element,
+            ));
+        }
+
+        diagnostics.push(elaboration_diagnostic(
+            "MNE211",
+            format!("unknown Profile 0.8 intrinsic {name}"),
+            span,
+        ));
+        None
+    }
+
+    fn emit_profile08_value(
+        &mut self,
+        prefix: &str,
+        kind: BodyOperationKind,
+        operands: Vec<String>,
+        ty: BodyType,
+    ) -> ResolvedBinding {
+        let id = self.new_value(prefix);
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind,
+            operands,
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        ResolvedBinding { id, ty }
+    }
+
     fn finish_return(
         &mut self,
         value: ResolvedBinding,
@@ -4231,13 +4674,23 @@ fn profile_type(
             name: record_type.name.clone(),
         };
     }
+    let parametric = BodyType::from_semantic_name(name);
+    if matches!(parametric, BodyType::Mask { .. })
+        || matches!(
+            &parametric,
+            BodyType::Vector { element, .. }
+                if matches!(element.as_ref(), BodyType::Integer(IntegerType { bits: 8 | 16 | 32 | 64, .. }))
+        )
+    {
+        return parametric;
+    }
     if let Some(sequence) = profile_sequence_type(name, finite_types, record_types) {
         return sequence;
     }
     profile_scalar_supported(name).unwrap_or_else(|| {
         diagnostics.push(elaboration_diagnostic(
             "MNE105",
-            "source profile supports bool, byte, 8/16/32/64-bit integers, declared finite types, declared record types, and canonical bounded-sequence spellings",
+            "source profile supports bool, byte, 8/16/32/64-bit integers, declared finite/record types, bounded sequences, and Profile 0.8 integer vec<T, N>/mask<N>",
             span,
         ));
         BodyType::Named(name.to_owned())

@@ -568,6 +568,13 @@ pub enum AstExpr {
         element: Box<AstExpr>,
         span: SourceSpan,
     },
+    /// Profile 0.8 semantic vector/mask intrinsic. The parser preserves the
+    /// intrinsic identity and arguments; elaboration supplies lane/type facts.
+    VectorIntrinsic {
+        name: SpannedText,
+        arguments: Vec<AstExpr>,
+        span: SourceSpan,
+    },
 }
 
 impl AstExpr {
@@ -587,7 +594,8 @@ impl AstExpr {
             | Self::Slice { span, .. }
             | Self::Cast { span, .. }
             | Self::Select { span, .. }
-            | Self::SequenceReplace { span, .. } => *span,
+            | Self::SequenceReplace { span, .. }
+            | Self::VectorIntrinsic { span, .. } => *span,
         }
     }
 }
@@ -2018,7 +2026,7 @@ impl<'a> Parser<'a> {
                 // a selection, never a branch.
                 if self.current_kind() == Some(TokenKind::LeftParen)
                     && profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_8)
-                    && matches!(name.text.as_str(), "select" | "replace")
+                    && is_profile08_intrinsic(&name.text)
                 {
                     return self.intrinsic_selection(name);
                 }
@@ -2246,7 +2254,11 @@ impl<'a> Parser<'a> {
                 );
                 None
             }
-            _ => None,
+            _ => Some(AstExpr::VectorIntrinsic {
+                name,
+                arguments,
+                span,
+            }),
         }
     }
 
@@ -2681,13 +2693,53 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parse a type annotation: either a plain named/scalar identifier or,
-    /// from Profile 0.7, a canonical bounded-sequence spelling
-    /// `[Element; N]` / `[Element; up_to M]`. The returned text is the
-    /// canonical spelling; elaboration resolves it against declarations.
+    /// Parse a type annotation: a plain named/scalar identifier, a Profile
+    /// 0.7 bounded sequence, or a Profile 0.8 semantic vector/mask family.
+    /// The returned text is canonical; elaboration owns its semantic identity.
     fn type_annotation(&mut self, code: &str, message: &str) -> Option<SpannedText> {
         if self.current_kind() != Some(TokenKind::LeftBracket) {
-            return self.spanned(TokenKind::Identifier, code, message);
+            let name = self.spanned(TokenKind::Identifier, code, message)?;
+            if self.current_kind() != Some(TokenKind::Lt)
+                || !matches!(name.text.as_str(), "vec" | "mask")
+            {
+                return Some(name);
+            }
+            if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_8) {
+                self.error(
+                    "MNP163",
+                    "semantic vector and mask types require source profile 0.8 or later",
+                    vec![TokenKind::Lt],
+                );
+            }
+            self.cursor += 1;
+            let text = if name.text == "vec" {
+                let element = self.type_annotation(code, message)?;
+                self.expect(
+                    TokenKind::Comma,
+                    "MNP164",
+                    "expected ',' between vector element type and lane count",
+                );
+                let lanes = self.spanned(
+                    TokenKind::IntegerLiteral,
+                    "MNP165",
+                    "expected a literal vector lane count",
+                )?;
+                format!("vec<{}, {}>", element.text, lanes.text)
+            } else {
+                let lanes = self.spanned(
+                    TokenKind::IntegerLiteral,
+                    "MNP166",
+                    "expected a literal mask lane count",
+                )?;
+                format!("mask<{}>", lanes.text)
+            };
+            let end = self.expect(
+                TokenKind::Gt,
+                "MNP167",
+                "expected '>' after vector or mask type",
+            )?;
+            let span = SourceSpan::covering(&self.envelope.text, name.span, self.tokens[end].span);
+            return Some(SpannedText { text, span });
         }
         if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_7) {
             self.error(
@@ -2894,6 +2946,51 @@ pub fn source_profile_supported(version: &str) -> bool {
             | SOURCE_PROFILE_VERSION_0_6
             | SOURCE_PROFILE_VERSION_0_7
             | SOURCE_PROFILE_VERSION_0_8
+    )
+}
+
+fn is_profile08_intrinsic(name: &str) -> bool {
+    matches!(
+        name,
+        "select"
+            | "replace"
+            | "vector"
+            | "splat"
+            | "extract_lane"
+            | "replace_lane"
+            | "vec_add_wrap"
+            | "vec_add_checked"
+            | "vec_add_sat"
+            | "vec_sub_wrap"
+            | "vec_sub_checked"
+            | "vec_sub_sat"
+            | "vec_mul_wrap"
+            | "vec_mul_checked"
+            | "vec_mul_sat"
+            | "vec_and"
+            | "vec_or"
+            | "vec_xor"
+            | "vec_shl"
+            | "vec_shr"
+            | "vec_min"
+            | "vec_max"
+            | "vec_eq"
+            | "vec_ne"
+            | "vec_lt"
+            | "vec_le"
+            | "vec_gt"
+            | "vec_ge"
+            | "mask_and"
+            | "mask_or"
+            | "mask_xor"
+            | "mask_not"
+            | "mask_any"
+            | "mask_all"
+            | "mask_none"
+            | "reduce_sum_wrap"
+            | "reduce_sum_checked"
+            | "reduce_min"
+            | "reduce_max"
     )
 }
 

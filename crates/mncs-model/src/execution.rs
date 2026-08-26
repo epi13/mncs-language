@@ -75,6 +75,15 @@ pub enum ExecutionValue {
     Sequence {
         values: Vec<ExecutionValue>,
     },
+    /// Logical vector lanes. No storage/register representation participates
+    /// in this reference value.
+    Vector {
+        values: Vec<ExecutionValue>,
+    },
+    /// Logical lane predicates. Backends may realize these as packed bits.
+    Mask {
+        lanes: Vec<bool>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -841,6 +850,281 @@ fn execute_operation(
                 },
             );
         }
+        BodyOperationKind::VectorConstruct { lanes, .. } => {
+            let Some(vector) = collect_operands(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "vector construction operand was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            if vector.len() != *lanes as usize {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "vector construction lane count mismatch".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Vector { values: vector },
+            );
+        }
+        BodyOperationKind::VectorSplat { lanes, .. } => {
+            let Some(value) = values
+                .get(operation.operands.first().unwrap_or(&String::new()))
+                .cloned()
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "vector splat operand was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Vector {
+                    values: vec![value; *lanes as usize],
+                },
+            );
+        }
+        BodyOperationKind::VectorExtract {
+            lanes, evidence, ..
+        } => {
+            let Some(ExecutionValue::Vector { values: vector }) =
+                values.get(operation.operands.first().unwrap_or(&String::new()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "vector extraction operand was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(index) = integer_operand(operation, values, 1) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "vector lane index was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            if index < 0 || index as u128 >= u128::from(*lanes) {
+                let status = if matches!(evidence, BoundsEvidence::RuntimeChecked { .. }) {
+                    ExecutionStatus::RuntimeFailure
+                } else {
+                    ExecutionStatus::InvalidRequest
+                };
+                result.fail(
+                    status,
+                    Some(identity.clone()),
+                    "vector lane index is out of bounds".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            values.insert(
+                operation.results[0].id.clone(),
+                vector[index as usize].clone(),
+            );
+        }
+        BodyOperationKind::VectorReplace {
+            lanes, evidence, ..
+        } => {
+            let Some(ExecutionValue::Vector { values: source }) =
+                values.get(operation.operands.first().unwrap_or(&String::new()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "vector replacement source was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(index) = integer_operand(operation, values, 1) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "vector lane index was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(element) = values
+                .get(operation.operands.get(2).unwrap_or(&String::new()))
+                .cloned()
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "vector replacement element was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            if index < 0 || index as u128 >= u128::from(*lanes) {
+                let status = if matches!(evidence, BoundsEvidence::RuntimeChecked { .. }) {
+                    ExecutionStatus::RuntimeFailure
+                } else {
+                    ExecutionStatus::InvalidRequest
+                };
+                result.fail(
+                    status,
+                    Some(identity.clone()),
+                    "vector lane index is out of bounds".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            let mut updated = source.clone();
+            updated[index as usize] = element;
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Vector { values: updated },
+            );
+        }
+        BodyOperationKind::VectorBinary {
+            operator,
+            element_type,
+            intent,
+            ..
+        } => {
+            let Some((left, right)) = vector_operands(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "vector binary operands were unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(produced) =
+                evaluate_vector_binary(operator, element_type, *intent, left, right)
+            else {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    "vector arithmetic failed in at least one lane".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Vector { values: produced },
+            );
+        }
+        BodyOperationKind::VectorCompare {
+            predicate,
+            element_type,
+            ..
+        } => {
+            let Some((left, right)) = vector_operands(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "vector comparison operands were unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(lanes) = evaluate_vector_compare(predicate, element_type, left, right) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "vector comparison operands violated their element type".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Mask { lanes },
+            );
+        }
+        BodyOperationKind::MaskBinary { operator, .. } => {
+            let Some((left, right)) = mask_operands(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "mask operands were unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let lanes = left
+                .iter()
+                .zip(right)
+                .map(|(left, right)| match operator.as_str() {
+                    "and" => *left && *right,
+                    "or" => *left || *right,
+                    _ => *left != *right,
+                })
+                .collect();
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Mask { lanes },
+            );
+        }
+        BodyOperationKind::MaskNot { .. } => {
+            let Some(ExecutionValue::Mask { lanes }) =
+                values.get(operation.operands.first().unwrap_or(&String::new()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "mask not operand was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Mask {
+                    lanes: lanes.iter().map(|lane| !lane).collect(),
+                },
+            );
+        }
+        BodyOperationKind::MaskReduce { operator, .. } => {
+            let Some(ExecutionValue::Mask { lanes }) =
+                values.get(operation.operands.first().unwrap_or(&String::new()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "mask reduction operand was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let value = match operator.as_str() {
+                "any" => lanes.iter().any(|lane| *lane),
+                "all" => lanes.iter().all(|lane| *lane),
+                _ => !lanes.iter().any(|lane| *lane),
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Boolean { value },
+            );
+        }
+        BodyOperationKind::VectorReduce {
+            operator,
+            element_type,
+            intent,
+            ..
+        } => {
+            let Some(ExecutionValue::Vector { values: lanes }) =
+                values.get(operation.operands.first().unwrap_or(&String::new()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "vector reduction operand was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(value) = evaluate_vector_reduce(operator, element_type, *intent, lanes) else {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    "vector reduction failed".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            values.insert(operation.results[0].id.clone(), value);
+        }
         BodyOperationKind::Select { operand_type: _ } => {
             let Some(condition) = values.get(operation.operands.first().unwrap_or(&String::new()))
             else {
@@ -851,11 +1135,58 @@ fn execute_operation(
                 );
                 return Some(result.clone());
             };
+            if let ExecutionValue::Mask { lanes } = condition {
+                let Some(ExecutionValue::Vector { values: true_lanes }) =
+                    values.get(&operation.operands[1])
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "masked selection true candidate was not a vector".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let Some(ExecutionValue::Vector {
+                    values: false_lanes,
+                }) = values.get(&operation.operands[2])
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "masked selection false candidate was not a vector".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                if lanes.len() != true_lanes.len() || lanes.len() != false_lanes.len() {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "masked selection lane count mismatch".to_owned(),
+                    );
+                    return Some(result.clone());
+                }
+                let selected = lanes
+                    .iter()
+                    .enumerate()
+                    .map(|(index, lane)| {
+                        if *lane {
+                            true_lanes[index].clone()
+                        } else {
+                            false_lanes[index].clone()
+                        }
+                    })
+                    .collect();
+                values.insert(
+                    operation.results[0].id.clone(),
+                    ExecutionValue::Vector { values: selected },
+                );
+                return None;
+            }
             let ExecutionValue::Boolean { value: chosen_true } = condition else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     Some(identity.clone()),
-                    "selection condition was not a boolean value".to_owned(),
+                    "selection condition was neither bool nor mask".to_owned(),
                 );
                 return Some(result.clone());
             };
@@ -863,7 +1194,12 @@ fn execute_operation(
             // This is the semantic distinction a branchless realization
             // preserves at the machine level.
             let candidate_index = if *chosen_true { 1 } else { 2 };
-            let Some(selected) = values.get(operation.operands.get(candidate_index).unwrap_or(&String::new())) else {
+            let Some(selected) = values.get(
+                operation
+                    .operands
+                    .get(candidate_index)
+                    .unwrap_or(&String::new()),
+            ) else {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     Some(identity.clone()),
@@ -1761,6 +2097,144 @@ pub(crate) fn compare_integers(
         "gt" => left > right,
         "ge" => left >= right,
         _ => return None,
+    })
+}
+
+fn collect_operands(
+    operation: &BodyOperation,
+    values: &BTreeMap<String, ExecutionValue>,
+) -> Option<Vec<ExecutionValue>> {
+    operation
+        .operands
+        .iter()
+        .map(|operand| values.get(operand).cloned())
+        .collect()
+}
+
+fn vector_operands<'a>(
+    operation: &BodyOperation,
+    values: &'a BTreeMap<String, ExecutionValue>,
+) -> Option<(&'a [ExecutionValue], &'a [ExecutionValue])> {
+    let ExecutionValue::Vector { values: left } = values.get(operation.operands.first()?)? else {
+        return None;
+    };
+    let ExecutionValue::Vector { values: right } = values.get(operation.operands.get(1)?)? else {
+        return None;
+    };
+    (left.len() == right.len()).then_some((left, right))
+}
+
+fn mask_operands<'a>(
+    operation: &BodyOperation,
+    values: &'a BTreeMap<String, ExecutionValue>,
+) -> Option<(&'a [bool], &'a [bool])> {
+    let ExecutionValue::Mask { lanes: left } = values.get(operation.operands.first()?)? else {
+        return None;
+    };
+    let ExecutionValue::Mask { lanes: right } = values.get(operation.operands.get(1)?)? else {
+        return None;
+    };
+    (left.len() == right.len()).then_some((left, right))
+}
+
+pub(crate) fn evaluate_vector_binary(
+    operator: &str,
+    element_type: &BodyType,
+    intent: ArithmeticIntent,
+    left: &[ExecutionValue],
+    right: &[ExecutionValue],
+) -> Option<Vec<ExecutionValue>> {
+    let BodyType::Integer(ty) = element_type else {
+        return None;
+    };
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| {
+            let (
+                ExecutionValue::Integer {
+                    value: left_value,
+                    ty: left_ty,
+                },
+                ExecutionValue::Integer {
+                    value: right_value,
+                    ty: right_ty,
+                },
+            ) = (left, right)
+            else {
+                return None;
+            };
+            if left_ty != ty || right_ty != ty {
+                return None;
+            }
+            let value = match operator {
+                "min" => (*left_value).min(*right_value),
+                "max" => (*left_value).max(*right_value),
+                _ => evaluate_integer(operator, *ty, intent, *left_value, *right_value)?,
+            };
+            Some(ExecutionValue::Integer { value, ty: *ty })
+        })
+        .collect()
+}
+
+pub(crate) fn evaluate_vector_compare(
+    predicate: &str,
+    element_type: &BodyType,
+    left: &[ExecutionValue],
+    right: &[ExecutionValue],
+) -> Option<Vec<bool>> {
+    let BodyType::Integer(ty) = element_type else {
+        return None;
+    };
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| {
+            let (
+                ExecutionValue::Integer {
+                    value: left_value,
+                    ty: left_ty,
+                },
+                ExecutionValue::Integer {
+                    value: right_value,
+                    ty: right_ty,
+                },
+            ) = (left, right)
+            else {
+                return None;
+            };
+            if left_ty != ty || right_ty != ty {
+                return None;
+            }
+            compare_integers(predicate, *ty, *left_value, *right_value)
+        })
+        .collect()
+}
+
+pub(crate) fn evaluate_vector_reduce(
+    operator: &str,
+    element_type: &BodyType,
+    intent: ArithmeticIntent,
+    lanes: &[ExecutionValue],
+) -> Option<ExecutionValue> {
+    let BodyType::Integer(ty) = element_type else {
+        return None;
+    };
+    let mut values = lanes.iter().map(|lane| match lane {
+        ExecutionValue::Integer { value, ty: lane_ty } if lane_ty == ty => Some(*value),
+        _ => None,
+    });
+    let mut reduced = values.next()??;
+    for value in values {
+        let value = value?;
+        reduced = match operator {
+            "min" => reduced.min(value),
+            "max" => reduced.max(value),
+            "sum" => evaluate_integer("add", *ty, intent, reduced, value)?,
+            _ => return None,
+        };
+    }
+    Some(ExecutionValue::Integer {
+        value: reduced,
+        ty: *ty,
     })
 }
 

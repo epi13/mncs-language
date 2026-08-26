@@ -114,6 +114,52 @@ pub enum IrOperationKind {
         bound: crate::SequenceBound,
         evidence: crate::BoundsEvidence,
     },
+    VectorConstruct {
+        element_type: Box<crate::BodyType>,
+        lanes: u32,
+    },
+    VectorSplat {
+        element_type: Box<crate::BodyType>,
+        lanes: u32,
+    },
+    VectorExtract {
+        element_type: Box<crate::BodyType>,
+        lanes: u32,
+        evidence: crate::BoundsEvidence,
+    },
+    VectorReplace {
+        element_type: Box<crate::BodyType>,
+        lanes: u32,
+        evidence: crate::BoundsEvidence,
+    },
+    VectorBinary {
+        operator: String,
+        element_type: Box<crate::BodyType>,
+        lanes: u32,
+        intent: crate::ArithmeticIntent,
+    },
+    VectorCompare {
+        predicate: String,
+        element_type: Box<crate::BodyType>,
+        lanes: u32,
+    },
+    MaskBinary {
+        operator: String,
+        lanes: u32,
+    },
+    MaskNot {
+        lanes: u32,
+    },
+    MaskReduce {
+        operator: String,
+        lanes: u32,
+    },
+    VectorReduce {
+        operator: String,
+        element_type: Box<crate::BodyType>,
+        lanes: u32,
+        intent: crate::ArithmeticIntent,
+    },
     /// Explicit total scalar conversion (Profile 0.7).
     Convert {
         from: crate::BodyType,
@@ -898,6 +944,138 @@ fn lower_executable_body(
                             element_type: element_type.clone(),
                             bound: *bound,
                             evidence: evidence.clone(),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::VectorConstruct {
+                        element_type,
+                        lanes,
+                    } => (
+                        IrOperationKind::VectorConstruct {
+                            element_type: element_type.clone(),
+                            lanes: *lanes,
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::VectorSplat {
+                        element_type,
+                        lanes,
+                    } => (
+                        IrOperationKind::VectorSplat {
+                            element_type: element_type.clone(),
+                            lanes: *lanes,
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::VectorExtract {
+                        element_type,
+                        lanes,
+                        evidence,
+                    } => (
+                        IrOperationKind::VectorExtract {
+                            element_type: element_type.clone(),
+                            lanes: *lanes,
+                            evidence: evidence.clone(),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::VectorReplace {
+                        element_type,
+                        lanes,
+                        evidence,
+                    } => (
+                        IrOperationKind::VectorReplace {
+                            element_type: element_type.clone(),
+                            lanes: *lanes,
+                            evidence: evidence.clone(),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::VectorBinary {
+                        operator,
+                        element_type,
+                        lanes,
+                        intent,
+                    } => (
+                        IrOperationKind::VectorBinary {
+                            operator: operator.clone(),
+                            element_type: element_type.clone(),
+                            lanes: *lanes,
+                            intent: *intent,
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::VectorCompare {
+                        predicate,
+                        element_type,
+                        lanes,
+                    } => (
+                        IrOperationKind::VectorCompare {
+                            predicate: predicate.clone(),
+                            element_type: element_type.clone(),
+                            lanes: *lanes,
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::MaskBinary { operator, lanes } => (
+                        IrOperationKind::MaskBinary {
+                            operator: operator.clone(),
+                            lanes: *lanes,
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::MaskNot { lanes } => (
+                        IrOperationKind::MaskNot { lanes: *lanes },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::MaskReduce { operator, lanes } => (
+                        IrOperationKind::MaskReduce {
+                            operator: operator.clone(),
+                            lanes: *lanes,
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::VectorReduce {
+                        operator,
+                        element_type,
+                        lanes,
+                        intent,
+                    } => (
+                        IrOperationKind::VectorReduce {
+                            operator: operator.clone(),
+                            element_type: element_type.clone(),
+                            lanes: *lanes,
+                            intent: *intent,
                         },
                         Vec::new(),
                         Vec::new(),

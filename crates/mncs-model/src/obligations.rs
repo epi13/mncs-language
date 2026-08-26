@@ -195,6 +195,14 @@ impl Program {
                             | BodyOperationKind::ByteCompare { .. }
                             | BodyOperationKind::Convert { .. }
                             | BodyOperationKind::Select { .. }
+                            | BodyOperationKind::VectorConstruct { .. }
+                            | BodyOperationKind::VectorSplat { .. }
+                            | BodyOperationKind::VectorCompare { .. }
+                            | BodyOperationKind::MaskBinary { .. }
+                            | BodyOperationKind::MaskNot { .. }
+                            | BodyOperationKind::MaskReduce { .. }
+                            | BodyOperationKind::VectorExtract { evidence: crate::BoundsEvidence::StaticExact | crate::BoundsEvidence::TraversalDomain, .. }
+                            | BodyOperationKind::VectorReplace { evidence: crate::BoundsEvidence::StaticExact | crate::BoundsEvidence::TraversalDomain, .. }
                             | BodyOperationKind::SequenceReplace {
                                 evidence: crate::BoundsEvidence::StaticExact,
                                 ..
@@ -228,6 +236,22 @@ impl Program {
                                         "checked update with explicit runtime failure"
                                             .to_owned(),
                                     ),
+                                });
+                            }
+                            BodyOperationKind::VectorExtract { evidence: crate::BoundsEvidence::RuntimeChecked { .. }, .. }
+                            | BodyOperationKind::VectorReplace { evidence: crate::BoundsEvidence::RuntimeChecked { .. }, .. } => {
+                                let requirement = requirement_id("vector-lane-bounds", &subject);
+                                obligations.push(ObligationRecord {
+                                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                    identity: body_obligation_id("vector-lane-bounds", &subject),
+                                    subject: subject.clone(),
+                                    requirement,
+                                    status: ObligationStatus::Unknown,
+                                    method: "runtime-checked-vector-lane".to_owned(),
+                                    assumptions: Vec::new(),
+                                    dependencies: vec![subject],
+                                    freshness: EvidenceFreshness::Unknown,
+                                    fallback: Some("the lane operation is available only on the successful bounds-check path".to_owned()),
                                 });
                             }
                             // A runtime-checked projection retains an explicit
@@ -281,7 +305,9 @@ impl Program {
                                     ),
                                 });
                             }
-                            BodyOperationKind::Integer { intent, .. } => {
+                            BodyOperationKind::Integer { intent, .. }
+                            | BodyOperationKind::VectorBinary { intent, .. }
+                            | BodyOperationKind::VectorReduce { intent, .. } => {
                                 let bounded_counter_step =
                                     body.bounded_iterations.iter().any(|iteration| {
                                         iteration.backedge == block.id

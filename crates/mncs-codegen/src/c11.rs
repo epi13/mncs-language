@@ -87,6 +87,11 @@ pub fn c11_capabilities() -> BackendCapabilityManifest {
             "integer_shifts",
             "bounded_sequences_internal",
             "bounded_views_internal",
+            "semantic_branchless_select",
+            "semantic_integer_vectors",
+            "semantic_masks",
+            "packed_mask_realization",
+            "portable_scalar_vector_fallback",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -490,6 +495,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
             let rhs_n = names.value(rhs);
             let bits = match dest.ty {
                 ScalarTy::Int(integer) => integer.bits,
+                ScalarTy::Mask(_) => 64,
                 _ => 32,
             };
             let signed = matches!(dest.ty, ScalarTy::Int(integer) if integer.signed);
@@ -519,11 +525,12 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 if operator == "shl" {
                     // Shift in the unsigned domain, then mask into the
                     // declared width; the destination cast restores sign.
-                    let _ = writeln!(
-                        out,
-                        "      {{ uint64_t mncs_w = (uint64_t)(uint64_t){lhs_n}; mncs_w = (bits > 63) ? (mncs_w << {count}) : (((mncs_w << {count})) & {mask}); {dest_n} = ({})mncs_w; }}",
-                        c_type(dest.ty),
-                    );
+                    let expression = if bits > 63 {
+                        format!("mncs_w << {count}")
+                    } else {
+                        format!("(mncs_w << {count}) & {mask}")
+                    };
+                    let _ = writeln!(out, "      {{ uint64_t mncs_w = (uint64_t)(uint64_t){lhs_n}; mncs_w = {expression}; {dest_n} = ({})mncs_w; }}", c_type(dest.ty));
                 } else if signed {
                     // Arithmetic right shift without relying on C's
                     // implementation-defined `>>` for negatives:
@@ -816,6 +823,80 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 names.value(src)
             );
         }
+        ScalarInst::Select {
+            dest,
+            condition,
+            when_true,
+            when_false,
+        } => {
+            // Strict booleans are normalized to 0/1. Blend in the unsigned
+            // domain so the C source itself contains no conditional operator
+            // or candidate-dependent control flow. Native branchlessness is
+            // still an artifact-level claim, not inferred from this source.
+            let _ = writeln!(
+                out,
+                "      {{ uint64_t mncs_mask = 0u - (uint64_t){}; uint64_t mncs_t = (uint64_t){}; uint64_t mncs_f = (uint64_t){}; {} = ({})((mncs_t & mncs_mask) | (mncs_f & ~mncs_mask)); }}",
+                names.value(condition),
+                names.value(when_true),
+                names.value(when_false),
+                names.value(&dest.id),
+                c_type(dest.ty),
+            );
+        }
+        ScalarInst::SequenceReplace {
+            dest,
+            source,
+            index,
+            element,
+            evidence,
+            length,
+            element_width,
+            ..
+        } => {
+            let dest_n = names.value(&dest.id);
+            let source_n = names.value(source);
+            let index_n = names.value(index);
+            if matches!(evidence, mncs_model::BoundsEvidence::RuntimeChecked { .. }) {
+                let _ = writeln!(
+                    out,
+                    "      if ((uint64_t){index_n} >= {length}ULL) {{ *mncs_status = 1; *mncs_value = 0; return; }}"
+                );
+            }
+            let _ = writeln!(out, "      {dest_n} = mncs_cell_alloc({}u);", length * 8);
+            for lane in 0..*length {
+                let offset = u64::from(lane) * 8;
+                match element_width {
+                    SlotWidth::W32 => {
+                        let _ = writeln!(
+                            out,
+                            "      mncs_slot_store32(mncs_arena, {dest_n} + {offset}u, mncs_slot_load32(mncs_arena, {source_n} + {offset}u));"
+                        );
+                    }
+                    SlotWidth::W64 => {
+                        let _ = writeln!(
+                            out,
+                            "      mncs_slot_store64(mncs_arena, {dest_n} + {offset}u, mncs_slot_load64(mncs_arena, {source_n} + {offset}u));"
+                        );
+                    }
+                }
+            }
+            match element_width {
+                SlotWidth::W32 => {
+                    let _ = writeln!(
+                        out,
+                        "      mncs_slot_store32(mncs_arena, {dest_n} + (uint64_t){index_n} * 8u, (uint32_t){});",
+                        names.value(element)
+                    );
+                }
+                SlotWidth::W64 => {
+                    let _ = writeln!(
+                        out,
+                        "      mncs_slot_store64(mncs_arena, {dest_n} + (uint64_t){index_n} * 8u, (uint64_t){});",
+                        names.value(element)
+                    );
+                }
+            }
+        }
         ScalarInst::SequenceProject {
             dest,
             seq,
@@ -973,6 +1054,8 @@ fn inst_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
         | ScalarInst::ByteBitwise { dest, .. }
         | ScalarInst::ByteShift { dest, .. }
         | ScalarInst::Convert { dest, .. }
+        | ScalarInst::Select { dest, .. }
+        | ScalarInst::SequenceReplace { dest, .. }
         | ScalarInst::SequenceProject { dest, .. }
         | ScalarInst::SequenceLength { dest, .. }
         | ScalarInst::ViewConstruct { dest, .. }

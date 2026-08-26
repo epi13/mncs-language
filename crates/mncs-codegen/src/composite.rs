@@ -364,6 +364,9 @@ impl ArenaWriter {
                 self.put64(offset, cell);
                 Ok(())
             }
+            Value::Vector { .. } | Value::Mask { .. } => Err(
+                "vector and mask values do not cross the canonical composite boundary".to_owned(),
+            ),
         }
     }
 

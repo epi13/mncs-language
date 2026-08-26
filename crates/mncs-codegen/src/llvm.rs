@@ -92,6 +92,11 @@ pub fn llvm_capabilities() -> BackendCapabilityManifest {
             "integer_shifts",
             "bounded_sequences_internal",
             "bounded_views_internal",
+            "semantic_branchless_select",
+            "semantic_integer_vectors",
+            "semantic_masks",
+            "packed_mask_realization",
+            "scalarized_vector_realization",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -398,7 +403,8 @@ fn module_uses_cells(module: &ScalarModule) -> bool {
                     ScalarInst::CellAlloc { .. }
                     | ScalarInst::CellStoreDiscriminant { .. }
                     | ScalarInst::CellStore { .. }
-                    | ScalarInst::CellLoad { .. } => true,
+                    | ScalarInst::CellLoad { .. }
+                    | ScalarInst::SequenceReplace { .. } => true,
                     ScalarInst::Sequence(nested) => nested.iter().any(|nested| {
                         matches!(
                             nested,
@@ -919,6 +925,85 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             };
             store_dest(out, names, dest, &converted);
         }
+        ScalarInst::Select {
+            dest,
+            condition,
+            when_true,
+            when_false,
+        } => {
+            let condition_ty = llvm_type(names.ty(condition));
+            let condition = load_value(out, names, condition, "selc", split);
+            let when_true = load_value(out, names, when_true, "selt", split);
+            let when_false = load_value(out, names, when_false, "self", split);
+            *split += 1;
+            let tag = *split;
+            let ty = llvm_type(dest.ty);
+            let _ = writeln!(out, "  %selb{tag} = icmp ne {condition_ty} %{condition}, 0");
+            let _ = writeln!(
+                out,
+                "  %sel{tag} = select i1 %selb{tag}, {ty} %{when_true}, {ty} %{when_false}"
+            );
+            store_dest(out, names, dest, &format!("sel{tag}"));
+        }
+        ScalarInst::SequenceReplace {
+            dest,
+            source,
+            index,
+            element,
+            evidence,
+            length,
+            element_width,
+            ..
+        } => {
+            let idx = load_value(out, names, index, "ridx", split);
+            let source = load_value(out, names, source, "rsrc", split);
+            if matches!(evidence, mncs_model::BoundsEvidence::RuntimeChecked { .. }) {
+                *split += 1;
+                let tag = *split;
+                let _ = writeln!(out, "  %roob{tag} = icmp uge i64 %{idx}, {length}");
+                let _ = writeln!(
+                    out,
+                    "  br i1 %roob{tag}, label %mncs_fail, label %roob{tag}_ok"
+                );
+                let _ = writeln!(out, "roob{tag}_ok:");
+            }
+            *split += 1;
+            let tag = *split;
+            let d = names.value(&dest.id);
+            let bytes = u64::from(*length) * 8;
+            let _ = writeln!(out, "  %rbump{tag} = load i64, ptr @mncs_bump");
+            let _ = writeln!(out, "  %rbb{tag} = add i64 %rbump{tag}, 7");
+            let _ = writeln!(out, "  %ral{tag} = and i64 %rbb{tag}, -8");
+            let _ = writeln!(out, "  %rnb{tag} = add i64 %ral{tag}, {bytes}");
+            let _ = writeln!(out, "  store i64 %rnb{tag}, ptr @mncs_bump");
+            let _ = writeln!(out, "  store i64 %ral{tag}, ptr %{d}_slot");
+            let raw_ty = slot_payload_ty(*element_width, names.ty(element));
+            for lane in 0..*length {
+                let offset = u64::from(lane) * 8;
+                let _ = writeln!(out, "  %rsaddr{tag}_{lane} = add i64 %{source}, {offset}");
+                let _ = writeln!(out, "  %rdaddr{tag}_{lane} = add i64 %ral{tag}, {offset}");
+                let _ = writeln!(out, "  %rsgep{tag}_{lane} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %rsaddr{tag}_{lane}");
+                let _ = writeln!(out, "  %rdgep{tag}_{lane} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %rdaddr{tag}_{lane}");
+                let _ = writeln!(
+                    out,
+                    "  %rslot{tag}_{lane} = load {raw_ty}, ptr %rsgep{tag}_{lane}"
+                );
+                let _ = writeln!(
+                    out,
+                    "  store {raw_ty} %rslot{tag}_{lane}, ptr %rdgep{tag}_{lane}"
+                );
+            }
+            let element = load_value(out, names, element, "relem", split);
+            *split += 1;
+            let store_tag = *split;
+            let _ = writeln!(out, "  %rioff{store_tag} = shl i64 %{idx}, 3");
+            let _ = writeln!(
+                out,
+                "  %riaddr{store_tag} = add i64 %ral{tag}, %rioff{store_tag}"
+            );
+            let _ = writeln!(out, "  %rige{store_tag} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %riaddr{store_tag}");
+            let _ = writeln!(out, "  store {raw_ty} %{element}, ptr %rige{store_tag}");
+        }
         ScalarInst::SequenceProject {
             dest,
             seq,
@@ -1364,6 +1449,8 @@ fn scalar_inst_dest(inst: &ScalarInst) -> Option<&ScalarValue> {
         | ScalarInst::ByteBitwise { dest, .. }
         | ScalarInst::ByteShift { dest, .. }
         | ScalarInst::Convert { dest, .. }
+        | ScalarInst::Select { dest, .. }
+        | ScalarInst::SequenceReplace { dest, .. }
         | ScalarInst::SequenceProject { dest, .. }
         | ScalarInst::SequenceLength { dest, .. }
         | ScalarInst::ViewConstruct { dest, .. }
@@ -1394,7 +1481,7 @@ fn bits_of(ty: ScalarTy) -> u16 {
         ScalarTy::Bool | ScalarTy::Finite => 32,
         ScalarTy::Byte => 8,
         ScalarTy::Int(integer) => integer.bits,
-        ScalarTy::Cell | ScalarTy::View => 64,
+        ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => 64,
     }
 }
 

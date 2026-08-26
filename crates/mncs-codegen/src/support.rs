@@ -289,8 +289,10 @@ pub(crate) fn argument_bits(value: &ExecutionValue) -> i128 {
         ExecutionValue::Byte { value } => *value,
         // Composite values never cross a scalar process-argument boundary;
         // callers must reject them before marshalling.
-        ExecutionValue::Sequence { .. } => {
-            panic!("sequence value cannot marshal to a native argument")
+        ExecutionValue::Sequence { .. }
+        | ExecutionValue::Vector { .. }
+        | ExecutionValue::Mask { .. } => {
+            panic!("collection value cannot marshal to a native argument")
         }
         ExecutionValue::Record { name, .. } => {
             panic!("record value {name} cannot marshal to a native argument")
@@ -302,6 +304,9 @@ pub(crate) fn argument_argv(value: &ExecutionValue) -> Result<String, String> {
     match value {
         ExecutionValue::Sequence { .. } => {
             Err("sequence value cannot cross the native process argument boundary".to_owned())
+        }
+        ExecutionValue::Vector { .. } | ExecutionValue::Mask { .. } => {
+            Err("vector or mask value cannot cross the native process argument boundary".to_owned())
         }
         ExecutionValue::Record { name, .. } => Err(format!(
             "record value {name} cannot cross the native process argument boundary"

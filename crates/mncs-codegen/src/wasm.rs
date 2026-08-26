@@ -1887,3 +1887,82 @@ fn decode_instr(payload: &[u8], cursor: usize) -> Result<(Instr, usize), WasmTra
     };
     Ok((instr, cursor))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn signed_leb_roundtrips_integer_extremes() {
+        for value in [i32::MIN, -42, -1, 0, 1, i32::MAX] {
+            let mut bytes = Vec::new();
+            encode_i32(&mut bytes, value);
+            let (decoded, consumed) = read_i32(&bytes, 0).expect("decode i32");
+            assert_eq!(decoded, value);
+            assert_eq!(consumed, bytes.len());
+        }
+        for value in [i64::MIN, -42, -1, 0, 1, i64::MAX] {
+            let mut bytes = Vec::new();
+            encode_i64(&mut bytes, value);
+            let (decoded, consumed) = read_i64(&bytes, 0).expect("decode i64");
+            assert_eq!(decoded, value);
+            assert_eq!(consumed, bytes.len());
+        }
+    }
+
+    #[test]
+    fn branchless_signed_max_keeps_negative_values() {
+        let mut body = vec![
+            Instr::I32Const(i32::MIN),
+            Instr::LocalSet(0),
+            // b ^ ((a ^ b) & -(a > b)), with a=MIN and b=-42.
+            Instr::I32Const(-42),
+            Instr::LocalGet(0),
+            Instr::I32Const(-42),
+            Instr::I32Xor,
+            Instr::I32Const(0),
+            Instr::LocalGet(0),
+            Instr::I32Const(-42),
+            Instr::I32GtS,
+            Instr::I32Sub,
+            Instr::I32And,
+            Instr::I32Xor,
+            Instr::LocalSet(0),
+            Instr::LocalGet(0),
+        ];
+        let module = WasmModule {
+            functions: vec![WasmFunction {
+                name: "max".to_owned(),
+                params: Vec::new(),
+                results: vec![ValType::I32],
+                locals: vec![ValType::I32],
+                body: std::mem::take(&mut body),
+            }],
+            memory: None,
+            globals: Vec::new(),
+        };
+        let decoded = decode_module(&encode_module(&module)).expect("decode module");
+        let execution = execute_function_typed(
+            &decoded,
+            "max",
+            &[],
+            &[],
+            &[MarshalTy::Int(IntegerType {
+                bits: 32,
+                signed: true,
+            })],
+            100,
+        )
+        .expect("execute max");
+        assert_eq!(
+            execution.returned,
+            vec![ExecutionValue::Integer {
+                value: -42,
+                ty: IntegerType {
+                    bits: 32,
+                    signed: true,
+                },
+            }]
+        );
+    }
+}

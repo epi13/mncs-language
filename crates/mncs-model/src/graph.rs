@@ -442,7 +442,9 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                         }
                     }
                     let generated_obligation = match &operation.kind {
-                        crate::BodyOperationKind::Integer { .. } => {
+                        crate::BodyOperationKind::Integer { .. }
+                        | crate::BodyOperationKind::VectorBinary { .. }
+                        | crate::BodyOperationKind::VectorReduce { .. } => {
                             Some(crate::obligations::body_obligation_id(
                                 "integer-overflow",
                                 &operation_identity,
@@ -460,6 +462,20 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                         | crate::BodyOperationKind::ByteCompare { .. }
                         | crate::BodyOperationKind::Convert { .. }
                         | crate::BodyOperationKind::Select { .. }
+                        | crate::BodyOperationKind::VectorConstruct { .. }
+                        | crate::BodyOperationKind::VectorSplat { .. }
+                        | crate::BodyOperationKind::VectorCompare { .. }
+                        | crate::BodyOperationKind::MaskBinary { .. }
+                        | crate::BodyOperationKind::MaskNot { .. }
+                        | crate::BodyOperationKind::MaskReduce { .. }
+                        | crate::BodyOperationKind::VectorExtract {
+                            evidence: BoundsEvidence::StaticExact | BoundsEvidence::TraversalDomain,
+                            ..
+                        }
+                        | crate::BodyOperationKind::VectorReplace {
+                            evidence: BoundsEvidence::StaticExact | BoundsEvidence::TraversalDomain,
+                            ..
+                        }
                         | crate::BodyOperationKind::SequenceReplace {
                             evidence: BoundsEvidence::StaticExact,
                             ..
@@ -475,6 +491,17 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                             ..
                         } => Some(crate::obligations::body_obligation_id(
                             "sequence-replace-bounds",
+                            &operation_identity,
+                        )),
+                        crate::BodyOperationKind::VectorExtract {
+                            evidence: BoundsEvidence::RuntimeChecked { .. },
+                            ..
+                        }
+                        | crate::BodyOperationKind::VectorReplace {
+                            evidence: BoundsEvidence::RuntimeChecked { .. },
+                            ..
+                        } => Some(crate::obligations::body_obligation_id(
+                            "vector-lane-bounds",
                             &operation_identity,
                         )),
                         crate::BodyOperationKind::SequenceProject {

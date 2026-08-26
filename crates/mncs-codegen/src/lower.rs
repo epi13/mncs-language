@@ -178,24 +178,26 @@ impl CompositeInfo {
 /// Whether any executable body materializes bounded sequences; such programs
 /// need linear-memory arena support even without records or payload sums.
 fn program_uses_sequences(program: &mncs_model::Program) -> bool {
-    let ty_is_sequence = |ty: &BodyType| matches!(ty, BodyType::Sequence { .. });
+    let ty_uses_arena =
+        |ty: &BodyType| matches!(ty, BodyType::Sequence { .. } | BodyType::Vector { .. });
     let mut found = false;
     for function in &program.functions {
         if let Some(body) = &function.body {
-            found |= body
-                .parameters
-                .iter()
-                .any(|param| ty_is_sequence(&param.ty));
+            found |= body.parameters.iter().any(|param| ty_uses_arena(&param.ty));
             for block in &body.blocks {
                 for operation in &block.operations {
                     found |= matches!(
                         operation.kind,
                         mncs_model::BodyOperationKind::SequenceConstruct { .. }
+                            | mncs_model::BodyOperationKind::VectorConstruct { .. }
+                            | mncs_model::BodyOperationKind::VectorSplat { .. }
+                            | mncs_model::BodyOperationKind::VectorReplace { .. }
+                            | mncs_model::BodyOperationKind::VectorBinary { .. }
                     );
                     found |= operation
                         .results
                         .iter()
-                        .any(|result| ty_is_sequence(&result.ty));
+                        .any(|result| ty_uses_arena(&result.ty));
                 }
             }
         }
@@ -503,6 +505,366 @@ fn lower_instruction(
                 emit_offset(body, (index * 8) as i32);
                 body.push(Instr::LocalGet(operand));
                 store_element_width(layout, instruction, index, body)?;
+            }
+        }
+        SsaInstructionKind::Select { operand_type } => {
+            let dest = dest_local(layout, instruction)?;
+            let condition = operand_local(layout, instruction, 0)?;
+            let when_true = operand_local(layout, instruction, 1)?;
+            let when_false = operand_local(layout, instruction, 2)?;
+            if let BodyType::Vector { element, lanes } = operand_type {
+                let (lane_type, lane_bytes, integer) = vector_lane_realization(element)?;
+                emit_alloc(
+                    body,
+                    dest,
+                    lanes
+                        .checked_mul(lane_bytes)
+                        .ok_or_else(|| "vector allocation size overflow".to_owned())?,
+                )?;
+                for lane in 0..*lanes {
+                    let offset = lane
+                        .checked_mul(lane_bytes)
+                        .ok_or_else(|| "vector lane offset overflow".to_owned())?
+                        as i32;
+                    body.push(Instr::LocalGet(dest));
+                    emit_offset(body, offset);
+                    body.push(Instr::LocalGet(when_true));
+                    emit_offset(body, offset);
+                    load_valtype(lane_type, body);
+                    body.push(Instr::LocalGet(when_false));
+                    emit_offset(body, offset);
+                    load_valtype(lane_type, body);
+                    body.push(Instr::LocalGet(condition));
+                    body.push(Instr::I64Const(i64::from(lane)));
+                    body.push(Instr::I64ShrU);
+                    body.push(Instr::I32WrapI64);
+                    body.push(Instr::I32Const(1));
+                    body.push(Instr::I32And);
+                    body.push(Instr::Select);
+                    store_valtype(lane_type, body);
+                }
+                let _ = integer;
+                return Ok(());
+            }
+            // WebAssembly `select` consumes true, false, condition and does
+            // not introduce a candidate-dependent control-flow edge.
+            body.push(Instr::LocalGet(when_true));
+            body.push(Instr::LocalGet(when_false));
+            body.push(Instr::LocalGet(condition));
+            body.push(Instr::Select);
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::SequenceReplace {
+            bound, evidence, ..
+        } => {
+            let mncs_model::SequenceBound::Exact(length) = bound else {
+                return Err("functional sequence update requires an exact bound".to_owned());
+            };
+            let dest = dest_local(layout, instruction)?;
+            let source = operand_local(layout, instruction, 0)?;
+            let index = operand_local(layout, instruction, 1)?;
+            let element = operand_local(layout, instruction, 2)?;
+            if matches!(evidence, mncs_model::BoundsEvidence::RuntimeChecked { .. }) {
+                body.push(Instr::LocalGet(index));
+                body.push(Instr::I64Const(i64::from(*length)));
+                body.push(Instr::I64GeU);
+                body.push(Instr::If);
+                body.push(Instr::Unreachable);
+                body.push(Instr::End);
+            }
+            // Allocate a fresh canonical cell and copy every fixed slot. The
+            // source is immutable, so replacement preserves value semantics.
+            emit_alloc(body, dest, *length * 8)?;
+            let element_valtype = instruction
+                .inputs
+                .get(2)
+                .and_then(|identity| layout.types.get(identity))
+                .copied()
+                .unwrap_or(ValType::I32);
+            for lane in 0..*length {
+                body.push(Instr::LocalGet(dest));
+                emit_offset(body, (lane * 8) as i32);
+                body.push(Instr::LocalGet(source));
+                emit_offset(body, (lane * 8) as i32);
+                match element_valtype {
+                    ValType::I32 => body.push(Instr::I32Load),
+                    ValType::I64 => body.push(Instr::I64Load),
+                }
+                store_element_width(layout, instruction, 2, body)?;
+            }
+            body.push(Instr::LocalGet(dest));
+            body.push(Instr::LocalGet(index));
+            body.push(Instr::I64Const(3));
+            body.push(Instr::I64Shl);
+            body.push(Instr::I32WrapI64);
+            body.push(Instr::I32Add);
+            body.push(Instr::LocalGet(element));
+            store_element_width(layout, instruction, 2, body)?;
+        }
+        SsaInstructionKind::VectorConstruct {
+            element_type,
+            lanes,
+        } => {
+            let dest = dest_local(layout, instruction)?;
+            let (lane_type, lane_bytes, _) = vector_lane_realization(element_type)?;
+            if instruction.inputs.len() != *lanes as usize {
+                return Err(
+                    "vector construction operand count does not match lane count".to_owned(),
+                );
+            }
+            emit_alloc(
+                body,
+                dest,
+                lanes
+                    .checked_mul(lane_bytes)
+                    .ok_or_else(|| "vector allocation size overflow".to_owned())?,
+            )?;
+            for lane in 0..*lanes {
+                body.push(Instr::LocalGet(dest));
+                emit_offset(
+                    body,
+                    lane.checked_mul(lane_bytes)
+                        .ok_or_else(|| "vector lane offset overflow".to_owned())?
+                        as i32,
+                );
+                body.push(Instr::LocalGet(operand_local(
+                    layout,
+                    instruction,
+                    lane as usize,
+                )?));
+                store_valtype(lane_type, body);
+            }
+        }
+        SsaInstructionKind::VectorSplat {
+            element_type,
+            lanes,
+        } => {
+            let dest = dest_local(layout, instruction)?;
+            let value = operand_local(layout, instruction, 0)?;
+            let (lane_type, lane_bytes, _) = vector_lane_realization(element_type)?;
+            emit_alloc(
+                body,
+                dest,
+                lanes
+                    .checked_mul(lane_bytes)
+                    .ok_or_else(|| "vector allocation size overflow".to_owned())?,
+            )?;
+            for lane in 0..*lanes {
+                body.push(Instr::LocalGet(dest));
+                emit_offset(
+                    body,
+                    lane.checked_mul(lane_bytes)
+                        .ok_or_else(|| "vector lane offset overflow".to_owned())?
+                        as i32,
+                );
+                body.push(Instr::LocalGet(value));
+                store_valtype(lane_type, body);
+            }
+        }
+        SsaInstructionKind::VectorExtract {
+            element_type,
+            lanes,
+            evidence,
+        } => {
+            let dest = dest_local(layout, instruction)?;
+            let vector = operand_local(layout, instruction, 0)?;
+            let index = operand_local(layout, instruction, 1)?;
+            let (lane_type, lane_bytes, _) = vector_lane_realization(element_type)?;
+            emit_vector_lane_check(body, index, *lanes, evidence);
+            body.push(Instr::LocalGet(vector));
+            body.push(Instr::LocalGet(index));
+            body.push(Instr::I64Const(i64::from(lane_bytes)));
+            body.push(Instr::I64Mul);
+            body.push(Instr::I32WrapI64);
+            body.push(Instr::I32Add);
+            load_valtype(lane_type, body);
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::VectorReplace {
+            element_type,
+            lanes,
+            evidence,
+        } => {
+            let dest = dest_local(layout, instruction)?;
+            let source = operand_local(layout, instruction, 0)?;
+            let index = operand_local(layout, instruction, 1)?;
+            let element = operand_local(layout, instruction, 2)?;
+            let (lane_type, lane_bytes, _) = vector_lane_realization(element_type)?;
+            emit_vector_lane_check(body, index, *lanes, evidence);
+            emit_alloc(
+                body,
+                dest,
+                lanes
+                    .checked_mul(lane_bytes)
+                    .ok_or_else(|| "vector allocation size overflow".to_owned())?,
+            )?;
+            for lane in 0..*lanes {
+                let offset = lane
+                    .checked_mul(lane_bytes)
+                    .ok_or_else(|| "vector lane offset overflow".to_owned())?
+                    as i32;
+                body.push(Instr::LocalGet(dest));
+                emit_offset(body, offset);
+                body.push(Instr::LocalGet(source));
+                emit_offset(body, offset);
+                load_valtype(lane_type, body);
+                store_valtype(lane_type, body);
+            }
+            body.push(Instr::LocalGet(dest));
+            body.push(Instr::LocalGet(index));
+            body.push(Instr::I64Const(i64::from(lane_bytes)));
+            body.push(Instr::I64Mul);
+            body.push(Instr::I32WrapI64);
+            body.push(Instr::I32Add);
+            body.push(Instr::LocalGet(element));
+            store_valtype(lane_type, body);
+        }
+        SsaInstructionKind::VectorBinary {
+            operator,
+            element_type,
+            lanes,
+            intent,
+        } => {
+            if !matches!(intent, ArithmeticIntent::Wrapping) {
+                return Err(format!("portable WASM scalar vector realization does not yet support {intent:?} lane arithmetic"));
+            }
+            let dest = dest_local(layout, instruction)?;
+            let left = operand_local(layout, instruction, 0)?;
+            let right = operand_local(layout, instruction, 1)?;
+            let (lane_type, lane_bytes, integer) = vector_lane_realization(element_type)?;
+            emit_alloc(
+                body,
+                dest,
+                lanes
+                    .checked_mul(lane_bytes)
+                    .ok_or_else(|| "vector allocation size overflow".to_owned())?,
+            )?;
+            for lane in 0..*lanes {
+                let offset = lane
+                    .checked_mul(lane_bytes)
+                    .ok_or_else(|| "vector lane offset overflow".to_owned())?
+                    as i32;
+                body.push(Instr::LocalGet(dest));
+                emit_offset(body, offset);
+                emit_vector_binary_lane(body, lane_type, integer, operator, left, right, offset)?;
+                store_valtype(lane_type, body);
+            }
+        }
+        SsaInstructionKind::VectorCompare {
+            predicate,
+            element_type,
+            lanes,
+        } => {
+            let dest = dest_local(layout, instruction)?;
+            let left = operand_local(layout, instruction, 0)?;
+            let right = operand_local(layout, instruction, 1)?;
+            let (lane_type, lane_bytes, integer) = vector_lane_realization(element_type)?;
+            body.push(Instr::I64Const(0));
+            body.push(Instr::LocalSet(dest));
+            for lane in 0..*lanes {
+                let offset = lane
+                    .checked_mul(lane_bytes)
+                    .ok_or_else(|| "vector lane offset overflow".to_owned())?
+                    as i32;
+                body.push(Instr::LocalGet(dest));
+                body.push(Instr::LocalGet(left));
+                emit_offset(body, offset);
+                load_valtype(lane_type, body);
+                body.push(Instr::LocalGet(right));
+                emit_offset(body, offset);
+                load_valtype(lane_type, body);
+                body.push(compare_instr(predicate, integer)?);
+                body.push(Instr::I64ExtendI32U);
+                if lane != 0 {
+                    body.push(Instr::I64Const(i64::from(lane)));
+                    body.push(Instr::I64Shl);
+                }
+                body.push(Instr::I64Or);
+                body.push(Instr::LocalSet(dest));
+            }
+        }
+        SsaInstructionKind::MaskBinary { operator, lanes } => {
+            let dest = dest_local(layout, instruction)?;
+            body.push(Instr::LocalGet(operand_local(layout, instruction, 0)?));
+            body.push(Instr::LocalGet(operand_local(layout, instruction, 1)?));
+            body.push(match operator.as_str() {
+                "and" => Instr::I64And,
+                "or" => Instr::I64Or,
+                "xor" => Instr::I64Xor,
+                other => return Err(format!("unsupported mask operator {other}")),
+            });
+            emit_mask_limit(body, *lanes);
+            body.push(Instr::I64And);
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::MaskNot { lanes } => {
+            let dest = dest_local(layout, instruction)?;
+            body.push(Instr::LocalGet(operand_local(layout, instruction, 0)?));
+            emit_mask_limit(body, *lanes);
+            body.push(Instr::I64Xor);
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::MaskReduce { operator, lanes } => {
+            let dest = dest_local(layout, instruction)?;
+            let value = operand_local(layout, instruction, 0)?;
+            body.push(Instr::LocalGet(value));
+            match operator.as_str() {
+                "any" => body.push(Instr::I64Eqz),
+                "none" => body.push(Instr::I64Eqz),
+                "all" => {
+                    emit_mask_limit(body, *lanes);
+                    body.push(Instr::I64Eq);
+                }
+                other => return Err(format!("unsupported mask reduction {other}")),
+            }
+            if operator == "any" {
+                body.push(Instr::I32Eqz);
+            }
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::VectorReduce {
+            operator,
+            element_type,
+            lanes,
+            intent,
+        } => {
+            if *lanes == 0 {
+                return Err("vector reduction requires at least one lane".to_owned());
+            }
+            if !matches!(intent, ArithmeticIntent::Wrapping) {
+                return Err(format!(
+                    "portable WASM scalar vector reduction does not yet support {intent:?}"
+                ));
+            }
+            let dest = dest_local(layout, instruction)?;
+            let vector = operand_local(layout, instruction, 0)?;
+            let (lane_type, lane_bytes, integer) = vector_lane_realization(element_type)?;
+            let seed = match operator.as_str() {
+                "sum" => 0,
+                "min" if integer.signed && integer.bits == 32 => i64::from(i32::MAX),
+                "min" if integer.signed => i64::MAX,
+                "min" if integer.bits == 32 => i64::from(u32::MAX),
+                "min" => -1,
+                "max" if integer.signed && integer.bits == 32 => i64::from(i32::MIN),
+                "max" if integer.signed => i64::MIN,
+                "max" => 0,
+                other => return Err(format!("unsupported vector reduction {other}")),
+            };
+            body.push(match lane_type {
+                ValType::I32 => Instr::I32Const(seed as i32),
+                ValType::I64 => Instr::I64Const(seed),
+            });
+            body.push(Instr::LocalSet(dest));
+            for lane in 0..*lanes {
+                emit_vector_reduce_lane(
+                    body,
+                    dest,
+                    vector,
+                    (lane * lane_bytes) as i32,
+                    lane_type,
+                    integer,
+                    operator,
+                )?;
             }
         }
         SsaInstructionKind::SequenceProject { bound, evidence } => {
@@ -1609,6 +1971,197 @@ fn load_instr(width: SlotWidth, body: &mut Vec<Instr>) {
     }
 }
 
+fn vector_lane_realization(element: &BodyType) -> Result<(ValType, u32, IntegerType), String> {
+    let BodyType::Integer(integer) = element else {
+        return Err("initial vector realization supports integer lanes only".to_owned());
+    };
+    match integer.bits {
+        32 => Ok((ValType::I32, 4, *integer)),
+        64 => Ok((ValType::I64, 8, *integer)),
+        bits => Err(format!(
+            "portable WASM vector realization does not yet support {bits}-bit lanes"
+        )),
+    }
+}
+
+fn load_valtype(ty: ValType, body: &mut Vec<Instr>) {
+    match ty {
+        ValType::I32 => body.push(Instr::I32Load),
+        ValType::I64 => body.push(Instr::I64Load),
+    }
+}
+
+fn store_valtype(ty: ValType, body: &mut Vec<Instr>) {
+    match ty {
+        ValType::I32 => body.push(Instr::I32Store),
+        ValType::I64 => body.push(Instr::I64Store),
+    }
+}
+
+fn emit_vector_lane_check(
+    body: &mut Vec<Instr>,
+    index: u32,
+    lanes: u32,
+    evidence: &mncs_model::BoundsEvidence,
+) {
+    if matches!(evidence, mncs_model::BoundsEvidence::RuntimeChecked { .. }) {
+        body.push(Instr::LocalGet(index));
+        body.push(Instr::I64Const(i64::from(lanes)));
+        body.push(Instr::I64GeU);
+        body.push(Instr::If);
+        body.push(Instr::Unreachable);
+        body.push(Instr::End);
+    }
+}
+
+fn emit_mask_limit(body: &mut Vec<Instr>, lanes: u32) {
+    let mask = if lanes >= 64 {
+        -1_i64
+    } else {
+        ((1_u64 << lanes) - 1) as i64
+    };
+    body.push(Instr::I64Const(mask));
+}
+
+fn emit_vector_binary_lane(
+    body: &mut Vec<Instr>,
+    lane_type: ValType,
+    integer: IntegerType,
+    operator: &str,
+    left: u32,
+    right: u32,
+    offset: i32,
+) -> Result<(), String> {
+    let load = |body: &mut Vec<Instr>, local| {
+        body.push(Instr::LocalGet(local));
+        emit_offset(body, offset);
+        load_valtype(lane_type, body);
+    };
+    if matches!(operator, "min" | "max") {
+        // b ^ ((a ^ b) & -(a cmp b)); branchless min/max over signed or
+        // unsigned lanes, where cmp is lt for min and gt for max.
+        load(body, right);
+        load(body, left);
+        load(body, right);
+        body.push(match lane_type {
+            ValType::I32 => Instr::I32Xor,
+            ValType::I64 => Instr::I64Xor,
+        });
+        body.push(match lane_type {
+            ValType::I32 => Instr::I32Const(0),
+            ValType::I64 => Instr::I64Const(0),
+        });
+        load(body, left);
+        load(body, right);
+        body.push(compare_instr(
+            if operator == "min" { "lt" } else { "gt" },
+            integer,
+        )?);
+        if lane_type == ValType::I64 {
+            body.push(Instr::I64ExtendI32U);
+        }
+        body.push(match lane_type {
+            ValType::I32 => Instr::I32Sub,
+            ValType::I64 => Instr::I64Sub,
+        });
+        body.push(match lane_type {
+            ValType::I32 => Instr::I32And,
+            ValType::I64 => Instr::I64And,
+        });
+        body.push(match lane_type {
+            ValType::I32 => Instr::I32Xor,
+            ValType::I64 => Instr::I64Xor,
+        });
+        return Ok(());
+    }
+    load(body, left);
+    load(body, right);
+    body.push(match (lane_type, operator, integer.signed) {
+        (ValType::I32, "add", _) => Instr::I32Add,
+        (ValType::I32, "sub", _) => Instr::I32Sub,
+        (ValType::I32, "mul", _) => Instr::I32Mul,
+        (ValType::I32, "and", _) => Instr::I32And,
+        (ValType::I32, "or", _) => Instr::I32Or,
+        (ValType::I32, "xor", _) => Instr::I32Xor,
+        (ValType::I32, "shl", _) => Instr::I32Shl,
+        (ValType::I32, "shr", true) => Instr::I32ShrS,
+        (ValType::I32, "shr", false) => Instr::I32ShrU,
+        (ValType::I64, "add", _) => Instr::I64Add,
+        (ValType::I64, "sub", _) => Instr::I64Sub,
+        (ValType::I64, "mul", _) => Instr::I64Mul,
+        (ValType::I64, "and", _) => Instr::I64And,
+        (ValType::I64, "or", _) => Instr::I64Or,
+        (ValType::I64, "xor", _) => Instr::I64Xor,
+        (ValType::I64, "shl", _) => Instr::I64Shl,
+        (ValType::I64, "shr", true) => Instr::I64ShrS,
+        (ValType::I64, "shr", false) => Instr::I64ShrU,
+        (_, other, _) => return Err(format!("unsupported vector operator {other}")),
+    });
+    Ok(())
+}
+
+fn emit_vector_reduce_lane(
+    body: &mut Vec<Instr>,
+    dest: u32,
+    vector: u32,
+    offset: i32,
+    lane_type: ValType,
+    integer: IntegerType,
+    operator: &str,
+) -> Result<(), String> {
+    let lane = |body: &mut Vec<Instr>| {
+        body.push(Instr::LocalGet(vector));
+        emit_offset(body, offset);
+        load_valtype(lane_type, body);
+    };
+    if matches!(operator, "min" | "max") {
+        // Same branchless blend as lane-wise min/max: b ^ ((a ^ b) & -cmp).
+        lane(body);
+        body.push(Instr::LocalGet(dest));
+        lane(body);
+        body.push(match lane_type {
+            ValType::I32 => Instr::I32Xor,
+            ValType::I64 => Instr::I64Xor,
+        });
+        body.push(match lane_type {
+            ValType::I32 => Instr::I32Const(0),
+            ValType::I64 => Instr::I64Const(0),
+        });
+        body.push(Instr::LocalGet(dest));
+        lane(body);
+        body.push(compare_instr(
+            if operator == "min" { "lt" } else { "gt" },
+            integer,
+        )?);
+        if lane_type == ValType::I64 {
+            body.push(Instr::I64ExtendI32U);
+        }
+        body.push(match lane_type {
+            ValType::I32 => Instr::I32Sub,
+            ValType::I64 => Instr::I64Sub,
+        });
+        body.push(match lane_type {
+            ValType::I32 => Instr::I32And,
+            ValType::I64 => Instr::I64And,
+        });
+        body.push(match lane_type {
+            ValType::I32 => Instr::I32Xor,
+            ValType::I64 => Instr::I64Xor,
+        });
+    } else if operator == "sum" {
+        body.push(Instr::LocalGet(dest));
+        lane(body);
+        body.push(match lane_type {
+            ValType::I32 => Instr::I32Add,
+            ValType::I64 => Instr::I64Add,
+        });
+    } else {
+        return Err(format!("unsupported vector reduction {operator}"));
+    }
+    body.push(Instr::LocalSet(dest));
+    Ok(())
+}
+
 fn store_width(width: SlotWidth, body: &mut Vec<Instr>) {
     match width {
         SlotWidth::W32 => body.push(Instr::I32Store),
@@ -1756,6 +2309,8 @@ fn wasm_type(ty: &IrType) -> Result<(ValType, Option<IntegerType>), String> {
                 bound: mncs_model::SequenceBound::UpTo(_),
                 ..
             } => Ok((ValType::I64, None)),
+            BodyType::Vector { .. } => Ok((ValType::I32, None)),
+            BodyType::Mask { .. } => Ok((ValType::I64, None)),
             BodyType::Named(_) | BodyType::Finite { .. } | BodyType::Record { .. } => {
                 Err(format!("unsupported SSA type {name}"))
             }
