@@ -1,0 +1,19 @@
+{
+  "schema_version": "0.2",
+  "name": "profile07-invalid-view-range",
+  "cases": [
+    {
+      "id": "inverted-range",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile07.invalid_view_range_runtime", "function": "window" },
+        "arguments": [
+          { "integer": { "value": 5, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "runtime_failure"
+    }
+  ],
+  "properties": []
+}

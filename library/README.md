@@ -11,13 +11,28 @@ same helpers ad hoc.
 ```text
 library/
   core/         foundational total operations (status lattice, boolean algebra,
-                ordering/selection)
-  std/          reserved for larger abstractions built on core
+                ordering/selection; bounded sequences; byte primitives)
+  std/          portable abstractions over core — encoding.v1 begins the
+                canonical serialization groundwork (RFC 0027 direction)
   capability/   reserved for capability/effect-shape declarations
 ```
 
-`std/` and `capability/` are intentionally empty until their governing language
-features exist; no placeholder syntax is invented to fill them.
+`capability/` remains empty until its governing language features exist; no
+placeholder syntax is invented to fill it.
+
+## Bounded data (Profile 0.7)
+
+`core/sequences.v1` and `core/bytes.v1` are the standard-library vocabulary
+over the new substrate: folds, membership, counting, option-shaped
+first/last access, sorted scans, byte bitwise/shift/ordering primitives,
+and a reproducible folding fingerprint. `std/encoding.v1` is the first
+portable `mncs.std` module: canonical big-endian encodings whose decodes
+are total by type and whose round-trip laws are executable MNCS functions.
+
+Realization envelope: reference executors and research bytecode realize
+these modules fully. The scalar backends refuse sequence-typed boundary
+crossings this tranche, so differential corpora for these modules use
+scalar-entry wrappers where cross-backend agreement is required.
 
 ## Modules
 

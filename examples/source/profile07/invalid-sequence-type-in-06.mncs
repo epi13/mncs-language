@@ -1,0 +1,9 @@
+mncs 0.6;
+
+// Negative fixture: bounded-sequence types require Profile 0.7; in 0.6 the
+// bracket spelling fails closed with MNP145.
+module examples.profile07.invalid_sequence_in_06;
+
+fn first(xs: [i32; 2]) -> (result: i32) {
+    return xs[0];
+}

@@ -1,0 +1,61 @@
+mncs 0.7;
+
+// Source Profile 0.7 positive fixture: bounded data substrate.
+//
+// Fixed sequences carry their exact length as machine knowledge; views
+// carry a maximum length plus a runtime length observation; bytes are
+// byte-oriented logical values distinct from integers. Traversal over a
+// sequence domain discharges element bounds checks by semantics, so no
+// unresolved index obligations remain for `xs[i]` accesses below.
+//
+// Sequence-typed parameters/results stay outside the scalar backends'
+// process-boundary marshal contract this tranche, so every entry point
+// takes scalar or byte values and materializes its bounded collections
+// internally; the research-bytecode envelope accepts sequence arguments.
+
+module examples.profile07_bounded_data;
+
+fn sum(a: i64, b: i64, c: i64, d: i64) -> (result: i64) {
+    let xs: [i64; 4] = [a, b, c, d];
+    iterate i over xs carrying acc: i64 = 0 {
+        next acc = acc + xs[i];
+    }
+    return acc;
+}
+
+fn checksum(data: [byte; 8]) -> (result: u64) {
+    iterate i over data carrying acc: u64 = 0 {
+        next acc = (acc + (data[i] as u64)) *% 31;
+    }
+    return acc;
+}
+
+fn checksum_from_bytes(seed: byte) -> (result: u64) {
+    let data: [byte; 4] = [seed, seed << 1, seed << 2, seed << 3];
+    iterate i over data carrying acc: u64 = 0 {
+        next acc = (acc + (data[i] as u64)) *% 31;
+    }
+    return acc;
+}
+
+fn count_over(threshold: i32) -> (result: i32) {
+    let readings: [i32; 5] = [threshold - 100, threshold + 7, threshold - 1, threshold + 42, threshold];
+    let window: [i32; up_to 5] = readings[1..4];
+    iterate i over window carrying hits: i32 = 0 {
+        next hits = hits + ((window[i] >= threshold) as i32);
+    }
+    return hits;
+}
+
+fn window_sum(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32) -> (result: i32) {
+    let xs: [i32; 6] = [v0, v1, v2, v3, v4, v5];
+    let middle: [i32; up_to 6] = xs[2..5];
+    let head: i32 = middle[0];
+    let tail: i32 = middle[middle.len - 1];
+    return head + tail;
+}
+
+fn mix(a: byte, b: byte, c: byte, d: byte) -> (result: byte) {
+    let data: [byte; 4] = [a, b, c, d];
+    return ((data[0] ^ data[1]) | (data[2] & data[3])) << 1;
+}

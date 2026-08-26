@@ -1,0 +1,95 @@
+{
+  "schema_version": "0.2",
+  "name": "profile07-serialization",
+  "cases": [
+    {
+      "id": "header-roundtrip",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.profile07.serialization",
+          "function": "header_roundtrip"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 66
+            }
+          },
+          {
+            "integer": {
+              "value": 3,
+              "type": {
+                "bits": 16,
+                "signed": false
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": 1024,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "header-roundtrip-rejects-bad-magic",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.profile07.serialization",
+          "function": "header_roundtrip"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 67
+            }
+          },
+          {
+            "integer": {
+              "value": 3,
+              "type": {
+                "bits": 16,
+                "signed": false
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": 1024,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "boolean": {
+            "value": false
+          }
+        }
+      ]
+    }
+  ],
+  "properties": []
+}

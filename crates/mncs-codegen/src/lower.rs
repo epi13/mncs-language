@@ -100,7 +100,31 @@ struct CompositeInfo {
 
 impl CompositeInfo {
     fn from_program(program: &mncs_model::Program) -> Self {
+        // Records and boxed finite variants occupy referenced cells; bare
+        // tags and narrow scalars stay in 32-bit slots.
         let width_of = |semantic_type: &str| -> SlotWidth {
+            if program
+                .record_types
+                .iter()
+                .any(|record| record.name == semantic_type)
+            {
+                return SlotWidth::W64;
+            }
+            if let Some(finite) = program
+                .finite_types
+                .iter()
+                .find(|finite| finite.name == semantic_type)
+            {
+                let boxed = finite
+                    .variants
+                    .iter()
+                    .any(|variant| !variant.payload.is_empty());
+                return if boxed {
+                    SlotWidth::W64
+                } else {
+                    SlotWidth::W32
+                };
+            }
             match mncs_model::BodyType::from_semantic_name(semantic_type) {
                 mncs_model::BodyType::Integer(ty) if ty.bits == 64 => SlotWidth::W64,
                 _ => SlotWidth::W32,
@@ -140,13 +164,43 @@ impl CompositeInfo {
                 info.boxed_finites.insert(finite.identity.clone(), variants);
             }
         }
-        info.uses_composites = !info.records.is_empty() || !info.boxed_finites.is_empty();
+        info.uses_composites = !info.records.is_empty()
+            || !info.boxed_finites.is_empty()
+            || program_uses_sequences(program);
         info
     }
 
     fn is_boxed_finite(&self, type_identity: &SemanticId) -> bool {
         self.boxed_finites.contains_key(type_identity)
     }
+}
+
+/// Whether any executable body materializes bounded sequences; such programs
+/// need linear-memory arena support even without records or payload sums.
+fn program_uses_sequences(program: &mncs_model::Program) -> bool {
+    let ty_is_sequence = |ty: &BodyType| matches!(ty, BodyType::Sequence { .. });
+    let mut found = false;
+    for function in &program.functions {
+        if let Some(body) = &function.body {
+            found |= body
+                .parameters
+                .iter()
+                .any(|param| ty_is_sequence(&param.ty));
+            for block in &body.blocks {
+                for operation in &block.operations {
+                    found |= matches!(
+                        operation.kind,
+                        mncs_model::BodyOperationKind::SequenceConstruct { .. }
+                    );
+                    found |= operation
+                        .results
+                        .iter()
+                        .any(|result| ty_is_sequence(&result.ty));
+                }
+            }
+        }
+    }
+    found
 }
 
 fn lower_function(
@@ -377,6 +431,213 @@ fn lower_instruction(
                 "or" => Instr::I32Or,
                 other => return Err(format!("unsupported boolean operator {other}")),
             });
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::ByteBitwise { operator } => {
+            // Bytes ride zero-extended in i32 cells; bitwise ops are exact.
+            let dest = dest_local(layout, instruction)?;
+            let left = operand_local(layout, instruction, 0)?;
+            let right = operand_local(layout, instruction, 1)?;
+            body.push(Instr::LocalGet(left));
+            body.push(Instr::LocalGet(right));
+            body.push(match operator.as_str() {
+                "and" => Instr::I32And,
+                "or" => Instr::I32Or,
+                "xor" => Instr::I32Xor,
+                other => return Err(format!("unsupported byte bitwise operator {other}")),
+            });
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::ByteShift { operator } => {
+            // Total semantics: the u64 count is taken modulo 8 (count rides
+            // i64), shifts are logical, and the result is masked to a byte.
+            let dest = dest_local(layout, instruction)?;
+            let left = operand_local(layout, instruction, 0)?;
+            let right = operand_local(layout, instruction, 1)?;
+            body.push(Instr::LocalGet(left));
+            body.push(Instr::LocalGet(right));
+            body.push(Instr::I64Const(8));
+            body.push(Instr::I64RemU);
+            body.push(Instr::I32WrapI64);
+            if operator == "shl" {
+                body.push(Instr::I32Shl);
+                body.push(Instr::I32Const(255));
+                body.push(Instr::I32And);
+            } else if operator == "shr" {
+                body.push(Instr::I32ShrU);
+            } else {
+                return Err(format!("unsupported byte shift operator {operator}"));
+            }
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::ByteCompare { predicate } => {
+            // Bytes compare as unsigned 8-bit values in i32 cells.
+            let dest = dest_local(layout, instruction)?;
+            let left = operand_local(layout, instruction, 0)?;
+            let right = operand_local(layout, instruction, 1)?;
+            body.push(Instr::LocalGet(left));
+            body.push(Instr::LocalGet(right));
+            body.push(compare_instr(
+                predicate,
+                IntegerType {
+                    bits: 8,
+                    signed: false,
+                },
+            )?);
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::Convert { from, to } => {
+            emit_convert(layout, instruction, body, from.clone(), to.clone())?
+        }
+        SsaInstructionKind::SequenceConstruct {
+            element_type: _,
+            length,
+        } => {
+            // Exact sequences materialize as canonical cells with one
+            // 8-byte slot per element, exactly like record layouts.
+            let dest = dest_local(layout, instruction)?;
+            emit_alloc(body, dest, *length * 8)?;
+            for index in 0..*length as usize {
+                let operand = operand_local(layout, instruction, index)?;
+                body.push(Instr::LocalGet(dest));
+                emit_offset(body, (index * 8) as i32);
+                body.push(Instr::LocalGet(operand));
+                store_element_width(layout, instruction, index, body)?;
+            }
+        }
+        SsaInstructionKind::SequenceProject { bound, evidence } => {
+            let dest = dest_local(layout, instruction)?;
+            let seq = operand_local(layout, instruction, 0)?;
+            let index = operand_local(layout, instruction, 1)?;
+            let checked = matches!(evidence, mncs_model::BoundsEvidence::RuntimeChecked { .. });
+            match bound {
+                mncs_model::SequenceBound::Exact(length) => {
+                    if checked {
+                        // Out-of-bounds indexes trap exactly like checked
+                        // arithmetic edges.
+                        body.push(Instr::LocalGet(index));
+                        body.push(Instr::I64Const(i64::from(*length)));
+                        body.push(Instr::I64GeU);
+                        body.push(Instr::If);
+                        body.push(Instr::Unreachable);
+                        body.push(Instr::End);
+                    }
+                    body.push(Instr::LocalGet(seq));
+                    body.push(Instr::LocalGet(index));
+                    body.push(Instr::I64Const(3));
+                    body.push(Instr::I64Shl);
+                    body.push(Instr::I32WrapI64);
+                    body.push(Instr::I32Add);
+                    load_element_width(layout, instruction, body)?;
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    if checked {
+                        body.push(Instr::LocalGet(index));
+                        body.push(Instr::LocalGet(seq));
+                        body.push(Instr::I64Const(32));
+                        body.push(Instr::I64ShrU);
+                        body.push(Instr::I64GeU);
+                        body.push(Instr::If);
+                        body.push(Instr::Unreachable);
+                        body.push(Instr::End);
+                    }
+                    body.push(Instr::LocalGet(seq));
+                    body.push(Instr::I32WrapI64);
+                    body.push(Instr::LocalGet(index));
+                    body.push(Instr::I64Const(3));
+                    body.push(Instr::I64Shl);
+                    body.push(Instr::I32WrapI64);
+                    body.push(Instr::I32Add);
+                    load_element_width(layout, instruction, body)?;
+                }
+            }
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::SequenceLength { bound } => {
+            let dest = dest_local(layout, instruction)?;
+            let seq = operand_local(layout, instruction, 0)?;
+            match bound {
+                mncs_model::SequenceBound::Exact(length) => {
+                    body.push(Instr::I64Const(i64::from(*length)));
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    body.push(Instr::LocalGet(seq));
+                    body.push(Instr::I64Const(32));
+                    body.push(Instr::I64ShrU);
+                }
+            }
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::ViewConstruct {
+            source_bound,
+            view_bound,
+        } => {
+            let mncs_model::SequenceBound::UpTo(cap) = view_bound else {
+                return Err("view construction must produce an UpTo view".to_owned());
+            };
+            let dest = dest_local(layout, instruction)?;
+            let seq = operand_local(layout, instruction, 0)?;
+            let start = operand_local(layout, instruction, 1)?;
+            let end = operand_local(layout, instruction, 2)?;
+            // Source length: static for exact sequences, packed for views.
+            let source_len = |body: &mut Vec<Instr>| match source_bound {
+                mncs_model::SequenceBound::Exact(length) => {
+                    body.push(Instr::I64Const(i64::from(*length)));
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    body.push(Instr::LocalGet(seq));
+                    body.push(Instr::I64Const(32));
+                    body.push(Instr::I64ShrU);
+                }
+            };
+            // start > end -> trap
+            body.push(Instr::LocalGet(start));
+            body.push(Instr::LocalGet(end));
+            body.push(Instr::I64GtU);
+            body.push(Instr::If);
+            body.push(Instr::Unreachable);
+            body.push(Instr::End);
+            // end > len(source) -> trap
+            body.push(Instr::LocalGet(end));
+            source_len(body);
+            body.push(Instr::I64GtU);
+            body.push(Instr::If);
+            body.push(Instr::Unreachable);
+            body.push(Instr::End);
+            // span > cap -> trap
+            body.push(Instr::LocalGet(end));
+            body.push(Instr::LocalGet(start));
+            body.push(Instr::I64Sub);
+            body.push(Instr::I64Const(i64::from(*cap)));
+            body.push(Instr::I64GtU);
+            body.push(Instr::If);
+            body.push(Instr::Unreachable);
+            body.push(Instr::End);
+            // Pack (base + start*8) | (span << 32).
+            match source_bound {
+                mncs_model::SequenceBound::Exact(_) => {
+                    body.push(Instr::LocalGet(seq));
+                    body.push(Instr::I64ExtendI32U);
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    body.push(Instr::LocalGet(seq));
+                    body.push(Instr::I64Const(4_294_967_295));
+                    body.push(Instr::I64And);
+                }
+            }
+            body.push(Instr::LocalGet(start));
+            body.push(Instr::I64Const(3));
+            body.push(Instr::I64Shl);
+            body.push(Instr::I64Add);
+            // Keep only the low 32 bits of the address half.
+            body.push(Instr::I64Const(4_294_967_295));
+            body.push(Instr::I64And);
+            body.push(Instr::LocalGet(end));
+            body.push(Instr::LocalGet(start));
+            body.push(Instr::I64Sub);
+            body.push(Instr::I64Const(32));
+            body.push(Instr::I64Shl);
+            body.push(Instr::I64Or);
             body.push(Instr::LocalSet(dest));
         }
         SsaInstructionKind::FinitePayloadProject {
@@ -610,6 +871,14 @@ fn emit_integer(
         (ValType::I32, "and", _) => Instr::I32And,
         (ValType::I32, "or", _) => Instr::I32Or,
         (ValType::I32, "xor", _) => Instr::I32Xor,
+        // Total shift semantics: counts are modulo the declared width and
+        // signed shr is arithmetic.
+        (ValType::I32, "shl", _) => Instr::I32Shl,
+        (ValType::I32, "shr", true) => Instr::I32ShrS,
+        (ValType::I32, "shr", false) => Instr::I32ShrU,
+        (ValType::I64, "shl", _) => Instr::I64Shl,
+        (ValType::I64, "shr", true) => Instr::I64ShrS,
+        (ValType::I64, "shr", false) => Instr::I64ShrU,
         (ValType::I64, "add", _) => Instr::I64Add,
         (ValType::I64, "sub", _) => Instr::I64Sub,
         (ValType::I64, "mul", _) => Instr::I64Mul,
@@ -636,7 +905,8 @@ fn emit_integer(
             body.push(wrapping);
             body.push(Instr::LocalSet(dest));
             emit_checked(body, operator, operand_type, wasm, left, right, dest)?;
-            mask_width(body, result_type, wasm);
+            // Narrow results are normalized through an explicit local round
+            // trip; a bare mask here would pop an empty operand stack.
             if result_type.bits < 32 && matches!(wasm, ValType::I32) {
                 body.push(Instr::LocalGet(dest));
                 mask_width(body, result_type, wasm);
@@ -674,9 +944,13 @@ fn emit_checked_division(
     // MIN / -1 is a signed-only overflow case; unsigned division has no
     // such corner and must not trap on it.
     let signed = ty.signed;
-    // if divisor == 0 { trap }
+    // if divisor == 0 { trap } — the zero test must match the operand's
+    // carrier width; an i32 test on an i64 divisor misses high-word values.
     body.push(Instr::LocalGet(right));
-    body.push(Instr::I32Eqz);
+    body.push(match wasm {
+        ValType::I64 => Instr::I64Eqz,
+        ValType::I32 => Instr::I32Eqz,
+    });
     body.push(Instr::If);
     body.push(Instr::Unreachable);
     body.push(Instr::End);
@@ -1361,6 +1635,106 @@ fn store_instr(
     Ok(())
 }
 
+/// Store for one sequence element: width follows the operand's realization.
+fn store_element_width(
+    layout: &FunctionLayout,
+    instruction: &mncs_model::SsaInstruction,
+    index: usize,
+    body: &mut Vec<Instr>,
+) -> Result<(), String> {
+    let identity = instruction
+        .inputs
+        .get(index)
+        .ok_or_else(|| format!("sequence element {index} is missing"))?;
+    let valtype = layout.types.get(identity).copied().unwrap_or(ValType::I32);
+    match valtype {
+        ValType::I64 => store_width(SlotWidth::W64, body),
+        ValType::I32 => store_width(SlotWidth::W32, body),
+    }
+    Ok(())
+}
+
+/// Load for one sequence element: the destination's realization type picks
+/// the load width, mirroring the canonical slot contract.
+fn load_element_width(
+    layout: &FunctionLayout,
+    instruction: &mncs_model::SsaInstruction,
+    body: &mut Vec<Instr>,
+) -> Result<(), String> {
+    let output = instruction
+        .outputs
+        .first()
+        .ok_or_else(|| "projection has no result".to_owned())?;
+    let valtype = layout
+        .types
+        .get(&output.identity)
+        .copied()
+        .unwrap_or(ValType::I32);
+    match valtype {
+        ValType::I64 => body.push(Instr::I64Load),
+        ValType::I32 => body.push(Instr::I32Load),
+    }
+    Ok(())
+}
+
+/// Explicit total conversion (Profile 0.7): narrowing truncates high bits;
+/// widening extends by the *source* signedness (`byte` zero-extends).
+fn emit_convert(
+    layout: &FunctionLayout,
+    instruction: &mncs_model::SsaInstruction,
+    body: &mut Vec<Instr>,
+    from: BodyType,
+    to: BodyType,
+) -> Result<(), String> {
+    let dest = dest_local(layout, instruction)?;
+    let src = operand_local(layout, instruction, 0)?;
+    let src_wide = matches!(&from, BodyType::Integer(ty) if ty.bits == 64);
+    let dst_wide = matches!(&to, BodyType::Integer(ty) if ty.bits == 64);
+    let dst_signed = matches!(&to, BodyType::Integer(ty) if ty.signed);
+    let (dst_bits, dst_is_byte) = match &to {
+        BodyType::Byte => (8u16, true),
+        BodyType::Integer(ty) => (ty.bits, false),
+        _ => return Err("conversion target must be scalar".to_owned()),
+    };
+    body.push(Instr::LocalGet(src));
+    if !src_wide && dst_wide {
+        // Widen i32 cells into i64 by source signedness; bytes zero-extend.
+        if matches!(&from, BodyType::Integer(ty) if ty.signed) {
+            body.push(Instr::I64ExtendI32S);
+        } else {
+            body.push(Instr::I64ExtendI32U);
+        }
+    } else if src_wide && !dst_wide {
+        body.push(Instr::I32WrapI64);
+    }
+    if dst_bits < 32 || dst_is_byte {
+        // Narrow targets normalize inside their declared domain.
+        let mask = (1_i32.checked_shl(u32::from(dst_bits)).unwrap_or(0)).wrapping_sub(1);
+        body.push(Instr::I32Const(mask));
+        body.push(Instr::I32And);
+        if dst_signed {
+            let sign = 1_i32.wrapping_shl(u32::from(dst_bits - 1));
+            body.push(Instr::I32Const(sign));
+            body.push(Instr::I32Xor);
+            body.push(Instr::I32Const(sign));
+            body.push(Instr::I32Sub);
+        }
+    } else if dst_wide && matches!(&to, BodyType::Integer(ty) if ty.bits < 64) {
+        let mask = ((1_i128 << dst_bits) - 1) as i64;
+        body.push(Instr::I64Const(mask));
+        body.push(Instr::I64And);
+        if dst_signed {
+            let shift = 64 - i64::from(dst_bits);
+            body.push(Instr::I64Const(shift));
+            body.push(Instr::I64Shl);
+            body.push(Instr::I64Const(shift));
+            body.push(Instr::I64ShrS);
+        }
+    }
+    body.push(Instr::LocalSet(dest));
+    Ok(())
+}
+
 fn wasm_type(ty: &IrType) -> Result<(ValType, Option<IntegerType>), String> {
     match ty {
         IrType::Finite { .. } => Ok((ValType::I32, None)),
@@ -1370,6 +1744,18 @@ fn wasm_type(ty: &IrType) -> Result<(ValType, Option<IntegerType>), String> {
         IrType::Named(name) if name == "bool" => Ok((ValType::I32, None)),
         IrType::Named(name) => match BodyType::from_semantic_name(name) {
             BodyType::Integer(integer) => Ok((val_type(integer)?, Some(integer))),
+            // Bytes ride zero-extended in i32 cells.
+            BodyType::Byte => Ok((ValType::I32, None)),
+            // Exact sequences are canonical cell pointers; bounded views are
+            // packed (offset | length << 32) descriptors riding i64.
+            BodyType::Sequence {
+                bound: mncs_model::SequenceBound::Exact(_),
+                ..
+            } => Ok((ValType::I32, None)),
+            BodyType::Sequence {
+                bound: mncs_model::SequenceBound::UpTo(_),
+                ..
+            } => Ok((ValType::I64, None)),
             BodyType::Named(_) | BodyType::Finite { .. } | BodyType::Record { .. } => {
                 Err(format!("unsupported SSA type {name}"))
             }

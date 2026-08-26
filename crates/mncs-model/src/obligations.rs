@@ -186,7 +186,67 @@ impl Program {
                             BodyOperationKind::RecordConstruct { .. }
                             | BodyOperationKind::RecordProject { .. }
                             | BodyOperationKind::FinitePayloadProject { .. }
-                            | BodyOperationKind::BooleanOp { .. } => {}
+                            | BodyOperationKind::BooleanOp { .. }
+                            // Byte bitwise/shift/compare and explicit
+                            // conversions are total by definition; sequence
+                            // construction and length observations cannot fail.
+                            | BodyOperationKind::ByteBitwise { .. }
+                            | BodyOperationKind::ByteShift { .. }
+                            | BodyOperationKind::ByteCompare { .. }
+                            | BodyOperationKind::Convert { .. }
+                            | BodyOperationKind::SequenceConstruct { .. }
+                            | BodyOperationKind::SequenceLength { .. } => {}
+                            // A runtime-checked projection retains an explicit
+                            // bounds obligation; statically established or
+                            // traversal-domain evidence discharges it by
+                            // semantics instead.
+                            BodyOperationKind::SequenceProject {
+                                evidence:
+                                    crate::BoundsEvidence::RuntimeChecked { failure: _ },
+                                ..
+                            } => {
+                                let requirement =
+                                    requirement_id("sequence-index-bounds", &subject);
+                                obligations.push(ObligationRecord {
+                                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                    identity: body_obligation_id(
+                                        "sequence-index-bounds",
+                                        &subject,
+                                    ),
+                                    subject: subject.clone(),
+                                    requirement,
+                                    status: ObligationStatus::Unknown,
+                                    method: "runtime-checked-sequence-index".to_owned(),
+                                    assumptions: Vec::new(),
+                                    dependencies: vec![subject],
+                                    freshness: EvidenceFreshness::Unknown,
+                                    fallback: Some(
+                                        "the element is available only on the successful bounds-check path"
+                                            .to_owned(),
+                                    ),
+                                });
+                            }
+                            BodyOperationKind::SequenceProject { .. } => {}
+                            // View range validity is checked at realization;
+                            // the obligation stays UNKNOWN until discharged.
+                            BodyOperationKind::ViewConstruct { .. } => {
+                                let requirement = requirement_id("view-range-valid", &subject);
+                                obligations.push(ObligationRecord {
+                                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                    identity: body_obligation_id("view-range-valid", &subject),
+                                    subject: subject.clone(),
+                                    requirement,
+                                    status: ObligationStatus::Unknown,
+                                    method: "checked-view-range-construction".to_owned(),
+                                    assumptions: Vec::new(),
+                                    dependencies: vec![subject],
+                                    freshness: EvidenceFreshness::Unknown,
+                                    fallback: Some(
+                                        "the view value exists only on the successful range-check path"
+                                            .to_owned(),
+                                    ),
+                                });
+                            }
                             BodyOperationKind::Integer { intent, .. } => {
                                 let bounded_counter_step =
                                     body.bounded_iterations.iter().any(|iteration| {

@@ -53,7 +53,7 @@ impl CompositeLayout {
     pub fn from_program(program: &Program) -> Self {
         let field_of = |name: &str, semantic_type: &str| CellField {
             name: name.to_owned(),
-            width: slot_width(semantic_type),
+            width: slot_width(semantic_type, program),
         };
         let mut layout = Self::default();
         for record in &program.record_types {
@@ -106,7 +106,49 @@ pub fn finite_payloads_declare_payloads(payloads: &BTreeMap<u32, Vec<(String, St
     payloads.values().any(|fields| !fields.is_empty())
 }
 
-fn slot_width(semantic_type: &str) -> SlotWidth {
+fn slot_width(semantic_type: &str, program: &mncs_model::Program) -> SlotWidth {
+    // Records always occupy referenced cells. Payload-bearing finite
+    // variants are boxed cells too; payload-free variants are bare tags and
+    // stay in a 32-bit slot. Sequences ride full words (cell refs or packed
+    // view descriptors).
+    if program
+        .record_types
+        .iter()
+        .any(|record| record.name == semantic_type)
+    {
+        return SlotWidth::W64;
+    }
+    if let Some(finite) = program
+        .finite_types
+        .iter()
+        .find(|finite| finite.name == semantic_type)
+    {
+        let boxed = finite
+            .variants
+            .iter()
+            .any(|variant| !variant.payload.is_empty());
+        return if boxed {
+            SlotWidth::W64
+        } else {
+            SlotWidth::W32
+        };
+    }
+    match mncs_model::BodyType::from_semantic_name(semantic_type) {
+        mncs_model::BodyType::Integer(ty) if ty.bits == 64 => SlotWidth::W64,
+        _ => SlotWidth::W32,
+    }
+}
+
+fn slot_width_registry(
+    semantic_type: &str,
+    registry: &BTreeMap<String, mncs_model::BackendValueContract>,
+) -> SlotWidth {
+    if registry.values().any(|contract| match contract {
+        mncs_model::BackendValueContract::Record { name, .. } => name == semantic_type,
+        _ => false,
+    }) {
+        return SlotWidth::W64;
+    }
     match mncs_model::BodyType::from_semantic_name(semantic_type) {
         mncs_model::BodyType::Integer(ty) if ty.bits == 64 => SlotWidth::W64,
         _ => SlotWidth::W32,
@@ -172,6 +214,7 @@ impl ArenaWriter {
             mncs_model::ExecutionValue::Boolean { value } => {
                 Ok(BoundaryValue::Bits(u64::from(*value)))
             }
+            mncs_model::ExecutionValue::Byte { value } => Ok(BoundaryValue::Bits(*value as u64)),
             mncs_model::ExecutionValue::Finite {
                 payload,
                 discriminant,
@@ -227,6 +270,10 @@ impl ArenaWriter {
                 }
                 Ok(base)
             }
+            Value::Sequence { values } => {
+                let elements = values.clone();
+                self.encode_sequence(&elements)
+            }
             Value::Finite {
                 discriminant,
                 payload,
@@ -267,7 +314,11 @@ impl ArenaWriter {
         declared_type: &str,
     ) -> Result<(), String> {
         use mncs_model::ExecutionValue as Value;
-        let width = slot_width(declared_type);
+        // Composite-typed fields always cross as cell references.
+        let width = match value {
+            Value::Record { .. } | Value::Sequence { .. } => SlotWidth::W64,
+            _ => slot_width_registry(declared_type, &self.registry),
+        };
         match value {
             Value::Record { .. } => {
                 // Records are always composite references.
@@ -302,7 +353,45 @@ impl ArenaWriter {
                 self.put32(offset, u32::from(*value));
                 Ok(())
             }
+            Value::Byte { value } => {
+                self.put32(offset, *value as u32);
+                Ok(())
+            }
+            // Exact-length sequences occupy their own cells and are
+            // referenced from this slot.
+            seq @ Value::Sequence { .. } => {
+                let cell = self.encode_cell(seq)?;
+                self.put64(offset, cell);
+                Ok(())
+            }
         }
+    }
+
+    /// Encode an exact-length sequence into a fresh canonical cell: one
+    /// 8-byte slot per element in index order. Returns the cell offset.
+    fn encode_sequence(&mut self, elements: &[mncs_model::ExecutionValue]) -> Result<u64, String> {
+        let base = self.align8();
+        self.image.resize(base as usize + elements.len() * 8, 0);
+        for (index, element) in elements.iter().enumerate() {
+            let slot = base + index as u64 * 8;
+            let bits = element_slot_bits(element)?;
+            self.put64(slot, bits);
+        }
+        Ok(base)
+    }
+}
+
+/// Zero-extended slot bits for a scalar or byte sequence element; nested
+/// composites are rejected because they must occupy referenced cells.
+fn element_slot_bits(value: &mncs_model::ExecutionValue) -> Result<u64, String> {
+    match value {
+        mncs_model::ExecutionValue::Integer { value, .. } => Ok(*value as u64),
+        mncs_model::ExecutionValue::Boolean { value } => Ok(u64::from(*value)),
+        mncs_model::ExecutionValue::Byte { value } => Ok(*value as u64),
+        mncs_model::ExecutionValue::Finite { discriminant, .. } => Ok(u64::from(*discriminant)),
+        other => Err(format!(
+            "nested composite sequence element requires cell realization: {other:?}"
+        )),
     }
 }
 
@@ -487,7 +576,7 @@ impl<'a> ArenaReader<'a> {
         }
         match BodyType::from_semantic_name(declared_type) {
             BodyType::Integer(ty) => {
-                let value: i128 = match slot_width(declared_type) {
+                let value: i128 = match slot_width_registry(declared_type, self.registry) {
                     SlotWidth::W32 => {
                         let bits = self.get32(offset)?;
                         if ty.signed {

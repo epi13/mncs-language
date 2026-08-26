@@ -1,0 +1,10 @@
+mncs 0.7;
+
+// Negative fixture: sequence literals must supply exactly the declared
+// element count; underfilling is an elaboration error (MNE184).
+module examples.profile07.invalid_underfilled;
+
+fn build(a: i32) -> (result: i32) {
+    let xs: [i32; 3] = [a, a];
+    return xs[0];
+}

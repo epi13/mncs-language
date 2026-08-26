@@ -15,8 +15,8 @@ use crate::execution::{
 use crate::identity::{function_id, program_id};
 use crate::{
     execute_with_policy, BodyType, ExecutionCorpus, ExecutionFailure, ExecutionResult,
-    ExecutionStatus, ExecutionSubject, ExecutionValue, IrType, Program, SemanticId, SsaBlock,
-    SsaFunction, SsaInstruction, SsaInstructionKind, SsaModule, SsaTerminator,
+    ExecutionStatus, ExecutionSubject, ExecutionValue, IntegerType, IrType, Program, SemanticId,
+    SsaBlock, SsaFunction, SsaInstruction, SsaInstructionKind, SsaModule, SsaTerminator,
     MAX_EXECUTION_BUDGET,
 };
 
@@ -645,6 +645,305 @@ fn execute_instruction(
                 values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
             }
         }
+        SsaInstructionKind::ByteBitwise { operator } => {
+            let Some((left, right)) = byte_operands(instruction, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "byte bitwise operands were unavailable or not byte values",
+                );
+                return true;
+            };
+            let Some(value) = crate::execution::evaluate_byte_bitwise(operator, left, right) else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    instruction_identity(instruction),
+                    format!("unsupported byte bitwise operator {operator:?}"),
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), ExecutionValue::Byte { value });
+            }
+        }
+        SsaInstructionKind::ByteShift { operator } => {
+            let Some((byte, count)) = byte_shift_operands(instruction, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "byte shift operands were unavailable or mistyped",
+                );
+                return true;
+            };
+            let Some(value) = crate::execution::evaluate_byte_shift(operator, byte, count) else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    instruction_identity(instruction),
+                    format!("unsupported byte shift operator {operator:?}"),
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), ExecutionValue::Byte { value });
+            }
+        }
+        SsaInstructionKind::ByteCompare { predicate } => {
+            let Some((left, right)) = byte_operands(instruction, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "byte comparison operands were unavailable or not byte values",
+                );
+                return true;
+            };
+            let Some(value) = crate::execution::compare_bytes(predicate, left, right) else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    instruction_identity(instruction),
+                    format!("unsupported byte comparison predicate {predicate:?}"),
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
+            }
+        }
+        SsaInstructionKind::Convert { from, to } => {
+            let Some(operand_value) =
+                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "conversion operand was unavailable",
+                );
+                return true;
+            };
+            let converted = match (operand_value, from, to) {
+                (
+                    ExecutionValue::Integer { value, .. },
+                    BodyType::Integer(_),
+                    BodyType::Integer(target),
+                ) => crate::execution::wrap_to_bits(*value, target.bits, target.signed)
+                    .map(|value| ExecutionValue::Integer { value, ty: *target }),
+                (ExecutionValue::Integer { value, .. }, BodyType::Integer(_), BodyType::Byte) => {
+                    crate::execution::wrap_to_bits(*value, 8, false)
+                        .map(|value| ExecutionValue::Byte { value })
+                }
+                (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Integer(target)) => {
+                    crate::execution::wrap_to_bits(*value, target.bits, target.signed)
+                        .map(|value| ExecutionValue::Integer { value, ty: *target })
+                }
+                (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Byte) => {
+                    Some(ExecutionValue::Byte { value: *value })
+                }
+                (
+                    ExecutionValue::Boolean { value },
+                    BodyType::Named(name),
+                    BodyType::Integer(target),
+                ) if name == "bool" => {
+                    crate::execution::wrap_to_bits(i128::from(*value), target.bits, target.signed)
+                        .map(|value| ExecutionValue::Integer { value, ty: *target })
+                }
+                (ExecutionValue::Boolean { value }, BodyType::Named(name), BodyType::Byte)
+                    if name == "bool" =>
+                {
+                    Some(ExecutionValue::Byte {
+                        value: i128::from(*value),
+                    })
+                }
+                _ => None,
+            };
+            let Some(converted) = converted else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    instruction_identity(instruction),
+                    "conversion operands do not match the declared conversion",
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), converted);
+            }
+        }
+        SsaInstructionKind::SequenceConstruct { length, .. } => {
+            let Some(output) = instruction.outputs.first() else {
+                return true;
+            };
+            if *length as usize != instruction.inputs.len() {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "sequence construction element count does not match its operands",
+                );
+                return true;
+            }
+            let mut element_values = Vec::with_capacity(instruction.inputs.len());
+            for input in &instruction.inputs {
+                let Some(value) = values.get(input) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "sequence construction operand was unavailable",
+                    );
+                    return true;
+                };
+                element_values.push(value.clone());
+            }
+            values.insert(
+                output.identity.clone(),
+                ExecutionValue::Sequence {
+                    values: element_values,
+                },
+            );
+        }
+        SsaInstructionKind::SequenceProject { bound: _, evidence } => {
+            let Some(ExecutionValue::Sequence { values: elements }) =
+                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "sequence projection operand was unavailable or not a sequence",
+                );
+                return true;
+            };
+            let Some(index) = ssa_integer_operand(instruction, values, 1) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "sequence index operand was unavailable or not a u64",
+                );
+                return true;
+            };
+            if index < 0 {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "sequence index is outside the u64 domain",
+                );
+                return true;
+            }
+            let length = elements.len() as u128;
+            let index = index as u128;
+            match evidence {
+                crate::BoundsEvidence::StaticExact | crate::BoundsEvidence::TraversalDomain => {
+                    if index >= length {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            "statically established sequence bounds were violated",
+                        );
+                        return true;
+                    }
+                }
+                crate::BoundsEvidence::RuntimeChecked { failure: _ } => {
+                    if index >= length {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            instruction_identity(instruction),
+                            "sequence index out of bounds",
+                        );
+                        return true;
+                    }
+                }
+            }
+            if let Some(output) = instruction.outputs.first() {
+                if let Some(value) = elements.get(index as usize) {
+                    values.insert(output.identity.clone(), value.clone());
+                }
+            }
+        }
+        SsaInstructionKind::SequenceLength { bound: _ } => {
+            let Some(ExecutionValue::Sequence { values: elements }) =
+                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "length observation operand was unavailable or not a sequence",
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Integer {
+                        value: elements.len() as i128,
+                        ty: IntegerType {
+                            bits: 64,
+                            signed: false,
+                        },
+                    },
+                );
+            }
+        }
+        SsaInstructionKind::ViewConstruct {
+            source_bound: _,
+            view_bound,
+        } => {
+            let crate::SequenceBound::UpTo(capacity) = view_bound else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "view construction must produce an UpTo-bounded view",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Sequence { values: source }) =
+                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "view construction source was unavailable or not a sequence",
+                );
+                return true;
+            };
+            let (Some(start), Some(end)) = (
+                ssa_integer_operand(instruction, values, 1),
+                ssa_integer_operand(instruction, values, 2),
+            ) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "view range endpoints were unavailable or not u64 values",
+                );
+                return true;
+            };
+            if start < 0 || end < 0 || end < start {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    instruction_identity(instruction),
+                    "view range is not a valid half-open range",
+                );
+                return true;
+            }
+            if end as u128 > source.len() as u128 {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    instruction_identity(instruction),
+                    "view range end exceeds the source length",
+                );
+                return true;
+            }
+            if (end - start) as u128 > u128::from(*capacity) {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    instruction_identity(instruction),
+                    "view range exceeds the declared view capacity",
+                );
+                return true;
+            }
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Sequence {
+                        values: source[start as usize..end as usize].to_vec(),
+                    },
+                );
+            }
+        }
         SsaInstructionKind::FiniteConstruct {
             type_identity,
             variant_identity,
@@ -1032,6 +1331,58 @@ fn integer_operands(
     Some((*left, *right))
 }
 
+fn byte_operands(
+    instruction: &SsaInstruction,
+    values: &BTreeMap<SemanticId, ExecutionValue>,
+) -> Option<(i128, i128)> {
+    let [left, right] = instruction.inputs.as_slice() else {
+        return None;
+    };
+    let ExecutionValue::Byte { value: left } = values.get(left)? else {
+        return None;
+    };
+    let ExecutionValue::Byte { value: right } = values.get(right)? else {
+        return None;
+    };
+    Some((*left, *right))
+}
+
+fn byte_shift_operands(
+    instruction: &SsaInstruction,
+    values: &BTreeMap<SemanticId, ExecutionValue>,
+) -> Option<(i128, i128)> {
+    let [left, right] = instruction.inputs.as_slice() else {
+        return None;
+    };
+    let ExecutionValue::Byte { value: left } = values.get(left)? else {
+        return None;
+    };
+    let ExecutionValue::Integer { value: right, .. } = values.get(right)? else {
+        return None;
+    };
+    if *right < 0 {
+        return None;
+    }
+    Some((*left, *right))
+}
+
+fn ssa_integer_operand(
+    instruction: &SsaInstruction,
+    values: &BTreeMap<SemanticId, ExecutionValue>,
+    index: usize,
+) -> Option<i128> {
+    match values.get(instruction.inputs.get(index)?)? {
+        ExecutionValue::Integer { value, .. } => Some(*value),
+        _ => None,
+    }
+}
+
+/// A stand-in identity for operand lookups when an instruction is malformed;
+/// the lookup misses and the caller reports InvalidRequest.
+fn output_sentinel() -> SemanticId {
+    SemanticId("mncs:ssa-execution:sentinel".to_owned())
+}
+
 fn constant_value(value: i128, ty: &IrType) -> Option<ExecutionValue> {
     let ty = body_type(ty)?;
     match ty {
@@ -1046,6 +1397,8 @@ fn constant_value(value: i128, ty: &IrType) -> Option<ExecutionValue> {
         BodyType::Named(name) if name == "bool" && matches!(value, 0 | 1) => {
             Some(ExecutionValue::Boolean { value: value == 1 })
         }
+        // Byte literals materialize through their unsigned 8-bit domain.
+        BodyType::Byte if (0..=255).contains(&value) => Some(ExecutionValue::Byte { value }),
         _ => None,
     }
 }
@@ -1095,6 +1448,31 @@ fn value_matches_type(value: &ExecutionValue, ty: &BodyType) -> bool {
         (ExecutionValue::Record { type_identity, .. }, BodyType::Record { identity, .. }) => {
             type_identity == identity
         }
+        (ExecutionValue::Byte { value }, BodyType::Byte) => (0..=255).contains(value),
+        (
+            ExecutionValue::Sequence { values },
+            BodyType::Sequence {
+                element,
+                bound: crate::SequenceBound::Exact(length),
+            },
+        ) => {
+            values.len() == *length as usize
+                && values
+                    .iter()
+                    .all(|element_value| value_matches_type(element_value, element))
+        }
+        (
+            ExecutionValue::Sequence { values },
+            BodyType::Sequence {
+                element,
+                bound: crate::SequenceBound::UpTo(capacity),
+            },
+        ) => {
+            values.len() <= *capacity as usize
+                && values
+                    .iter()
+                    .all(|element_value| value_matches_type(element_value, element))
+        }
         _ => false,
     }
 }
@@ -1134,6 +1512,35 @@ fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionVal
             if type_identity == identity =>
         {
             Some(value.clone())
+        }
+        (ExecutionValue::Byte { value }, BodyType::Byte) if (0..=255).contains(value) => {
+            Some(ExecutionValue::Byte { value: *value })
+        }
+        (
+            ExecutionValue::Sequence { values },
+            BodyType::Sequence {
+                element,
+                bound: crate::SequenceBound::Exact(length),
+            },
+        ) if values.len() == *length as usize => {
+            let mut normalized = Vec::with_capacity(values.len());
+            for value in values {
+                normalized.push(normalize_value(value, element)?);
+            }
+            Some(ExecutionValue::Sequence { values: normalized })
+        }
+        (
+            ExecutionValue::Sequence { values },
+            BodyType::Sequence {
+                element,
+                bound: crate::SequenceBound::UpTo(capacity),
+            },
+        ) if values.len() <= *capacity as usize => {
+            let mut normalized = Vec::with_capacity(values.len());
+            for value in values {
+                normalized.push(normalize_value(value, element)?);
+            }
+            Some(ExecutionValue::Sequence { values: normalized })
         }
         _ => None,
     }

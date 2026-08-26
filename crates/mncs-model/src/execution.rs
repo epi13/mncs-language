@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::identity::{function_id, SemanticId};
 use crate::{
     ArithmeticIntent, BodyBlock, BodyOperation, BodyOperationKind, BodyTerminator, BodyType,
-    Function, FunctionBody, IntegerType, Program,
+    BoundsEvidence, Function, FunctionBody, IntegerType, Program, SequenceBound,
 };
 
 pub const EXECUTION_REQUEST_SCHEMA_VERSION: &str = "0.1";
@@ -64,6 +64,16 @@ pub enum ExecutionValue {
         type_identity: SemanticId,
         name: String,
         fields: Vec<(String, ExecutionValue)>,
+    },
+    /// A byte-oriented logical value (Profile 0.7). The domain is 0..=255;
+    /// no host pointer or storage shape participates in meaning.
+    Byte {
+        value: i128,
+    },
+    /// A bounded sequence's logical value: exactly its ordered element
+    /// values. Length facts come from the type, not from the value.
+    Sequence {
+        values: Vec<ExecutionValue>,
     },
 }
 
@@ -678,6 +688,297 @@ fn execute_operation(
                 ExecutionValue::Boolean { value },
             );
         }
+        BodyOperationKind::ByteBitwise { operator } => {
+            let Some((left, right)) = byte_operands(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "byte bitwise operands were unavailable or not byte values".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(value) = evaluate_byte_bitwise(operator, left, right) else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    format!("unsupported byte bitwise operator {operator:?}"),
+                );
+                return Some(result.clone());
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Byte { value },
+            );
+        }
+        BodyOperationKind::ByteShift { operator } => {
+            let Some((byte, count)) = byte_shift_operands(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "byte shift operands were unavailable or mistyped".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(value) = evaluate_byte_shift(operator, byte, count) else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    format!("unsupported byte shift operator {operator:?}"),
+                );
+                return Some(result.clone());
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Byte { value },
+            );
+        }
+        BodyOperationKind::ByteCompare { predicate } => {
+            let Some((left, right)) = byte_operands(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "byte comparison operands were unavailable or not byte values".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(value) = compare_bytes(predicate, left, right) else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    format!("unsupported byte comparison predicate {predicate:?}"),
+                );
+                return Some(result.clone());
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Boolean { value },
+            );
+        }
+        BodyOperationKind::Convert { from, to } => {
+            let Some(operand_value) = operation
+                .operands
+                .first()
+                .and_then(|operand| values.get(operand))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "conversion operand was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let converted = match (operand_value, from, to) {
+                (
+                    ExecutionValue::Integer { value, .. },
+                    BodyType::Integer(_),
+                    BodyType::Integer(target),
+                ) => wrap_to_bits(*value, target.bits, target.signed)
+                    .map(|value| ExecutionValue::Integer { value, ty: *target }),
+                (ExecutionValue::Integer { value, .. }, BodyType::Integer(_), BodyType::Byte) => {
+                    wrap_to_bits(*value, 8, false).map(|value| ExecutionValue::Byte { value })
+                }
+                (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Integer(target)) => {
+                    wrap_to_bits(*value, target.bits, target.signed)
+                        .map(|value| ExecutionValue::Integer { value, ty: *target })
+                }
+                (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Byte) => {
+                    Some(ExecutionValue::Byte { value: *value })
+                }
+                // Booleans convert outward as 0/1; never inward.
+                (
+                    ExecutionValue::Boolean { value },
+                    BodyType::Named(name),
+                    BodyType::Integer(target),
+                ) if name == "bool" => wrap_to_bits(i128::from(*value), target.bits, target.signed)
+                    .map(|value| ExecutionValue::Integer { value, ty: *target }),
+                (ExecutionValue::Boolean { value }, BodyType::Named(name), BodyType::Byte)
+                    if name == "bool" =>
+                {
+                    Some(ExecutionValue::Byte {
+                        value: i128::from(*value),
+                    })
+                }
+                _ => None,
+            };
+            let Some(converted) = converted else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    "conversion operands do not match the declared conversion".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            values.insert(operation.results[0].id.clone(), converted);
+        }
+        BodyOperationKind::SequenceConstruct { length, .. } => {
+            let mut element_values = Vec::with_capacity(operation.operands.len());
+            for operand in &operation.operands {
+                match values.get(operand) {
+                    Some(value) => element_values.push(value.clone()),
+                    None => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            "sequence construction operand was unavailable".to_owned(),
+                        );
+                        return Some(result.clone());
+                    }
+                }
+            }
+            if element_values.len() != *length as usize {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "sequence construction element count does not match the declared length"
+                        .to_owned(),
+                );
+                return Some(result.clone());
+            }
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Sequence {
+                    values: element_values,
+                },
+            );
+        }
+        BodyOperationKind::SequenceProject { bound: _, evidence } => {
+            let Some(sequence_value) = sequence_operand(operation, values, 0) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "sequence projection operand was unavailable or not a sequence".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(index) = integer_operand(operation, values, 1) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "sequence index operand was unavailable or not a u64".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            if !(0..=u64::MAX as i128).contains(&index) {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "sequence index is outside the u64 domain".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            let length = sequence_value.len() as u128;
+            let index = index as u128;
+            match evidence {
+                BoundsEvidence::StaticExact | BoundsEvidence::TraversalDomain => {
+                    // The evidence claims validity; a violation would be a
+                    // compiler defect, so fail closed without pretending it
+                    // was a runtime check.
+                    if index >= length {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            "statically established sequence bounds were violated".to_owned(),
+                        );
+                        return Some(result.clone());
+                    }
+                }
+                BoundsEvidence::RuntimeChecked { failure: _ } => {
+                    if index >= length {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            Some(identity.clone()),
+                            "sequence index out of bounds".to_owned(),
+                        );
+                        return Some(result.clone());
+                    }
+                }
+            }
+            if let Some(value) = sequence_value.get(index as usize) {
+                values.insert(operation.results[0].id.clone(), value.clone());
+            }
+        }
+        BodyOperationKind::SequenceLength { bound: _ } => {
+            let Some(sequence_value) = sequence_operand(operation, values, 0) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "length observation operand was unavailable or not a sequence".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Integer {
+                    value: sequence_value.len() as i128,
+                    ty: IntegerType {
+                        bits: 64,
+                        signed: false,
+                    },
+                },
+            );
+        }
+        BodyOperationKind::ViewConstruct {
+            source_bound: _,
+            view_bound,
+        } => {
+            let SequenceBound::UpTo(capacity) = view_bound else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "view construction must produce an UpTo-bounded view".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(source) = sequence_operand(operation, values, 0) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "view construction source was unavailable or not a sequence".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let (Some(start), Some(end)) = (
+                integer_operand(operation, values, 1),
+                integer_operand(operation, values, 2),
+            ) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "view range endpoints were unavailable or not u64 values".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            if start < 0 || end < 0 || end < start {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    "view range is not a valid half-open range".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            if end as u128 > source.len() as u128 {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    "view range end exceeds the source length".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            if (end - start) as u128 > u128::from(*capacity) {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    "view range exceeds the declared view capacity".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Sequence {
+                    values: source[start as usize..end as usize].to_vec(),
+                },
+            );
+        }
         BodyOperationKind::FiniteConstruct {
             type_identity,
             variant_identity,
@@ -926,6 +1227,31 @@ fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) 
         (ExecutionValue::Boolean { .. }, BodyType::Integer(integer)) => {
             integer.bits == 1 && !integer.signed
         }
+        (ExecutionValue::Byte { value }, BodyType::Byte) => (0..=255).contains(value),
+        (
+            ExecutionValue::Sequence { values },
+            BodyType::Sequence {
+                element,
+                bound: SequenceBound::Exact(length),
+            },
+        ) => {
+            values.len() == *length as usize
+                && values
+                    .iter()
+                    .all(|element_value| value_matches_type(program, element_value, element))
+        }
+        (
+            ExecutionValue::Sequence { values },
+            BodyType::Sequence {
+                element,
+                bound: SequenceBound::UpTo(capacity),
+            },
+        ) => {
+            values.len() <= *capacity as usize
+                && values
+                    .iter()
+                    .all(|element_value| value_matches_type(program, element_value, element))
+        }
         (
             ExecutionValue::Finite {
                 type_identity,
@@ -1062,6 +1388,7 @@ fn constant_value(value: i128, ty: &BodyType) -> Option<ExecutionValue> {
         BodyType::Named(name) if name == "bool" && matches!(value, 0 | 1) => {
             Some(ExecutionValue::Boolean { value: value == 1 })
         }
+        BodyType::Byte if (0..=255).contains(&value) => Some(ExecutionValue::Byte { value }),
         _ => None,
     }
 }
@@ -1116,8 +1443,37 @@ fn normalize_value(
         ) if type_identity == identity && record_fields_match(program, type_identity, fields) => {
             Some(value.clone())
         }
+        (ExecutionValue::Byte { value }, BodyType::Byte) if (0..=255).contains(value) => {
+            Some(ExecutionValue::Byte { value: *value })
+        }
+        (
+            ExecutionValue::Sequence { values },
+            BodyType::Sequence {
+                element,
+                bound: SequenceBound::Exact(length),
+            },
+        ) if values.len() == *length as usize => normalize_sequence(program, values, element),
+        (
+            ExecutionValue::Sequence { values },
+            BodyType::Sequence {
+                element,
+                bound: SequenceBound::UpTo(capacity),
+            },
+        ) if values.len() <= *capacity as usize => normalize_sequence(program, values, element),
         _ => None,
     }
+}
+
+fn normalize_sequence(
+    program: &Program,
+    values: &[ExecutionValue],
+    element_type: &BodyType,
+) -> Option<ExecutionValue> {
+    let mut normalized = Vec::with_capacity(values.len());
+    for value in values {
+        normalized.push(normalize_value(program, value, element_type)?);
+    }
+    Some(ExecutionValue::Sequence { values: normalized })
 }
 
 pub(crate) fn valid_finite_value(
@@ -1169,6 +1525,126 @@ fn integer_operands(
     Some((*left, *right))
 }
 
+fn byte_operands(
+    operation: &BodyOperation,
+    values: &BTreeMap<String, ExecutionValue>,
+) -> Option<(i128, i128)> {
+    let [left, right] = operation.operands.as_slice() else {
+        return None;
+    };
+    let Some(ExecutionValue::Byte { value: left }) = values.get(left) else {
+        return None;
+    };
+    let Some(ExecutionValue::Byte { value: right }) = values.get(right) else {
+        return None;
+    };
+    Some((*left, *right))
+}
+
+fn byte_shift_operands(
+    operation: &BodyOperation,
+    values: &BTreeMap<String, ExecutionValue>,
+) -> Option<(i128, i128)> {
+    let [left, right] = operation.operands.as_slice() else {
+        return None;
+    };
+    let Some(ExecutionValue::Byte { value: left }) = values.get(left) else {
+        return None;
+    };
+    let Some(ExecutionValue::Integer { value: right, .. }) = values.get(right) else {
+        return None;
+    };
+    if *right < 0 {
+        return None;
+    }
+    Some((*left, *right))
+}
+
+fn sequence_operand<'a>(
+    operation: &BodyOperation,
+    values: &'a BTreeMap<String, ExecutionValue>,
+    index: usize,
+) -> Option<&'a [ExecutionValue]> {
+    match values.get(operation.operands.get(index)?)? {
+        ExecutionValue::Sequence { values } => Some(values),
+        _ => None,
+    }
+}
+
+fn integer_operand(
+    operation: &BodyOperation,
+    values: &BTreeMap<String, ExecutionValue>,
+    index: usize,
+) -> Option<i128> {
+    match values.get(operation.operands.get(index)?)? {
+        ExecutionValue::Integer { value, .. } => Some(*value),
+        _ => None,
+    }
+}
+
+pub(crate) fn compare_bytes(predicate: &str, left: i128, right: i128) -> Option<bool> {
+    if !(0..=255).contains(&left) || !(0..=255).contains(&right) {
+        return None;
+    }
+    Some(match predicate {
+        "eq" => left == right,
+        "ne" => left != right,
+        // Byte ordering is unsigned by definition.
+        "lt" => left < right,
+        "le" => left <= right,
+        "gt" => left > right,
+        "ge" => left >= right,
+        _ => return None,
+    })
+}
+
+pub(crate) fn evaluate_byte_bitwise(operator: &str, left: i128, right: i128) -> Option<i128> {
+    if !(0..=255).contains(&left) || !(0..=255).contains(&right) {
+        return None;
+    }
+    match operator {
+        "and" => Some(left & right),
+        "or" => Some(left | right),
+        "xor" => Some(left ^ right),
+        _ => None,
+    }
+}
+
+/// Byte shifts are total: the count is taken modulo 8 and both shifts are
+/// logical (bytes are unsigned by definition).
+pub(crate) fn evaluate_byte_shift(operator: &str, byte: i128, count: i128) -> Option<i128> {
+    if !(0..=255).contains(&byte) || count < 0 {
+        return None;
+    }
+    let count = (count % 8) as u32;
+    match operator {
+        "shl" => Some((byte << count) & 0xFF),
+        "shr" => Some(byte >> count),
+        _ => None,
+    }
+}
+
+/// Total two's-complement truncation/extension into `bits` width.
+/// Widening extends by the declared signedness of the target; narrowing
+/// truncates high bits. Total for 1..=126 bits.
+pub(crate) fn wrap_to_bits(value: i128, bits: u16, signed: bool) -> Option<i128> {
+    if !(1..=126).contains(&bits) {
+        return None;
+    }
+    let modulus = 1_i128.checked_shl(u32::from(bits))?;
+    let truncated = value.rem_euclid(modulus);
+    if signed {
+        let sign = 1_i128.checked_shl(u32::from(bits - 1))?;
+        Some(if truncated >= sign {
+            truncated - modulus
+        } else {
+            truncated
+        })
+    } else {
+        Some(truncated)
+    }
+}
+
 pub(crate) fn compare_integers(
     predicate: &str,
     ty: IntegerType,
@@ -1191,7 +1667,7 @@ pub(crate) fn compare_integers(
 
 pub(crate) fn integer_operator_supported(operator: &str, intent: ArithmeticIntent) -> bool {
     matches!(operator, "add" | "sub" | "mul" | "div" | "mod")
-        || (matches!(operator, "and" | "or" | "xor")
+        || (matches!(operator, "and" | "or" | "xor" | "shl" | "shr")
             && matches!(intent, ArithmeticIntent::Wrapping))
 }
 

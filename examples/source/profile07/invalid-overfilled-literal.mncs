@@ -1,0 +1,10 @@
+mncs 0.7;
+
+// Negative fixture: overfilling a sequence literal is an elaboration
+// error (MNE184).
+module examples.profile07.invalid_overfilled;
+
+fn build(a: i32) -> (result: i32) {
+    let xs: [i32; 2] = [a, a, a];
+    return xs[0];
+}

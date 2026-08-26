@@ -85,6 +85,27 @@ impl IntegerOperation {
                 self.left,
                 self.right,
             ),
+            // Shifts are total: the count is taken modulo the declared
+            // width, `shl` masks into the width, signed `shr` preserves the
+            // sign (arithmetic), unsigned `shr` is logical.
+            "shl" | "shr" if self.right >= 0 => {
+                let bits = u32::from(self.operand_type.bits);
+                let count = (self.right as u128 % u128::from(bits)) as u32;
+                let unsigned = |value: i128| -> u128 {
+                    unsigned_domain(value, self.operand_type.bits, self.operand_type.signed)
+                };
+                let shifted = match self.operator.as_str() {
+                    "shl" => {
+                        Some(i128::try_from(unsigned(self.left) << count).unwrap_or(i128::MAX))
+                    }
+                    _ if !self.operand_type.signed => {
+                        Some(i128::try_from(unsigned(self.left) >> count).unwrap_or(0))
+                    }
+                    _ => Some(self.left >> count),
+                };
+                shifted.map(|value| wrap(value, self.operand_type.bits, self.operand_type.signed))
+            }
+            "shl" | "shr" => None,
             _ => None,
         };
         let overflow = raw
@@ -111,7 +132,7 @@ impl IntegerOperation {
                             Some(self.left.wrapping_rem(self.right))
                         }
                     }
-                    "and" | "or" | "xor" => raw,
+                    "and" | "or" | "xor" | "shl" | "shr" => raw,
                     _ => None,
                 }
                 .map(|value| wrap(value, self.operand_type.bits, self.operand_type.signed)),
@@ -185,6 +206,18 @@ pub fn minimum_widening_bits(operator: &str, operand: IntegerType) -> Option<u16
         "sub" => None,
         "mul" => operand.bits.checked_mul(2),
         _ => None,
+    }
+}
+
+/// Reinterpret a value's low `bits` two's-complement digits as an unsigned
+/// magnitude so logical shift math operates on the declared bit pattern.
+fn unsigned_domain(value: i128, bits: u16, signed: bool) -> u128 {
+    let modulus = 1_u128.checked_shl(u32::from(bits)).unwrap_or(u128::MAX);
+    let truncated = (value as u128) % modulus;
+    if signed && value < 0 {
+        modulus - truncated
+    } else {
+        truncated
     }
 }
 

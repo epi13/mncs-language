@@ -89,14 +89,25 @@ pub fn cranelift_capabilities() -> BackendCapabilityManifest {
             "semantic_bounded_iteration",
             "finite_values",
             "canonical_composite_cells",
+            "byte_operations",
+            "explicit_scalar_conversion",
+            "integer_shifts",
+            "bounded_sequences_internal",
+            "bounded_views_internal",
         ]
         .into_iter()
         .map(str::to_owned)
         .collect(),
-        ["memory", "effects", "widening_integer", "non_host_isa_jit"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect(),
+        [
+            "memory",
+            "effects",
+            "sequence_or_view_boundary_crossing",
+            "widening_integer",
+            "non_host_isa_jit",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
         [CRANELIFT_ARTIFACT_KIND.to_owned()].into_iter().collect(),
         ["bounded_execution_agreement".to_owned()]
             .into_iter()
@@ -501,6 +512,38 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                 let _ = writeln!(out, "        {dest_n} = {op} {lhs_n}, {rhs_n}");
                 return;
             }
+            if matches!(operator.as_str(), "shl" | "shr") {
+                // Counts are modulo the declared width inside the uniform
+                // i64 cell; normalize operands into the declared domain
+                // first so the bit pattern matches the language semantics.
+                let bits = match dest.ty {
+                    ScalarTy::Int(integer) => integer.bits,
+                    _ => 32,
+                };
+                let signed = matches!(dest.ty, ScalarTy::Int(integer) if integer.signed);
+                let (lhs_v, rhs_v) = emit_width_normalize(out, lhs_n, rhs_n, bits, signed, dest_n);
+                let _ = writeln!(out, "        {dest_n}_c = urem.i64 {rhs_v}, {bits}");
+                if operator == "shl" {
+                    let _ = writeln!(out, "        {dest_n} = ishl {lhs_v}, {dest_n}_c");
+                    if bits < 64 {
+                        if signed {
+                            let shift = 64 - i64::from(bits);
+                            let _ =
+                                writeln!(out, "        {dest_n} = ishl_imm.i64 {dest_n}, {shift}");
+                            let _ =
+                                writeln!(out, "        {dest_n} = sshr_imm.i64 {dest_n}, {shift}");
+                        } else {
+                            let mask = ((1_i128 << bits) - 1) as i64;
+                            let _ = writeln!(out, "        {dest_n} = band {dest_n}, {mask}");
+                        }
+                    }
+                } else if signed {
+                    let _ = writeln!(out, "        {dest_n} = sshr {lhs_v}, {dest_n}_c");
+                } else {
+                    let _ = writeln!(out, "        {dest_n} = ushr {lhs_v}, {dest_n}_c");
+                }
+                return;
+            }
             let op = match operator.as_str() {
                 "sub" => "isub",
                 "mul" => "imul",
@@ -646,6 +689,148 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                 emit_clif_inst(out, nested, names);
             }
         }
+        ScalarInst::ByteBitwise {
+            dest,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            // Bytes ride zero-extended in the uniform cell, so bitwise ops
+            // on the cells are byte-exact.
+            let op = match operator.as_str() {
+                "and" => "band",
+                "or" => "bor",
+                _ => "bxor",
+            };
+            let _ = writeln!(
+                out,
+                "        {} = {op} {}, {}",
+                names.value(&dest.id),
+                names.value(lhs),
+                names.value(rhs)
+            );
+        }
+        ScalarInst::ByteShift {
+            dest,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            // Total semantics: count modulo 8, logical shifts, result masked
+            // back into the byte domain.
+            let d = names.value(&dest.id);
+            let _ = writeln!(out, "        {d}_c = urem.i64 {}, 8", names.value(rhs));
+            if operator == "shl" {
+                let _ = writeln!(out, "        {d}_s = ishl {}, {d}_c", names.value(lhs));
+            } else {
+                let _ = writeln!(out, "        {d}_s = ushr {}, {d}_c", names.value(lhs));
+            }
+            let _ = writeln!(out, "        {d} = band {d}_s, 255");
+        }
+        ScalarInst::Convert { dest, to, src, .. } => {
+            // The source cell is normalized to its own width/signedness, so
+            // conversion is renormalization into the target parameters:
+            // truncation drops high bits; widening keeps the value exactly.
+            let d = names.value(&dest.id);
+            let bits = bits_of(*to);
+            let signed = signed_of(*to);
+            if bits >= 64 && !signed {
+                let _ = writeln!(out, "        {d} = {}", names.value(src));
+            } else if signed {
+                let shift = 64 - i64::from(bits);
+                let _ = writeln!(
+                    out,
+                    "        {d} = ishl_imm.i64 {}, {shift}",
+                    names.value(src)
+                );
+                let _ = writeln!(out, "        {d} = sshr_imm.i64 {d}, {shift}");
+            } else {
+                let mask = ((1_i128 << bits) - 1) as i64;
+                let _ = writeln!(out, "        {d} = band {}, {mask}", names.value(src));
+            }
+        }
+        ScalarInst::SequenceProject {
+            dest,
+            seq,
+            index,
+            bound,
+            evidence,
+            width,
+        } => {
+            emit_clif_sequence_project(out, dest, seq, index, *bound, evidence, *width, names);
+        }
+        ScalarInst::SequenceLength { dest, bound, seq } => match bound {
+            mncs_model::SequenceBound::Exact(length) => {
+                let _ = writeln!(
+                    out,
+                    "        {} = iconst.i64 {length}",
+                    names.value(&dest.id)
+                );
+            }
+            mncs_model::SequenceBound::UpTo(_) => {
+                let _ = writeln!(
+                    out,
+                    "        {} = ushr_imm.i64 {}, 32",
+                    names.value(&dest.id),
+                    names.value(seq)
+                );
+            }
+        },
+        ScalarInst::ViewConstruct {
+            dest,
+            source_bound,
+            view_cap,
+            source,
+            start,
+            end,
+        } => {
+            let d = names.value(&dest.id);
+            let start_n = names.value(start);
+            let end_n = names.value(end);
+            let source_len = match source_bound {
+                mncs_model::SequenceBound::Exact(length) => {
+                    let _ = writeln!(out, "        {d}_sl = iconst.i64 {length}");
+                    format!("{d}_sl")
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    let _ = writeln!(
+                        out,
+                        "        {d}_sl = ushr_imm.i64 {}, 32",
+                        names.value(source)
+                    );
+                    format!("{d}_sl")
+                }
+            };
+            let base = match source_bound {
+                mncs_model::SequenceBound::Exact(_) => names.value(source).to_owned(),
+                mncs_model::SequenceBound::UpTo(_) => {
+                    let _ = writeln!(
+                        out,
+                        "        {d}_b32 = band {}, 4294967295",
+                        names.value(source)
+                    );
+                    format!("{d}_b32")
+                }
+            };
+            let _ = writeln!(out, "        {d}_gt = icmp ug {start_n}, {end_n}");
+            let _ = writeln!(out, "        {d}_over = icmp ugt {end_n}, {source_len}");
+            let _ = writeln!(out, "        {d}_span = isub {end_n}, {start_n}");
+            let _ = writeln!(out, "        {d}_cap = icmp ugt {d}_span, {view_cap}");
+            let _ = writeln!(out, "        {d}_bad12 = bor {d}_gt, {d}_over");
+            let _ = writeln!(out, "        {d}_bad = bor {d}_bad12, {d}_cap");
+            let _ = writeln!(out, "        brnz {d}_bad, fail_{d}");
+            let _ = writeln!(out, "        {d}_addr = iadd {base}, {start_n}");
+            let _ = writeln!(out, "        {d}_lo = band {d}_addr, 4294967295");
+            let _ = writeln!(out, "        {d}_hi = ishl_imm.i64 {d}_span, 32");
+            let _ = writeln!(out, "        {d} = bor {d}_lo, {d}_hi");
+            let _ = writeln!(out, "        jump ok_{d}");
+            let _ = writeln!(out, "    fail_{d}:");
+            out.push_str("        v_bad = iconst.i32 1\n        v_z = iconst.i64 0\n");
+            out.push_str(
+                "        store.i32 v_bad, st\n        store.i64 v_z, val\n        return\n",
+            );
+            let _ = writeln!(out, "    ok_{d}:");
+        }
         ScalarInst::FiniteIsVariant {
             dest,
             src,
@@ -675,6 +860,85 @@ fn clif_ty(ty: ScalarTy) -> &'static str {
     match ty {
         ScalarTy::Int(integer) if integer.bits == 64 => "i64",
         _ => "i32",
+    }
+}
+
+/// Bit width of a scalar realization kind for conversion decisions.
+fn bits_of(ty: ScalarTy) -> u16 {
+    match ty {
+        ScalarTy::Bool | ScalarTy::Finite => 32,
+        ScalarTy::Byte => 8,
+        ScalarTy::Int(integer) => integer.bits,
+        ScalarTy::Cell | ScalarTy::View => 64,
+    }
+}
+
+/// Signedness of a scalar realization kind for widening decisions.
+fn signed_of(ty: ScalarTy) -> bool {
+    matches!(ty, ScalarTy::Int(integer) if integer.signed)
+}
+
+/// Text-CLIF realization of a bounded-sequence projection. Exact sequences
+/// are canonical cells; views are packed descriptors whose low half holds
+/// the base offset and whose high half holds the runtime length.
+#[allow(clippy::too_many_arguments)]
+fn emit_clif_sequence_project(
+    out: &mut String,
+    dest: &crate::scalar::ScalarValue,
+    seq: &mncs_model::SemanticId,
+    index: &mncs_model::SemanticId,
+    bound: mncs_model::SequenceBound,
+    evidence: &mncs_model::BoundsEvidence,
+    width: crate::composite::SlotWidth,
+    names: &ClifNames,
+) {
+    let d = names.value(&dest.id);
+    let seq_n = names.value(seq);
+    let idx_n = names.value(index);
+    let checked = matches!(evidence, mncs_model::BoundsEvidence::RuntimeChecked { .. });
+    match bound {
+        mncs_model::SequenceBound::Exact(length) => {
+            if checked {
+                let _ = writeln!(out, "        {d}_lim = iconst.i64 {length}");
+                // Out-of-bounds is idx >= length; comparing against
+                // length-1 keeps the unsigned comparison wrap-free at zero.
+                if length == 0 {
+                    let _ = writeln!(out, "        {d}_oob = iconst.i8 1");
+                } else {
+                    let _ = writeln!(out, "        {d}_lm1 = iconst.i64 {}", length - 1);
+                    let _ = writeln!(out, "        {d}_oob = icmp ugt {idx_n}, {d}_lm1");
+                }
+                let _ = writeln!(out, "        brnz {d}_oob, fail_{d}");
+            }
+            let _ = writeln!(out, "        {d}_base = {}", seq_n);
+            let _ = writeln!(out, "        {d}_off = ishl_imm.i64 {idx_n}, 3");
+        }
+        mncs_model::SequenceBound::UpTo(_) => {
+            if checked {
+                let _ = writeln!(out, "        {d}_len = ushr_imm.i64 {seq_n}, 32");
+                // Views check against their runtime length; an empty view
+                // fails every index.
+                let _ = writeln!(out, "        {d}_oob = icmp uge {idx_n}, {d}_len");
+                let _ = writeln!(out, "        brnz {d}_oob, fail_{d}");
+            }
+            let _ = writeln!(out, "        {d}_base = band {seq_n}, 4294967295");
+            let _ = writeln!(out, "        {d}_off = ishl_imm.i64 {idx_n}, 3");
+        }
+    }
+    if checked {
+        let _ = writeln!(out, "        jump ok_{d}");
+        let _ = writeln!(out, "    fail_{d}:");
+        out.push_str("        v_bad = iconst.i32 1\n        v_z = iconst.i64 0\n");
+        out.push_str("        store.i32 v_bad, st\n        store.i64 v_z, val\n        return\n");
+        let _ = writeln!(out, "    ok_{d}:");
+    }
+    match width {
+        crate::composite::SlotWidth::W32 => {
+            let _ = writeln!(out, "        {d} = load.u32 {d}_base, {d}_off");
+        }
+        crate::composite::SlotWidth::W64 => {
+            let _ = writeln!(out, "        {d} = load.i64 {d}_base, {d}_off");
+        }
     }
 }
 
@@ -731,6 +995,12 @@ fn scalar_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
         | ScalarInst::CellAlloc { dest, .. }
         | ScalarInst::CellLoad { dest, .. }
         | ScalarInst::FiniteIsVariant { dest, .. }
+        | ScalarInst::ByteBitwise { dest, .. }
+        | ScalarInst::ByteShift { dest, .. }
+        | ScalarInst::Convert { dest, .. }
+        | ScalarInst::SequenceProject { dest, .. }
+        | ScalarInst::SequenceLength { dest, .. }
+        | ScalarInst::ViewConstruct { dest, .. }
         | ScalarInst::Call { dest, .. } => Some(dest),
         ScalarInst::CellStoreDiscriminant { .. } | ScalarInst::CellStore { .. } => None,
         ScalarInst::Sequence(_) => None,
@@ -1297,6 +1567,32 @@ where
                                 values.insert(dest.id.clone(), produced);
                                 continue;
                             }
+                            if matches!(operator.as_str(), "shl" | "shr") {
+                                // Total shifts in the uniform i64 cell:
+                                // normalize into the declared domain, apply
+                                // the modulo count, renormalize the result.
+                                let bits = match dest.ty {
+                                    ScalarTy::Int(integer) => integer.bits,
+                                    _ => 32,
+                                };
+                                let signed =
+                                    matches!(dest.ty, ScalarTy::Int(integer) if integer.signed);
+                                let left_n = normalize_one(&mut builder, left, bits, signed);
+                                let width_bits = builder.ins().iconst(types::I64, i64::from(bits));
+                                let count = builder.ins().urem(right, width_bits);
+                                let mut produced = if operator == "shl" {
+                                    builder.ins().ishl(left_n, count)
+                                } else if signed {
+                                    builder.ins().sshr(left_n, count)
+                                } else {
+                                    builder.ins().ushr(left_n, count)
+                                };
+                                if operator == "shl" && bits < 64 {
+                                    produced = normalize_one(&mut builder, produced, bits, signed);
+                                }
+                                values.insert(dest.id.clone(), produced);
+                                continue;
+                            }
                             let bits = match dest.ty {
                                 ScalarTy::Int(integer) => integer.bits,
                                 _ => 32,
@@ -1587,6 +1883,201 @@ where
                             let flag = builder.ins().icmp(IntCC::Equal, values[src], disc);
                             let produced = builder.ins().uextend(types::I64, flag);
                             values.insert(dest.id.clone(), produced);
+                        }
+                        ScalarInst::ByteBitwise {
+                            dest,
+                            operator,
+                            lhs,
+                            rhs,
+                        } => {
+                            // Bytes ride zero-extended in the uniform i64
+                            // cell, so bitwise ops are byte-exact.
+                            let produced = match operator.as_str() {
+                                "and" => builder.ins().band(values[lhs], values[rhs]),
+                                "or" => builder.ins().bor(values[lhs], values[rhs]),
+                                _ => builder.ins().bxor(values[lhs], values[rhs]),
+                            };
+                            values.insert(dest.id.clone(), produced);
+                        }
+                        ScalarInst::ByteShift {
+                            dest,
+                            operator,
+                            lhs,
+                            rhs,
+                        } => {
+                            // Total semantics: count modulo 8, logical
+                            // shifts, result masked into the byte domain.
+                            let eight = builder.ins().iconst(types::I64, 8);
+                            let count = builder.ins().urem(values[rhs], eight);
+                            let shifted = if operator == "shl" {
+                                builder.ins().ishl(values[lhs], count)
+                            } else {
+                                builder.ins().ushr(values[lhs], count)
+                            };
+                            let mask = builder.ins().iconst(types::I64, 255);
+                            let produced = builder.ins().band(shifted, mask);
+                            values.insert(dest.id.clone(), produced);
+                        }
+                        ScalarInst::Convert { dest, to, src, .. } => {
+                            // Renormalize the source cell into the target
+                            // width/signedness: truncation drops high bits,
+                            // widening keeps the value exactly.
+                            let bits = bits_of(*to);
+                            let signed = signed_of(*to);
+                            let src_v = values[src];
+                            let produced = if bits >= 64 && !signed {
+                                src_v
+                            } else if signed {
+                                let shift = builder.ins().iconst(types::I64, i64::from(64 - bits));
+                                let widened = builder.ins().ishl(src_v, shift);
+                                builder.ins().sshr(widened, shift)
+                            } else {
+                                let mask = builder
+                                    .ins()
+                                    .iconst(types::I64, ((1i128 << bits) - 1) as i64);
+                                builder.ins().band(src_v, mask)
+                            };
+                            values.insert(dest.id.clone(), produced);
+                        }
+                        ScalarInst::SequenceProject {
+                            dest,
+                            seq,
+                            index,
+                            bound,
+                            evidence,
+                            width,
+                        } => {
+                            let seq_v = values[seq];
+                            let idx_v = values[index];
+                            let checked = matches!(
+                                evidence,
+                                mncs_model::BoundsEvidence::RuntimeChecked { .. }
+                            );
+                            let (base, offset) = match bound {
+                                mncs_model::SequenceBound::Exact(length) => {
+                                    if checked {
+                                        let limit =
+                                            builder.ins().iconst(types::I64, i64::from(*length));
+                                        let oob = builder.ins().icmp(
+                                            IntCC::UnsignedGreaterThanOrEqual,
+                                            idx_v,
+                                            limit,
+                                        );
+                                        let cont = builder.create_block();
+                                        builder.ins().brif(
+                                            oob,
+                                            fail,
+                                            &[] as &[BlockArg],
+                                            cont,
+                                            &[] as &[BlockArg],
+                                        );
+                                        builder.switch_to_block(cont);
+                                        builder.seal_block(cont);
+                                    }
+                                    (seq_v, builder.ins().ishl_imm(idx_v, 3))
+                                }
+                                mncs_model::SequenceBound::UpTo(_) => {
+                                    if checked {
+                                        let len = builder.ins().ushr_imm(seq_v, 32);
+                                        let oob = builder.ins().icmp(
+                                            IntCC::UnsignedGreaterThanOrEqual,
+                                            idx_v,
+                                            len,
+                                        );
+                                        let cont = builder.create_block();
+                                        builder.ins().brif(
+                                            oob,
+                                            fail,
+                                            &[] as &[BlockArg],
+                                            cont,
+                                            &[] as &[BlockArg],
+                                        );
+                                        builder.switch_to_block(cont);
+                                        builder.seal_block(cont);
+                                    }
+                                    let mask = builder.ins().iconst(types::I64, 4_294_967_295);
+                                    (
+                                        builder.ins().band(seq_v, mask),
+                                        builder.ins().ishl_imm(idx_v, 3),
+                                    )
+                                }
+                            };
+                            let addr = builder.ins().iadd(base, offset);
+                            // Slot access goes through the shared libcalls:
+                            // addresses are canonical arena offsets, never
+                            // host pointers.
+                            let name = match width {
+                                crate::composite::SlotWidth::W32 => "mncs_slot_load32",
+                                crate::composite::SlotWidth::W64 => "mncs_slot_load64",
+                            };
+                            let callee = cell_libcall(module, builder.func, name);
+                            let call = builder.ins().call(callee, &[addr]);
+                            values.insert(dest.id.clone(), builder.inst_results(call)[0]);
+                        }
+                        ScalarInst::SequenceLength { dest, bound, seq } => {
+                            let produced = match bound {
+                                mncs_model::SequenceBound::Exact(length) => {
+                                    builder.ins().iconst(types::I64, i64::from(*length))
+                                }
+                                mncs_model::SequenceBound::UpTo(_) => {
+                                    builder.ins().ushr_imm(values[seq], 32)
+                                }
+                            };
+                            values.insert(dest.id.clone(), produced);
+                        }
+                        ScalarInst::ViewConstruct {
+                            dest,
+                            source_bound,
+                            view_cap,
+                            source,
+                            start,
+                            end,
+                        } => {
+                            let start_v = values[start];
+                            let end_v = values[end];
+                            let source_len = match source_bound {
+                                mncs_model::SequenceBound::Exact(length) => {
+                                    builder.ins().iconst(types::I64, i64::from(*length))
+                                }
+                                mncs_model::SequenceBound::UpTo(_) => {
+                                    builder.ins().ushr_imm(values[source], 32)
+                                }
+                            };
+                            let span = builder.ins().isub(end_v, start_v);
+                            let gt = builder
+                                .ins()
+                                .icmp(IntCC::UnsignedGreaterThan, start_v, end_v);
+                            let over =
+                                builder
+                                    .ins()
+                                    .icmp(IntCC::UnsignedGreaterThan, end_v, source_len);
+                            let cap = builder.ins().iconst(types::I64, i64::from(*view_cap));
+                            let beyond = builder.ins().icmp(IntCC::UnsignedGreaterThan, span, cap);
+                            let bad12 = builder.ins().bor(gt, over);
+                            let bad = builder.ins().bor(bad12, beyond);
+                            let cont = builder.create_block();
+                            builder.ins().brif(
+                                bad,
+                                fail,
+                                &[] as &[BlockArg],
+                                cont,
+                                &[] as &[BlockArg],
+                            );
+                            builder.switch_to_block(cont);
+                            builder.seal_block(cont);
+                            let base = match source_bound {
+                                mncs_model::SequenceBound::Exact(_) => values[source],
+                                mncs_model::SequenceBound::UpTo(_) => {
+                                    let mask = builder.ins().iconst(types::I64, 4_294_967_295);
+                                    builder.ins().band(values[source], mask)
+                                }
+                            };
+                            let scaled = builder.ins().ishl_imm(start_v, 3);
+                            let addr = builder.ins().iadd(base, scaled);
+                            let lo = builder.ins().band_imm(addr, 4_294_967_295);
+                            let hi = builder.ins().ishl_imm(span, 32);
+                            let packed = builder.ins().bor(lo, hi);
+                            values.insert(dest.id.clone(), packed);
                         }
                         ScalarInst::Call { dest, callee, args } => {
                             let callee_id = declared[callee];
@@ -1902,9 +2393,48 @@ fn jit_scalar(
                     &mut value,
                 );
             }
+            4 => {
+                let f: extern "C" fn(i64, i64, i64, i64, *mut i32, *mut i64) =
+                    std::mem::transmute(ptr);
+                f(
+                    raw_args[0],
+                    raw_args[1],
+                    raw_args[2],
+                    raw_args[3],
+                    &mut status,
+                    &mut value,
+                );
+            }
+            5 => {
+                let f: extern "C" fn(i64, i64, i64, i64, i64, *mut i32, *mut i64) =
+                    std::mem::transmute(ptr);
+                f(
+                    raw_args[0],
+                    raw_args[1],
+                    raw_args[2],
+                    raw_args[3],
+                    raw_args[4],
+                    &mut status,
+                    &mut value,
+                );
+            }
+            6 => {
+                let f: extern "C" fn(i64, i64, i64, i64, i64, i64, *mut i32, *mut i64) =
+                    std::mem::transmute(ptr);
+                f(
+                    raw_args[0],
+                    raw_args[1],
+                    raw_args[2],
+                    raw_args[3],
+                    raw_args[4],
+                    raw_args[5],
+                    &mut status,
+                    &mut value,
+                );
+            }
             _ => {
                 return Err(
-                    "Cranelift host trampoline currently supports at most three scalar arguments"
+                    "Cranelift host trampoline currently supports at most six scalar arguments"
                         .to_owned(),
                 );
             }
