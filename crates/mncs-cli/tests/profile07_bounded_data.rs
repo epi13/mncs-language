@@ -14,7 +14,10 @@ fn library(name: &str) -> String {
 }
 
 fn source_fixture(name: &str) -> String {
-    format!("{}/../../examples/source/{name}", env!("CARGO_MANIFEST_DIR"))
+    format!(
+        "{}/../../examples/source/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    )
 }
 
 fn binary() -> Command {
@@ -129,9 +132,11 @@ fn profile07_negative_fixtures_are_rejected_with_coded_diagnostics() {
     ];
     for case in &cases {
         let path = source_fixture(&format!("profile07/{}", case.fixture));
-        let output = binary().args(["validate", &path]).output().expect("validate");
-        let diagnostics: Value =
-            serde_json::from_slice(&output.stdout).expect("diagnostics JSON");
+        let output = binary()
+            .args(["validate", &path])
+            .output()
+            .expect("validate");
+        let diagnostics: Value = serde_json::from_slice(&output.stdout).expect("diagnostics JSON");
         let codes: Vec<&str> = diagnostics
             .as_array()
             .expect("diagnostics list")
