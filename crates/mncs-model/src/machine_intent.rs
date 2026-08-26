@@ -396,6 +396,13 @@ pub enum BackendPromise {
     TrappingArithmetic,
     WrappingArithmetic,
     Relaxation,
+    /// The realization of a selection preserves its semantics without
+    /// data-dependent branch divergence between candidates. This promise is
+    /// never granted by lowering alone: it requires independent structural
+    /// evidence about the emitted artifact (opcode/IR inspection by a
+    /// separate verifier), and stays UNKNOWN where final native control
+    /// flow is unobservable.
+    BranchlessRealization,
 }
 
 pub const BACKEND_PROMISE_CERTIFICATE_SCHEMA_VERSION: &str = "0.1";
@@ -492,6 +499,7 @@ impl BackendPromiseDecision {
             BackendPromise::TrappingArithmetic => "trapping-arithmetic",
             BackendPromise::WrappingArithmetic => "wrapping-arithmetic",
             BackendPromise::Relaxation => "relaxation",
+            BackendPromise::BranchlessRealization => "realization-branchless",
         };
         let required = obligations.iter().find(|obligation| {
             obligation.subject == *subject && obligation.requirement.0.ends_with(suffix)

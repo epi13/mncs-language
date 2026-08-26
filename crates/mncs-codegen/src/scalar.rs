@@ -166,6 +166,32 @@ pub enum ScalarInst {
         start: SemanticId,
         end: SemanticId,
     },
+    /// Semantic conditional selection (Profile 0.8). Both candidates are
+    /// values of one pure selection; every realization of this instruction
+    /// is obligated to avoid data-dependent branch divergence between them.
+    /// Whether each backend met that obligation is decided by independent
+    /// structural verification, never by this lowering's self-report.
+    Select {
+        dest: ScalarValue,
+        condition: SemanticId,
+        when_true: SemanticId,
+        when_false: SemanticId,
+    },
+    /// Total functional sequence update over an exact bound (Profile 0.8):
+    /// allocate a new cell, copy the source slots, store the replacement
+    /// element at the (dynamically checked when required) index. The source
+    /// cell is never written.
+    SequenceReplace {
+        dest: ScalarValue,
+        source: SemanticId,
+        index: SemanticId,
+        element: SemanticId,
+        bound: mncs_model::SequenceBound,
+        evidence: mncs_model::BoundsEvidence,
+        length: u32,
+        element_width: SlotWidth,
+        element_bytes: u64,
+    },
     /// One source instruction lowered into an ordered group of cell
     /// operations (allocation followed by canonical field stores).
     Sequence(Vec<ScalarInst>),
@@ -540,6 +566,52 @@ fn lower_instruction(
             dest,
             seq: operand(instruction, 0)?,
         }),
+        SsaInstructionKind::Select { .. } => {
+            // The branchless promise is recorded as *requested but not yet
+            // evidenced*: obligations start UNKNOWN and only independent
+            // structural verification of an emitted artifact may discharge
+            // them. Lowering never certifies its own realization.
+            let decisions = crate::promises::branchless_promise_decisions(module, instruction);
+            for decision in &decisions {
+                promises.push(format!(
+                    "branchless_realization requested (status {:?})",
+                    decision.evidence_status.unwrap_or(mncs_model::ObligationStatus::Unknown)
+                ));
+                promise_decisions.push(decision.clone());
+            }
+            Ok(ScalarInst::Select {
+                dest,
+                condition: operand(instruction, 0)?,
+                when_true: operand(instruction, 1)?,
+                when_false: operand(instruction, 2)?,
+            })
+        }
+        SsaInstructionKind::SequenceReplace {
+            element_type,
+            bound,
+            evidence,
+            ..
+        } => {
+            let mncs_model::SequenceBound::Exact(length) = bound else {
+                return Err("functional sequence update requires an exact bound".to_owned())
+            };
+            let element_ty = scalar_ty_in(&ir_type_of(element_type), layout)?;
+            let width = slot_width_of(element_ty);
+            Ok(ScalarInst::SequenceReplace {
+                dest,
+                source: operand(instruction, 0)?,
+                index: operand(instruction, 1)?,
+                element: operand(instruction, 2)?,
+                bound: *bound,
+                evidence: evidence.clone(),
+                length: *length,
+                element_width: width,
+                element_bytes: match width {
+                    SlotWidth::W32 => 4,
+                    SlotWidth::W64 => 8,
+                },
+            })
+        }
         SsaInstructionKind::ViewConstruct {
             source_bound,
             view_bound,

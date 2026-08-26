@@ -104,6 +104,16 @@ pub enum IrOperationKind {
     ByteCompare {
         predicate: String,
     },
+    /// Semantic conditional selection (Profile 0.8).
+    Select {
+        operand_type: Box<crate::BodyType>,
+    },
+    /// Total functional sequence update over an exact bound (Profile 0.8).
+    SequenceReplace {
+        element_type: Box<crate::BodyType>,
+        bound: crate::SequenceBound,
+        evidence: crate::BoundsEvidence,
+    },
     /// Explicit total scalar conversion (Profile 0.7).
     Convert {
         from: crate::BodyType,
@@ -864,6 +874,30 @@ fn lower_executable_body(
                     BodyOperationKind::ByteCompare { predicate } => (
                         IrOperationKind::ByteCompare {
                             predicate: predicate.clone(),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::Select { operand_type } => (
+                        IrOperationKind::Select {
+                            operand_type: operand_type.clone(),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::SequenceReplace {
+                        element_type,
+                        bound,
+                        evidence,
+                    } => (
+                        IrOperationKind::SequenceReplace {
+                            element_type: element_type.clone(),
+                            bound: *bound,
+                            evidence: evidence.clone(),
                         },
                         Vec::new(),
                         Vec::new(),

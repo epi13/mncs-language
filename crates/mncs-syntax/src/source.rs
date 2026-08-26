@@ -11,6 +11,7 @@ pub const SOURCE_PROFILE_VERSION_0_4: &str = "0.4";
 pub const SOURCE_PROFILE_VERSION_0_5: &str = "0.5";
 pub const SOURCE_PROFILE_VERSION_0_6: &str = "0.6";
 pub const SOURCE_PROFILE_VERSION_0_7: &str = "0.7";
+pub const SOURCE_PROFILE_VERSION_0_8: &str = "0.8";
 
 /// True when the active source profile declares at least `version`. Profile
 /// features are strictly additive, so a numeric comparison replaces the
@@ -549,6 +550,24 @@ pub enum AstExpr {
         target_type: SpannedText,
         span: SourceSpan,
     },
+    /// Semantic conditional selection `select(c, t, f)` (Profile 0.8). The
+    /// source names a pure selection operation, not a branch; realization
+    /// must not introduce control-flow divergence between the candidates.
+    Select {
+        condition: Box<AstExpr>,
+        when_true: Box<AstExpr>,
+        when_false: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Total functional sequence update `replace(seq, index, element)`
+    /// (Profile 0.8). Produces a new sequence value equal to `seq` except
+    /// at one index; the source value is unchanged.
+    SequenceReplace {
+        sequence: Box<AstExpr>,
+        index: Box<AstExpr>,
+        element: Box<AstExpr>,
+        span: SourceSpan,
+    },
 }
 
 impl AstExpr {
@@ -566,7 +585,9 @@ impl AstExpr {
             | Self::SequenceLiteral { span, .. }
             | Self::Index { span, .. }
             | Self::Slice { span, .. }
-            | Self::Cast { span, .. } => *span,
+            | Self::Cast { span, .. }
+            | Self::Select { span, .. }
+            | Self::SequenceReplace { span, .. } => *span,
         }
     }
 }
@@ -1991,6 +2012,16 @@ impl<'a> Parser<'a> {
         match self.current_kind() {
             Some(TokenKind::Identifier) => {
                 let name = self.spanned(TokenKind::Identifier, "MNP062", "expected expression")?;
+                // Branchless-selection intrinsics (Profile 0.8). The names
+                // are reserved in expression head position so the semantic
+                // operation is explicit at the source: `select(c, t, f)` is
+                // a selection, never a branch.
+                if self.current_kind() == Some(TokenKind::LeftParen)
+                    && profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_8)
+                    && matches!(name.text.as_str(), "select" | "replace")
+                {
+                    return self.intrinsic_selection(name);
+                }
                 if self.current_kind() == Some(TokenKind::LeftBrace)
                     && profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_5)
                     && self.at_record_literal()
@@ -2146,6 +2177,76 @@ impl<'a> Parser<'a> {
                 );
                 None
             }
+        }
+    }
+
+    /// Parse the Profile 0.8 selection intrinsics `select(c, t, f)` and
+    /// `replace(seq, index, element)`. `name` is the already-consumed
+    /// intrinsic identifier.
+    fn intrinsic_selection(&mut self, name: SpannedText) -> Option<AstExpr> {
+        self.expect(
+            TokenKind::LeftParen,
+            "MNP160",
+            "expected '(' after a selection intrinsic",
+        );
+        let mut arguments = Vec::new();
+        while self.current_kind() != Some(TokenKind::RightParen)
+            && self.cursor < self.significant.len()
+        {
+            arguments.push(self.expression()?);
+            if self.current_kind() != Some(TokenKind::Comma) {
+                break;
+            }
+            self.cursor += 1;
+        }
+        let end = self
+            .expect(
+                TokenKind::RightParen,
+                "MNP161",
+                "expected ')' after selection intrinsic arguments",
+            )
+            .and_then(|index| self.tokens.get(index))
+            .map_or(name.span, |token| token.span);
+        let span = SourceSpan::covering(&self.envelope.text, name.span, end);
+        match (name.text.as_str(), arguments.len()) {
+            ("select", 3) => {
+                let mut iter = arguments.into_iter();
+                // The three argument expressions were validated by arity above.
+                let (Some(condition), Some(when_true), Some(when_false)) =
+                    (iter.next(), iter.next(), iter.next())
+                else {
+                    return None;
+                };
+                Some(AstExpr::Select {
+                    condition: Box::new(condition),
+                    when_true: Box::new(when_true),
+                    when_false: Box::new(when_false),
+                    span,
+                })
+            }
+            ("replace", 3) => {
+                let mut iter = arguments.into_iter();
+                let (Some(sequence), Some(index), Some(element)) =
+                    (iter.next(), iter.next(), iter.next())
+                else {
+                    return None;
+                };
+                Some(AstExpr::SequenceReplace {
+                    sequence: Box::new(sequence),
+                    index: Box::new(index),
+                    element: Box::new(element),
+                    span,
+                })
+            }
+            ("select" | "replace", _) => {
+                self.error(
+                    "MNP162",
+                    "selection intrinsics take exactly three arguments",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            _ => None,
         }
     }
 
@@ -2792,6 +2893,7 @@ pub fn source_profile_supported(version: &str) -> bool {
             | SOURCE_PROFILE_VERSION_0_5
             | SOURCE_PROFILE_VERSION_0_6
             | SOURCE_PROFILE_VERSION_0_7
+            | SOURCE_PROFILE_VERSION_0_8
     )
 }
 
@@ -2801,6 +2903,7 @@ fn infer_source_profile(text: &str) -> &'static str {
         !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with("/*")
     });
     match header {
+        Some(line) if line.trim_start().starts_with("mncs 0.8") => SOURCE_PROFILE_VERSION_0_8,
         Some(line) if line.trim_start().starts_with("mncs 0.7") => SOURCE_PROFILE_VERSION_0_7,
         Some(line) if line.trim_start().starts_with("mncs 0.6") => SOURCE_PROFILE_VERSION_0_6,
         Some(line) if line.trim_start().starts_with("mncs 0.5") => SOURCE_PROFILE_VERSION_0_5,

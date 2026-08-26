@@ -331,3 +331,29 @@ pub fn promise_summary(promise: &LoweringPromise) -> String {
         format!("promise {name} withheld: {}", promise.decision.reason)
     }
 }
+
+/// Branchless-realization promise decisions for a selection instruction.
+///
+/// Lowering records the request and the current obligation state; it never
+/// grants the promise. Only an independent structural verifier inspecting
+/// the emitted artifact may report PASS, and even then the final native
+/// machine code remains UNKNOWN unless disassembly evidence exists.
+pub fn branchless_promise_decisions(
+    module: &SsaModule,
+    instruction: &SsaInstruction,
+) -> Vec<BackendPromiseDecision> {
+    if !matches!(instruction.kind, SsaInstructionKind::Select { .. }) {
+        return Vec::new();
+    }
+    let subject = instruction
+        .semantic_identity
+        .clone()
+        .unwrap_or_else(|| instruction.identity.clone());
+    let obligations = related_obligations(module, instruction);
+    let decision = BackendPromiseDecision::evaluate(
+        BackendPromise::BranchlessRealization,
+        &subject,
+        &obligations,
+    );
+    vec![decision]
+}

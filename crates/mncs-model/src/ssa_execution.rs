@@ -854,6 +854,106 @@ fn execute_instruction(
                 }
             }
         }
+        SsaInstructionKind::Select { operand_type: _ } => {
+            let Some(ExecutionValue::Boolean { value: chosen_true }) =
+                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "selection condition was unavailable or not a boolean",
+                );
+                return true;
+            };
+            let candidate_index = if *chosen_true { 1 } else { 2 };
+            let Some(selected) = values
+                .get(instruction.inputs.get(candidate_index).unwrap_or(&output_sentinel()))
+                .cloned()
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "selection candidate was unavailable",
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), selected);
+            }
+        }
+        SsaInstructionKind::SequenceReplace {
+            bound,
+            evidence,
+            ..
+        } => {
+            let crate::SequenceBound::Exact(length) = bound else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    instruction_identity(instruction),
+                    "functional sequence update requires an exact bound",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Sequence { values: source }) =
+                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "functional update source was unavailable or not a sequence",
+                );
+                return true;
+            };
+            let source = source.clone();
+            let Some(index) = ssa_integer_operand(instruction, values, 1) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "functional update index was unavailable or not a u64",
+                );
+                return true;
+            };
+            let Some(element) = values
+                .get(instruction.inputs.get(2).unwrap_or(&output_sentinel()))
+                .cloned()
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "functional update element was unavailable",
+                );
+                return true;
+            };
+            if index < 0 || index as u128 >= u128::from(*length) {
+                match evidence {
+                    crate::BoundsEvidence::RuntimeChecked { .. } => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            instruction_identity(instruction),
+                            format!(
+                                "functional update index {index} is outside the exact bound {length}"
+                            ),
+                        );
+                    }
+                    _ => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            instruction_identity(instruction),
+                            "statically established update index violated the declared bound",
+                        );
+                    }
+                }
+                return true;
+            }
+            let mut updated = source;
+            updated[index as usize] = element;
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Sequence { values: updated },
+                );
+            }
+        }
         SsaInstructionKind::SequenceLength { bound: _ } => {
             let Some(ExecutionValue::Sequence { values: elements }) =
                 values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))

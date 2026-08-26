@@ -841,6 +841,105 @@ fn execute_operation(
                 },
             );
         }
+        BodyOperationKind::Select { operand_type: _ } => {
+            let Some(condition) = values.get(operation.operands.first().unwrap_or(&String::new()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "selection condition was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let ExecutionValue::Boolean { value: chosen_true } = condition else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "selection condition was not a boolean value".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            // Both candidates are read as values; neither branch "executes".
+            // This is the semantic distinction a branchless realization
+            // preserves at the machine level.
+            let candidate_index = if *chosen_true { 1 } else { 2 };
+            let Some(selected) = values.get(operation.operands.get(candidate_index).unwrap_or(&String::new())) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "selection candidate was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let selected = selected.clone();
+            values.insert(operation.results[0].id.clone(), selected);
+        }
+        BodyOperationKind::SequenceReplace {
+            element_type: _,
+            bound,
+            evidence,
+        } => {
+            let SequenceBound::Exact(length) = bound else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    "functional sequence update requires an exact bound".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(source) = sequence_operand(operation, values, 0) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "functional update source was unavailable or not a sequence".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let source = source.to_vec();
+            let Some(index) = integer_operand(operation, values, 1) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "functional update index was unavailable or not a u64 value".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(element) = values.get(operation.operands.get(2).unwrap_or(&String::new()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "functional update element was unavailable".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let element = element.clone();
+            if index < 0 || index as u128 >= u128::from(*length) {
+                match evidence {
+                    BoundsEvidence::RuntimeChecked { .. } => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            Some(identity.clone()),
+                            format!("functional update index {index} is outside the exact bound {length}"),
+                        );
+                    }
+                    _ => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            Some(identity.clone()),
+                            format!("statically established update index {index} violated the declared bound; elaboration invariant broken"),
+                        );
+                    }
+                }
+                return Some(result.clone());
+            }
+            let mut updated = source;
+            updated[index as usize] = element;
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Sequence { values: updated },
+            );
+        }
         BodyOperationKind::SequenceProject { bound: _, evidence } => {
             let Some(sequence_value) = sequence_operand(operation, values, 0) else {
                 result.fail(

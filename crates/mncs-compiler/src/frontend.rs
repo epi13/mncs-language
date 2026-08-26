@@ -6,11 +6,12 @@ use mncs_model::{
     BodyOperationKind, BodyParameter, BodyTerminator, BodyType, BodyValue,
     BoundedIterationCompletion, CompilationStatus, CompilationStudyRequest, CompilationStudyResult,
     CompilerArtifactRef, CompilerNodeProfile, CompilerPassExecutionObservation, ContractClause,
-    ContractKind, Effect, FailureMode, FiniteType, FiniteVariant, Function, FunctionBody,
-    IntegerType, IterationDomain, Program, RecordField, RecordType, SemanticGraph, SemanticId,
-    SemanticIdentities, TransformationEdge, TransformationStatus, ValidationReport, Value,
-    EXECUTABLE_BODY_SCHEMA_VERSION, SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
-    SUPPORTED_SCHEMA_VERSION,
+    ContractKind, Effect, EvidenceFreshness, FailureMode, Fact, FiniteType, FiniteVariant,
+    Function, FunctionBody, IntegerType, Intent, IterationDomain, MachineIntentSpec,
+    MachinePreference, Obligation, ObligationStatus, Program, RecordField, RecordType,
+    Requirement, SemanticGraph, SemanticId, SemanticIdentities, TransformationEdge,
+    TransformationStatus, ValidationReport, Value, EXECUTABLE_BODY_SCHEMA_VERSION,
+    SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND, SUPPORTED_SCHEMA_VERSION,
 };
 use mncs_syntax::{
     parse, AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstStmt, ConcreteSyntaxTree,
@@ -1657,6 +1658,26 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
             calls_in_expr(end, calls);
         }
         AstExpr::Cast { value, .. } => calls_in_expr(value, calls),
+        AstExpr::Select {
+            condition,
+            when_true,
+            when_false,
+            ..
+        } => {
+            calls_in_expr(condition, calls);
+            calls_in_expr(when_true, calls);
+            calls_in_expr(when_false, calls);
+        }
+        AstExpr::SequenceReplace {
+            sequence,
+            index,
+            element,
+            ..
+        } => {
+            calls_in_expr(sequence, calls);
+            calls_in_expr(index, calls);
+            calls_in_expr(element, calls);
+        }
         AstExpr::SequenceLiteral { elements, .. } => {
             for element in elements {
                 calls_in_expr(element, calls);
@@ -3330,6 +3351,224 @@ impl<'a> BodyBuilder<'a> {
                     ));
                 }
                 Some(projected)
+            }
+            AstExpr::Select {
+                condition,
+                when_true,
+                when_false,
+                span,
+            } => {
+                let condition_binding =
+                    self.elaborate_expr(condition, None, env, diagnostics)?;
+                let boolean_type = BodyType::Named("bool".to_owned());
+                if condition_binding.ty != boolean_type {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE195",
+                        "selection condition must have boolean type",
+                        condition.span(),
+                    ));
+                    return None;
+                }
+                // The operand type is the expected type when known; otherwise
+                // the first candidate establishes it and the second must
+                // agree. Both candidates are values of one selection.
+                let operand_type = match expected {
+                    Some(candidate) => candidate.clone(),
+                    None => {
+                        let first =
+                            self.elaborate_expr(when_true, None, env, diagnostics)?;
+                        first.ty
+                    }
+                };
+                let true_binding =
+                    self.elaborate_expr(when_true, Some(&operand_type), env, diagnostics)?;
+                if true_binding.ty != operand_type {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE196",
+                        "selection candidates must have the same type",
+                        when_true.span(),
+                    ));
+                    return None;
+                }
+                let false_binding =
+                    self.elaborate_expr(when_false, Some(&operand_type), env, diagnostics)?;
+                if false_binding.ty != operand_type {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE196",
+                        "selection candidates must have the same type",
+                        when_false.span(),
+                    ));
+                    return None;
+                }
+                let id = self.new_value("sel");
+                let requirement_identity = SemanticId(format!(
+                    "mncs:0.8:requirement:realization-branchless:{}:{}",
+                    self.function, id
+                ));
+                let machine_intent = MachineIntentSpec {
+                    intent: Intent {
+                        identity: SemanticId(format!(
+                            "mncs:0.8:intent:semantic-selection:{}:{}",
+                            self.function, id
+                        )),
+                        statement: "pure conditional selection over two candidate values; \
+                                    no control-flow divergence between them is part of the meaning"
+                            .to_owned(),
+                    },
+                    preferences: vec![MachinePreference {
+                        identity: SemanticId("mncs:0.8:preference:select-not-branch".to_owned()),
+                        statement: "prefer a backend-native select/predicated realization over \
+                                    branch lowering where the target can provide it"
+                            .to_owned(),
+                    }],
+                    facts: Vec::new(),
+                    requirements: vec![Requirement {
+                        identity: requirement_identity.clone(),
+                        subject: SemanticId(id.clone()),
+                        statement: "realization must preserve selection semantics without \
+                                    introducing data-dependent branch divergence between the candidates"
+                            .to_owned(),
+                    }],
+                    obligations: Vec::new(),
+                };
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: id.clone(),
+                    kind: BodyOperationKind::Select {
+                        operand_type: Box::new(operand_type.clone()),
+                    },
+                    operands: vec![
+                        condition_binding.id,
+                        true_binding.id,
+                        false_binding.id,
+                    ],
+                    results: vec![BodyValue {
+                        id: id.clone(),
+                        ty: operand_type.clone(),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: Some(machine_intent),
+                    lowering: None,
+                    portability: None,
+                });
+                Some(ResolvedBinding {
+                    id,
+                    ty: operand_type,
+                })
+            }
+            AstExpr::SequenceReplace {
+                sequence,
+                index,
+                element,
+                span,
+            } => {
+                let source = self.elaborate_expr(sequence, None, env, diagnostics)?;
+                let BodyType::Sequence {
+                    element: element_type,
+                    bound,
+                } = source.ty.clone()
+                else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE197",
+                        "functional update requires a bounded-sequence value",
+                        sequence.span(),
+                    ));
+                    return None;
+                };
+                if matches!(bound, mncs_model::SequenceBound::UpTo(_)) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE198",
+                        "functional update requires an exact-bound sequence this tranche; views refuse",
+                        *span,
+                    ));
+                    return None;
+                }
+                let counter_type = BodyType::Integer(IntegerType {
+                    bits: 64,
+                    signed: false,
+                });
+                let index_binding =
+                    self.elaborate_expr(index, Some(&counter_type), env, diagnostics)?;
+                if index_binding.ty != counter_type {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE199",
+                        "functional update index must have u64 type",
+                        index.span(),
+                    ));
+                    return None;
+                }
+                let element_binding =
+                    self.elaborate_expr(element, Some(&element_type), env, diagnostics)?;
+                if element_binding.ty != *element_type {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE200",
+                        "functional update element does not match the declared element type",
+                        element.span(),
+                    ));
+                    return None;
+                }
+                // A literal index at or beyond an exact declared bound is
+                // provably invalid: fail closed here rather than deferring a
+                // guaranteed runtime failure.
+                if let (mncs_model::SequenceBound::Exact(length), AstExpr::Integer { value, .. }) =
+                    (&bound, index.as_ref())
+                {
+                    if *value < 0 || *value >= i128::from(*length) {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE192",
+                            format!(
+                                "index {value} is outside the statically known domain 0..{length}"
+                            ),
+                            index.span(),
+                        ));
+                        return None;
+                    }
+                }
+                // Index validity evidence mirrors projection: literal indices
+                // inside an exact bound are static; traversal indices are
+                // discharged by traversal semantics; anything else keeps an
+                // explicit runtime-checked failure obligation.
+                let evidence = match index.as_ref() {
+                    AstExpr::Integer { value, .. }
+                        if matches!(&bound, mncs_model::SequenceBound::Exact(length)
+                            if *value >= 0 && (*value as u64) < u64::from(*length)) =>
+                    {
+                        mncs_model::BoundsEvidence::StaticExact
+                    }
+                    _ if matches!(index.as_ref(), AstExpr::Name(name) if env.is_traversal_index(&name.text)) => {
+                        mncs_model::BoundsEvidence::TraversalDomain
+                    }
+                    _ => mncs_model::BoundsEvidence::RuntimeChecked {
+                        failure: FailureMode::Isolated,
+                    },
+                };
+                let result_type = BodyType::Sequence {
+                    element: element_type.clone(),
+                    bound,
+                };
+                let id = self.new_value("rep");
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: id.clone(),
+                    kind: BodyOperationKind::SequenceReplace {
+                        element_type: element_type.clone(),
+                        bound,
+                        evidence: evidence.clone(),
+                    },
+                    operands: vec![source.id, index_binding.id, element_binding.id],
+                    results: vec![BodyValue {
+                        id: id.clone(),
+                        ty: result_type.clone(),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                });
+                Some(ResolvedBinding {
+                    id,
+                    ty: result_type,
+                })
             }
             AstExpr::SequenceLiteral { elements, span } => {
                 let BodyType::Sequence {

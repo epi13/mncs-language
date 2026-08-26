@@ -239,8 +239,24 @@ impl Program {
                             | crate::BodyOperationKind::ByteShift { .. }
                             | crate::BodyOperationKind::ByteCompare { .. }
                             | crate::BodyOperationKind::Convert { .. }
+                            | crate::BodyOperationKind::Select { .. }
+                            | crate::BodyOperationKind::SequenceReplace {
+                                evidence: BoundsEvidence::StaticExact,
+                                ..
+                            }
+                            | crate::BodyOperationKind::SequenceReplace {
+                                evidence: BoundsEvidence::TraversalDomain,
+                                ..
+                            }
                             | crate::BodyOperationKind::SequenceConstruct { .. }
                             | crate::BodyOperationKind::SequenceLength { .. } => None,
+                            crate::BodyOperationKind::SequenceReplace {
+                                evidence: BoundsEvidence::RuntimeChecked { .. },
+                                ..
+                            } => Some(crate::obligations::body_obligation_id(
+                                "sequence-replace-bounds",
+                                &operation_identity,
+                            )),
                             crate::BodyOperationKind::SequenceProject {
                                 evidence: BoundsEvidence::RuntimeChecked { .. },
                                 ..

@@ -307,6 +307,29 @@ pub enum BodyOperationKind {
     ByteCompare {
         predicate: String,
     },
+    /// Semantic conditional selection (Profile 0.8). Operand 0 is a bool
+    /// condition; operands 1 and 2 are the candidate values of the declared
+    /// operand type. Both candidates are *values* of one pure selection
+    /// operation: neither is "executed after" the other, and no control-flow
+    /// divergence between them is part of the meaning. Total by definition.
+    /// The operation carries machine intent requesting that realization
+    /// preserve selection without introducing data-dependent branch
+    /// divergence; whether a backend met that request is decided by
+    /// structural evidence, never assumed.
+    Select {
+        operand_type: Box<BodyType>,
+    },
+    /// Total functional sequence update (Profile 0.8): produce a new
+    /// sequence equal to operand 0 except the element at operand 1's index,
+    /// which becomes operand 2. Value semantics: the source sequence value
+    /// is unchanged and no aliasing is created. Restricted to exact bounds
+    /// this tranche; views refuse with a coded diagnostic. Index validity
+    /// follows the same three-state evidence model as projection.
+    SequenceReplace {
+        element_type: Box<BodyType>,
+        bound: SequenceBound,
+        evidence: BoundsEvidence,
+    },
     /// Explicit total scalar conversion (Profile 0.7). Truncation drops high
     /// bits; widening extends by the *source* signedness (`byte` zero-extends).
     /// Total by definition; no obligation survives.
@@ -1274,6 +1297,111 @@ fn validate_operation(
                 // Views always check against their runtime length; evidence is
                 // recorded but never claims static validity for views.
             }
+        }
+        BodyOperationKind::Select { operand_type } => {
+            if operation.operands.len() != 3 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB102",
+                    path.to_owned(),
+                    "selection requires a condition, two candidate values, and one result",
+                ));
+                return;
+            }
+            let boolean_type = BodyType::Named("bool".to_owned());
+            if available.get(operation.operands[0].as_str()) != Some(&boolean_type) {
+                errors.push(body_diagnostic(
+                    "MNB103",
+                    format!("{path}.operands[0]"),
+                    "selection condition must have boolean type",
+                ));
+            }
+            for (index, operand) in operation.operands[1..3].iter().enumerate() {
+                if available.get(operand) != Some(operand_type.as_ref()) {
+                    errors.push(body_diagnostic(
+                        "MNB104",
+                        format!("{path}.operands[{}]", index + 1),
+                        "selection candidates must have the declared operand type",
+                    ));
+                }
+            }
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| &result.ty != operand_type.as_ref())
+            {
+                errors.push(body_diagnostic(
+                    "MNB105",
+                    format!("{path}.results"),
+                    "selection result must have the declared operand type",
+                ));
+            }
+        }
+        BodyOperationKind::SequenceReplace {
+            element_type,
+            bound,
+            evidence,
+        } => {
+            if matches!(bound, SequenceBound::UpTo(_)) {
+                errors.push(body_diagnostic(
+                    "MNB106",
+                    format!("{path}.kind.bound"),
+                    "functional sequence update requires an exact bound this tranche; views refuse",
+                ));
+            }
+            if operation.operands.len() != 3 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB107",
+                    path.to_owned(),
+                    "functional sequence update requires a sequence, an index, an element, and one result",
+                ));
+            }
+            let counter_type = BodyType::Integer(IntegerType {
+                bits: 64,
+                signed: false,
+            });
+            if available.get(operation.operands.get(1).unwrap_or(&String::new()))
+                != Some(&counter_type)
+            {
+                errors.push(body_diagnostic(
+                    "MNB108",
+                    format!("{path}.operands[1]"),
+                    "functional update index must have u64 type",
+                ));
+            }
+            if available.get(operation.operands.get(2).unwrap_or(&String::new()))
+                != Some(element_type.as_ref())
+            {
+                errors.push(body_diagnostic(
+                    "MNB109",
+                    format!("{path}.operands[2]"),
+                    "functional update element does not have the declared element type",
+                ));
+            }
+            let expected_sequence = BodyType::Sequence {
+                element: element_type.clone(),
+                bound: *bound,
+            };
+            if available.get(operation.operands.first().unwrap_or(&String::new()))
+                != Some(&expected_sequence)
+            {
+                errors.push(body_diagnostic(
+                    "MNB110",
+                    format!("{path}.operands[0]"),
+                    "functional update source does not have the declared bounded-sequence type",
+                ));
+            }
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| result.ty != expected_sequence)
+            {
+                errors.push(body_diagnostic(
+                    "MNB111",
+                    format!("{path}.results"),
+                    "functional update result does not preserve the source bounded-sequence type",
+                ));
+            }
+            let _ = evidence;
         }
         BodyOperationKind::SequenceLength { .. } => {
             if operation.operands.len() != 1 || operation.results.len() != 1 {

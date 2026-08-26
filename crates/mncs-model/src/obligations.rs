@@ -194,8 +194,42 @@ impl Program {
                             | BodyOperationKind::ByteShift { .. }
                             | BodyOperationKind::ByteCompare { .. }
                             | BodyOperationKind::Convert { .. }
+                            | BodyOperationKind::Select { .. }
+                            | BodyOperationKind::SequenceReplace {
+                                evidence: crate::BoundsEvidence::StaticExact,
+                                ..
+                            }
+                            | BodyOperationKind::SequenceReplace {
+                                evidence: crate::BoundsEvidence::TraversalDomain,
+                                ..
+                            }
                             | BodyOperationKind::SequenceConstruct { .. }
                             | BodyOperationKind::SequenceLength { .. } => {}
+                            BodyOperationKind::SequenceReplace {
+                                evidence: crate::BoundsEvidence::RuntimeChecked { failure: _ },
+                                ..
+                            } => {
+                                let requirement =
+                                    requirement_id("sequence-replace-bounds", &subject);
+                                obligations.push(ObligationRecord {
+                                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                    identity: body_obligation_id(
+                                        "sequence-replace-bounds",
+                                        &subject,
+                                    ),
+                                    subject,
+                                    requirement,
+                                    status: ObligationStatus::Unknown,
+                                    method: "runtime-checked-functional-update".to_owned(),
+                                    assumptions: Vec::new(),
+                                    dependencies: Vec::new(),
+                                    freshness: EvidenceFreshness::Unknown,
+                                    fallback: Some(
+                                        "checked update with explicit runtime failure"
+                                            .to_owned(),
+                                    ),
+                                });
+                            }
                             // A runtime-checked projection retains an explicit
                             // bounds obligation; statically established or
                             // traversal-domain evidence discharges it by
