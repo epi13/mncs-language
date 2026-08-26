@@ -1,0 +1,8 @@
+mncs 0.7;
+
+module examples.invalid_vector_type_in_07;
+
+fn invalid(value: i32) -> (result: i32) {
+    let values: vec<i32, 4> = vector(value, value, value, value);
+    return value;
+}

@@ -1,0 +1,14 @@
+mncs 0.8;
+
+module examples.invalid_mask_lane_mismatch;
+
+fn invalid() -> (result: bool) {
+    let left_values: vec<i32, 4> = vector(1, 2, 3, 4);
+    let left_zero: vec<i32, 4> = splat(0);
+    let right_values: vec<i32, 2> = vector(1, 2);
+    let right_zero: vec<i32, 2> = splat(0);
+    let left: mask<4> = vec_gt(left_values, left_zero);
+    let right: mask<2> = vec_gt(right_values, right_zero);
+    let result: mask<4> = mask_and(left, right);
+    return mask_any(result);
+}

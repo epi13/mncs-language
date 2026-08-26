@@ -1,0 +1,19 @@
+mncs 0.8;
+
+// mncs.std.simd — compositional numerical kernels over semantic vectors.
+// Arithmetic intent remains explicit at every lane operation.
+module mncs.std.simd.v1;
+
+fn affine_relu_sum4(
+    x0: i32, x1: i32, x2: i32, x3: i32,
+    scale: i32, bias: i32
+) -> (result: i32) {
+    let values: vec<i32, 4> = vector(x0, x1, x2, x3);
+    let scales: vec<i32, 4> = splat(scale);
+    let biases: vec<i32, 4> = splat(bias);
+    let zero: vec<i32, 4> = splat(0);
+    let multiplied: vec<i32, 4> = vec_mul_wrap(values, scales);
+    let shifted: vec<i32, 4> = vec_add_wrap(multiplied, biases);
+    let positive: vec<i32, 4> = vec_max(shifted, zero);
+    return reduce_sum_wrap(positive);
+}

@@ -94,6 +94,11 @@ pub fn cranelift_capabilities() -> BackendCapabilityManifest {
             "integer_shifts",
             "bounded_sequences_internal",
             "bounded_views_internal",
+            "semantic_branchless_select",
+            "semantic_integer_vectors",
+            "semantic_masks",
+            "packed_mask_realization",
+            "scalarized_vector_realization",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -474,6 +479,7 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                 let signed = matches!(dest.ty, ScalarTy::Int(integer) if integer.signed);
                 let bits = match dest.ty {
                     ScalarTy::Int(integer) => integer.bits,
+                    ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => 64,
                     _ => 32,
                 };
                 let (lhs_norm, rhs_norm) =
@@ -518,6 +524,7 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                 // first so the bit pattern matches the language semantics.
                 let bits = match dest.ty {
                     ScalarTy::Int(integer) => integer.bits,
+                    ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => 64,
                     _ => 32,
                 };
                 let signed = matches!(dest.ty, ScalarTy::Int(integer) if integer.signed);
@@ -749,6 +756,99 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                 let _ = writeln!(out, "        {d} = band {}, {mask}", names.value(src));
             }
         }
+        ScalarInst::Select {
+            dest,
+            condition,
+            when_true,
+            when_false,
+        } => {
+            let d = names.value(&dest.id);
+            let _ = writeln!(
+                out,
+                "        {d}_b = icmp_imm ne {}, 0",
+                names.value(condition)
+            );
+            let _ = writeln!(
+                out,
+                "        {d} = select {d}_b, {}, {}",
+                names.value(when_true),
+                names.value(when_false)
+            );
+        }
+        ScalarInst::SequenceReplace {
+            dest,
+            source,
+            index,
+            element,
+            evidence,
+            length,
+            element_width,
+            ..
+        } => {
+            let d = names.value(&dest.id);
+            let checked = matches!(evidence, mncs_model::BoundsEvidence::RuntimeChecked { .. });
+            if checked {
+                let _ = writeln!(out, "        {d}_lim = iconst.i64 {length}");
+                let _ = writeln!(
+                    out,
+                    "        {d}_oob = icmp uge {}, {d}_lim",
+                    names.value(index)
+                );
+                let _ = writeln!(out, "        brnz {d}_oob, fail_{d}");
+            }
+            let _ = writeln!(out, "        {d} = call %mncs_cell_alloc({})", length * 8);
+            for lane in 0..*length {
+                let offset = lane * 8;
+                match element_width {
+                    crate::composite::SlotWidth::W32 => {
+                        let _ = writeln!(
+                            out,
+                            "        {d}_s{lane} = load.u32({}, {offset})",
+                            names.value(source)
+                        );
+                        let _ = writeln!(
+                            out,
+                            "        call %mncs_slot_store32({d}, {offset}, {d}_s{lane})"
+                        );
+                    }
+                    crate::composite::SlotWidth::W64 => {
+                        let _ = writeln!(
+                            out,
+                            "        {d}_s{lane} = load.i64({}, {offset})",
+                            names.value(source)
+                        );
+                        let _ = writeln!(
+                            out,
+                            "        call %mncs_slot_store64({d}, {offset}, {d}_s{lane})"
+                        );
+                    }
+                }
+            }
+            let _ = writeln!(
+                out,
+                "        {d}_off = ishl_imm.i64 {}, 3",
+                names.value(index)
+            );
+            let _ = writeln!(out, "        {d}_addr = iadd {d}, {d}_off");
+            let store = match element_width {
+                crate::composite::SlotWidth::W32 => "mncs_slot_store32",
+                crate::composite::SlotWidth::W64 => "mncs_slot_store64",
+            };
+            let _ = writeln!(
+                out,
+                "        call %{store}({d}_addr, 0, {})",
+                names.value(element)
+            );
+            if checked {
+                let _ = writeln!(out, "        jump ok_{d}");
+                let _ = writeln!(out, "    fail_{d}:");
+                out.push_str("        v_bad = iconst.i32 1\n        v_z = iconst.i64 0\n");
+                out.push_str(
+                    "        store.i32 v_bad, st\n        store.i64 v_z, val\n        return\n",
+                );
+                let _ = writeln!(out, "    ok_{d}:");
+            }
+        }
         ScalarInst::SequenceProject {
             dest,
             seq,
@@ -859,6 +959,7 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
 fn clif_ty(ty: ScalarTy) -> &'static str {
     match ty {
         ScalarTy::Int(integer) if integer.bits == 64 => "i64",
+        ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => "i64",
         _ => "i32",
     }
 }
@@ -869,7 +970,7 @@ fn bits_of(ty: ScalarTy) -> u16 {
         ScalarTy::Bool | ScalarTy::Finite => 32,
         ScalarTy::Byte => 8,
         ScalarTy::Int(integer) => integer.bits,
-        ScalarTy::Cell | ScalarTy::View => 64,
+        ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => 64,
     }
 }
 
@@ -998,6 +1099,8 @@ fn scalar_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
         | ScalarInst::ByteBitwise { dest, .. }
         | ScalarInst::ByteShift { dest, .. }
         | ScalarInst::Convert { dest, .. }
+        | ScalarInst::Select { dest, .. }
+        | ScalarInst::SequenceReplace { dest, .. }
         | ScalarInst::SequenceProject { dest, .. }
         | ScalarInst::SequenceLength { dest, .. }
         | ScalarInst::ViewConstruct { dest, .. }
@@ -1573,6 +1676,7 @@ where
                                 // the modulo count, renormalize the result.
                                 let bits = match dest.ty {
                                     ScalarTy::Int(integer) => integer.bits,
+                                    ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => 64,
                                     _ => 32,
                                 };
                                 let signed =
@@ -1852,8 +1956,16 @@ where
                             let addr = builder.ins().iadd(values[cell], offset);
                             let call = builder.ins().call(callee, &[addr]);
                             // Load libcalls return zero-extended i64 slot
-                            // payloads in the uniform value domain.
-                            values.insert(dest.id.clone(), builder.inst_results(call)[0]);
+                            // payloads. Restore the semantic lane width and
+                            // signedness before later arithmetic/comparison.
+                            let raw = builder.inst_results(call)[0];
+                            let produced = normalize_one(
+                                &mut builder,
+                                raw,
+                                bits_of(dest.ty),
+                                signed_of(dest.ty),
+                            );
+                            values.insert(dest.id.clone(), produced);
                         }
                         ScalarInst::Sequence(_) => {
                             unreachable!("Sequence must be flattened before building")
@@ -1938,6 +2050,79 @@ where
                                 builder.ins().band(src_v, mask)
                             };
                             values.insert(dest.id.clone(), produced);
+                        }
+                        ScalarInst::Select {
+                            dest,
+                            condition,
+                            when_true,
+                            when_false,
+                        } => {
+                            let flag =
+                                builder
+                                    .ins()
+                                    .icmp_imm(IntCC::NotEqual, values[condition], 0);
+                            let produced =
+                                builder
+                                    .ins()
+                                    .select(flag, values[when_true], values[when_false]);
+                            values.insert(dest.id.clone(), produced);
+                        }
+                        ScalarInst::SequenceReplace {
+                            dest,
+                            source,
+                            index,
+                            element,
+                            evidence,
+                            length,
+                            element_width,
+                            ..
+                        } => {
+                            let idx = values[index];
+                            if matches!(evidence, mncs_model::BoundsEvidence::RuntimeChecked { .. })
+                            {
+                                let limit = builder.ins().iconst(types::I64, i64::from(*length));
+                                let oob = builder.ins().icmp(
+                                    IntCC::UnsignedGreaterThanOrEqual,
+                                    idx,
+                                    limit,
+                                );
+                                let cont = builder.create_block();
+                                builder.ins().brif(
+                                    oob,
+                                    fail,
+                                    &[] as &[BlockArg],
+                                    cont,
+                                    &[] as &[BlockArg],
+                                );
+                                builder.switch_to_block(cont);
+                                builder.seal_block(cont);
+                            }
+                            let alloc = cell_libcall(module, builder.func, "mncs_cell_alloc");
+                            let bytes = builder.ins().iconst(types::I64, i64::from(*length) * 8);
+                            let call = builder.ins().call(alloc, &[bytes]);
+                            let allocated = builder.inst_results(call)[0];
+                            let (load_name, store_name) = match element_width {
+                                crate::composite::SlotWidth::W32 => {
+                                    ("mncs_slot_load32", "mncs_slot_store32")
+                                }
+                                crate::composite::SlotWidth::W64 => {
+                                    ("mncs_slot_load64", "mncs_slot_store64")
+                                }
+                            };
+                            let load = cell_libcall(module, builder.func, load_name);
+                            let store = cell_libcall(module, builder.func, store_name);
+                            for lane in 0..*length {
+                                let offset = builder.ins().iconst(types::I64, i64::from(lane) * 8);
+                                let source_addr = builder.ins().iadd(values[source], offset);
+                                let loaded = builder.ins().call(load, &[source_addr]);
+                                let lane_value = builder.inst_results(loaded)[0];
+                                let dest_addr = builder.ins().iadd(allocated, offset);
+                                builder.ins().call(store, &[dest_addr, lane_value]);
+                            }
+                            let scaled = builder.ins().ishl_imm(idx, 3);
+                            let dest_addr = builder.ins().iadd(allocated, scaled);
+                            builder.ins().call(store, &[dest_addr, values[element]]);
+                            values.insert(dest.id.clone(), allocated);
                         }
                         ScalarInst::SequenceProject {
                             dest,

@@ -61,6 +61,65 @@ pub enum SsaInstructionKind {
     ByteCompare {
         predicate: String,
     },
+    /// Semantic conditional selection (Profile 0.8). Both candidates are
+    /// values of one pure selection; realization must not introduce
+    /// data-dependent branch divergence between them.
+    Select {
+        operand_type: crate::BodyType,
+    },
+    /// Total functional sequence update over an exact bound (Profile 0.8):
+    /// a new sequence equal to the source with one element replaced.
+    SequenceReplace {
+        element_type: crate::BodyType,
+        bound: crate::SequenceBound,
+        evidence: crate::BoundsEvidence,
+    },
+    VectorConstruct {
+        element_type: crate::BodyType,
+        lanes: u32,
+    },
+    VectorSplat {
+        element_type: crate::BodyType,
+        lanes: u32,
+    },
+    VectorExtract {
+        element_type: crate::BodyType,
+        lanes: u32,
+        evidence: crate::BoundsEvidence,
+    },
+    VectorReplace {
+        element_type: crate::BodyType,
+        lanes: u32,
+        evidence: crate::BoundsEvidence,
+    },
+    VectorBinary {
+        operator: String,
+        element_type: crate::BodyType,
+        lanes: u32,
+        intent: crate::ArithmeticIntent,
+    },
+    VectorCompare {
+        predicate: String,
+        element_type: crate::BodyType,
+        lanes: u32,
+    },
+    MaskBinary {
+        operator: String,
+        lanes: u32,
+    },
+    MaskNot {
+        lanes: u32,
+    },
+    MaskReduce {
+        operator: String,
+        lanes: u32,
+    },
+    VectorReduce {
+        operator: String,
+        element_type: crate::BodyType,
+        lanes: u32,
+        intent: crate::ArithmeticIntent,
+    },
     /// Explicit total scalar conversion (Profile 0.7).
     Convert {
         from: crate::BodyType,
@@ -1397,6 +1456,90 @@ fn ssa_kind(kind: &IrOperationKind) -> SsaInstructionKind {
         IrOperationKind::ByteCompare { predicate } => SsaInstructionKind::ByteCompare {
             predicate: predicate.clone(),
         },
+        IrOperationKind::Select { operand_type } => SsaInstructionKind::Select {
+            operand_type: (**operand_type).clone(),
+        },
+        IrOperationKind::SequenceReplace {
+            element_type,
+            bound,
+            evidence,
+        } => SsaInstructionKind::SequenceReplace {
+            element_type: element_type.as_ref().clone(),
+            bound: *bound,
+            evidence: evidence.clone(),
+        },
+        IrOperationKind::VectorConstruct {
+            element_type,
+            lanes,
+        } => SsaInstructionKind::VectorConstruct {
+            element_type: element_type.as_ref().clone(),
+            lanes: *lanes,
+        },
+        IrOperationKind::VectorSplat {
+            element_type,
+            lanes,
+        } => SsaInstructionKind::VectorSplat {
+            element_type: element_type.as_ref().clone(),
+            lanes: *lanes,
+        },
+        IrOperationKind::VectorExtract {
+            element_type,
+            lanes,
+            evidence,
+        } => SsaInstructionKind::VectorExtract {
+            element_type: element_type.as_ref().clone(),
+            lanes: *lanes,
+            evidence: evidence.clone(),
+        },
+        IrOperationKind::VectorReplace {
+            element_type,
+            lanes,
+            evidence,
+        } => SsaInstructionKind::VectorReplace {
+            element_type: element_type.as_ref().clone(),
+            lanes: *lanes,
+            evidence: evidence.clone(),
+        },
+        IrOperationKind::VectorBinary {
+            operator,
+            element_type,
+            lanes,
+            intent,
+        } => SsaInstructionKind::VectorBinary {
+            operator: operator.clone(),
+            element_type: element_type.as_ref().clone(),
+            lanes: *lanes,
+            intent: *intent,
+        },
+        IrOperationKind::VectorCompare {
+            predicate,
+            element_type,
+            lanes,
+        } => SsaInstructionKind::VectorCompare {
+            predicate: predicate.clone(),
+            element_type: element_type.as_ref().clone(),
+            lanes: *lanes,
+        },
+        IrOperationKind::MaskBinary { operator, lanes } => SsaInstructionKind::MaskBinary {
+            operator: operator.clone(),
+            lanes: *lanes,
+        },
+        IrOperationKind::MaskNot { lanes } => SsaInstructionKind::MaskNot { lanes: *lanes },
+        IrOperationKind::MaskReduce { operator, lanes } => SsaInstructionKind::MaskReduce {
+            operator: operator.clone(),
+            lanes: *lanes,
+        },
+        IrOperationKind::VectorReduce {
+            operator,
+            element_type,
+            lanes,
+            intent,
+        } => SsaInstructionKind::VectorReduce {
+            operator: operator.clone(),
+            element_type: element_type.as_ref().clone(),
+            lanes: *lanes,
+            intent: *intent,
+        },
         IrOperationKind::Convert { from, to } => SsaInstructionKind::Convert {
             from: from.clone(),
             to: to.clone(),
@@ -1523,6 +1666,90 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
         },
         BodyOperationKind::ByteCompare { predicate } => SsaInstructionKind::ByteCompare {
             predicate: predicate.clone(),
+        },
+        BodyOperationKind::Select { operand_type } => SsaInstructionKind::Select {
+            operand_type: (**operand_type).clone(),
+        },
+        BodyOperationKind::SequenceReplace {
+            element_type,
+            bound,
+            evidence,
+        } => SsaInstructionKind::SequenceReplace {
+            element_type: element_type.as_ref().clone(),
+            bound: *bound,
+            evidence: evidence.clone(),
+        },
+        BodyOperationKind::VectorConstruct {
+            element_type,
+            lanes,
+        } => SsaInstructionKind::VectorConstruct {
+            element_type: element_type.as_ref().clone(),
+            lanes: *lanes,
+        },
+        BodyOperationKind::VectorSplat {
+            element_type,
+            lanes,
+        } => SsaInstructionKind::VectorSplat {
+            element_type: element_type.as_ref().clone(),
+            lanes: *lanes,
+        },
+        BodyOperationKind::VectorExtract {
+            element_type,
+            lanes,
+            evidence,
+        } => SsaInstructionKind::VectorExtract {
+            element_type: element_type.as_ref().clone(),
+            lanes: *lanes,
+            evidence: evidence.clone(),
+        },
+        BodyOperationKind::VectorReplace {
+            element_type,
+            lanes,
+            evidence,
+        } => SsaInstructionKind::VectorReplace {
+            element_type: element_type.as_ref().clone(),
+            lanes: *lanes,
+            evidence: evidence.clone(),
+        },
+        BodyOperationKind::VectorBinary {
+            operator,
+            element_type,
+            lanes,
+            intent,
+        } => SsaInstructionKind::VectorBinary {
+            operator: operator.clone(),
+            element_type: element_type.as_ref().clone(),
+            lanes: *lanes,
+            intent: *intent,
+        },
+        BodyOperationKind::VectorCompare {
+            predicate,
+            element_type,
+            lanes,
+        } => SsaInstructionKind::VectorCompare {
+            predicate: predicate.clone(),
+            element_type: element_type.as_ref().clone(),
+            lanes: *lanes,
+        },
+        BodyOperationKind::MaskBinary { operator, lanes } => SsaInstructionKind::MaskBinary {
+            operator: operator.clone(),
+            lanes: *lanes,
+        },
+        BodyOperationKind::MaskNot { lanes } => SsaInstructionKind::MaskNot { lanes: *lanes },
+        BodyOperationKind::MaskReduce { operator, lanes } => SsaInstructionKind::MaskReduce {
+            operator: operator.clone(),
+            lanes: *lanes,
+        },
+        BodyOperationKind::VectorReduce {
+            operator,
+            element_type,
+            lanes,
+            intent,
+        } => SsaInstructionKind::VectorReduce {
+            operator: operator.clone(),
+            element_type: element_type.as_ref().clone(),
+            lanes: *lanes,
+            intent: *intent,
         },
         BodyOperationKind::Convert { from, to } => SsaInstructionKind::Convert {
             from: from.clone(),

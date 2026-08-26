@@ -797,6 +797,304 @@ fn execute_instruction(
                 },
             );
         }
+        SsaInstructionKind::VectorConstruct { lanes, .. } => {
+            let Some(output) = instruction.outputs.first() else {
+                return true;
+            };
+            let collected: Option<Vec<_>> = instruction
+                .inputs
+                .iter()
+                .map(|input| values.get(input).cloned())
+                .collect();
+            let Some(collected) = collected else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector construction operand was unavailable",
+                );
+                return true;
+            };
+            if collected.len() != *lanes as usize {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector construction lane count mismatch",
+                );
+                return true;
+            }
+            values.insert(
+                output.identity.clone(),
+                ExecutionValue::Vector { values: collected },
+            );
+        }
+        SsaInstructionKind::VectorSplat { lanes, .. } => {
+            let Some(output) = instruction.outputs.first() else {
+                return true;
+            };
+            let Some(value) = values
+                .get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+                .cloned()
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector splat operand was unavailable",
+                );
+                return true;
+            };
+            values.insert(
+                output.identity.clone(),
+                ExecutionValue::Vector {
+                    values: vec![value; *lanes as usize],
+                },
+            );
+        }
+        SsaInstructionKind::VectorExtract {
+            lanes, evidence, ..
+        } => {
+            let Some(ExecutionValue::Vector { values: vector }) =
+                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector extraction operand was unavailable",
+                );
+                return true;
+            };
+            let Some(index) = ssa_integer_operand(instruction, values, 1) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector lane index was unavailable",
+                );
+                return true;
+            };
+            if index < 0 || index as u128 >= u128::from(*lanes) {
+                let status = if matches!(evidence, crate::BoundsEvidence::RuntimeChecked { .. }) {
+                    ExecutionStatus::RuntimeFailure
+                } else {
+                    ExecutionStatus::InvalidRequest
+                };
+                result.fail(
+                    status,
+                    instruction_identity(instruction),
+                    "vector lane index is out of bounds",
+                );
+                return true;
+            }
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), vector[index as usize].clone());
+            }
+        }
+        SsaInstructionKind::VectorReplace {
+            lanes, evidence, ..
+        } => {
+            let Some(ExecutionValue::Vector { values: source }) =
+                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector replacement source was unavailable",
+                );
+                return true;
+            };
+            let Some(index) = ssa_integer_operand(instruction, values, 1) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector lane index was unavailable",
+                );
+                return true;
+            };
+            let Some(element) = values
+                .get(instruction.inputs.get(2).unwrap_or(&output_sentinel()))
+                .cloned()
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector replacement element was unavailable",
+                );
+                return true;
+            };
+            if index < 0 || index as u128 >= u128::from(*lanes) {
+                let status = if matches!(evidence, crate::BoundsEvidence::RuntimeChecked { .. }) {
+                    ExecutionStatus::RuntimeFailure
+                } else {
+                    ExecutionStatus::InvalidRequest
+                };
+                result.fail(
+                    status,
+                    instruction_identity(instruction),
+                    "vector lane index is out of bounds",
+                );
+                return true;
+            }
+            let mut updated = source.clone();
+            updated[index as usize] = element;
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Vector { values: updated },
+                );
+            }
+        }
+        SsaInstructionKind::VectorBinary {
+            operator,
+            element_type,
+            intent,
+            ..
+        } => {
+            let Some((left, right)) = ssa_vector_operands(instruction, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector binary operands were unavailable",
+                );
+                return true;
+            };
+            let Some(produced) = crate::execution::evaluate_vector_binary(
+                operator,
+                element_type,
+                *intent,
+                left,
+                right,
+            ) else {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    instruction_identity(instruction),
+                    "vector arithmetic failed in at least one lane",
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Vector { values: produced },
+                );
+            }
+        }
+        SsaInstructionKind::VectorCompare {
+            predicate,
+            element_type,
+            ..
+        } => {
+            let Some((left, right)) = ssa_vector_operands(instruction, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector comparison operands were unavailable",
+                );
+                return true;
+            };
+            let Some(lanes) =
+                crate::execution::evaluate_vector_compare(predicate, element_type, left, right)
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector comparison operands violated their element type",
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), ExecutionValue::Mask { lanes });
+            }
+        }
+        SsaInstructionKind::MaskBinary { operator, .. } => {
+            let Some((left, right)) = ssa_mask_operands(instruction, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "mask operands were unavailable",
+                );
+                return true;
+            };
+            let lanes = left
+                .iter()
+                .zip(right)
+                .map(|(left, right)| match operator.as_str() {
+                    "and" => *left && *right,
+                    "or" => *left || *right,
+                    _ => *left != *right,
+                })
+                .collect();
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), ExecutionValue::Mask { lanes });
+            }
+        }
+        SsaInstructionKind::MaskNot { .. } => {
+            let Some(ExecutionValue::Mask { lanes }) =
+                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "mask not operand was unavailable",
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Mask {
+                        lanes: lanes.iter().map(|lane| !lane).collect(),
+                    },
+                );
+            }
+        }
+        SsaInstructionKind::MaskReduce { operator, .. } => {
+            let Some(ExecutionValue::Mask { lanes }) =
+                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "mask reduction operand was unavailable",
+                );
+                return true;
+            };
+            let value = match operator.as_str() {
+                "any" => lanes.iter().any(|lane| *lane),
+                "all" => lanes.iter().all(|lane| *lane),
+                _ => !lanes.iter().any(|lane| *lane),
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
+            }
+        }
+        SsaInstructionKind::VectorReduce {
+            operator,
+            element_type,
+            intent,
+            ..
+        } => {
+            let Some(ExecutionValue::Vector { values: lanes }) =
+                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "vector reduction operand was unavailable",
+                );
+                return true;
+            };
+            let Some(value) =
+                crate::execution::evaluate_vector_reduce(operator, element_type, *intent, lanes)
+            else {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    instruction_identity(instruction),
+                    "vector reduction failed",
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), value);
+            }
+        }
         SsaInstructionKind::SequenceProject { bound: _, evidence } => {
             let Some(ExecutionValue::Sequence { values: elements }) =
                 values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
@@ -852,6 +1150,166 @@ fn execute_instruction(
                 if let Some(value) = elements.get(index as usize) {
                     values.insert(output.identity.clone(), value.clone());
                 }
+            }
+        }
+        SsaInstructionKind::Select { operand_type: _ } => {
+            let Some(condition) =
+                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "selection condition was unavailable",
+                );
+                return true;
+            };
+            if let ExecutionValue::Mask { lanes } = condition {
+                let Some(ExecutionValue::Vector { values: true_lanes }) =
+                    values.get(&instruction.inputs[1])
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "masked selection true candidate was not a vector",
+                    );
+                    return true;
+                };
+                let Some(ExecutionValue::Vector {
+                    values: false_lanes,
+                }) = values.get(&instruction.inputs[2])
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "masked selection false candidate was not a vector",
+                    );
+                    return true;
+                };
+                if lanes.len() != true_lanes.len() || lanes.len() != false_lanes.len() {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "masked selection lane count mismatch",
+                    );
+                    return true;
+                }
+                let selected = lanes
+                    .iter()
+                    .enumerate()
+                    .map(|(index, lane)| {
+                        if *lane {
+                            true_lanes[index].clone()
+                        } else {
+                            false_lanes[index].clone()
+                        }
+                    })
+                    .collect();
+                if let Some(output) = instruction.outputs.first() {
+                    values.insert(
+                        output.identity.clone(),
+                        ExecutionValue::Vector { values: selected },
+                    );
+                }
+                return false;
+            }
+            let ExecutionValue::Boolean { value: chosen_true } = condition else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "selection condition was neither bool nor mask",
+                );
+                return true;
+            };
+            let candidate_index = if *chosen_true { 1 } else { 2 };
+            let Some(selected) = values
+                .get(
+                    instruction
+                        .inputs
+                        .get(candidate_index)
+                        .unwrap_or(&output_sentinel()),
+                )
+                .cloned()
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "selection candidate was unavailable",
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), selected);
+            }
+        }
+        SsaInstructionKind::SequenceReplace {
+            bound, evidence, ..
+        } => {
+            let crate::SequenceBound::Exact(length) = bound else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    instruction_identity(instruction),
+                    "functional sequence update requires an exact bound",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Sequence { values: source }) =
+                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "functional update source was unavailable or not a sequence",
+                );
+                return true;
+            };
+            let source = source.clone();
+            let Some(index) = ssa_integer_operand(instruction, values, 1) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "functional update index was unavailable or not a u64",
+                );
+                return true;
+            };
+            let Some(element) = values
+                .get(instruction.inputs.get(2).unwrap_or(&output_sentinel()))
+                .cloned()
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "functional update element was unavailable",
+                );
+                return true;
+            };
+            if index < 0 || index as u128 >= u128::from(*length) {
+                match evidence {
+                    crate::BoundsEvidence::RuntimeChecked { .. } => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            instruction_identity(instruction),
+                            format!(
+                                "functional update index {index} is outside the exact bound {length}"
+                            ),
+                        );
+                    }
+                    _ => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            instruction_identity(instruction),
+                            "statically established update index violated the declared bound",
+                        );
+                    }
+                }
+                return true;
+            }
+            let mut updated = source;
+            updated[index as usize] = element;
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Sequence { values: updated },
+                );
             }
         }
         SsaInstructionKind::SequenceLength { bound: _ } => {
@@ -1375,6 +1833,32 @@ fn ssa_integer_operand(
         ExecutionValue::Integer { value, .. } => Some(*value),
         _ => None,
     }
+}
+
+fn ssa_vector_operands<'a>(
+    instruction: &SsaInstruction,
+    values: &'a BTreeMap<SemanticId, ExecutionValue>,
+) -> Option<(&'a [ExecutionValue], &'a [ExecutionValue])> {
+    let ExecutionValue::Vector { values: left } = values.get(instruction.inputs.first()?)? else {
+        return None;
+    };
+    let ExecutionValue::Vector { values: right } = values.get(instruction.inputs.get(1)?)? else {
+        return None;
+    };
+    (left.len() == right.len()).then_some((left, right))
+}
+
+fn ssa_mask_operands<'a>(
+    instruction: &SsaInstruction,
+    values: &'a BTreeMap<SemanticId, ExecutionValue>,
+) -> Option<(&'a [bool], &'a [bool])> {
+    let ExecutionValue::Mask { lanes: left } = values.get(instruction.inputs.first()?)? else {
+        return None;
+    };
+    let ExecutionValue::Mask { lanes: right } = values.get(instruction.inputs.get(1)?)? else {
+        return None;
+    };
+    (left.len() == right.len()).then_some((left, right))
 }
 
 /// A stand-in identity for operand lookups when an instruction is malformed;

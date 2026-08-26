@@ -11,7 +11,7 @@ same helpers ad hoc.
 ```text
 library/
   core/         foundational total operations (status lattice, boolean algebra,
-                ordering/selection; bounded sequences; byte primitives)
+                ordering/selection; bounded sequences; byte, mask, and vector primitives)
   std/          portable abstractions over core — encoding.v1 begins the
                 canonical serialization groundwork (RFC 0027 direction)
   capability/   reserved for capability/effect-shape declarations
@@ -34,6 +34,15 @@ these modules fully. The scalar backends refuse sequence-typed boundary
 crossings this tranche, so differential corpora for these modules use
 scalar-entry wrappers where cross-backend agreement is required.
 
+## Branchless vectors and masks (Profile 0.8)
+
+`core/vector.v1` and `core/mask.v1` expose reusable bounded integer-vector
+and logical-mask kernels without naming a physical SIMD width. `std/simd.v1`
+adds an affine/ReLU/reduction kernel whose wrapping arithmetic intent and
+fixed reduction order remain visible through HIR and SSA. The current five
+executable backends agree through reference or conservative scalarized
+realizations; native SIMD selection remains a later target-specific step.
+
 ## Modules
 
 | File | Module | Contents |
@@ -42,6 +51,9 @@ scalar-entry wrappers where cross-backend agreement is required.
 | `core/logic.mncs` | `mncs.core.logic.v1` | total boolean algebra: `bool_not/and/or/implies/xor` |
 | `core/ordering.mncs` | `mncs.core.ordering.v1` | comparison-only `min/max/clamp` for i32/i64 (no arithmetic, hence no overflow obligations) |
 | `core/result.mncs` | `mncs.core.result.v1` (Profile 0.6) | the standard Result shape with real reason payloads: `Ok { value }`, `Err { reason }`, `divide`, `bounded_divide`, `value_or`, `reason_of`; exhaustive matching with payload binders |
+| `core/vector.mncs` | `mncs.core.vector.v1` (Profile 0.8) | wrapping dot product, masked positive sum, and functional lane replacement |
+| `core/mask.mncs` | `mncs.core.mask.v1` (Profile 0.8) | bounded any/all/none predicate kernels |
+| `std/simd.mncs` | `mncs.std.simd.v1` (Profile 0.8) | explicit-intent affine/ReLU/reduction kernel |
 
 ## Current constraint: one module per file
 

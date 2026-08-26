@@ -14,6 +14,9 @@ pub const SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND: u32 = 32;
 /// (Source Profile 0.7). Bounds are semantic facts carried by types, so they
 /// must stay small enough to remain machine-checkable everywhere.
 pub const MAX_SEQUENCE_BOUND: u32 = 64;
+/// Semantic vectors and masks are deliberately bounded in the first Profile
+/// 0.8 tranche. Lane count is logical identity and never a register width.
+pub const MAX_VECTOR_LANES: u32 = 64;
 
 /// The declared length facts of a bounded sequence type. `Exact` sequences
 /// carry their length statically; `UpTo` views carry a maximum and a runtime
@@ -161,6 +164,17 @@ pub enum BodyType {
         element: Box<BodyType>,
         bound: SequenceBound,
     },
+    /// A machine-independent vector of logical lanes (Profile 0.8). This is
+    /// not a fixed sequence and does not prescribe a physical register count.
+    Vector {
+        element: Box<BodyType>,
+        lanes: u32,
+    },
+    /// A logical collection of lane predicates (Profile 0.8). Physical
+    /// realizations may be packed bits, vector booleans, or predicate state.
+    Mask {
+        lanes: u32,
+    },
     Finite {
         identity: SemanticId,
         name: String,
@@ -173,6 +187,12 @@ pub enum BodyType {
 
 impl BodyType {
     pub fn from_semantic_name(name: &str) -> Self {
+        if let Some(vector) = Self::parse_vector_name(name) {
+            return vector;
+        }
+        if let Some(mask) = Self::parse_mask_name(name) {
+            return mask;
+        }
         if let Some(sequence) = Self::parse_sequence_name(name) {
             return sequence;
         }
@@ -221,6 +241,33 @@ impl BodyType {
         }
     }
 
+    fn parse_vector_name(name: &str) -> Option<Self> {
+        let inner = name.strip_prefix("vec<")?.strip_suffix('>')?;
+        let separator = inner.rfind(',')?;
+        let element = Self::from_semantic_name(inner[..separator].trim());
+        if !matches!(element, Self::Integer(_)) {
+            return None;
+        }
+        let lanes = inner[separator + 1..].trim().parse::<u32>().ok()?;
+        if lanes == 0 || lanes > MAX_VECTOR_LANES {
+            return None;
+        }
+        Some(Self::Vector {
+            element: Box::new(element),
+            lanes,
+        })
+    }
+
+    fn parse_mask_name(name: &str) -> Option<Self> {
+        let lanes = name
+            .strip_prefix("mask<")?
+            .strip_suffix('>')?
+            .trim()
+            .parse::<u32>()
+            .ok()?;
+        (lanes > 0 && lanes <= MAX_VECTOR_LANES).then_some(Self::Mask { lanes })
+    }
+
     pub fn semantic_name(&self) -> String {
         match self {
             Self::Named(name) => name.clone(),
@@ -231,6 +278,10 @@ impl BodyType {
             Self::Sequence { element, bound } => {
                 format!("[{}; {}]", element.semantic_name(), bound.canonical_text())
             }
+            Self::Vector { element, lanes } => {
+                format!("vec<{}, {lanes}>", element.semantic_name())
+            }
+            Self::Mask { lanes } => format!("mask<{lanes}>"),
             Self::Finite { name, .. } => name.clone(),
             Self::Record { name, .. } => name.clone(),
         }
@@ -306,6 +357,77 @@ pub enum BodyOperationKind {
     /// Byte comparison (Profile 0.7): unsigned 8-bit ordering/equality.
     ByteCompare {
         predicate: String,
+    },
+    /// Semantic conditional selection (Profile 0.8). Operand 0 is a bool
+    /// condition; operands 1 and 2 are the candidate values of the declared
+    /// operand type. Both candidates are *values* of one pure selection
+    /// operation: neither is "executed after" the other, and no control-flow
+    /// divergence between them is part of the meaning. Total by definition.
+    /// The operation carries machine intent requesting that realization
+    /// preserve selection without introducing data-dependent branch
+    /// divergence; whether a backend met that request is decided by
+    /// structural evidence, never assumed.
+    Select {
+        operand_type: Box<BodyType>,
+    },
+    /// Total functional sequence update (Profile 0.8): produce a new
+    /// sequence equal to operand 0 except the element at operand 1's index,
+    /// which becomes operand 2. Value semantics: the source sequence value
+    /// is unchanged and no aliasing is created. Restricted to exact bounds
+    /// this tranche; views refuse with a coded diagnostic. Index validity
+    /// follows the same three-state evidence model as projection.
+    SequenceReplace {
+        element_type: Box<BodyType>,
+        bound: SequenceBound,
+        evidence: BoundsEvidence,
+    },
+    VectorConstruct {
+        element_type: Box<BodyType>,
+        lanes: u32,
+    },
+    VectorSplat {
+        element_type: Box<BodyType>,
+        lanes: u32,
+    },
+    VectorExtract {
+        element_type: Box<BodyType>,
+        lanes: u32,
+        evidence: BoundsEvidence,
+    },
+    VectorReplace {
+        element_type: Box<BodyType>,
+        lanes: u32,
+        evidence: BoundsEvidence,
+    },
+    /// Lane-wise integer operation. Arithmetic intent applies independently
+    /// to every lane; one checked/trapping failure fails the whole operation.
+    VectorBinary {
+        operator: String,
+        element_type: Box<BodyType>,
+        lanes: u32,
+        intent: ArithmeticIntent,
+    },
+    VectorCompare {
+        predicate: String,
+        element_type: Box<BodyType>,
+        lanes: u32,
+    },
+    MaskBinary {
+        operator: String,
+        lanes: u32,
+    },
+    MaskNot {
+        lanes: u32,
+    },
+    MaskReduce {
+        operator: String,
+        lanes: u32,
+    },
+    VectorReduce {
+        operator: String,
+        element_type: Box<BodyType>,
+        lanes: u32,
+        intent: ArithmeticIntent,
     },
     /// Explicit total scalar conversion (Profile 0.7). Truncation drops high
     /// bits; widening extends by the *source* signedness (`byte` zero-extends).
@@ -1273,6 +1395,363 @@ fn validate_operation(
             {
                 // Views always check against their runtime length; evidence is
                 // recorded but never claims static validity for views.
+            }
+        }
+        BodyOperationKind::Select { operand_type } => {
+            if operation.operands.len() != 3 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB102",
+                    path.to_owned(),
+                    "selection requires a condition, two candidate values, and one result",
+                ));
+                return;
+            }
+            let condition_type = match operand_type.as_ref() {
+                BodyType::Vector { lanes, .. } => BodyType::Mask { lanes: *lanes },
+                _ => BodyType::Named("bool".to_owned()),
+            };
+            if available.get(operation.operands[0].as_str()) != Some(&condition_type) {
+                errors.push(body_diagnostic(
+                    "MNB103",
+                    format!("{path}.operands[0]"),
+                    "selection condition must be bool, or a lane-matched mask for vectors",
+                ));
+            }
+            for (index, operand) in operation.operands[1..3].iter().enumerate() {
+                if available.get(operand) != Some(operand_type.as_ref()) {
+                    errors.push(body_diagnostic(
+                        "MNB104",
+                        format!("{path}.operands[{}]", index + 1),
+                        "selection candidates must have the declared operand type",
+                    ));
+                }
+            }
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| &result.ty != operand_type.as_ref())
+            {
+                errors.push(body_diagnostic(
+                    "MNB105",
+                    format!("{path}.results"),
+                    "selection result must have the declared operand type",
+                ));
+            }
+        }
+        BodyOperationKind::SequenceReplace {
+            element_type,
+            bound,
+            evidence,
+        } => {
+            if matches!(bound, SequenceBound::UpTo(_)) {
+                errors.push(body_diagnostic(
+                    "MNB106",
+                    format!("{path}.kind.bound"),
+                    "functional sequence update requires an exact bound this tranche; views refuse",
+                ));
+            }
+            if operation.operands.len() != 3 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB107",
+                    path.to_owned(),
+                    "functional sequence update requires a sequence, an index, an element, and one result",
+                ));
+            }
+            let counter_type = BodyType::Integer(IntegerType {
+                bits: 64,
+                signed: false,
+            });
+            if available.get(operation.operands.get(1).unwrap_or(&String::new()))
+                != Some(&counter_type)
+            {
+                errors.push(body_diagnostic(
+                    "MNB108",
+                    format!("{path}.operands[1]"),
+                    "functional update index must have u64 type",
+                ));
+            }
+            if available.get(operation.operands.get(2).unwrap_or(&String::new()))
+                != Some(element_type.as_ref())
+            {
+                errors.push(body_diagnostic(
+                    "MNB109",
+                    format!("{path}.operands[2]"),
+                    "functional update element does not have the declared element type",
+                ));
+            }
+            let expected_sequence = BodyType::Sequence {
+                element: element_type.clone(),
+                bound: *bound,
+            };
+            if available.get(operation.operands.first().unwrap_or(&String::new()))
+                != Some(&expected_sequence)
+            {
+                errors.push(body_diagnostic(
+                    "MNB110",
+                    format!("{path}.operands[0]"),
+                    "functional update source does not have the declared bounded-sequence type",
+                ));
+            }
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| result.ty != expected_sequence)
+            {
+                errors.push(body_diagnostic(
+                    "MNB111",
+                    format!("{path}.results"),
+                    "functional update result does not preserve the source bounded-sequence type",
+                ));
+            }
+            let _ = evidence;
+        }
+        BodyOperationKind::VectorConstruct {
+            element_type,
+            lanes,
+        } => {
+            let vector = BodyType::Vector {
+                element: element_type.clone(),
+                lanes: *lanes,
+            };
+            if *lanes == 0
+                || *lanes > MAX_VECTOR_LANES
+                || operation.operands.len() != *lanes as usize
+                || operation.results.len() != 1
+                || operation
+                    .operands
+                    .iter()
+                    .any(|operand| available.get(operand) != Some(element_type.as_ref()))
+                || operation
+                    .results
+                    .first()
+                    .is_none_or(|result| result.ty != vector)
+            {
+                errors.push(body_diagnostic("MNB112", path.to_owned(), "vector construction must have one correctly typed operand per bounded lane and one matching vector result"));
+            }
+        }
+        BodyOperationKind::VectorSplat {
+            element_type,
+            lanes,
+        } => {
+            let vector = BodyType::Vector {
+                element: element_type.clone(),
+                lanes: *lanes,
+            };
+            if operation.operands.len() != 1
+                || operation.results.len() != 1
+                || available.get(operation.operands.first().unwrap_or(&String::new()))
+                    != Some(element_type.as_ref())
+                || operation
+                    .results
+                    .first()
+                    .is_none_or(|result| result.ty != vector)
+            {
+                errors.push(body_diagnostic(
+                    "MNB113",
+                    path.to_owned(),
+                    "vector splat requires one element and one matching vector result",
+                ));
+            }
+        }
+        BodyOperationKind::VectorExtract {
+            element_type,
+            lanes,
+            ..
+        } => {
+            let vector = BodyType::Vector {
+                element: element_type.clone(),
+                lanes: *lanes,
+            };
+            let counter = BodyType::Integer(IntegerType {
+                bits: 64,
+                signed: false,
+            });
+            if operation.operands.len() != 2
+                || operation.results.len() != 1
+                || available.get(operation.operands.first().unwrap_or(&String::new()))
+                    != Some(&vector)
+                || available.get(operation.operands.get(1).unwrap_or(&String::new()))
+                    != Some(&counter)
+                || operation
+                    .results
+                    .first()
+                    .is_none_or(|result| &result.ty != element_type.as_ref())
+            {
+                errors.push(body_diagnostic("MNB114", path.to_owned(), "vector extraction requires a vector, u64 lane index, and matching element result"));
+            }
+        }
+        BodyOperationKind::VectorReplace {
+            element_type,
+            lanes,
+            ..
+        } => {
+            let vector = BodyType::Vector {
+                element: element_type.clone(),
+                lanes: *lanes,
+            };
+            let counter = BodyType::Integer(IntegerType {
+                bits: 64,
+                signed: false,
+            });
+            if operation.operands.len() != 3
+                || operation.results.len() != 1
+                || available.get(operation.operands.first().unwrap_or(&String::new()))
+                    != Some(&vector)
+                || available.get(operation.operands.get(1).unwrap_or(&String::new()))
+                    != Some(&counter)
+                || available.get(operation.operands.get(2).unwrap_or(&String::new()))
+                    != Some(element_type.as_ref())
+                || operation
+                    .results
+                    .first()
+                    .is_none_or(|result| result.ty != vector)
+            {
+                errors.push(body_diagnostic(
+                    "MNB115",
+                    path.to_owned(),
+                    "vector replacement must preserve vector type and use a u64 lane index",
+                ));
+            }
+        }
+        BodyOperationKind::VectorBinary {
+            operator,
+            element_type,
+            lanes,
+            ..
+        } => {
+            let vector = BodyType::Vector {
+                element: element_type.clone(),
+                lanes: *lanes,
+            };
+            if !matches!(element_type.as_ref(), BodyType::Integer(_))
+                || !matches!(
+                    operator.as_str(),
+                    "add" | "sub" | "mul" | "and" | "or" | "xor" | "shl" | "shr" | "min" | "max"
+                )
+                || operation.operands.len() != 2
+                || operation.results.len() != 1
+                || operation
+                    .operands
+                    .iter()
+                    .any(|operand| available.get(operand) != Some(&vector))
+                || operation
+                    .results
+                    .first()
+                    .is_none_or(|result| result.ty != vector)
+            {
+                errors.push(body_diagnostic("MNB116", path.to_owned(), "vector binary operation requires two identical integer vectors and one matching result"));
+            }
+        }
+        BodyOperationKind::VectorCompare {
+            predicate,
+            element_type,
+            lanes,
+        } => {
+            let vector = BodyType::Vector {
+                element: element_type.clone(),
+                lanes: *lanes,
+            };
+            let mask = BodyType::Mask { lanes: *lanes };
+            if !matches!(element_type.as_ref(), BodyType::Integer(_))
+                || !matches!(predicate.as_str(), "eq" | "ne" | "lt" | "le" | "gt" | "ge")
+                || operation.operands.len() != 2
+                || operation.results.len() != 1
+                || operation
+                    .operands
+                    .iter()
+                    .any(|operand| available.get(operand) != Some(&vector))
+                || operation
+                    .results
+                    .first()
+                    .is_none_or(|result| result.ty != mask)
+            {
+                errors.push(body_diagnostic("MNB117", path.to_owned(), "vector comparison requires matching integer vectors and produces a lane-matched mask"));
+            }
+        }
+        BodyOperationKind::MaskBinary { operator, lanes } => {
+            let mask = BodyType::Mask { lanes: *lanes };
+            if !matches!(operator.as_str(), "and" | "or" | "xor")
+                || operation.operands.len() != 2
+                || operation.results.len() != 1
+                || operation
+                    .operands
+                    .iter()
+                    .any(|operand| available.get(operand) != Some(&mask))
+                || operation
+                    .results
+                    .first()
+                    .is_none_or(|result| result.ty != mask)
+            {
+                errors.push(body_diagnostic(
+                    "MNB118",
+                    path.to_owned(),
+                    "mask binary operation requires matching masks and preserves lane count",
+                ));
+            }
+        }
+        BodyOperationKind::MaskNot { lanes } => {
+            let mask = BodyType::Mask { lanes: *lanes };
+            if operation.operands.len() != 1
+                || operation.results.len() != 1
+                || available.get(operation.operands.first().unwrap_or(&String::new()))
+                    != Some(&mask)
+                || operation
+                    .results
+                    .first()
+                    .is_none_or(|result| result.ty != mask)
+            {
+                errors.push(body_diagnostic(
+                    "MNB119",
+                    path.to_owned(),
+                    "mask not requires one mask and preserves lane count",
+                ));
+            }
+        }
+        BodyOperationKind::MaskReduce { operator, lanes } => {
+            let mask = BodyType::Mask { lanes: *lanes };
+            let boolean = BodyType::Named("bool".to_owned());
+            if !matches!(operator.as_str(), "any" | "all" | "none")
+                || operation.operands.len() != 1
+                || operation.results.len() != 1
+                || available.get(operation.operands.first().unwrap_or(&String::new()))
+                    != Some(&mask)
+                || operation
+                    .results
+                    .first()
+                    .is_none_or(|result| result.ty != boolean)
+            {
+                errors.push(body_diagnostic(
+                    "MNB120",
+                    path.to_owned(),
+                    "mask reduction requires one mask and produces bool",
+                ));
+            }
+        }
+        BodyOperationKind::VectorReduce {
+            operator,
+            element_type,
+            lanes,
+            ..
+        } => {
+            let vector = BodyType::Vector {
+                element: element_type.clone(),
+                lanes: *lanes,
+            };
+            if !matches!(operator.as_str(), "sum" | "min" | "max")
+                || operation.operands.len() != 1
+                || operation.results.len() != 1
+                || available.get(operation.operands.first().unwrap_or(&String::new()))
+                    != Some(&vector)
+                || operation
+                    .results
+                    .first()
+                    .is_none_or(|result| &result.ty != element_type.as_ref())
+            {
+                errors.push(body_diagnostic(
+                    "MNB121",
+                    path.to_owned(),
+                    "vector reduction requires one integer vector and produces one element",
+                ));
             }
         }
         BodyOperationKind::SequenceLength { .. } => {

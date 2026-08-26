@@ -1,0 +1,23 @@
+mncs 0.8;
+
+// mncs.core.mask — logical predicate composition over four bounded lanes.
+module mncs.core.mask.v1;
+
+fn any_negative4(a: i32, b: i32, c: i32, d: i32) -> (result: bool) {
+    let values: vec<i32, 4> = vector(a, b, c, d);
+    let zero: vec<i32, 4> = splat(0);
+    let negative: mask<4> = vec_lt(values, zero);
+    return mask_any(negative);
+}
+
+fn all_nonzero4(a: i32, b: i32, c: i32, d: i32) -> (result: bool) {
+    let values: vec<i32, 4> = vector(a, b, c, d);
+    let zero: vec<i32, 4> = splat(0);
+    return mask_all(vec_ne(values, zero));
+}
+
+fn none_negative4(a: i32, b: i32, c: i32, d: i32) -> (result: bool) {
+    let values: vec<i32, 4> = vector(a, b, c, d);
+    let zero: vec<i32, 4> = splat(0);
+    return mask_none(vec_lt(values, zero));
+}

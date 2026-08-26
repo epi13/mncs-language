@@ -21,6 +21,7 @@ mod machine_intent;
 mod obligations;
 mod provenance;
 mod refinement;
+mod representation;
 mod ssa;
 mod ssa_execution;
 mod translation;
@@ -32,7 +33,7 @@ pub use body::{
     BodyParameter, BodyTerminator, BodyType, BodyValue, BoundedIterationCompletion, BoundsEvidence,
     FunctionBody, IterationDomain, LoweringEnvelope, MachineIntentSpec, PortabilityEnvelope,
     PortabilityTarget, RealizationClass, SequenceBound, EXECUTABLE_BODY_SCHEMA_VERSION,
-    MAX_SEQUENCE_BOUND, SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
+    MAX_SEQUENCE_BOUND, MAX_VECTOR_LANES, SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
 };
 pub use canonical::{CanonicalError, CanonicalForm, CANONICAL_SCHEMA_VERSION};
 pub use cfg::{Cfg, CfgBlock, CFG_SCHEMA_VERSION};
@@ -101,10 +102,10 @@ pub use ir::{
 };
 pub use machine_intent::{
     arithmetic_result_type, minimum_widening_bits, AlignmentCapability, ArithmeticIntent,
-    BackendPromise, BackendPromiseCertificate, BackendPromiseDecision, Fact, HighLevelIrNode,
-    IntegerEvaluation, IntegerOperation, IntegerType, Intent, MachineIntentExpression,
-    MachinePreference, Obligation, ObligationStatus, Preference, Requirement,
-    BACKEND_PROMISE_CERTIFICATE_SCHEMA_VERSION,
+    BackendPromise, BackendPromiseCertificate, BackendPromiseDecision, DisjointCapability, Fact,
+    HighLevelIrNode, IntegerEvaluation, IntegerOperation, IntegerType, Intent,
+    MachineIntentExpression, MachinePreference, MemoryRange, Obligation, ObligationStatus,
+    Preference, Requirement, BACKEND_PROMISE_CERTIFICATE_SCHEMA_VERSION,
 };
 pub use obligations::{
     generate_machine_intent_obligations, ObligationGeneration, ObligationRecord,
@@ -119,6 +120,10 @@ pub use refinement::{
     PatchOperation, PromotionDecision, PromotionDisposition, ProtectedPropertyEvaluation,
     ProtectedPropertyResult, ProtectedPropertyStatus, RefinementBudget, RefinementError,
     RepairProposal, ResourceLimits, SemanticChange, SemanticPatch, VerificationPlan,
+};
+pub use representation::{
+    select_representation, LayoutFamily, RepresentationCandidate, RepresentationContext,
+    RepresentationDecision, RepresentationObservation, SpatialFacts,
 };
 pub use ssa::{
     SsaBlock, SsaBoundedIteration, SsaDiagnostic, SsaError, SsaFunction, SsaInstruction,

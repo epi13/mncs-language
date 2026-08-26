@@ -341,6 +341,71 @@ impl AlignmentCapability {
     }
 }
 
+/// One bounded region in a stable allocation epoch. Offsets are half-open
+/// byte ranges; the epoch prevents evidence from surviving reallocation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryRange {
+    pub region: SemanticId,
+    pub epoch: SemanticId,
+    pub start: u64,
+    pub end: u64,
+}
+
+/// Evidence that two exact ranges are disjoint. This is not a general alias
+/// assertion: it is valid only for the recorded regions, offsets, and epoch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisjointCapability {
+    pub identity: SemanticId,
+    pub left: MemoryRange,
+    pub right: MemoryRange,
+    pub scope: String,
+    pub evidence: Obligation,
+}
+
+impl DisjointCapability {
+    pub fn permits(&self, left: &MemoryRange, right: &MemoryRange, scope: &str) -> bool {
+        let exact_pair = (self.left == *left && self.right == *right)
+            || (self.left == *right && self.right == *left);
+        exact_pair
+            && self.scope == scope
+            && self.evidence.subject == self.identity
+            && self.evidence.freshness == EvidenceFreshness::Current
+            && self.evidence.status == ObligationStatus::Pass
+    }
+
+    /// Establish the deliberately narrow static case: two well-formed ranges
+    /// in one allocation epoch whose half-open offsets do not overlap.
+    pub fn derive_static(left: MemoryRange, right: MemoryRange, scope: String) -> Self {
+        let separated = left.start <= left.end
+            && right.start <= right.end
+            && left.region == right.region
+            && left.epoch == right.epoch
+            && (left.end <= right.start || right.end <= left.start);
+        let identity = SemanticId(format!(
+            "mncs:capability:disjoint:{}:{}:{}:{}:{}",
+            left.region.0, left.epoch.0, left.start, left.end, right.start
+        ));
+        Self {
+            evidence: Obligation {
+                identity: SemanticId(format!("{}:evidence", identity.0)),
+                subject: identity.clone(),
+                requirement: SemanticId(format!("{}:requirement", identity.0)),
+                status: if separated {
+                    ObligationStatus::Pass
+                } else {
+                    ObligationStatus::Fail
+                },
+                freshness: EvidenceFreshness::Current,
+                method: "exact-static-half-open-range-separation-v0.1".to_owned(),
+            },
+            identity,
+            left,
+            right,
+            scope,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MachineIntentExpression {
     pub operation: IntegerOperation,
@@ -396,6 +461,13 @@ pub enum BackendPromise {
     TrappingArithmetic,
     WrappingArithmetic,
     Relaxation,
+    /// The realization of a selection preserves its semantics without
+    /// data-dependent branch divergence between candidates. This promise is
+    /// never granted by lowering alone: it requires independent structural
+    /// evidence about the emitted artifact (opcode/IR inspection by a
+    /// separate verifier), and stays UNKNOWN where final native control
+    /// flow is unobservable.
+    BranchlessRealization,
 }
 
 pub const BACKEND_PROMISE_CERTIFICATE_SCHEMA_VERSION: &str = "0.1";
@@ -492,6 +564,7 @@ impl BackendPromiseDecision {
             BackendPromise::TrappingArithmetic => "trapping-arithmetic",
             BackendPromise::WrappingArithmetic => "wrapping-arithmetic",
             BackendPromise::Relaxation => "relaxation",
+            BackendPromise::BranchlessRealization => "realization-branchless",
         };
         let required = obligations.iter().find(|obligation| {
             obligation.subject == *subject && obligation.requirement.0.ends_with(suffix)
@@ -819,5 +892,30 @@ mod tests {
         assert!(capability.permits(&subject, "call:one", 32));
         assert!(!capability.permits(&SemanticId("allocation:b".to_owned()), "call:one", 32));
         assert!(!capability.permits(&subject, "call:two", 32));
+    }
+
+    #[test]
+    fn static_disjointness_is_exact_to_ranges_and_epoch() {
+        let region = SemanticId("allocation:particles".to_owned());
+        let epoch = SemanticId("epoch:7".to_owned());
+        let left = MemoryRange {
+            region: region.clone(),
+            epoch: epoch.clone(),
+            start: 0,
+            end: 64,
+        };
+        let right = MemoryRange {
+            region,
+            epoch,
+            start: 64,
+            end: 128,
+        };
+        let capability =
+            DisjointCapability::derive_static(left.clone(), right.clone(), "kernel:one".to_owned());
+        assert_eq!(capability.evidence.status, ObligationStatus::Pass);
+        assert!(capability.permits(&left, &right, "kernel:one"));
+        let mut moved = right;
+        moved.start = 32;
+        assert!(!capability.permits(&left, &moved, "kernel:one"));
     }
 }

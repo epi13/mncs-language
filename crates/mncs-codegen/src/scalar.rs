@@ -33,6 +33,9 @@ pub enum ScalarTy {
     /// 32 bits hold the source cell offset, the high 32 bits the runtime
     /// length. One valid representation among possible realizations.
     View,
+    /// One packed-bits realization of a semantic mask. Lane identity remains
+    /// in SSA operation metadata; this physical choice is backend-local.
+    Mask(u32),
 }
 
 impl ScalarTy {
@@ -165,6 +168,31 @@ pub enum ScalarInst {
         source: SemanticId,
         start: SemanticId,
         end: SemanticId,
+    },
+    /// Semantic conditional selection (Profile 0.8). Both candidates are
+    /// values of one pure selection; every realization of this instruction
+    /// is obligated to avoid data-dependent branch divergence between them.
+    /// Whether each backend met that obligation is decided by independent
+    /// structural verification, never by this lowering's self-report.
+    Select {
+        dest: ScalarValue,
+        condition: SemanticId,
+        when_true: SemanticId,
+        when_false: SemanticId,
+    },
+    /// Total functional sequence update over an exact bound (Profile 0.8):
+    /// allocate a new cell, copy the source slots, store the replacement
+    /// element at the (dynamically checked when required) index. The source
+    /// cell is never written.
+    SequenceReplace {
+        dest: ScalarValue,
+        source: SemanticId,
+        index: SemanticId,
+        element: SemanticId,
+        bound: mncs_model::SequenceBound,
+        evidence: mncs_model::BoundsEvidence,
+        length: u32,
+        element_width: SlotWidth,
     },
     /// One source instruction lowered into an ordered group of cell
     /// operations (allocation followed by canonical field stores).
@@ -540,6 +568,54 @@ fn lower_instruction(
             dest,
             seq: operand(instruction, 0)?,
         }),
+        SsaInstructionKind::Select { operand_type } => {
+            // The branchless promise is recorded as *requested but not yet
+            // evidenced*: obligations start UNKNOWN and only independent
+            // structural verification of an emitted artifact may discharge
+            // them. Lowering never certifies its own realization.
+            let decisions = crate::promises::branchless_promise_decisions(module, instruction);
+            for decision in &decisions {
+                promises.push(format!(
+                    "branchless_realization requested (status {:?})",
+                    decision
+                        .evidence_status
+                        .unwrap_or(mncs_model::ObligationStatus::Unknown)
+                ));
+                promise_decisions.push(decision.clone());
+            }
+            if let BodyType::Vector { element, lanes } = operand_type {
+                lower_vector_select(module, instruction, dest, element, *lanes, layout)
+            } else {
+                Ok(ScalarInst::Select {
+                    dest,
+                    condition: operand(instruction, 0)?,
+                    when_true: operand(instruction, 1)?,
+                    when_false: operand(instruction, 2)?,
+                })
+            }
+        }
+        SsaInstructionKind::SequenceReplace {
+            element_type,
+            bound,
+            evidence,
+            ..
+        } => {
+            let mncs_model::SequenceBound::Exact(length) = bound else {
+                return Err("functional sequence update requires an exact bound".to_owned());
+            };
+            let element_ty = scalar_ty_in(&ir_type_of(element_type), layout)?;
+            let width = slot_width_of(element_ty);
+            Ok(ScalarInst::SequenceReplace {
+                dest,
+                source: operand(instruction, 0)?,
+                index: operand(instruction, 1)?,
+                element: operand(instruction, 2)?,
+                bound: *bound,
+                evidence: evidence.clone(),
+                length: *length,
+                element_width: width,
+            })
+        }
         SsaInstructionKind::ViewConstruct {
             source_bound,
             view_bound,
@@ -559,6 +635,154 @@ fn lower_instruction(
                 end: operand(instruction, 2)?,
             })
         }
+        SsaInstructionKind::VectorConstruct {
+            element_type,
+            lanes,
+        } => lower_vector_construct(instruction, dest, element_type, *lanes, layout),
+        SsaInstructionKind::VectorSplat {
+            element_type,
+            lanes,
+        } => lower_vector_splat(instruction, dest, element_type, *lanes, layout),
+        SsaInstructionKind::VectorExtract {
+            element_type,
+            lanes,
+            evidence,
+        } => {
+            let width = vector_element_width(element_type, layout)?;
+            Ok(ScalarInst::SequenceProject {
+                dest,
+                seq: operand(instruction, 0)?,
+                index: operand(instruction, 1)?,
+                bound: mncs_model::SequenceBound::Exact(*lanes),
+                evidence: evidence.clone(),
+                width,
+            })
+        }
+        SsaInstructionKind::VectorReplace {
+            element_type,
+            lanes,
+            evidence,
+        } => {
+            let width = vector_element_width(element_type, layout)?;
+            Ok(ScalarInst::SequenceReplace {
+                dest,
+                source: operand(instruction, 0)?,
+                index: operand(instruction, 1)?,
+                element: operand(instruction, 2)?,
+                bound: mncs_model::SequenceBound::Exact(*lanes),
+                evidence: evidence.clone(),
+                length: *lanes,
+                element_width: width,
+            })
+        }
+        SsaInstructionKind::VectorBinary {
+            operator,
+            element_type,
+            lanes,
+            intent,
+        } => lower_vector_binary(
+            module,
+            instruction,
+            dest,
+            operator,
+            element_type,
+            *lanes,
+            *intent,
+            layout,
+        ),
+        SsaInstructionKind::VectorCompare {
+            predicate,
+            element_type,
+            lanes,
+        } => lower_vector_compare(
+            module,
+            instruction,
+            dest,
+            predicate,
+            element_type,
+            *lanes,
+            layout,
+        ),
+        SsaInstructionKind::MaskBinary { operator, lanes: _ } => {
+            let promise = integer_no_overflow_promise(module, instruction);
+            Ok(ScalarInst::Integer {
+                dest,
+                operator: operator.clone(),
+                intent: ArithmeticIntent::Wrapping,
+                lhs: operand(instruction, 0)?,
+                rhs: operand(instruction, 1)?,
+                promise: Box::new(promise),
+            })
+        }
+        SsaInstructionKind::MaskNot { lanes } => {
+            let limit = mask_limit(*lanes);
+            let constant = temporary(instruction, "mask_limit", ScalarTy::Mask(*lanes));
+            let promise = integer_no_overflow_promise(module, instruction);
+            Ok(ScalarInst::Sequence(vec![
+                ScalarInst::Const {
+                    dest: constant.clone(),
+                    value: i128::from(limit),
+                },
+                ScalarInst::Integer {
+                    dest,
+                    operator: "xor".to_owned(),
+                    intent: ArithmeticIntent::Wrapping,
+                    lhs: operand(instruction, 0)?,
+                    rhs: constant.id,
+                    promise: Box::new(promise),
+                },
+            ]))
+        }
+        SsaInstructionKind::MaskReduce { operator, lanes } => {
+            let expected = if operator == "all" {
+                mask_limit(*lanes)
+            } else {
+                0
+            };
+            let constant = temporary(
+                instruction,
+                "mask_reduce_rhs",
+                ScalarTy::Int(IntegerType {
+                    bits: 64,
+                    signed: false,
+                }),
+            );
+            Ok(ScalarInst::Sequence(vec![
+                ScalarInst::Const {
+                    dest: constant.clone(),
+                    value: i128::from(expected),
+                },
+                ScalarInst::Compare {
+                    dest,
+                    predicate: if operator == "any" {
+                        "ne".to_owned()
+                    } else {
+                        "eq".to_owned()
+                    },
+                    operand: IntegerType {
+                        bits: 64,
+                        signed: false,
+                    },
+                    lhs: operand(instruction, 0)?,
+                    rhs: constant.id,
+                },
+            ]))
+        }
+        SsaInstructionKind::VectorReduce {
+            operator,
+            element_type,
+            lanes,
+            intent,
+        } => lower_vector_reduce(
+            module,
+            instruction,
+            dest,
+            operator,
+            element_type,
+            *lanes,
+            *intent,
+            layout,
+        ),
         SsaInstructionKind::FinitePayloadProject {
             type_identity,
             discriminant,
@@ -665,6 +889,431 @@ fn lower_instruction(
     }
 }
 
+fn temporary(instruction: &SsaInstruction, suffix: &str, ty: ScalarTy) -> ScalarValue {
+    ScalarValue {
+        id: SemanticId(format!("{}:scalar:{suffix}", instruction.identity.0)),
+        ty,
+    }
+}
+
+fn vector_element(
+    element: &BodyType,
+    layout: &CompositeLayout,
+) -> Result<(ScalarTy, SlotWidth, IntegerType), String> {
+    let BodyType::Integer(integer) = element else {
+        return Err("initial scalar vector realization supports integer lanes only".to_owned());
+    };
+    let ty = scalar_ty_in(&ir_type_of(element), layout)?;
+    Ok((ty, slot_width_of(ty), *integer))
+}
+
+fn vector_element_width(element: &BodyType, layout: &CompositeLayout) -> Result<SlotWidth, String> {
+    vector_element(element, layout).map(|(_, width, _)| width)
+}
+
+fn mask_limit(lanes: u32) -> u64 {
+    if lanes >= 64 {
+        u64::MAX
+    } else {
+        (1_u64 << lanes) - 1
+    }
+}
+
+fn lower_vector_construct(
+    instruction: &SsaInstruction,
+    dest: ScalarValue,
+    element: &BodyType,
+    lanes: u32,
+    layout: &CompositeLayout,
+) -> Result<ScalarInst, String> {
+    let (_, width, _) = vector_element(element, layout)?;
+    if instruction.inputs.len() != lanes as usize {
+        return Err("vector construction does not match its declared lane count".to_owned());
+    }
+    let mut insts = vec![ScalarInst::CellAlloc {
+        dest: dest.clone(),
+        bytes: u64::from(lanes) * 8,
+    }];
+    for lane in 0..lanes {
+        insts.push(ScalarInst::CellStore {
+            cell: dest.id.clone(),
+            byte_offset: u64::from(lane) * 8,
+            width,
+            value: operand(instruction, lane as usize)?,
+        });
+    }
+    Ok(ScalarInst::Sequence(insts))
+}
+
+fn lower_vector_splat(
+    instruction: &SsaInstruction,
+    dest: ScalarValue,
+    element: &BodyType,
+    lanes: u32,
+    layout: &CompositeLayout,
+) -> Result<ScalarInst, String> {
+    let (_, width, _) = vector_element(element, layout)?;
+    let value = operand(instruction, 0)?;
+    let mut insts = vec![ScalarInst::CellAlloc {
+        dest: dest.clone(),
+        bytes: u64::from(lanes) * 8,
+    }];
+    for lane in 0..lanes {
+        insts.push(ScalarInst::CellStore {
+            cell: dest.id.clone(),
+            byte_offset: u64::from(lane) * 8,
+            width,
+            value: value.clone(),
+        });
+    }
+    Ok(ScalarInst::Sequence(insts))
+}
+
+fn lower_vector_select(
+    module: &SsaModule,
+    instruction: &SsaInstruction,
+    dest: ScalarValue,
+    element: &BodyType,
+    lanes: u32,
+    layout: &CompositeLayout,
+) -> Result<ScalarInst, String> {
+    let (element_ty, width, _) = vector_element(element, layout)?;
+    let mask = operand(instruction, 0)?;
+    let when_true = operand(instruction, 1)?;
+    let when_false = operand(instruction, 2)?;
+    let mut insts = vec![ScalarInst::CellAlloc {
+        dest: dest.clone(),
+        bytes: u64::from(lanes) * 8,
+    }];
+    for lane in 0..lanes {
+        let true_lane = temporary(instruction, &format!("select_true_{lane}"), element_ty);
+        let false_lane = temporary(instruction, &format!("select_false_{lane}"), element_ty);
+        let count = temporary(
+            instruction,
+            &format!("select_count_{lane}"),
+            ScalarTy::Int(IntegerType {
+                bits: 64,
+                signed: false,
+            }),
+        );
+        let shifted = temporary(
+            instruction,
+            &format!("select_shift_{lane}"),
+            ScalarTy::Mask(lanes),
+        );
+        let one = temporary(
+            instruction,
+            &format!("select_one_{lane}"),
+            ScalarTy::Mask(lanes),
+        );
+        let active = temporary(
+            instruction,
+            &format!("select_active_{lane}"),
+            ScalarTy::Mask(lanes),
+        );
+        let selected = temporary(instruction, &format!("select_lane_{lane}"), element_ty);
+        let promise = integer_no_overflow_promise(module, instruction);
+        insts.extend([
+            ScalarInst::CellLoad {
+                dest: true_lane.clone(),
+                cell: when_true.clone(),
+                byte_offset: u64::from(lane) * 8,
+                width,
+            },
+            ScalarInst::CellLoad {
+                dest: false_lane.clone(),
+                cell: when_false.clone(),
+                byte_offset: u64::from(lane) * 8,
+                width,
+            },
+            ScalarInst::Const {
+                dest: count.clone(),
+                value: i128::from(lane),
+            },
+            ScalarInst::Integer {
+                dest: shifted.clone(),
+                operator: "shr".to_owned(),
+                intent: ArithmeticIntent::Wrapping,
+                lhs: mask.clone(),
+                rhs: count.id,
+                promise: Box::new(promise.clone()),
+            },
+            ScalarInst::Const {
+                dest: one.clone(),
+                value: 1,
+            },
+            ScalarInst::Integer {
+                dest: active.clone(),
+                operator: "and".to_owned(),
+                intent: ArithmeticIntent::Wrapping,
+                lhs: shifted.id,
+                rhs: one.id,
+                promise: Box::new(promise),
+            },
+            ScalarInst::Select {
+                dest: selected.clone(),
+                condition: active.id,
+                when_true: true_lane.id,
+                when_false: false_lane.id,
+            },
+            ScalarInst::CellStore {
+                cell: dest.id.clone(),
+                byte_offset: u64::from(lane) * 8,
+                width,
+                value: selected.id,
+            },
+        ]);
+    }
+    Ok(ScalarInst::Sequence(insts))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lower_vector_binary(
+    module: &SsaModule,
+    instruction: &SsaInstruction,
+    dest: ScalarValue,
+    operator: &str,
+    element: &BodyType,
+    lanes: u32,
+    intent: ArithmeticIntent,
+    layout: &CompositeLayout,
+) -> Result<ScalarInst, String> {
+    if matches!(intent, ArithmeticIntent::Widening { .. }) {
+        return Err("scalar vector widening awaits a distinct widened lane result type".to_owned());
+    }
+    let (element_ty, width, integer) = vector_element(element, layout)?;
+    let left = operand(instruction, 0)?;
+    let right = operand(instruction, 1)?;
+    let mut insts = vec![ScalarInst::CellAlloc {
+        dest: dest.clone(),
+        bytes: u64::from(lanes) * 8,
+    }];
+    for lane in 0..lanes {
+        let lhs = temporary(instruction, &format!("binary_lhs_{lane}"), element_ty);
+        let rhs = temporary(instruction, &format!("binary_rhs_{lane}"), element_ty);
+        let value = temporary(instruction, &format!("binary_value_{lane}"), element_ty);
+        insts.push(ScalarInst::CellLoad {
+            dest: lhs.clone(),
+            cell: left.clone(),
+            byte_offset: u64::from(lane) * 8,
+            width,
+        });
+        insts.push(ScalarInst::CellLoad {
+            dest: rhs.clone(),
+            cell: right.clone(),
+            byte_offset: u64::from(lane) * 8,
+            width,
+        });
+        if matches!(operator, "min" | "max") {
+            let condition = temporary(instruction, &format!("binary_cmp_{lane}"), ScalarTy::Bool);
+            insts.push(ScalarInst::Compare {
+                dest: condition.clone(),
+                predicate: if operator == "min" {
+                    "lt".to_owned()
+                } else {
+                    "gt".to_owned()
+                },
+                operand: integer,
+                lhs: lhs.id.clone(),
+                rhs: rhs.id.clone(),
+            });
+            insts.push(ScalarInst::Select {
+                dest: value.clone(),
+                condition: condition.id,
+                when_true: lhs.id,
+                when_false: rhs.id,
+            });
+        } else {
+            insts.push(ScalarInst::Integer {
+                dest: value.clone(),
+                operator: operator.to_owned(),
+                intent,
+                lhs: lhs.id,
+                rhs: rhs.id,
+                promise: Box::new(integer_no_overflow_promise(module, instruction)),
+            });
+        }
+        insts.push(ScalarInst::CellStore {
+            cell: dest.id.clone(),
+            byte_offset: u64::from(lane) * 8,
+            width,
+            value: value.id,
+        });
+    }
+    Ok(ScalarInst::Sequence(insts))
+}
+
+fn lower_vector_compare(
+    module: &SsaModule,
+    instruction: &SsaInstruction,
+    dest: ScalarValue,
+    predicate: &str,
+    element: &BodyType,
+    lanes: u32,
+    layout: &CompositeLayout,
+) -> Result<ScalarInst, String> {
+    let (element_ty, width, integer) = vector_element(element, layout)?;
+    let left = operand(instruction, 0)?;
+    let right = operand(instruction, 1)?;
+    let initial = temporary(instruction, "compare_mask_0", ScalarTy::Mask(lanes));
+    let mut accumulator = initial.clone();
+    let mut insts = vec![ScalarInst::Const {
+        dest: initial,
+        value: 0,
+    }];
+    for lane in 0..lanes {
+        let lhs = temporary(instruction, &format!("compare_lhs_{lane}"), element_ty);
+        let rhs = temporary(instruction, &format!("compare_rhs_{lane}"), element_ty);
+        let bit = temporary(
+            instruction,
+            &format!("compare_bit_{lane}"),
+            ScalarTy::Mask(lanes),
+        );
+        let count = temporary(
+            instruction,
+            &format!("compare_count_{lane}"),
+            ScalarTy::Int(IntegerType {
+                bits: 64,
+                signed: false,
+            }),
+        );
+        let shifted = temporary(
+            instruction,
+            &format!("compare_shifted_{lane}"),
+            ScalarTy::Mask(lanes),
+        );
+        let next = if lane + 1 == lanes {
+            dest.clone()
+        } else {
+            temporary(
+                instruction,
+                &format!("compare_mask_{}", lane + 1),
+                ScalarTy::Mask(lanes),
+            )
+        };
+        insts.extend([
+            ScalarInst::CellLoad {
+                dest: lhs.clone(),
+                cell: left.clone(),
+                byte_offset: u64::from(lane) * 8,
+                width,
+            },
+            ScalarInst::CellLoad {
+                dest: rhs.clone(),
+                cell: right.clone(),
+                byte_offset: u64::from(lane) * 8,
+                width,
+            },
+            ScalarInst::Compare {
+                dest: bit.clone(),
+                predicate: predicate.to_owned(),
+                operand: integer,
+                lhs: lhs.id,
+                rhs: rhs.id,
+            },
+            ScalarInst::Const {
+                dest: count.clone(),
+                value: i128::from(lane),
+            },
+            ScalarInst::Integer {
+                dest: shifted.clone(),
+                operator: "shl".to_owned(),
+                intent: ArithmeticIntent::Wrapping,
+                lhs: bit.id,
+                rhs: count.id,
+                promise: Box::new(integer_no_overflow_promise(module, instruction)),
+            },
+            ScalarInst::Integer {
+                dest: next.clone(),
+                operator: "or".to_owned(),
+                intent: ArithmeticIntent::Wrapping,
+                lhs: accumulator.id,
+                rhs: shifted.id,
+                promise: Box::new(integer_no_overflow_promise(module, instruction)),
+            },
+        ]);
+        accumulator = next;
+    }
+    Ok(ScalarInst::Sequence(insts))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lower_vector_reduce(
+    module: &SsaModule,
+    instruction: &SsaInstruction,
+    dest: ScalarValue,
+    operator: &str,
+    element: &BodyType,
+    lanes: u32,
+    intent: ArithmeticIntent,
+    layout: &CompositeLayout,
+) -> Result<ScalarInst, String> {
+    if lanes == 0 {
+        return Err("vector reduction requires at least one lane".to_owned());
+    }
+    let (element_ty, width, integer) = vector_element(element, layout)?;
+    let vector = operand(instruction, 0)?;
+    let first = if lanes == 1 {
+        dest.clone()
+    } else {
+        temporary(instruction, "reduce_acc_0", element_ty)
+    };
+    let mut insts = vec![ScalarInst::CellLoad {
+        dest: first.clone(),
+        cell: vector.clone(),
+        byte_offset: 0,
+        width,
+    }];
+    let mut accumulator = first;
+    for lane in 1..lanes {
+        let value = temporary(instruction, &format!("reduce_lane_{lane}"), element_ty);
+        let next = if lane + 1 == lanes {
+            dest.clone()
+        } else {
+            temporary(instruction, &format!("reduce_acc_{lane}"), element_ty)
+        };
+        insts.push(ScalarInst::CellLoad {
+            dest: value.clone(),
+            cell: vector.clone(),
+            byte_offset: u64::from(lane) * 8,
+            width,
+        });
+        if operator == "sum" {
+            insts.push(ScalarInst::Integer {
+                dest: next.clone(),
+                operator: "add".to_owned(),
+                intent,
+                lhs: accumulator.id,
+                rhs: value.id,
+                promise: Box::new(integer_no_overflow_promise(module, instruction)),
+            });
+        } else if matches!(operator, "min" | "max") {
+            let condition = temporary(instruction, &format!("reduce_cmp_{lane}"), ScalarTy::Bool);
+            insts.push(ScalarInst::Compare {
+                dest: condition.clone(),
+                predicate: if operator == "min" {
+                    "lt".to_owned()
+                } else {
+                    "gt".to_owned()
+                },
+                operand: integer,
+                lhs: accumulator.id.clone(),
+                rhs: value.id.clone(),
+            });
+            insts.push(ScalarInst::Select {
+                dest: next.clone(),
+                condition: condition.id,
+                when_true: accumulator.id,
+                when_false: value.id,
+            });
+        } else {
+            return Err(format!("unsupported vector reduction {operator}"));
+        }
+        accumulator = next;
+    }
+    Ok(ScalarInst::Sequence(insts))
+}
+
 fn lower_term(terminator: &SsaTerminator) -> Result<ScalarTerm, String> {
     Ok(match terminator {
         SsaTerminator::Return { values } => ScalarTerm::Return {
@@ -746,6 +1395,8 @@ pub fn scalar_ty_in(ty: &IrType, layout: &CompositeLayout) -> Result<ScalarTy, S
                 bound: mncs_model::SequenceBound::UpTo(_),
                 ..
             } => Ok(ScalarTy::View),
+            BodyType::Vector { .. } => Ok(ScalarTy::Cell),
+            BodyType::Mask { lanes } => Ok(ScalarTy::Mask(lanes)),
             _ => Err(format!("unsupported SSA type {name}")),
         },
     }
@@ -754,7 +1405,7 @@ pub fn scalar_ty_in(ty: &IrType, layout: &CompositeLayout) -> Result<ScalarTy, S
 pub fn abi_bits(ty: ScalarTy) -> u16 {
     match ty {
         // Cell references and packed view descriptors are full 64-bit values.
-        ScalarTy::Cell | ScalarTy::View => 64,
+        ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => 64,
         ScalarTy::Bool | ScalarTy::Finite => 32,
         ScalarTy::Byte => 8,
         ScalarTy::Int(integer) => integer.bits.clamp(32, 64),
@@ -765,7 +1416,7 @@ pub fn c_type(ty: ScalarTy) -> &'static str {
     match ty {
         // Cell references are unsigned byte offsets into the arena; view
         // descriptors pack offset and length into one unsigned word.
-        ScalarTy::Cell | ScalarTy::View => "uint64_t",
+        ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => "uint64_t",
         ScalarTy::Byte => "uint8_t",
         _ => match abi_bits(ty) {
             64 => "int64_t",
@@ -776,7 +1427,7 @@ pub fn c_type(ty: ScalarTy) -> &'static str {
 
 pub fn llvm_type(ty: ScalarTy) -> String {
     match ty {
-        ScalarTy::Cell | ScalarTy::View => "i64".to_owned(),
+        ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => "i64".to_owned(),
         ScalarTy::Bool | ScalarTy::Finite => "i32".to_owned(),
         ScalarTy::Byte => "i8".to_owned(),
         ScalarTy::Int(integer) => format!("i{}", integer.bits),
