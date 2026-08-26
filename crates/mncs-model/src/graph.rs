@@ -7,7 +7,7 @@ use crate::identity::{
     assumption_id, capability_id, contract_id, diff_identities, effect_id, evidence_id,
     function_id, program_id, IdentityKind, SemanticId,
 };
-use crate::{Program, SemanticDiff, SemanticIdentities, ValidationReport};
+use crate::{BoundsEvidence, Program, SemanticDiff, SemanticIdentities, ValidationReport};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -454,7 +454,27 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                         | crate::BodyOperationKind::FinitePayloadProject { .. }
                         | crate::BodyOperationKind::FiniteIsVariant { .. }
                         | crate::BodyOperationKind::RecordConstruct { .. }
-                        | crate::BodyOperationKind::RecordProject { .. } => None,
+                        | crate::BodyOperationKind::RecordProject { .. }
+                        | crate::BodyOperationKind::ByteBitwise { .. }
+                        | crate::BodyOperationKind::ByteShift { .. }
+                        | crate::BodyOperationKind::ByteCompare { .. }
+                        | crate::BodyOperationKind::Convert { .. }
+                        | crate::BodyOperationKind::SequenceConstruct { .. }
+                        | crate::BodyOperationKind::SequenceLength { .. } => None,
+                        crate::BodyOperationKind::SequenceProject {
+                            evidence: BoundsEvidence::RuntimeChecked { .. },
+                            ..
+                        } => Some(crate::obligations::body_obligation_id(
+                            "sequence-index-bounds",
+                            &operation_identity,
+                        )),
+                        crate::BodyOperationKind::SequenceProject { .. } => None,
+                        crate::BodyOperationKind::ViewConstruct { .. } => {
+                            Some(crate::obligations::body_obligation_id(
+                                "view-range-valid",
+                                &operation_identity,
+                            ))
+                        }
                         crate::BodyOperationKind::Call { .. } => {
                             Some(crate::obligations::body_obligation_id(
                                 "call-authority-closure",

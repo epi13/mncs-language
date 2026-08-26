@@ -49,6 +49,44 @@ pub enum SsaInstructionKind {
     BooleanOp {
         operator: String,
     },
+    /// Byte bitwise op (Profile 0.7): `and` | `or` | `xor`.
+    ByteBitwise {
+        operator: String,
+    },
+    /// Byte shift (Profile 0.7): `shl` | `shr`; count modulo 8.
+    ByteShift {
+        operator: String,
+    },
+    /// Unsigned byte comparison (Profile 0.7).
+    ByteCompare {
+        predicate: String,
+    },
+    /// Explicit total scalar conversion (Profile 0.7).
+    Convert {
+        from: crate::BodyType,
+        to: crate::BodyType,
+    },
+    /// Construct an exact-length sequence (Profile 0.7).
+    SequenceConstruct {
+        element_type: Box<crate::BodyType>,
+        length: u32,
+    },
+    /// Element projection with recorded bounds evidence (Profile 0.7).
+    SequenceProject {
+        bound: crate::SequenceBound,
+        evidence: crate::BoundsEvidence,
+    },
+    /// Length observation as u64 (Profile 0.7). The declared bound rides
+    /// with the instruction so every realization folds or observes it
+    /// without rediscovery.
+    SequenceLength {
+        bound: crate::SequenceBound,
+    },
+    /// Checked bounded view construction over a half-open range (Profile 0.7).
+    ViewConstruct {
+        source_bound: crate::SequenceBound,
+        view_bound: crate::SequenceBound,
+    },
     FiniteConstruct {
         type_identity: SemanticId,
         variant_identity: SemanticId,
@@ -155,6 +193,10 @@ pub struct SsaFunction {
 pub struct SsaBoundedIteration {
     pub identity: SemanticId,
     pub bound: u32,
+    /// What the iteration counts over; absent (legacy attempts) forms
+    /// serialize unchanged.
+    #[serde(default)]
+    pub domain: crate::IterationDomain,
     pub state_type: IrType,
     pub preheader: SemanticId,
     pub header: SemanticId,
@@ -775,6 +817,7 @@ fn lower_body(
                 .iter()
                 .find(|candidate| candidate.identity == identity);
             SsaBoundedIteration {
+                domain: iteration.domain.clone(),
                 identity,
                 bound: iteration.bound,
                 state_type: body_type(&iteration.state_type),
@@ -943,12 +986,25 @@ fn validate_function(
         }
     }
     for iteration in &function.bounded_iterations {
-        if !(1..=crate::SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND).contains(&iteration.bound) {
-            errors.push(diagnostic(
-                "SSA019",
-                path,
-                "SSA bounded iteration has an invalid Profile 0.4 ceiling",
-            ));
+        match &iteration.domain {
+            crate::IterationDomain::Attempts => {
+                if !(1..=crate::SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND).contains(&iteration.bound) {
+                    errors.push(diagnostic(
+                        "SSA019",
+                        path,
+                        "SSA bounded iteration has an invalid Profile 0.4 ceiling",
+                    ));
+                }
+            }
+            crate::IterationDomain::OverSequence { .. } => {
+                if iteration.bound > crate::MAX_SEQUENCE_BOUND {
+                    errors.push(diagnostic(
+                        "SSA019",
+                        path,
+                        "SSA sequence traversal exceeds the declared profile ceiling",
+                    ));
+                }
+            }
         }
         if [
             &iteration.preheader,
@@ -1332,6 +1388,42 @@ fn ssa_kind(kind: &IrOperationKind) -> SsaInstructionKind {
         IrOperationKind::BooleanOp { operator } => SsaInstructionKind::BooleanOp {
             operator: operator.clone(),
         },
+        IrOperationKind::ByteBitwise { operator } => SsaInstructionKind::ByteBitwise {
+            operator: operator.clone(),
+        },
+        IrOperationKind::ByteShift { operator } => SsaInstructionKind::ByteShift {
+            operator: operator.clone(),
+        },
+        IrOperationKind::ByteCompare { predicate } => SsaInstructionKind::ByteCompare {
+            predicate: predicate.clone(),
+        },
+        IrOperationKind::Convert { from, to } => SsaInstructionKind::Convert {
+            from: from.clone(),
+            to: to.clone(),
+        },
+        IrOperationKind::SequenceConstruct {
+            element_type,
+            length,
+        } => SsaInstructionKind::SequenceConstruct {
+            element_type: element_type.clone(),
+            length: *length,
+        },
+        IrOperationKind::SequenceProject { bound, evidence } => {
+            SsaInstructionKind::SequenceProject {
+                bound: *bound,
+                evidence: evidence.clone(),
+            }
+        }
+        IrOperationKind::SequenceLength { bound } => {
+            SsaInstructionKind::SequenceLength { bound: *bound }
+        }
+        IrOperationKind::ViewConstruct {
+            source_bound,
+            view_bound,
+        } => SsaInstructionKind::ViewConstruct {
+            source_bound: *source_bound,
+            view_bound: *view_bound,
+        },
         IrOperationKind::RecordConstruct {
             type_identity,
             field_names,
@@ -1423,6 +1515,42 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
         BodyOperationKind::BooleanOp { operator } => SsaInstructionKind::BooleanOp {
             operator: operator.clone(),
         },
+        BodyOperationKind::ByteBitwise { operator } => SsaInstructionKind::ByteBitwise {
+            operator: operator.clone(),
+        },
+        BodyOperationKind::ByteShift { operator } => SsaInstructionKind::ByteShift {
+            operator: operator.clone(),
+        },
+        BodyOperationKind::ByteCompare { predicate } => SsaInstructionKind::ByteCompare {
+            predicate: predicate.clone(),
+        },
+        BodyOperationKind::Convert { from, to } => SsaInstructionKind::Convert {
+            from: from.clone(),
+            to: to.clone(),
+        },
+        BodyOperationKind::SequenceConstruct {
+            element_type,
+            length,
+        } => SsaInstructionKind::SequenceConstruct {
+            element_type: element_type.clone(),
+            length: *length,
+        },
+        BodyOperationKind::SequenceProject { bound, evidence } => {
+            SsaInstructionKind::SequenceProject {
+                bound: *bound,
+                evidence: evidence.clone(),
+            }
+        }
+        BodyOperationKind::SequenceLength { bound } => {
+            SsaInstructionKind::SequenceLength { bound: *bound }
+        }
+        BodyOperationKind::ViewConstruct {
+            source_bound,
+            view_bound,
+        } => SsaInstructionKind::ViewConstruct {
+            source_bound: *source_bound,
+            view_bound: *view_bound,
+        },
         BodyOperationKind::RecordConstruct {
             type_identity,
             field_names,
@@ -1495,6 +1623,10 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
 fn body_failure(kind: &BodyOperationKind) -> Option<FailureMode> {
     match kind {
         BodyOperationKind::RuntimeCheck { failure, .. } => Some(failure.clone()),
+        BodyOperationKind::SequenceProject {
+            evidence: crate::BoundsEvidence::RuntimeChecked { failure },
+            ..
+        } => Some(failure.clone()),
         _ => None,
     }
 }

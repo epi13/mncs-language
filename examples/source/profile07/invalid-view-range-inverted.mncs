@@ -1,0 +1,12 @@
+mncs 0.7;
+
+// Positive-at-elaboration, checked-at-runtime: an inverted view range passes
+// elaboration (endpoints are runtime values) but fails deterministically when
+// executed. The range-validity obligation stays UNKNOWN until discharged.
+module examples.profile07.invalid_view_range_runtime;
+
+fn window(a: i32) -> (result: i32) {
+    let xs: [i32; 4] = [a, a, a, a];
+    let view: [i32; up_to 4] = xs[3..1];
+    return view[0];
+}

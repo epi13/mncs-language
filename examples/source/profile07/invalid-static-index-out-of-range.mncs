@@ -1,0 +1,9 @@
+mncs 0.7;
+
+// Negative fixture: a literal index at or beyond an exact declared bound is
+// provably invalid, so elaboration fails closed (MNE192).
+module examples.profile07.invalid_static_index;
+
+fn read(xs: [i32; 4]) -> (result: i32) {
+    return xs[4];
+}

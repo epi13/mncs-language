@@ -7,8 +7,8 @@ use mncs_model::{
     BoundedIterationCompletion, CompilationStatus, CompilationStudyRequest, CompilationStudyResult,
     CompilerArtifactRef, CompilerNodeProfile, CompilerPassExecutionObservation, ContractClause,
     ContractKind, Effect, FailureMode, FiniteType, FiniteVariant, Function, FunctionBody,
-    IntegerType, Program, RecordField, RecordType, SemanticGraph, SemanticId, SemanticIdentities,
-    TransformationEdge, TransformationStatus, ValidationReport, Value,
+    IntegerType, IterationDomain, Program, RecordField, RecordType, SemanticGraph, SemanticId,
+    SemanticIdentities, TransformationEdge, TransformationStatus, ValidationReport, Value,
     EXECUTABLE_BODY_SCHEMA_VERSION, SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
     SUPPORTED_SCHEMA_VERSION,
 };
@@ -1637,6 +1637,23 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
             }
         }
         AstExpr::FieldProject { base, .. } => calls_in_expr(base, calls),
+        AstExpr::Index { base, index, .. } => {
+            calls_in_expr(base, calls);
+            calls_in_expr(index, calls);
+        }
+        AstExpr::Slice {
+            base, start, end, ..
+        } => {
+            calls_in_expr(base, calls);
+            calls_in_expr(start, calls);
+            calls_in_expr(end, calls);
+        }
+        AstExpr::Cast { value, .. } => calls_in_expr(value, calls),
+        AstExpr::SequenceLiteral { elements, .. } => {
+            for element in elements {
+                calls_in_expr(element, calls);
+            }
+        }
         AstExpr::Name(_)
         | AstExpr::Integer { .. }
         | AstExpr::Boolean { .. }
@@ -1656,12 +1673,15 @@ struct ResolvedBinding {
 }
 
 /// Lexical role of a bound name; recorded so tools can distinguish parameter,
-/// local binding, and carried iteration-state declarations.
+/// local binding, carried iteration-state, and traversal-index declarations.
 #[derive(Debug, Clone, Copy)]
 enum BoundNameKind {
     Parameter,
     Binding,
     IterationState,
+    /// The index binding of an enclosing bounded sequence traversal; element
+    /// projections through it are discharged by traversal semantics.
+    TraversalIndex,
 }
 
 impl BoundNameKind {
@@ -1669,7 +1689,7 @@ impl BoundNameKind {
         match self {
             Self::Parameter => ResolvedNameKind::Parameter,
             Self::Binding => ResolvedNameKind::Binding,
-            Self::IterationState => ResolvedNameKind::IterationState,
+            Self::IterationState | Self::TraversalIndex => ResolvedNameKind::IterationState,
         }
     }
 }
@@ -1715,14 +1735,26 @@ impl BindingEnv {
         span: SourceSpan,
         diagnostics: &mut Vec<SourceDiagnostic>,
     ) -> Option<ResolvedBinding> {
+        self.resolve_with_kind(name, span, diagnostics)
+            .map(|(binding, _kind)| binding)
+    }
+
+    /// Resolve a name and report its lexical role so indexing can recognize
+    /// traversal-domain bindings.
+    fn resolve_with_kind(
+        &mut self,
+        name: &str,
+        span: SourceSpan,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<(ResolvedBinding, BoundNameKind)> {
         for scope in self.scopes.iter().rev() {
-            if let Some((id, declaration, kind)) = scope.get(name) {
+            if let Some((binding, declaration, kind)) = scope.get(name) {
                 self.resolutions.push(NameResolution {
                     occurrence: span,
                     declaration: *declaration,
                     kind: kind.resolved_kind(),
                 });
-                return Some(id.clone());
+                return Some((binding.clone(), *kind));
             }
         }
         diagnostics.push(elaboration_diagnostic(
@@ -1731,6 +1763,14 @@ impl BindingEnv {
             span,
         ));
         None
+    }
+
+    /// Whether `name` is currently bound as a bounded-traversal index.
+    fn is_traversal_index(&self, name: &str) -> bool {
+        self.scopes
+            .iter()
+            .rev()
+            .any(|scope| matches!(scope.get(name), Some((_, _, BoundNameKind::TraversalIndex))))
     }
 
     fn binds(&self, name: &str) -> bool {
@@ -1965,6 +2005,7 @@ impl<'a> BodyBuilder<'a> {
             body,
             next_state,
             next_value,
+            over_source,
             span,
         } = statement
         else {
@@ -1978,25 +2019,87 @@ impl<'a> BodyBuilder<'a> {
             ));
             return;
         }
-        let Ok(bound_u32) = u32::try_from(*bound_value) else {
-            diagnostics.push(elaboration_diagnostic(
-                "MNE142",
-                "iteration bound must be a positive Profile 0.4 integer literal",
-                bound.span,
-            ));
-            return;
+        // Bounded sequence traversal (Profile 0.7): the step count derives
+        // from the traversed sequence's declared bound rather than a source
+        // literal.
+        let traversal = over_source.as_deref().map(|source| {
+            let resolved = self.elaborate_expr(source, None, env, diagnostics);
+            (source.span(), resolved)
+        });
+        let mut traversal_length = None;
+        let mut traversal_element: Option<Box<BodyType>> = None;
+        let bound_u32 = match &traversal {
+            Some((source_span, resolved)) => {
+                let Some(resolved) = resolved else {
+                    return;
+                };
+                let BodyType::Sequence { element, bound } = &resolved.ty else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE180",
+                        "bounded traversal requires a bounded-sequence subject",
+                        *source_span,
+                    ));
+                    return;
+                };
+                traversal_element = Some(element.clone());
+                let ceiling = bound.ceiling();
+                if ceiling > mncs_model::MAX_SEQUENCE_BOUND {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE182",
+                        format!(
+                            "sequence traversal bound must not exceed the profile ceiling {}",
+                            mncs_model::MAX_SEQUENCE_BOUND
+                        ),
+                        *source_span,
+                    ));
+                    return;
+                }
+                // The runtime length observation drives both exact sequences
+                // (constant-foldable) and views (runtime length).
+                let length_id = self.new_value("iteration_domain_len");
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: length_id.clone(),
+                    kind: BodyOperationKind::SequenceLength { bound: *bound },
+                    operands: vec![resolved.id.clone()],
+                    results: vec![BodyValue {
+                        id: length_id.clone(),
+                        ty: BodyType::Integer(IntegerType {
+                            bits: 64,
+                            signed: false,
+                        }),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                });
+                traversal_length = Some((resolved.id.clone(), length_id));
+                ceiling
+            }
+            None => {
+                let Ok(bound_u32) = u32::try_from(*bound_value) else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE142",
+                        "iteration bound must be a positive Profile 0.4 integer literal",
+                        bound.span,
+                    ));
+                    return;
+                };
+                if !(1..=SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND).contains(&bound_u32) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE142",
+                        format!(
+                            "iteration bound must be between 1 and {} in Source Profile 0.4",
+                            SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND
+                        ),
+                        bound.span,
+                    ));
+                    return;
+                }
+                bound_u32
+            }
         };
-        if !(1..=SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND).contains(&bound_u32) {
-            diagnostics.push(elaboration_diagnostic(
-                "MNE142",
-                format!(
-                    "iteration bound must be between 1 and {} in Source Profile 0.4",
-                    SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND
-                ),
-                bound.span,
-            ));
-            return;
-        }
         if self
             .bounded_iterations
             .iter()
@@ -2034,24 +2137,31 @@ impl<'a> BodyBuilder<'a> {
             bits: 64,
             signed: false,
         });
-        let bound_id = self.new_value("iteration_bound");
-        self.blocks[self.current].operations.push(BodyOperation {
-            id: bound_id.clone(),
-            kind: BodyOperationKind::Constant {
-                value: i128::from(bound_u32),
-                ty: counter_type.clone(),
-            },
-            operands: Vec::new(),
-            results: vec![BodyValue {
+        let bound_id = if let Some((_, length_id)) = &traversal_length {
+            // Sequence traversal counts down from the observed runtime length;
+            // exact sequences fold this observation to their declared length.
+            length_id.clone()
+        } else {
+            let bound_id = self.new_value("iteration_bound");
+            self.blocks[self.current].operations.push(BodyOperation {
                 id: bound_id.clone(),
-                ty: counter_type.clone(),
-            }],
-            contracts: Vec::new(),
-            assumptions: Vec::new(),
-            machine_intent: None,
-            lowering: None,
-            portability: None,
-        });
+                kind: BodyOperationKind::Constant {
+                    value: i128::from(bound_u32),
+                    ty: counter_type.clone(),
+                },
+                operands: Vec::new(),
+                results: vec![BodyValue {
+                    id: bound_id.clone(),
+                    ty: counter_type.clone(),
+                }],
+                contracts: Vec::new(),
+                assumptions: Vec::new(),
+                machine_intent: None,
+                lowering: None,
+                portability: None,
+            });
+            bound_id
+        };
         let header = self.new_block();
         let body_entry = self.new_block();
         let exit = self.new_block();
@@ -2130,6 +2240,47 @@ impl<'a> BodyBuilder<'a> {
         self.current = self.index_of(&body_entry);
         self.in_iteration = true;
         env.push();
+        // Bounded traversal binds the loop index in the body scope. The
+        // index is derived from the countdown counter so the traversal
+        // domain fact (0 .. len) is machine knowledge, not a runtime check.
+        if let Some((_, length_id)) = &traversal_length {
+            let index_id = self.new_value("iteration_index");
+            self.blocks[self.current].operations.push(BodyOperation {
+                id: index_id.clone(),
+                kind: BodyOperationKind::Integer {
+                    operator: "sub".to_owned(),
+                    operand_type: IntegerType {
+                        bits: 64,
+                        signed: false,
+                    },
+                    intent: ArithmeticIntent::Wrapping,
+                },
+                operands: vec![length_id.clone(), header_counter.clone()],
+                results: vec![BodyValue {
+                    id: index_id.clone(),
+                    ty: BodyType::Integer(IntegerType {
+                        bits: 64,
+                        signed: false,
+                    }),
+                }],
+                contracts: Vec::new(),
+                assumptions: Vec::new(),
+                machine_intent: None,
+                lowering: None,
+                portability: None,
+            });
+            env.bind(
+                name.text.clone(),
+                index_id,
+                BodyType::Integer(IntegerType {
+                    bits: 64,
+                    signed: false,
+                }),
+                name.span,
+                BoundNameKind::TraversalIndex,
+                diagnostics,
+            );
+        }
         env.bind(
             state.text.clone(),
             header_state.clone(),
@@ -2248,6 +2399,12 @@ impl<'a> BodyBuilder<'a> {
             bound: bound_u32,
             state_name: state.text.clone(),
             state_type: carried_type.clone(),
+            domain: match (&traversal, &traversal_element) {
+                (Some(_), Some(element)) => IterationDomain::OverSequence {
+                    element_type: element.clone(),
+                },
+                _ => IterationDomain::Attempts,
+            },
             initial_value: initial_value.id,
             header_state,
             header_counter,
@@ -2299,6 +2456,8 @@ impl<'a> BodyBuilder<'a> {
             AstExpr::Integer { value, text } => {
                 let ty = match expected {
                     Some(BodyType::Integer(integer)) => BodyType::Integer(*integer),
+                    // Byte-typed literals adapt to the unsigned 8-bit domain.
+                    Some(BodyType::Byte) if (0..=255).contains(value) => BodyType::Byte,
                     Some(_) => {
                         diagnostics.push(elaboration_diagnostic(
                             "MNE118",
@@ -3038,6 +3197,59 @@ impl<'a> BodyBuilder<'a> {
                 Some(ResolvedBinding { id, ty })
             }
             AstExpr::FieldProject { base, field, span } => {
+                // Length observation on a bounded sequence: `xs.len` (0.7).
+                // Field projection on sequences is reserved for `.len`.
+                if field.text == "len" {
+                    let subject = self.elaborate_expr(base, None, env, diagnostics)?;
+                    if let BodyType::Sequence { bound, .. } = &subject.ty {
+                        let id = self.new_value("seqlen");
+                        self.blocks[self.current].operations.push(BodyOperation {
+                            id: id.clone(),
+                            kind: match &subject.ty {
+                                BodyType::Sequence { bound, .. } => {
+                                    BodyOperationKind::SequenceLength { bound: *bound }
+                                }
+                                _ => BodyOperationKind::SequenceLength {
+                                    bound: mncs_model::SequenceBound::Exact(0),
+                                },
+                            },
+                            operands: vec![subject.id.clone()],
+                            results: vec![BodyValue {
+                                id: id.clone(),
+                                ty: BodyType::Integer(IntegerType {
+                                    bits: 64,
+                                    signed: false,
+                                }),
+                            }],
+                            contracts: Vec::new(),
+                            assumptions: Vec::new(),
+                            machine_intent: None,
+                            lowering: None,
+                            portability: None,
+                        });
+                        if expected.is_some_and(|expected| {
+                            *expected
+                                != BodyType::Integer(IntegerType {
+                                    bits: 64,
+                                    signed: false,
+                                })
+                        }) {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE163",
+                                "length observation does not have the required expression type",
+                                *span,
+                            ));
+                        }
+                        let _ = bound;
+                        return Some(ResolvedBinding {
+                            id,
+                            ty: BodyType::Integer(IntegerType {
+                                bits: 64,
+                                signed: false,
+                            }),
+                        });
+                    }
+                }
                 let subject = self.elaborate_expr(base, None, env, diagnostics)?;
                 let BodyType::Record {
                     name: type_name, ..
@@ -3111,9 +3323,338 @@ impl<'a> BodyBuilder<'a> {
                 }
                 Some(projected)
             }
+            AstExpr::SequenceLiteral { elements, span } => {
+                let BodyType::Sequence {
+                    element: element_type,
+                    bound: mncs_model::SequenceBound::Exact(length),
+                } = expected
+                    .cloned()
+                    .unwrap_or(BodyType::Named("invalid".to_owned()))
+                else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE183",
+                        "sequence literals require an exact bounded-sequence expected type",
+                        *span,
+                    ));
+                    return None;
+                };
+                if elements.len() != length as usize {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE184",
+                        format!(
+                            "sequence literal supplies {0} elements but the declared exact length is {length}",
+                            elements.len()
+                        ),
+                        *span,
+                    ));
+                    return None;
+                }
+                let mut operands = Vec::with_capacity(elements.len());
+                for element in elements {
+                    let resolved =
+                        self.elaborate_expr(element, Some(&element_type), env, diagnostics)?;
+                    if &resolved.ty != element_type.as_ref() {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE185",
+                            "sequence element value does not match the declared element type",
+                            element.span(),
+                        ));
+                    }
+                    operands.push(resolved.id);
+                }
+                let id = self.new_value("seq");
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: id.clone(),
+                    kind: BodyOperationKind::SequenceConstruct {
+                        element_type,
+                        length,
+                    },
+                    operands,
+                    results: vec![BodyValue {
+                        id: id.clone(),
+                        ty: expected
+                            .cloned()
+                            .unwrap_or_else(|| BodyType::Named("invalid".to_owned())),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                });
+                Some(ResolvedBinding {
+                    id,
+                    ty: expected
+                        .cloned()
+                        .unwrap_or_else(|| BodyType::Named("invalid".to_owned())),
+                })
+            }
+            AstExpr::Index { base, index, span } => {
+                let subject = self.elaborate_expr(base, None, env, diagnostics)?;
+                let BodyType::Sequence {
+                    element: element_type,
+                    bound,
+                } = &subject.ty
+                else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE186",
+                        "index observation requires a bounded-sequence value",
+                        base.span(),
+                    ));
+                    return None;
+                };
+                let counter_type = BodyType::Integer(IntegerType {
+                    bits: 64,
+                    signed: false,
+                });
+                let index_value =
+                    self.elaborate_expr(index, Some(&counter_type), env, diagnostics)?;
+                // A literal index at or beyond an exact declared bound is
+                // provably invalid: fail closed at elaboration instead of
+                // deferring a guaranteed runtime failure.
+                if let (mncs_model::SequenceBound::Exact(length), AstExpr::Integer { value, .. }) =
+                    (&bound, index.as_ref())
+                {
+                    if *value < 0 || *value >= i128::from(*length) {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE192",
+                            format!(
+                                "index {value} is outside the statically known domain 0..{length}"
+                            ),
+                            index.span(),
+                        ));
+                        return None;
+                    }
+                }
+                // Bounds evidence is first-class machine knowledge: a literal
+                // index inside an exact declared bound is statically valid; a
+                // traversal-domain binding is discharged by traversal
+                // semantics; anything else keeps an explicit runtime check.
+                let evidence = match (&bound, index.as_ref()) {
+                    (mncs_model::SequenceBound::Exact(length), AstExpr::Integer { value, .. })
+                        if *value >= 0 && (*value as u64) < u64::from(*length) =>
+                    {
+                        mncs_model::BoundsEvidence::StaticExact
+                    }
+                    _ if matches!(index.as_ref(), AstExpr::Name(name) if env.is_traversal_index(&name.text)) => {
+                        mncs_model::BoundsEvidence::TraversalDomain
+                    }
+                    _ => mncs_model::BoundsEvidence::RuntimeChecked {
+                        failure: FailureMode::Isolated,
+                    },
+                };
+                if expected.is_some_and(|expected| expected != element_type.as_ref()) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE163",
+                        "projected sequence element does not have the required expression type",
+                        *span,
+                    ));
+                }
+                let id = self.new_value("elem");
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: id.clone(),
+                    kind: BodyOperationKind::SequenceProject {
+                        bound: *bound,
+                        evidence,
+                    },
+                    operands: vec![subject.id, index_value.id],
+                    results: vec![BodyValue {
+                        id: id.clone(),
+                        ty: (**element_type).clone(),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                });
+                Some(ResolvedBinding {
+                    id,
+                    ty: (**element_type).clone(),
+                })
+            }
+            AstExpr::Slice {
+                base,
+                start,
+                end,
+                span,
+            } => {
+                let subject = self.elaborate_expr(base, None, env, diagnostics)?;
+                let BodyType::Sequence {
+                    element: _,
+                    bound: source_bound,
+                } = &subject.ty
+                else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE187",
+                        "view derivation requires a bounded-sequence source",
+                        base.span(),
+                    ));
+                    return None;
+                };
+                let view_cap = source_bound.ceiling();
+                let counter_type = BodyType::Integer(IntegerType {
+                    bits: 64,
+                    signed: false,
+                });
+                let start_value =
+                    self.elaborate_expr(start, Some(&counter_type), env, diagnostics)?;
+                let end_value = self.elaborate_expr(end, Some(&counter_type), env, diagnostics)?;
+                let result_ty = BodyType::Sequence {
+                    element: Box::new(match &subject.ty {
+                        BodyType::Sequence { element, .. } => (**element).clone(),
+                        _ => BodyType::Named("invalid".to_owned()),
+                    }),
+                    bound: mncs_model::SequenceBound::UpTo(view_cap),
+                };
+                if expected.is_some_and(|expected| expected != &result_ty) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE188",
+                        format!(
+                            "derived view has type {} which does not satisfy the required type",
+                            result_ty.semantic_name()
+                        ),
+                        *span,
+                    ));
+                }
+                let id = self.new_value("view");
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: id.clone(),
+                    kind: BodyOperationKind::ViewConstruct {
+                        source_bound: *source_bound,
+                        view_bound: mncs_model::SequenceBound::UpTo(view_cap),
+                    },
+                    operands: vec![subject.id, start_value.id, end_value.id],
+                    results: vec![BodyValue {
+                        id: id.clone(),
+                        ty: result_ty.clone(),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                });
+                Some(ResolvedBinding { id, ty: result_ty })
+            }
+            AstExpr::Cast {
+                value,
+                target_type,
+                span,
+            } => {
+                let subject = self.elaborate_expr(value, None, env, diagnostics)?;
+                let to = profile_type(
+                    &target_type.text,
+                    target_type.span,
+                    self.finite_types,
+                    self.record_types,
+                    diagnostics,
+                );
+                let convertible_source = |ty: &BodyType| {
+                    matches!(ty, BodyType::Byte)
+                        || matches!(ty, BodyType::Integer(integer) if matches!(integer.bits, 1..=64))
+                        || matches!(ty, BodyType::Named(name) if name == "bool")
+                };
+                let convertible_target = |ty: &BodyType| {
+                    matches!(ty, BodyType::Byte)
+                        || matches!(ty, BodyType::Integer(integer) if matches!(integer.bits, 1..=64))
+                };
+                if !convertible_source(&subject.ty) || !convertible_target(&to) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE189",
+                        "explicit conversions require scalar integer or byte types on both sides",
+                        *span,
+                    ));
+                    return None;
+                }
+                if expected.is_some_and(|expected| expected != &to) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE163",
+                        "converted value does not have the required expression type",
+                        *span,
+                    ));
+                }
+                let from = subject.ty.clone();
+                let id = self.new_value("cast");
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: id.clone(),
+                    kind: BodyOperationKind::Convert {
+                        from,
+                        to: to.clone(),
+                    },
+                    operands: vec![subject.id],
+                    results: vec![BodyValue {
+                        id: id.clone(),
+                        ty: to.clone(),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                });
+                Some(ResolvedBinding { id, ty: to })
+            }
             AstExpr::Binary {
                 op, left, right, ..
             } => {
+                // Shifts (Profile 0.7). A byte left operand shifts a byte
+                // (count modulo 8); an integer left operand shifts within its
+                // declared width (count modulo width). Both are total by
+                // definition and carry wrapping intent.
+                if matches!(op, AstBinaryOp::Shl | AstBinaryOp::Shr) {
+                    let counter_type = BodyType::Integer(IntegerType {
+                        bits: 64,
+                        signed: false,
+                    });
+                    let left_value = self.elaborate_expr(left, None, env, diagnostics)?;
+                    let count_value =
+                        self.elaborate_expr(right, Some(&counter_type), env, diagnostics)?;
+                    let operator = match op {
+                        AstBinaryOp::Shl => "shl",
+                        _ => "shr",
+                    };
+                    let id = self.new_value("sh");
+                    let (kind, result_ty) = match &left_value.ty {
+                        BodyType::Byte => (
+                            BodyOperationKind::ByteShift {
+                                operator: operator.to_owned(),
+                            },
+                            BodyType::Byte,
+                        ),
+                        BodyType::Integer(operand_type) => (
+                            BodyOperationKind::Integer {
+                                operator: operator.to_owned(),
+                                operand_type: *operand_type,
+                                intent: ArithmeticIntent::Wrapping,
+                            },
+                            left_value.ty.clone(),
+                        ),
+                        _ => {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE190",
+                                "shift operands must shift a byte or integer value",
+                                expr.span(),
+                            ));
+                            return None;
+                        }
+                    };
+                    self.blocks[self.current].operations.push(BodyOperation {
+                        id: id.clone(),
+                        kind,
+                        operands: vec![left_value.id, count_value.id],
+                        results: vec![BodyValue {
+                            id: id.clone(),
+                            ty: result_ty.clone(),
+                        }],
+                        contracts: Vec::new(),
+                        assumptions: Vec::new(),
+                        machine_intent: None,
+                        lowering: None,
+                        portability: None,
+                    });
+                    return Some(ResolvedBinding { id, ty: result_ty });
+                }
                 let arithmetic =
                     matches!(op, AstBinaryOp::Add | AstBinaryOp::Sub | AstBinaryOp::Mul);
                 let operand_expected = arithmetic.then_some(expected).flatten();
@@ -3161,6 +3702,75 @@ impl<'a> BodyBuilder<'a> {
                         portability: None,
                     });
                     return Some(ResolvedBinding { id, ty: bool_type });
+                }
+                // Byte-oriented operators (Profile 0.7): bitwise and/or/xor
+                // and unsigned comparisons over bytes.
+                if left_value.ty == BodyType::Byte {
+                    let is_compare = matches!(
+                        op,
+                        AstBinaryOp::Eq
+                            | AstBinaryOp::Ne
+                            | AstBinaryOp::Lt
+                            | AstBinaryOp::Le
+                            | AstBinaryOp::Gt
+                            | AstBinaryOp::Ge
+                    );
+                    let is_bitwise = matches!(
+                        op,
+                        AstBinaryOp::BitwiseAnd | AstBinaryOp::BitwiseOr | AstBinaryOp::BitwiseXor
+                    );
+                    if !is_compare && !is_bitwise {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE191",
+                            "bytes support bitwise operations, shifts, comparisons, and explicit conversions; use `as` for arithmetic",
+                            expr.span(),
+                        ));
+                        return None;
+                    }
+                    let id = self.new_value("b");
+                    let (kind, result_ty) = if is_compare {
+                        (
+                            BodyOperationKind::ByteCompare {
+                                predicate: match op {
+                                    AstBinaryOp::Eq => "eq",
+                                    AstBinaryOp::Ne => "ne",
+                                    AstBinaryOp::Lt => "lt",
+                                    AstBinaryOp::Le => "le",
+                                    AstBinaryOp::Gt => "gt",
+                                    _ => "ge",
+                                }
+                                .to_owned(),
+                            },
+                            BodyType::Named("bool".to_owned()),
+                        )
+                    } else {
+                        (
+                            BodyOperationKind::ByteBitwise {
+                                operator: match op {
+                                    AstBinaryOp::BitwiseAnd => "and",
+                                    AstBinaryOp::BitwiseOr => "or",
+                                    _ => "xor",
+                                }
+                                .to_owned(),
+                            },
+                            BodyType::Byte,
+                        )
+                    };
+                    self.blocks[self.current].operations.push(BodyOperation {
+                        id: id.clone(),
+                        kind,
+                        operands: vec![left_value.id, right_value.id],
+                        results: vec![BodyValue {
+                            id: id.clone(),
+                            ty: result_ty.clone(),
+                        }],
+                        contracts: Vec::new(),
+                        assumptions: Vec::new(),
+                        machine_intent: None,
+                        lowering: None,
+                        portability: None,
+                    });
+                    return Some(ResolvedBinding { id, ty: result_ty });
                 }
                 let id = self.new_value("v");
                 let (kind, result_ty) = match op {
@@ -3374,14 +3984,72 @@ fn profile_type(
             name: record_type.name.clone(),
         };
     }
+    if let Some(sequence) = profile_sequence_type(name, finite_types, record_types) {
+        return sequence;
+    }
     profile_scalar_supported(name).unwrap_or_else(|| {
         diagnostics.push(elaboration_diagnostic(
             "MNE105",
-            "source profile supports bool, 8/16/32/64-bit integers, declared finite types, and declared record types",
+            "source profile supports bool, byte, 8/16/32/64-bit integers, declared finite types, declared record types, and canonical bounded-sequence spellings",
             span,
         ));
         BodyType::Named(name.to_owned())
     })
+}
+
+/// Resolve a canonical bounded-sequence spelling `[E; N]` / `[E; up_to M]`
+/// whose element may be a scalar, byte, nested sequence, or a declared
+/// nominal type of this module.
+fn profile_sequence_type(
+    name: &str,
+    finite_types: &BTreeMap<String, FiniteType>,
+    record_types: &BTreeMap<String, RecordType>,
+) -> Option<BodyType> {
+    let inner = name.strip_prefix('[')?.strip_suffix(']')?;
+    let separator = inner.rfind(';')?;
+    let (element_text, bound_text) = (inner[..separator].trim(), inner[separator + 1..].trim());
+    let bound = if let Some(capacity) = bound_text.strip_prefix("up_to") {
+        let capacity = capacity.trim().parse::<u32>().ok()?;
+        if capacity > mncs_model::MAX_SEQUENCE_BOUND {
+            return None;
+        }
+        mncs_model::SequenceBound::UpTo(capacity)
+    } else {
+        let length = bound_text.parse::<u32>().ok()?;
+        if length > mncs_model::MAX_SEQUENCE_BOUND {
+            return None;
+        }
+        mncs_model::SequenceBound::Exact(length)
+    };
+    if finite_types.get(element_text).is_some() || record_types.get(element_text).is_some() {
+        // Nominal elements resolve through profile_type on a fresh diagnostic
+        // budget; reuse the direct maps to keep this helper side-effect free.
+        if let Some(finite) = finite_types.get(element_text) {
+            return Some(BodyType::Sequence {
+                element: Box::new(BodyType::Finite {
+                    identity: finite.identity.clone(),
+                    name: finite.name.clone(),
+                }),
+                bound,
+            });
+        }
+        let record = record_types.get(element_text)?;
+        return Some(BodyType::Sequence {
+            element: Box::new(BodyType::Record {
+                identity: record.identity.clone(),
+                name: record.name.clone(),
+            }),
+            bound,
+        });
+    }
+    let element = Box::new(match profile_scalar_supported(element_text) {
+        Some(scalar) => scalar,
+        None => profile_sequence_type(element_text, finite_types, record_types)?,
+    });
+    match &*element {
+        BodyType::Named(_) => None,
+        _ => Some(BodyType::Sequence { element, bound }),
+    }
 }
 
 fn profile_scalar_supported(name: &str) -> Option<BodyType> {
@@ -3392,7 +4060,7 @@ fn profile_scalar_supported(name: &str) -> Option<BodyType> {
             BodyType::Integer(IntegerType {
                 bits: 8 | 16 | 32 | 64,
                 ..
-            })
+            }) | BodyType::Byte
         );
     supported.then_some(ty)
 }

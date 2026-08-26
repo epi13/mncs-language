@@ -1,0 +1,91 @@
+{
+  "schema_version": "0.2",
+  "name": "profile07-bounded-data",
+  "cases": [
+    {
+      "id": "sum-baseline",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile07_bounded_data", "function": "sum" },
+        "arguments": [
+          { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": -20, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 300, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        { "integer": { "value": 294, "type": { "bits": 64, "signed": true } } }
+      ]
+    },
+    {
+      "id": "checksum-from-bytes",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile07_bounded_data", "function": "checksum_from_bytes" },
+        "arguments": [
+          { "byte": { "value": 3 } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        { "integer": { "value": 2961585, "type": { "bits": 64, "signed": false } } }
+      ]
+    },
+    {
+      "id": "count-over-window",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile07_bounded_data", "function": "count_over" },
+        "arguments": [
+          { "integer": { "value": 100, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        { "integer": { "value": 2, "type": { "bits": 32, "signed": true } } }
+      ]
+    },
+    {
+      "id": "window-sum-view",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile07_bounded_data", "function": "window_sum" },
+        "arguments": [
+          { "integer": { "value": 1, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 2, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 3, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 4, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 5, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 6, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        { "integer": { "value": 8, "type": { "bits": 32, "signed": true } } }
+      ]
+    },
+    {
+      "id": "mix-byte-ops",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.profile07_bounded_data", "function": "mix" },
+        "arguments": [
+          { "byte": { "value": 12 } },
+          { "byte": { "value": 10 } },
+          { "byte": { "value": 200 } },
+          { "byte": { "value": 240 } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [ { "byte": { "value": 140 } } ]
+    }
+  ],
+  "properties": []
+}

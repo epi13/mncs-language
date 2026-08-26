@@ -10,6 +10,7 @@ pub const SOURCE_PROFILE_VERSION_0_3: &str = "0.3";
 pub const SOURCE_PROFILE_VERSION_0_4: &str = "0.4";
 pub const SOURCE_PROFILE_VERSION_0_5: &str = "0.5";
 pub const SOURCE_PROFILE_VERSION_0_6: &str = "0.6";
+pub const SOURCE_PROFILE_VERSION_0_7: &str = "0.7";
 
 /// True when the active source profile declares at least `version`. Profile
 /// features are strictly additive, so a numeric comparison replaces the
@@ -253,6 +254,8 @@ pub enum TokenKind {
     UpToKeyword,
     CarryingKeyword,
     NextKeyword,
+    OverKeyword,
+    AsKeyword,
     WhileKeyword,
     TrueKeyword,
     FalseKeyword,
@@ -270,6 +273,9 @@ pub enum TokenKind {
     PlusPipe,
     MinusPipe,
     StarPipe,
+    Ampersand,
+    Pipe,
+    Caret,
     EqEq,
     NotEq,
     AndAnd,
@@ -278,6 +284,8 @@ pub enum TokenKind {
     Gt,
     Le,
     Ge,
+    Shl,
+    Shr,
     Equal,
     Dot,
     DotDot,
@@ -288,6 +296,8 @@ pub enum TokenKind {
     RightParen,
     LeftBrace,
     RightBrace,
+    LeftBracket,
+    RightBracket,
     Arrow,
     FatArrow,
     Unknown,
@@ -444,6 +454,17 @@ pub enum AstBinaryOp {
     AddSat,
     SubSat,
     MulSat,
+    /// Bitwise conjunction `&` (Profile 0.7). Wrapping by definition.
+    BitwiseAnd,
+    /// Bitwise disjunction `|` (Profile 0.7). Wrapping by definition.
+    BitwiseOr,
+    /// Bitwise exclusive disjunction `^` (Profile 0.7). Wrapping by
+    /// definition.
+    BitwiseXor,
+    /// Byte shift left, Profile 0.7.
+    Shl,
+    /// Byte shift right, Profile 0.7.
+    Shr,
     And,
     Or,
     Eq,
@@ -502,6 +523,32 @@ pub enum AstExpr {
         field: SpannedText,
         span: SourceSpan,
     },
+    /// A bounded-sequence literal `[e0, e1, ...]` (Profile 0.7). The element
+    /// count must equal the expected exact length at elaboration.
+    SequenceLiteral {
+        elements: Vec<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Element observation `base[index]` (Profile 0.7).
+    Index {
+        base: Box<AstExpr>,
+        index: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Bounded view derivation `base[start..end]` (Profile 0.7). The range is
+    /// half-open; validity is checked under checked semantics.
+    Slice {
+        base: Box<AstExpr>,
+        start: Box<AstExpr>,
+        end: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Explicit total scalar conversion `value as Type` (Profile 0.7).
+    Cast {
+        value: Box<AstExpr>,
+        target_type: SpannedText,
+        span: SourceSpan,
+    },
 }
 
 impl AstExpr {
@@ -515,7 +562,11 @@ impl AstExpr {
             | Self::Match { span, .. }
             | Self::Binary { span, .. }
             | Self::RecordLiteral { span, .. }
-            | Self::FieldProject { span, .. } => *span,
+            | Self::FieldProject { span, .. }
+            | Self::SequenceLiteral { span, .. }
+            | Self::Index { span, .. }
+            | Self::Slice { span, .. }
+            | Self::Cast { span, .. } => *span,
         }
     }
 }
@@ -570,6 +621,11 @@ pub enum AstStmt {
         body: Vec<AstStmt>,
         next_state: SpannedText,
         next_value: Box<AstExpr>,
+        /// Set when the iteration traverses a bounded sequence
+        /// (`iterate i over xs ...`, Profile 0.7). The traversal source is
+        /// elaborated once; its declared bound is the step ceiling.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        over_source: Option<Box<AstExpr>>,
         span: SourceSpan,
     },
 }
@@ -773,6 +829,12 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
         } else if source[start..].starts_with(">=") {
             offset += 2;
             TokenKind::Ge
+        } else if source[start..].starts_with("<<") {
+            offset += 2;
+            TokenKind::Shl
+        } else if source[start..].starts_with(">>") {
+            offset += 2;
+            TokenKind::Shr
         } else if is_identifier_start(current) {
             offset += current.len_utf8();
             while offset < source.len()
@@ -810,6 +872,8 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                 "up_to" => TokenKind::UpToKeyword,
                 "carrying" => TokenKind::CarryingKeyword,
                 "next" => TokenKind::NextKeyword,
+                "over" => TokenKind::OverKeyword,
+                "as" => TokenKind::AsKeyword,
                 "while" => TokenKind::WhileKeyword,
                 "true" => TokenKind::TrueKeyword,
                 "false" => TokenKind::FalseKeyword,
@@ -818,16 +882,29 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
         } else if current.is_ascii_digit() {
             offset += current.len_utf8();
             let mut dotted = false;
-            while offset < source.len()
-                && source[offset..]
-                    .chars()
-                    .next()
-                    .is_some_and(|value| value.is_ascii_digit() || value == '.')
-            {
-                if source[offset..].starts_with('.') {
-                    dotted = true;
+            while offset < source.len() {
+                let Some(next) = source[offset..].chars().next() else {
+                    break;
+                };
+                if next.is_ascii_digit() {
+                    offset += 1;
+                } else if next == '.' {
+                    // A single dot followed by a digit continues a version
+                    // literal (`mncs 0.7`); a doubled dot closes the number
+                    // and opens a half-open view range (`xs[2..5]`).
+                    let after_dot = source[offset + 1..].chars().next();
+                    if dotted
+                        || after_dot != Some('.')
+                            && after_dot.is_some_and(|value| value.is_ascii_digit())
+                    {
+                        dotted = true;
+                        offset += 1;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
                 }
-                offset += 1;
             }
             if dotted {
                 TokenKind::Version
@@ -849,6 +926,8 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                 ')' => TokenKind::RightParen,
                 '{' => TokenKind::LeftBrace,
                 '}' => TokenKind::RightBrace,
+                '[' => TokenKind::LeftBracket,
+                ']' => TokenKind::RightBracket,
                 '+' => {
                     if source[offset..].starts_with('%') {
                         offset += 1;
@@ -884,6 +963,9 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                 }
                 '/' => TokenKind::Slash,
                 '%' => TokenKind::Percent,
+                '&' => TokenKind::Ampersand,
+                '|' => TokenKind::Pipe,
+                '^' => TokenKind::Caret,
                 '<' => TokenKind::Lt,
                 '>' => TokenKind::Gt,
                 '=' => TokenKind::Equal,
@@ -1201,7 +1283,7 @@ impl<'a> Parser<'a> {
                 self.spanned(TokenKind::Identifier, "MNP073", "expected variant name")
             {
                 if self.current_kind() == Some(TokenKind::LeftBrace)
-                    && matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_6)
+                    && profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_6)
                 {
                     // Payload variant: `Name { field: Type, ... }` with the
                     // same field syntax as record declarations.
@@ -1216,11 +1298,9 @@ impl<'a> Parser<'a> {
                             "MNP133",
                             "expected ':' after payload field name",
                         );
-                        let Some(field_type) = self.spanned(
-                            TokenKind::Identifier,
-                            "MNP134",
-                            "expected payload field type",
-                        ) else {
+                        let Some(field_type) =
+                            self.type_annotation("MNP134", "expected payload field type")
+                        else {
                             break;
                         };
                         let field_span = SourceSpan::covering(
@@ -1304,7 +1384,7 @@ impl<'a> Parser<'a> {
             let field_start = self.current_token_index();
             let field_name = self.spanned(TokenKind::Identifier, "MNP124", "expected field name");
             self.expect(TokenKind::Colon, "MNP125", "expected ':' after field name");
-            let field_type = self.spanned(TokenKind::Identifier, "MNP126", "expected field type");
+            let field_type = self.type_annotation("MNP126", "expected field type");
             let field_end = self.previous_token_index(field_start);
             if let (Some(field_name), Some(field_type)) = (field_name.clone(), field_type.clone()) {
                 let field_span =
@@ -1547,8 +1627,7 @@ impl<'a> Parser<'a> {
                     "MNP051",
                     "expected ':' after binding name",
                 );
-                let value_type =
-                    self.spanned(TokenKind::Identifier, "MNP052", "expected binding type");
+                let value_type = self.type_annotation("MNP052", "expected binding type");
                 // '=' is colon-like; accept identifier after a dummy skip if '=' unknown
                 self.expect(
                     TokenKind::Equal,
@@ -1697,15 +1776,46 @@ impl<'a> Parser<'a> {
             "MNP092",
             "expected iteration identity",
         );
-        self.expect(TokenKind::UpToKeyword, "MNP093", "expected 'up_to'");
-        let bound = self.spanned(
-            TokenKind::IntegerLiteral,
-            "MNP094",
-            "expected a literal iteration bound",
-        );
-        let bound_value = bound
-            .as_ref()
-            .and_then(|bound| bound.text.parse::<i128>().ok());
+        // Profile 0.7 adds the bounded-sequence traversal form
+        // `iterate i over xs carrying ...`; the counted attempt form is
+        // unchanged. The traversal source is parsed here so elaboration can
+        // derive the exact step ceiling from its declared bound.
+        let mut over_source: Option<Box<AstExpr>> = None;
+        let bound: Option<SpannedText>;
+        let bound_value: Option<i128>;
+        if self.current_kind() == Some(TokenKind::OverKeyword) {
+            if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_7) {
+                self.error(
+                    "MNP144",
+                    "bounded sequence traversal requires source profile 0.7 or later",
+                    vec![TokenKind::OverKeyword],
+                );
+            }
+            self.cursor += 1;
+            let source = self.expression();
+            let source_span = source.as_ref().map(|expr| expr.span());
+            over_source = source.map(Box::new);
+            bound = Some(SpannedText {
+                text: String::new(),
+                span: SourceSpan::at(
+                    &self.envelope.text,
+                    source_span.map_or(0, |span| span.start),
+                    source_span.map_or(0, |span| span.start),
+                ),
+            });
+            bound_value = Some(0);
+        } else {
+            self.expect(TokenKind::UpToKeyword, "MNP093", "expected 'up_to'");
+            let parsed_bound = self.spanned(
+                TokenKind::IntegerLiteral,
+                "MNP094",
+                "expected a literal iteration bound",
+            );
+            bound_value = parsed_bound
+                .as_ref()
+                .and_then(|bound| bound.text.parse::<i128>().ok());
+            bound = parsed_bound;
+        }
         self.expect(
             TokenKind::CarryingKeyword,
             "MNP095",
@@ -1721,11 +1831,7 @@ impl<'a> Parser<'a> {
             "MNP097",
             "expected ':' after carried state",
         );
-        let state_type = self.spanned(
-            TokenKind::Identifier,
-            "MNP098",
-            "expected carried state type",
-        );
+        let state_type = self.type_annotation("MNP098", "expected carried state type");
         self.expect(
             TokenKind::Equal,
             "MNP099",
@@ -1804,6 +1910,7 @@ impl<'a> Parser<'a> {
                 body,
                 next_state,
                 next_value: Box::new(next_value),
+                over_source,
                 span: node.span,
             }),
             _ => None,
@@ -1856,6 +1963,31 @@ impl<'a> Parser<'a> {
     }
 
     fn primary(&mut self) -> Option<AstExpr> {
+        let atom = self.primary_atom()?;
+        // Explicit total conversion suffix `expr as Type` (Profile 0.7).
+        // The cast binds tighter than any binary operator.
+        if self.current_kind() != Some(TokenKind::AsKeyword) {
+            return Some(atom);
+        }
+        if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_7) {
+            self.error(
+                "MNP150",
+                "explicit conversions require source profile 0.7 or later",
+                vec![TokenKind::AsKeyword],
+            );
+            return None;
+        }
+        self.cursor += 1;
+        let target_type = self.type_annotation("MNP151", "expected target type after 'as'")?;
+        let span = SourceSpan::covering(&self.envelope.text, atom.span(), target_type.span);
+        Some(AstExpr::Cast {
+            value: Box::new(atom),
+            target_type,
+            span,
+        })
+    }
+
+    fn primary_atom(&mut self) -> Option<AstExpr> {
         match self.current_kind() {
             Some(TokenKind::Identifier) => {
                 let name = self.spanned(TokenKind::Identifier, "MNP062", "expected expression")?;
@@ -1877,7 +2009,7 @@ impl<'a> Parser<'a> {
                     // (Profile 0.6). The lookahead distinguishes it from a
                     // projection chain by checking for a literal-opening '{'.
                     if self.at_payload_construct()
-                        && matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_6)
+                        && profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_6)
                     {
                         self.cursor += 1;
                         let mut fields = Vec::new();
@@ -1984,6 +2116,21 @@ impl<'a> Parser<'a> {
                 value
             }
             Some(TokenKind::MatchKeyword) => self.match_expression(),
+            Some(TokenKind::LeftBracket) => {
+                // Bounded-sequence literal `[e0, e1, ...]` (Profile 0.7).
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_7) {
+                    self.error(
+                        "MNP152",
+                        "sequence literals require source profile 0.7 or later",
+                        vec![TokenKind::LeftBracket],
+                    );
+                    return None;
+                }
+                let literal = self.sequence_literal()?;
+                // A literal may be indexed or sliced immediately:
+                // `[b0, b1, b2][1]`.
+                Some(self.project_chain(literal))
+            }
             _ => {
                 self.error(
                     "MNP064",
@@ -2003,23 +2150,123 @@ impl<'a> Parser<'a> {
     }
 
     fn project_chain(&mut self, mut base: AstExpr) -> AstExpr {
-        while self.current_kind() == Some(TokenKind::Dot) {
-            self.cursor += 1;
-            let Some(field) = self.spanned(
-                TokenKind::Identifier,
-                "MNP129",
-                "expected field name after '.'",
-            ) else {
-                break;
-            };
-            let span = SourceSpan::covering(&self.envelope.text, base.span(), field.span);
-            base = AstExpr::FieldProject {
-                base: Box::new(base),
-                field,
-                span,
-            };
+        loop {
+            match self.current_kind() {
+                Some(TokenKind::Dot) => {
+                    self.cursor += 1;
+                    let Some(field) = self.spanned(
+                        TokenKind::Identifier,
+                        "MNP129",
+                        "expected field name after '.'",
+                    ) else {
+                        break;
+                    };
+                    let span = SourceSpan::covering(&self.envelope.text, base.span(), field.span);
+                    base = AstExpr::FieldProject {
+                        base: Box::new(base),
+                        field,
+                        span,
+                    };
+                }
+                Some(TokenKind::LeftBracket) => {
+                    // Element observation `xs[i]` or bounded view derivation
+                    // `xs[start..end]` (Profile 0.7). The bracket lookahead
+                    // distinguishes the forms without guessing.
+                    if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_7) {
+                        self.error(
+                            "MNP153",
+                            "sequence indexing and views require source profile 0.7 or later",
+                            vec![TokenKind::LeftBracket],
+                        );
+                        break;
+                    }
+                    self.cursor += 1;
+                    let Some(first) = self.expression() else {
+                        break;
+                    };
+                    if self.current_kind() == Some(TokenKind::DotDot) {
+                        self.cursor += 1;
+                        let Some(second) = self.expression() else {
+                            break;
+                        };
+                        let end_index = self.expect(
+                            TokenKind::RightBracket,
+                            "MNP154",
+                            "expected ']' after view range",
+                        );
+                        let span = SourceSpan::covering(
+                            &self.envelope.text,
+                            base.span(),
+                            end_index
+                                .and_then(|index| self.tokens.get(index))
+                                .map_or(first.span(), |token| token.span),
+                        );
+                        base = AstExpr::Slice {
+                            base: Box::new(base),
+                            start: Box::new(first),
+                            end: Box::new(second),
+                            span,
+                        };
+                    } else {
+                        let end_index = self.expect(
+                            TokenKind::RightBracket,
+                            "MNP155",
+                            "expected ']' after sequence index",
+                        );
+                        let span = SourceSpan::covering(
+                            &self.envelope.text,
+                            base.span(),
+                            end_index
+                                .and_then(|index| self.tokens.get(index))
+                                .map_or(first.span(), |token| token.span),
+                        );
+                        base = AstExpr::Index {
+                            base: Box::new(base),
+                            index: Box::new(first),
+                            span,
+                        };
+                    }
+                }
+                _ => break,
+            }
         }
         base
+    }
+
+    /// A bounded-sequence literal: `[e0, e1, ...]`. The expected element
+    /// count is established by elaboration against the declared exact type.
+    fn sequence_literal(&mut self) -> Option<AstExpr> {
+        let open = self.expect(
+            TokenKind::LeftBracket,
+            "MNP156",
+            "expected '[' to open a sequence literal",
+        )?;
+        let mut elements = Vec::new();
+        while self.current_kind() != Some(TokenKind::RightBracket)
+            && self.cursor < self.significant.len()
+        {
+            let Some(element) = self.expression() else {
+                break;
+            };
+            elements.push(element);
+            if self.current_kind() != Some(TokenKind::Comma) {
+                break;
+            }
+            self.cursor += 1;
+        }
+        let close = self.expect(
+            TokenKind::RightBracket,
+            "MNP157",
+            "expected ']' after sequence elements",
+        );
+        let span = SourceSpan::at(
+            &self.envelope.text,
+            self.tokens.get(open).map_or(0, |token| token.span.start),
+            close
+                .and_then(|index| self.tokens.get(index))
+                .map_or(self.envelope.text.len(), |token| token.span.end),
+        );
+        Some(AstExpr::SequenceLiteral { elements, span })
     }
 
     /// Profile 0.5 shares `Name {` between record literals and every construct
@@ -2137,7 +2384,7 @@ impl<'a> Parser<'a> {
             let mut type_name = None;
             let mut variant = first;
             if self.current_kind() == Some(TokenKind::Dot)
-                && matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_6)
+                && profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_6)
             {
                 self.cursor += 1;
                 type_name = Some(variant.clone());
@@ -2154,7 +2401,7 @@ impl<'a> Parser<'a> {
             let mut bindings = Vec::new();
             let mut ignore_payload = false;
             if self.current_kind() == Some(TokenKind::LeftBrace)
-                && matches!(self.profile.as_str(), SOURCE_PROFILE_VERSION_0_6)
+                && profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_6)
             {
                 self.cursor += 1;
                 if self.current_kind() == Some(TokenKind::DotDot) {
@@ -2250,8 +2497,7 @@ impl<'a> Parser<'a> {
                 "MNP022",
                 "expected ':' after parameter name",
             );
-            let value_type =
-                self.spanned(TokenKind::Identifier, "MNP023", "expected parameter type");
+            let value_type = self.type_annotation("MNP023", "expected parameter type");
             let parameter_end = self.previous_token_index(parameter_start);
             children.push(self.node(
                 CstKind::Parameter,
@@ -2332,6 +2578,60 @@ impl<'a> Parser<'a> {
             text: token.text.clone(),
             span: token.span,
         })
+    }
+
+    /// Parse a type annotation: either a plain named/scalar identifier or,
+    /// from Profile 0.7, a canonical bounded-sequence spelling
+    /// `[Element; N]` / `[Element; up_to M]`. The returned text is the
+    /// canonical spelling; elaboration resolves it against declarations.
+    fn type_annotation(&mut self, code: &str, message: &str) -> Option<SpannedText> {
+        if self.current_kind() != Some(TokenKind::LeftBracket) {
+            return self.spanned(TokenKind::Identifier, code, message);
+        }
+        if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_7) {
+            self.error(
+                "MNP145",
+                "bounded sequence types require source profile 0.7 or later",
+                vec![TokenKind::LeftBracket],
+            );
+        }
+        let start_span = self.current_token().map(|token| token.span);
+        self.cursor += 1;
+        let element = self.type_annotation(code, message)?;
+        self.expect(
+            TokenKind::Semicolon,
+            "MNP146",
+            "expected ';' between sequence element type and bound",
+        );
+        let bound_text = if self.current_kind() == Some(TokenKind::UpToKeyword) {
+            self.cursor += 1;
+            let capacity = self.spanned(
+                TokenKind::IntegerLiteral,
+                "MNP147",
+                "expected a literal view capacity after 'up_to'",
+            )?;
+            format!("up_to {}", capacity.text)
+        } else {
+            let length = self.spanned(
+                TokenKind::IntegerLiteral,
+                "MNP148",
+                "expected a literal sequence length or 'up_to M'",
+            )?;
+            length.text.clone()
+        };
+        let end_index = self.expect(
+            TokenKind::RightBracket,
+            "MNP149",
+            "expected ']' after sequence bound",
+        )?;
+        let end_span = self.tokens.get(end_index).map(|token| token.span);
+        let text = format!("[{}; {}]", element.text, bound_text);
+        let span = SourceSpan::at(
+            &self.envelope.text,
+            start_span.map_or(0, |span| span.start),
+            end_span.map_or(0, |span| span.end),
+        );
+        Some(SpannedText { text, span })
     }
 
     fn expect(&mut self, kind: TokenKind, code: &str, message: &str) -> Option<usize> {
@@ -2448,23 +2748,32 @@ fn binary_operator(kind: Option<TokenKind>) -> Option<(AstBinaryOp, u8)> {
     Some(match kind? {
         TokenKind::OrOr => (AstBinaryOp::Or, 1),
         TokenKind::AndAnd => (AstBinaryOp::And, 2),
-        TokenKind::EqEq => (AstBinaryOp::Eq, 3),
-        TokenKind::NotEq => (AstBinaryOp::Ne, 3),
-        TokenKind::Lt => (AstBinaryOp::Lt, 4),
-        TokenKind::Le => (AstBinaryOp::Le, 4),
-        TokenKind::Gt => (AstBinaryOp::Gt, 4),
-        TokenKind::Ge => (AstBinaryOp::Ge, 4),
-        TokenKind::Plus => (AstBinaryOp::Add, 5),
-        TokenKind::Minus => (AstBinaryOp::Sub, 5),
-        TokenKind::PlusPercent => (AstBinaryOp::AddWrap, 5),
-        TokenKind::MinusPercent => (AstBinaryOp::SubWrap, 5),
-        TokenKind::PlusPipe => (AstBinaryOp::AddSat, 5),
-        TokenKind::MinusPipe => (AstBinaryOp::SubSat, 5),
-        TokenKind::Star => (AstBinaryOp::Mul, 6),
-        TokenKind::StarPercent => (AstBinaryOp::MulWrap, 6),
-        TokenKind::StarPipe => (AstBinaryOp::MulSat, 6),
-        TokenKind::Slash => (AstBinaryOp::Div, 6),
-        TokenKind::Percent => (AstBinaryOp::Mod, 6),
+        // Bitwise operators bind tighter than equality so mask idioms such as
+        // `a << 24 | b << 16` group as expected (Profile 0.7).
+        TokenKind::Pipe => (AstBinaryOp::BitwiseOr, 3),
+        TokenKind::Caret => (AstBinaryOp::BitwiseXor, 4),
+        TokenKind::Ampersand => (AstBinaryOp::BitwiseAnd, 5),
+        TokenKind::EqEq => (AstBinaryOp::Eq, 6),
+        TokenKind::NotEq => (AstBinaryOp::Ne, 6),
+        TokenKind::Lt => (AstBinaryOp::Lt, 7),
+        TokenKind::Le => (AstBinaryOp::Le, 7),
+        TokenKind::Gt => (AstBinaryOp::Gt, 7),
+        TokenKind::Ge => (AstBinaryOp::Ge, 7),
+        // Byte shifts bind tighter than addition but looser than comparison
+        // (Profile 0.7).
+        TokenKind::Shl => (AstBinaryOp::Shl, 8),
+        TokenKind::Shr => (AstBinaryOp::Shr, 8),
+        TokenKind::Plus => (AstBinaryOp::Add, 9),
+        TokenKind::Minus => (AstBinaryOp::Sub, 9),
+        TokenKind::PlusPercent => (AstBinaryOp::AddWrap, 9),
+        TokenKind::MinusPercent => (AstBinaryOp::SubWrap, 9),
+        TokenKind::PlusPipe => (AstBinaryOp::AddSat, 9),
+        TokenKind::MinusPipe => (AstBinaryOp::SubSat, 9),
+        TokenKind::Star => (AstBinaryOp::Mul, 10),
+        TokenKind::StarPercent => (AstBinaryOp::MulWrap, 10),
+        TokenKind::StarPipe => (AstBinaryOp::MulSat, 10),
+        TokenKind::Slash => (AstBinaryOp::Div, 10),
+        TokenKind::Percent => (AstBinaryOp::Mod, 10),
         _ => return None,
     })
 }
@@ -2482,6 +2791,7 @@ pub fn source_profile_supported(version: &str) -> bool {
             | SOURCE_PROFILE_VERSION_0_4
             | SOURCE_PROFILE_VERSION_0_5
             | SOURCE_PROFILE_VERSION_0_6
+            | SOURCE_PROFILE_VERSION_0_7
     )
 }
 
@@ -2491,6 +2801,7 @@ fn infer_source_profile(text: &str) -> &'static str {
         !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with("/*")
     });
     match header {
+        Some(line) if line.trim_start().starts_with("mncs 0.7") => SOURCE_PROFILE_VERSION_0_7,
         Some(line) if line.trim_start().starts_with("mncs 0.6") => SOURCE_PROFILE_VERSION_0_6,
         Some(line) if line.trim_start().starts_with("mncs 0.5") => SOURCE_PROFILE_VERSION_0_5,
         Some(line) if line.trim_start().starts_with("mncs 0.4") => SOURCE_PROFILE_VERSION_0_4,

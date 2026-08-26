@@ -92,6 +92,42 @@ pub enum IrOperationKind {
     BooleanOp {
         operator: String,
     },
+    /// Byte-oriented bitwise op (Profile 0.7): `and` | `or` | `xor`.
+    ByteBitwise {
+        operator: String,
+    },
+    /// Byte shift (Profile 0.7): `shl` | `shr`; count taken modulo 8.
+    ByteShift {
+        operator: String,
+    },
+    /// Unsigned byte comparison (Profile 0.7).
+    ByteCompare {
+        predicate: String,
+    },
+    /// Explicit total scalar conversion (Profile 0.7).
+    Convert {
+        from: crate::BodyType,
+        to: crate::BodyType,
+    },
+    /// Construct an exact-length sequence (Profile 0.7).
+    SequenceConstruct {
+        element_type: Box<crate::BodyType>,
+        length: u32,
+    },
+    /// Project an element with recorded bounds evidence (Profile 0.7).
+    SequenceProject {
+        bound: crate::SequenceBound,
+        evidence: crate::BoundsEvidence,
+    },
+    /// Observe a bounded sequence's length as u64 (Profile 0.7).
+    SequenceLength {
+        bound: crate::SequenceBound,
+    },
+    /// Derive a checked bounded view over a half-open range (Profile 0.7).
+    ViewConstruct {
+        source_bound: crate::SequenceBound,
+        view_bound: crate::SequenceBound,
+    },
     FiniteConstruct {
         type_identity: SemanticId,
         variant_identity: SemanticId,
@@ -195,6 +231,10 @@ pub struct IrFunction {
 pub struct IrBoundedIteration {
     pub identity: SemanticId,
     pub bound: u32,
+    /// What the iteration counts over; absent (legacy attempts) forms
+    /// serialize unchanged.
+    #[serde(default)]
+    pub domain: crate::IterationDomain,
     pub state_type: IrType,
     pub preheader: SemanticId,
     pub header: SemanticId,
@@ -803,6 +843,86 @@ fn lower_executable_body(
                         None,
                         None,
                     ),
+                    BodyOperationKind::ByteBitwise { operator } => (
+                        IrOperationKind::ByteBitwise {
+                            operator: operator.clone(),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::ByteShift { operator } => (
+                        IrOperationKind::ByteShift {
+                            operator: operator.clone(),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::ByteCompare { predicate } => (
+                        IrOperationKind::ByteCompare {
+                            predicate: predicate.clone(),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::Convert { from, to } => (
+                        IrOperationKind::Convert {
+                            from: from.clone(),
+                            to: to.clone(),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::SequenceConstruct {
+                        element_type,
+                        length,
+                    } => (
+                        IrOperationKind::SequenceConstruct {
+                            element_type: element_type.clone(),
+                            length: *length,
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::SequenceProject { bound, evidence } => (
+                        IrOperationKind::SequenceProject {
+                            bound: *bound,
+                            evidence: evidence.clone(),
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::SequenceLength { bound } => (
+                        IrOperationKind::SequenceLength { bound: *bound },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
+                    BodyOperationKind::ViewConstruct {
+                        source_bound,
+                        view_bound,
+                    } => (
+                        IrOperationKind::ViewConstruct {
+                            source_bound: *source_bound,
+                            view_bound: *view_bound,
+                        },
+                        Vec::new(),
+                        Vec::new(),
+                        None,
+                        None,
+                    ),
                     BodyOperationKind::FiniteConstruct {
                         type_identity,
                         variant_identity,
@@ -1139,6 +1259,7 @@ fn lower_executable_body(
             .map(|kind| crate::obligations::body_obligation_id(kind, &identity))
             .collect();
             IrBoundedIteration {
+                domain: iteration.domain.clone(),
                 identity,
                 bound: iteration.bound,
                 state_type: ir_type(&iteration.state_type),

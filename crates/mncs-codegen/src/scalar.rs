@@ -21,10 +21,18 @@ use crate::promises::{
 pub enum ScalarTy {
     Bool,
     Int(IntegerType),
+    /// A byte-oriented 8-bit unsigned logical value (Profile 0.7),
+    /// realized in one unsigned 8-bit cell.
+    Byte,
     Finite,
-    /// A reference to a canonical arena cell (record or boxed finite
-    /// variant). The value itself is the cell's byte offset.
+    /// A reference to a canonical arena cell (record, boxed finite
+    /// variant, or fixed-length sequence). The value itself is the
+    /// cell's byte offset.
     Cell,
+    /// A bounded view descriptor packed into one 64-bit cell: the low
+    /// 32 bits hold the source cell offset, the high 32 bits the runtime
+    /// length. One valid representation among possible realizations.
+    View,
 }
 
 impl ScalarTy {
@@ -99,6 +107,64 @@ pub enum ScalarInst {
         dest: ScalarValue,
         src: SemanticId,
         discriminant: u32,
+    },
+    /// Byte bitwise op (Profile 0.7): `and` | `or` | `xor` over two byte
+    /// cells; realized as an 8-bit unsigned operation.
+    ByteBitwise {
+        dest: ScalarValue,
+        operator: String,
+        lhs: SemanticId,
+        rhs: SemanticId,
+    },
+    /// Byte shift (Profile 0.7): `shl` | `shr` with a u64 count taken
+    /// modulo 8.
+    ByteShift {
+        dest: ScalarValue,
+        operator: String,
+        lhs: SemanticId,
+        rhs: SemanticId,
+    },
+    /// Explicit total scalar conversion (Profile 0.7). Truncation drops high
+    /// bits; widening extends by the source signedness (`byte` zero-extends).
+    Convert {
+        dest: ScalarValue,
+        from: ScalarTy,
+        to: ScalarTy,
+        src: SemanticId,
+    },
+    /// Project one element of a bounded sequence (Profile 0.7). Exact
+    /// sequences are canonical cells (address `cell + index * 8`); views are
+    /// packed descriptors whose low 32 bits hold the source offset and whose
+    /// high 32 bits hold the runtime length. Realization performs the bounds
+    /// check exactly when the evidence is `RuntimeChecked`, trapping on
+    /// violation; other evidences discharge the check statically or through
+    /// traversal semantics.
+    SequenceProject {
+        dest: ScalarValue,
+        seq: SemanticId,
+        index: SemanticId,
+        bound: mncs_model::SequenceBound,
+        evidence: mncs_model::BoundsEvidence,
+        width: SlotWidth,
+    },
+    /// Observe a bounded sequence's length (Profile 0.7). Exact bounds fold
+    /// to constants; views expose their packed runtime length.
+    SequenceLength {
+        dest: ScalarValue,
+        bound: mncs_model::SequenceBound,
+        seq: SemanticId,
+    },
+    /// Derive a bounded view over a checked half-open range (Profile 0.7).
+    /// Realization checks `start <= end`, `end <= len(source)`, and
+    /// `end - start <= cap` before packing `(offset | length << 32)` into
+    /// one 64-bit descriptor; violations trap as explicit failures.
+    ViewConstruct {
+        dest: ScalarValue,
+        source_bound: mncs_model::SequenceBound,
+        view_cap: u32,
+        source: SemanticId,
+        start: SemanticId,
+        end: SemanticId,
     },
     /// One source instruction lowered into an ordered group of cell
     /// operations (allocation followed by canonical field stores).
@@ -318,7 +384,7 @@ fn lower_instruction(
             }
             if !matches!(
                 operator.as_str(),
-                "add" | "sub" | "mul" | "div" | "mod" | "and" | "or" | "xor"
+                "add" | "sub" | "mul" | "div" | "mod" | "and" | "or" | "xor" | "shl" | "shr"
             ) {
                 return Err(format!("unsupported integer operator {operator}"));
             }
@@ -398,6 +464,101 @@ fn lower_instruction(
             lhs: operand(instruction, 0)?,
             rhs: operand(instruction, 1)?,
         }),
+        SsaInstructionKind::ByteBitwise { operator } => Ok(ScalarInst::ByteBitwise {
+            dest,
+            operator: operator.clone(),
+            lhs: operand(instruction, 0)?,
+            rhs: operand(instruction, 1)?,
+        }),
+        SsaInstructionKind::ByteShift { operator } => Ok(ScalarInst::ByteShift {
+            dest,
+            operator: operator.clone(),
+            lhs: operand(instruction, 0)?,
+            rhs: operand(instruction, 1)?,
+        }),
+        SsaInstructionKind::ByteCompare { predicate } => {
+            // Bytes realize as unsigned 8-bit cells, so byte comparison
+            // reuses the integer comparison machinery exactly.
+            Ok(ScalarInst::Compare {
+                dest,
+                predicate: predicate.clone(),
+                operand: IntegerType {
+                    bits: 8,
+                    signed: false,
+                },
+                lhs: operand(instruction, 0)?,
+                rhs: operand(instruction, 1)?,
+            })
+        }
+        SsaInstructionKind::Convert { from, to } => Ok(ScalarInst::Convert {
+            from: scalar_ty_in(&ir_type_of(from), layout)?,
+            to: scalar_ty_in(&ir_type_of(to), layout)?,
+            dest,
+            src: operand(instruction, 0)?,
+        }),
+        SsaInstructionKind::SequenceConstruct {
+            element_type,
+            length,
+        } => {
+            let element_ty = scalar_ty_in(&ir_type_of(element_type), layout)?;
+            let width = slot_width_of(element_ty);
+            if *length as usize != instruction.inputs.len() {
+                return Err("sequence construction does not match its declared length".to_owned());
+            }
+            let cell = dest.id.clone();
+            let mut insts = vec![ScalarInst::CellAlloc {
+                dest: dest.clone(),
+                bytes: u64::from(*length) * 8,
+            }];
+            for index in 0..*length as usize {
+                insts.push(ScalarInst::CellStore {
+                    cell: cell.clone(),
+                    byte_offset: index as u64 * 8,
+                    width,
+                    value: operand(instruction, index)?,
+                });
+            }
+            Ok(ScalarInst::Sequence(insts))
+        }
+        SsaInstructionKind::SequenceProject { bound, evidence } => {
+            let output = instruction
+                .outputs
+                .first()
+                .ok_or_else(|| "projection has no result".to_owned())?;
+            let element_ty = scalar_ty_in(&output.ty, layout)?;
+            Ok(ScalarInst::SequenceProject {
+                dest,
+                seq: operand(instruction, 0)?,
+                index: operand(instruction, 1)?,
+                bound: *bound,
+                evidence: evidence.clone(),
+                width: slot_width_of(element_ty),
+            })
+        }
+        SsaInstructionKind::SequenceLength { bound } => Ok(ScalarInst::SequenceLength {
+            bound: *bound,
+            dest,
+            seq: operand(instruction, 0)?,
+        }),
+        SsaInstructionKind::ViewConstruct {
+            source_bound,
+            view_bound,
+        } => {
+            let cap = match view_bound {
+                mncs_model::SequenceBound::UpTo(cap) => *cap,
+                mncs_model::SequenceBound::Exact(_) => {
+                    return Err("view construction must produce an UpTo view".to_owned())
+                }
+            };
+            Ok(ScalarInst::ViewConstruct {
+                dest,
+                source_bound: *source_bound,
+                view_cap: cap,
+                source: operand(instruction, 0)?,
+                start: operand(instruction, 1)?,
+                end: operand(instruction, 2)?,
+            })
+        }
         SsaInstructionKind::FinitePayloadProject {
             type_identity,
             discriminant,
@@ -573,6 +734,18 @@ pub fn scalar_ty_in(ty: &IrType, layout: &CompositeLayout) -> Result<ScalarTy, S
             BodyType::Integer(integer) if matches!(integer.bits, 8 | 16 | 32 | 64) => {
                 Ok(ScalarTy::Int(integer))
             }
+            // Bytes realize as unsigned 8-bit cells.
+            BodyType::Byte => Ok(ScalarTy::Byte),
+            // Exact sequences are canonical cells; bounded views are packed
+            // descriptors riding one 64-bit cell.
+            BodyType::Sequence {
+                bound: mncs_model::SequenceBound::Exact(_),
+                ..
+            } => Ok(ScalarTy::Cell),
+            BodyType::Sequence {
+                bound: mncs_model::SequenceBound::UpTo(_),
+                ..
+            } => Ok(ScalarTy::View),
             _ => Err(format!("unsupported SSA type {name}")),
         },
     }
@@ -580,17 +753,20 @@ pub fn scalar_ty_in(ty: &IrType, layout: &CompositeLayout) -> Result<ScalarTy, S
 
 pub fn abi_bits(ty: ScalarTy) -> u16 {
     match ty {
-        // Cell references are full 64-bit arena offsets.
-        ScalarTy::Cell => 64,
+        // Cell references and packed view descriptors are full 64-bit values.
+        ScalarTy::Cell | ScalarTy::View => 64,
         ScalarTy::Bool | ScalarTy::Finite => 32,
+        ScalarTy::Byte => 8,
         ScalarTy::Int(integer) => integer.bits.clamp(32, 64),
     }
 }
 
 pub fn c_type(ty: ScalarTy) -> &'static str {
     match ty {
-        // Cell references are unsigned byte offsets into the arena.
-        ScalarTy::Cell => "uint64_t",
+        // Cell references are unsigned byte offsets into the arena; view
+        // descriptors pack offset and length into one unsigned word.
+        ScalarTy::Cell | ScalarTy::View => "uint64_t",
+        ScalarTy::Byte => "uint8_t",
         _ => match abi_bits(ty) {
             64 => "int64_t",
             _ => "int32_t",
@@ -600,9 +776,36 @@ pub fn c_type(ty: ScalarTy) -> &'static str {
 
 pub fn llvm_type(ty: ScalarTy) -> String {
     match ty {
-        ScalarTy::Cell => "i64".to_owned(),
+        ScalarTy::Cell | ScalarTy::View => "i64".to_owned(),
         ScalarTy::Bool | ScalarTy::Finite => "i32".to_owned(),
+        ScalarTy::Byte => "i8".to_owned(),
         ScalarTy::Int(integer) => format!("i{}", integer.bits),
+    }
+}
+
+/// Map a semantic body type into the IR view used by scalar lowering.
+/// Nominal types keep their structural variants; scalars, bytes, and
+/// bounded sequences travel as canonical semantic names.
+fn ir_type_of(ty: &mncs_model::BodyType) -> IrType {
+    match ty {
+        mncs_model::BodyType::Finite { identity, name } => IrType::Finite {
+            identity: identity.clone(),
+            name: name.clone(),
+        },
+        mncs_model::BodyType::Record { identity, name } => IrType::Record {
+            identity: identity.clone(),
+            name: name.clone(),
+        },
+        other => IrType::Named(other.semantic_name()),
+    }
+}
+
+/// Canonical slot width for a sequence element inside an exact cell.
+pub fn slot_width_of(ty: ScalarTy) -> SlotWidth {
+    match ty {
+        ScalarTy::Int(integer) if integer.bits == 64 => SlotWidth::W64,
+        ScalarTy::Cell | ScalarTy::View => SlotWidth::W64,
+        _ => SlotWidth::W32,
     }
 }
 

@@ -870,6 +870,8 @@ fn backend_input_matches(
                 (BodyType::Integer(expected), ExecutionValue::Integer { value, ty }) => {
                     expected == *ty && support::integer_fits(*value, expected)
                 }
+                // Bytes marshal through their unsigned 8-bit domain.
+                (BodyType::Byte, ExecutionValue::Byte { value }) => (0..=255).contains(value),
                 _ => false,
             }
         }
@@ -971,6 +973,18 @@ pub(crate) fn backend_output_value(
                         ty: expected,
                     })
                 }
+                // Byte results normalize through the unsigned byte domain.
+                (BodyType::Byte, ExecutionValue::Integer { value, .. })
+                | (BodyType::Byte, ExecutionValue::Byte { value }) => {
+                    let normalized = value.rem_euclid(256);
+                    if !(0..=255).contains(&normalized) {
+                        return Err(
+                            "backend returned a scalar outside the language-owned integer type"
+                                .to_owned(),
+                        );
+                    }
+                    Ok(ExecutionValue::Byte { value: normalized })
+                }
                 _ => Err(
                     "backend scalar result violates the language-owned value contract".to_owned(),
                 ),
@@ -1040,6 +1054,11 @@ fn marshal_ty(
             match BodyType::from_semantic_name(semantic_type) {
                 BodyType::Named(name) if name == "bool" => MarshalTy::Bool,
                 BodyType::Integer(ty) => MarshalTy::Int(ty),
+                // Bytes marshal as unsigned 8-bit scalar cells.
+                BodyType::Byte => MarshalTy::Int(IntegerType {
+                    bits: 8,
+                    signed: false,
+                }),
                 _ => MarshalTy::Int(IntegerType {
                     bits: 64,
                     signed: true,
@@ -1482,8 +1501,33 @@ fn values_agree(left: &[ExecutionValue], right: &[ExecutionValue]) -> bool {
                     && left_name == right_name
                     && record_fields_agree(left_fields, right_fields)
             }
+            // Bytes agree through their unsigned 8-bit domain.
+            (ExecutionValue::Byte { value: left }, ExecutionValue::Byte { value: right }) => {
+                left == right
+            }
+            // A byte returned from a scalar realization may surface as an
+            // integer observation; agree through the byte domain when the
+            // value fits.
+            (
+                ExecutionValue::Byte { value: left },
+                ExecutionValue::Integer { value: right, .. },
+            )
+            | (
+                ExecutionValue::Integer { value: right, .. },
+                ExecutionValue::Byte { value: left },
+            ) => (0..=255).contains(left) && (*left == widen_byte(*right)),
+            // Sequences agree element-wise under the same observable rules.
+            (
+                ExecutionValue::Sequence { values: left },
+                ExecutionValue::Sequence { values: right },
+            ) => values_agree(left, right),
             _ => false,
         })
+}
+
+/// Normalize an observed integer into the unsigned 8-bit byte domain.
+fn widen_byte(value: i128) -> i128 {
+    value.rem_euclid(256)
 }
 
 /// Logical record agreement: fields are kept in canonical (sorted) name

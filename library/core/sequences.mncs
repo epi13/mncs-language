@@ -1,0 +1,120 @@
+mncs 0.7;
+
+// mncs.core.sequences — reusable operations over bounded sequences.
+//
+// This module is the standard-library definition of the bounded-data
+// substrate's traversal vocabulary (Source Profile 0.7, RFC 0044). Every
+// operation is total over its declared domain: lengths are fixed by the
+// sequence types themselves, traversal discharges element bounds checks by
+// semantics, and no operation allocates or fails. Element bounds facts are
+// machine knowledge here, not runtime folklore.
+//
+// Fixed element counts appear in the type signatures because the substrate
+// is deliberately bounded; generalization awaits RFC 0013 polymorphism and
+// must not be simulated with unbounded representations.
+//
+// Realization envelope (2026-08): reference executors and research bytecode
+// realize these operations fully, including sequence-typed parameters at
+// language-level signatures. C11, LLVM IR, portable WASM, Cranelift, and the
+// external artifact targets refuse sequence-typed boundary crossings this
+// tranche and realize the same logic through scalar-entry wrappers.
+module mncs.core.sequences.v1;
+
+enum Found { Yes { value: i64 }, No }
+
+record Scan { prev: i64, ordered: bool }
+
+fn make_found(value: i64) -> (result: Found) {
+    return Found.Yes { value: value };
+}
+
+fn no_found() -> (result: Found) {
+    return Found.No;
+}
+
+// Sum of an exact window. Checked accumulation keeps overflow explicit.
+fn sum4(a: i64, b: i64, c: i64, d: i64) -> (result: i64) {
+    let xs: [i64; 4] = [a, b, c, d];
+    iterate i over xs carrying acc: i64 = 0 {
+        next acc = acc + xs[i];
+    }
+    return acc;
+}
+
+// Membership test by full deterministic traversal.
+fn contains4(xs: [i64; 4], needle: i64) -> (result: bool) {
+    iterate i over xs carrying hit: bool = false {
+        next hit = hit || xs[i] == needle;
+    }
+    return hit;
+}
+
+// Count of exact matches; the canonical search-shape fold.
+fn count4(xs: [i64; 4], needle: i64) -> (result: i64) {
+    iterate i over xs carrying hits: i64 = 0 {
+        next hits = hits + ((xs[i] == needle) as i64);
+    }
+    return hits;
+}
+
+// First element of a window, as a logical option. The empty case is
+// representable because a view may have runtime length zero; observing a
+// missing head is a value, never a failure.
+fn first_of(view: [i64; up_to 4]) -> (result: Found) {
+    if view.len == 0 {
+        return Found.No;
+    }
+    return Found.Yes { value: view[0] };
+}
+
+// Last element of a window under the same option discipline.
+fn last_of(view: [i64; up_to 4]) -> (result: Found) {
+    if view.len == 0 {
+        return Found.No;
+    }
+    return Found.Yes { value: view[view.len - 1] };
+}
+
+// Strict ordering scan: carries the previous element and the running verdict
+// through one traversal. Pairwise adjacency comes from carried state, so no
+// index arithmetic beyond the traversal domain is needed.
+fn scan_sorted(prev: i64, ordered: bool, next_value: i64) -> (result: Scan) {
+    let still: bool = ordered && prev <= next_value;
+    return Scan { prev: next_value, ordered: still };
+}
+
+fn start_scan(first: i64) -> (result: Scan) {
+    return Scan { prev: first, ordered: true };
+}
+
+// Non-decreasing check over a fixed window using the scan state machine.
+fn is_sorted4(xs: [i64; 4]) -> (result: bool) {
+    let seed: Scan = start_scan(xs[0]);
+    iterate i over xs carrying state: Scan = seed {
+        next state = scan_sorted(state.prev, state.ordered, xs[i]);
+    }
+    return state.ordered;
+}
+
+// Equality of two fixed windows by position-wise conjunction.
+fn equals4(left: [i64; 4], right: [i64; 4]) -> (result: bool) {
+    iterate i over left carrying same: bool = true {
+        next same = same && left[i] == right[i];
+    }
+    return same;
+}
+
+// Positional overwrite of one slot; the canonical functional-update shape
+// for fixed windows. Each branch observes exactly the slot it writes.
+fn put4(base: [i64; 4], index: u64, value: i64) -> (result: [i64; 4]) {
+    if index == 0 {
+        return [value, base[1], base[2], base[3]];
+    }
+    if index == 1 {
+        return [base[0], value, base[2], base[3]];
+    }
+    if index == 2 {
+        return [base[0], base[1], value, base[3]];
+    }
+    return [base[0], base[1], base[2], value];
+}

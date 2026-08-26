@@ -1,0 +1,69 @@
+mncs 0.7;
+
+// Canonical-serialization groundwork experiment (RFC 0027 direction).
+//
+// This consumer binds against mncs.std.encoding.v1 and mncs.core.bytes.v1
+// through elaboration-time imports and exercises the full bounded-data
+// substrate across a module boundary: byte sequences, views, traversal,
+// explicit conversions, and executable encoding round-trip laws.
+//
+// Wire layout v1 (8 bytes, big-endian):
+//   [0] magic (66)          [1] marker (77)
+//   [2] version_major hi    [3] version_major lo
+//   [4..8) payload_len (u32)
+//
+// Logical value != runtime representation != serialized bytes: encode/decode
+// are the explicit boundary, and the law below re-runs the boundary in both
+// directions over a bounded corpus.
+
+module examples.profile07.serialization;
+
+use mncs.std.encoding;
+use mncs.core.bytes;
+
+
+record Header { magic: byte, marker: byte, version_major: u16, payload_len: u32 }
+
+enum Decoded { Ok { header: Header }, Reject }
+
+fn encode_header(header: Header) -> (result: [byte; 8]) {
+    let prefix: [byte; 4] = [
+        header.magic,
+        header.marker,
+        (header.version_major / 256) as byte,
+        (header.version_major % 256) as byte,
+    ];
+    let width: [byte; 4] = encode_u32(header.payload_len);
+    return [prefix[0], prefix[1], prefix[2], prefix[3], width[0], width[1], width[2], width[3]];
+}
+
+fn decode_header(data: [byte; 8]) -> (result: Decoded) {
+    if data[0] != 66 {
+        return Decoded.Reject;
+    }
+    if data[1] != 77 {
+        return Decoded.Reject;
+    }
+    let word: [byte; 4] = [data[4], data[5], data[6], data[7]];
+    let len: u32 = decode_u32(word);
+    let major: u16 = ((data[2] as u16) *% 256) + (data[3] as u16);
+    return Decoded.Ok { header: Header { magic: data[0], marker: data[1], version_major: major, payload_len: len } };
+}
+
+fn fingerprint_header(header: Header) -> (result: u64) {
+    let seed: byte = (header.payload_len % 251) as byte;
+    return fingerprint4([seed, (header.version_major as byte) << 1, header.magic, header.marker]);
+}
+
+fn header_roundtrip(magic: byte, major: u16, len: u32) -> (result: bool) {
+    let header: Header = Header { magic: magic, marker: 77, version_major: major, payload_len: len };
+    let encoded: [byte; 8] = encode_header(header);
+    let window: [byte; up_to 8] = encoded[0..4];
+    let prefix_ok: bool = (window.len == 4) && (window[0] == magic) && (window[1] == 77);
+    let decoded_ok: bool = match decode_header(encoded) {
+        Decoded.Ok { header: decoded } =>
+            (decoded.payload_len == len) && (decoded.version_major == major),
+        Reject => false,
+    };
+    return prefix_ok && decoded_ok;
+}

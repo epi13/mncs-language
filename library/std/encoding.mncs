@@ -1,0 +1,83 @@
+mncs 0.7;
+
+// mncs.std.encoding — canonical big-endian byte encodings for scalar values.
+//
+// This is the first portable module in mncs.std: it exists because the
+// bounded-data substrate finally makes encoded data expressible without
+// faking bytes as integers. Encodings here are canonical by construction:
+//
+// - fixed field widths, most-significant byte first (big-endian);
+// - logical value != runtime representation != serialized encoding; these
+//   functions are the explicit boundary between the first and the last;
+// - every decode is total over its declared input type because the type
+//   itself guarantees the width; no partial failure path exists to hide;
+// - the round-trip law below is executable: `decode(encode(v)) == v` is a
+//   bounded property any consumer can re-run, not folklore.
+//
+// Wire-contract versioning (RFC 0027) will wrap this module with schema
+// identities once family records need them; the byte layout of v1 functions
+// is frozen from this commit forward.
+module mncs.std.encoding.v1;
+
+// Big-endian u32 -> four bytes, most significant first. Extraction uses
+// division and remainder by exact powers of two so no host endianness or
+// shift-width folklore participates in meaning.
+fn encode_u32(value: u32) -> (result: [byte; 4]) {
+    let b0: byte = (value / 16777216) as byte;
+    let rest0: u32 = value % 16777216;
+    let b1: byte = (rest0 / 65536) as byte;
+    let rest1: u32 = rest0 % 65536;
+    let b2: byte = (rest1 / 256) as byte;
+    let b3: byte = (rest1 % 256) as byte;
+    return [b0, b1, b2, b3];
+}
+
+// Four big-endian bytes -> u32. Total by type: four bytes always form a
+// valid word, so there is no failure mode.
+fn decode_u32(data: [byte; 4]) -> (result: u32) {
+    let high: u64 = ((data[0] as u64) *% 16777216)
+        + ((data[1] as u64) *% 65536)
+        + ((data[2] as u64) *% 256);
+    return ((high + (data[3] as u64)) % 4294967296) as u32;
+}
+
+// Round-trip law for u32: decode after encode reproduces the input exactly.
+fn u32_roundtrip(value: u32) -> (result: bool) {
+    let encoded: [byte; 4] = encode_u32(value);
+    return decode_u32(encoded) == value;
+}
+
+// Canonical three-component semantic version: one byte pair per component,
+// big-endian, major first — six bytes total. This layout is the wire
+// contract for family version records until RFC 0027 supersedes it.
+fn encode_version(major: u16, minor: u16, patch: u16) -> (result: [byte; 6]) {
+    let mh: byte = (major / 256) as byte;
+    let ml: byte = (major % 256) as byte;
+    let nh: byte = (minor / 256) as byte;
+    let nl: byte = (minor % 256) as byte;
+    let ph: byte = (patch / 256) as byte;
+    let pl: byte = (patch % 256) as byte;
+    return [mh, ml, nh, nl, ph, pl];
+}
+
+// Component decoders. Total by type: each component is exactly two bytes.
+fn version_major(data: [byte; 6]) -> (result: u32) {
+    return ((data[0] as u32) *% 256) + (data[1] as u32);
+}
+
+fn version_minor(data: [byte; 6]) -> (result: u32) {
+    return ((data[2] as u32) *% 256) + (data[3] as u32);
+}
+
+fn version_patch(data: [byte; 6]) -> (result: u32) {
+    return ((data[4] as u32) *% 256) + (data[5] as u32);
+}
+
+// Round-trip law for versions: all three components reproduce exactly.
+fn version_roundtrip(major: u16, minor: u16, patch: u16) -> (result: bool) {
+    let encoded: [byte; 6] = encode_version(major, minor, patch);
+    let same: bool = ((version_major(encoded) == (major as u32))
+        && (version_minor(encoded) == (minor as u32)))
+        && (version_patch(encoded) == (patch as u32));
+    return same;
+}

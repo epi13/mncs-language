@@ -621,6 +621,16 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 "and" => "and",
                 "or" => "or",
                 "xor" => "xor",
+                // Total shifts: counts are modulo width; signed shr is
+                // arithmetic (ashr), unsigned logical (lshr).
+                "shl" => "shl",
+                "shr" => {
+                    if matches!(dest.ty, ScalarTy::Int(integer) if integer.signed) {
+                        "ashr"
+                    } else {
+                        "lshr"
+                    }
+                }
                 _ => "add",
             };
             let left = load_value(out, names, lhs, "lhs", split);
@@ -760,6 +770,9 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let cellv = format!("st_cell{split}");
             let addr = format!("st_addr{split}");
             let gep = format!("st_gep{split}");
+            // The slot payload keeps the value's own realization width;
+            // narrow scalars (bytes, i8/i16) must not be reloaded as i32.
+            let raw_ty = slot_payload_ty(*width, names.ty(value));
             let raw = format!("st_raw{split}");
             match width {
                 crate::composite::SlotWidth::W32 => {
@@ -769,8 +782,8 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                         out,
                         "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
                     );
-                    let _ = writeln!(out, "  %{raw} = load i32, ptr %{v}_slot");
-                    let _ = writeln!(out, "  store i32 %{raw}, ptr %{gep}");
+                    let _ = writeln!(out, "  %{raw} = load {raw_ty}, ptr %{v}_slot");
+                    let _ = writeln!(out, "  store {raw_ty} %{raw}, ptr %{gep}");
                 }
                 crate::composite::SlotWidth::W64 => {
                     let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
@@ -796,6 +809,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let cellv = format!("ld_cell{split}");
             let addr = format!("ld_addr{split}");
             let gep = format!("ld_gep{split}");
+            let raw_ty = slot_payload_ty(*width, dest.ty);
             match width {
                 crate::composite::SlotWidth::W32 => {
                     let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
@@ -804,8 +818,8 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                         out,
                         "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
                     );
-                    let _ = writeln!(out, "  %{d}_v32 = load i32, ptr %{gep}");
-                    let _ = writeln!(out, "  store i32 %{d}_v32, ptr %{d}_slot");
+                    let _ = writeln!(out, "  %{d}_v32 = load {raw_ty}, ptr %{gep}");
+                    let _ = writeln!(out, "  store {raw_ty} %{d}_v32, ptr %{d}_slot");
                 }
                 crate::composite::SlotWidth::W64 => {
                     let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
@@ -818,6 +832,232 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                     let _ = writeln!(out, "  store i64 %{d}_v64, ptr %{d}_slot");
                 }
             }
+        }
+        ScalarInst::ByteBitwise {
+            dest,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            // Bytes realize as unsigned 8-bit cells; bitwise ops are total.
+            let left = load_value(out, names, lhs, "lhs", split);
+            let right = load_value(out, names, rhs, "rhs", split);
+            let op = match operator.as_str() {
+                "and" => "and",
+                "or" => "or",
+                _ => "xor",
+            };
+            *split += 1;
+            let tmp = format!("bw{split}");
+            let _ = writeln!(out, "  %{tmp} = {op} i8 %{left}, %{right}");
+            store_dest(out, names, dest, &tmp);
+        }
+        ScalarInst::ByteShift {
+            dest,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            // Total semantics: the u64 count is taken modulo 8; shifts are
+            // logical because bytes are unsigned by definition.
+            let left = load_value(out, names, lhs, "lhs", split);
+            let right = load_value(out, names, rhs, "rhs", split);
+            *split += 1;
+            let modn = format!("shmod{split}");
+            let _ = writeln!(out, "  %{modn} = urem i64 %{right}, 8");
+            let count = if llvm_type(dest.ty) == "i64" {
+                modn
+            } else {
+                *split += 1;
+                let trunc = format!("shtr{split}");
+                let _ = writeln!(out, "  %{trunc} = trunc i64 %{modn} to i8");
+                trunc
+            };
+            let op = if operator == "shl" { "shl" } else { "lshr" };
+            *split += 1;
+            let tmp = format!("sh{split}");
+            let _ = writeln!(
+                out,
+                "  %{tmp} = {op} {} %{left}, %{count}",
+                llvm_type(dest.ty),
+                count = count
+            );
+            store_dest(out, names, dest, &tmp);
+        }
+        ScalarInst::Convert {
+            dest,
+            from,
+            to,
+            src,
+        } => {
+            // Explicit total conversion: narrowing truncates high bits,
+            // widening extends by the source signedness (`byte` is unsigned).
+            let srcv = load_value(out, names, src, "src", split);
+            let from_ty = llvm_type(*from);
+            let to_ty = llvm_type(*to);
+            let converted = if from_ty == to_ty {
+                srcv
+            } else {
+                *split += 1;
+                let tmp = format!("cv{split}");
+                if bits_of(*from) < bits_of(*to) {
+                    if signed_of(*from) {
+                        let _ = writeln!(out, "  %{tmp} = sext {from_ty} %{srcv} to {to_ty}");
+                    } else {
+                        let _ = writeln!(out, "  %{tmp} = zext {from_ty} %{srcv} to {to_ty}");
+                    }
+                } else {
+                    let _ = writeln!(out, "  %{tmp} = trunc {from_ty} %{srcv} to {to_ty}");
+                }
+                tmp
+            };
+            store_dest(out, names, dest, &converted);
+        }
+        ScalarInst::SequenceProject {
+            dest,
+            seq,
+            index,
+            bound,
+            evidence,
+            width,
+        } => {
+            let checked = matches!(evidence, mncs_model::BoundsEvidence::RuntimeChecked { .. });
+            let idx = load_value(out, names, index, "idx", split);
+            let seqv = load_value(out, names, seq, "seq", split);
+            // Bounds check exactly when validity was not established
+            // statically or by traversal semantics.
+            if checked {
+                *split += 1;
+                let tag = *split;
+                match bound {
+                    mncs_model::SequenceBound::Exact(length) => {
+                        let _ = writeln!(out, "  %oob{tag} = icmp uge i64 %{idx}, {length}");
+                    }
+                    mncs_model::SequenceBound::UpTo(_) => {
+                        let _ = writeln!(out, "  %vlen{tag} = lshr i64 %{seqv}, 32");
+                        let _ = writeln!(out, "  %oob{tag} = icmp uge i64 %{idx}, %vlen{tag}");
+                    }
+                }
+                let _ = writeln!(
+                    out,
+                    "  br i1 %oob{tag}, label %mncs_fail, label %oob{tag}_ok"
+                );
+                let _ = writeln!(out, "oob{tag}_ok:");
+            }
+            // Address computation: exact sequences are canonical cells;
+            // views unpack their base offset from the descriptor's low half.
+            let base = match bound {
+                mncs_model::SequenceBound::Exact(_) => seqv,
+                mncs_model::SequenceBound::UpTo(_) => {
+                    *split += 1;
+                    let base = format!("vbase{split}");
+                    let _ = writeln!(out, "  %base32{split} = trunc i64 %{seqv} to i32");
+                    let _ = writeln!(out, "  %{base} = zext i32 %base32{split} to i64");
+                    base
+                }
+            };
+            *split += 1;
+            let off = format!("soff{split}");
+            let _ = writeln!(out, "  %idxw{split} = shl i64 %{idx}, 3");
+            let _ = writeln!(out, "  %{off} = add i64 %{base}, %idxw{split}");
+            let gep = format!("sgep{split}");
+            let _ = writeln!(
+                out,
+                "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{off}"
+            );
+            let d = names.value(&dest.id);
+            let elem_ty = slot_payload_ty(*width, dest.ty);
+            match width {
+                crate::composite::SlotWidth::W32 => {
+                    let _ = writeln!(out, "  %{d}_v32 = load {elem_ty}, ptr %{gep}");
+                    let _ = writeln!(out, "  store {elem_ty} %{d}_v32, ptr %{d}_slot");
+                }
+                crate::composite::SlotWidth::W64 => {
+                    let _ = writeln!(out, "  %{d}_v64 = load i64, ptr %{gep}");
+                    let _ = writeln!(out, "  store i64 %{d}_v64, ptr %{d}_slot");
+                }
+            }
+        }
+        ScalarInst::SequenceLength { dest, bound, seq } => match bound {
+            mncs_model::SequenceBound::Exact(length) => {
+                *split += 1;
+                let tmp = format!("sl{split}");
+                let _ = writeln!(out, "  %{tmp} = add i64 {length}, 0");
+                store_dest(out, names, dest, &tmp);
+            }
+            mncs_model::SequenceBound::UpTo(_) => {
+                let seqv = load_value(out, names, seq, "seq", split);
+                *split += 1;
+                let tmp = format!("sl{split}");
+                let _ = writeln!(out, "  %{tmp} = lshr i64 %{seqv}, 32");
+                store_dest(out, names, dest, &tmp);
+            }
+        },
+        ScalarInst::ViewConstruct {
+            dest,
+            source_bound,
+            view_cap,
+            source,
+            start,
+            end,
+        } => {
+            let startv = load_value(out, names, start, "start", split);
+            let endv = load_value(out, names, end, "end", split);
+            // The source length is static for exact sequences and observed
+            // from the packed descriptor for views.
+            let source_len = match source_bound {
+                mncs_model::SequenceBound::Exact(length) => {
+                    *split += 1;
+                    let tmp = format!("srcl{split}");
+                    let _ = writeln!(out, "  %{tmp} = add i64 {length}, 0");
+                    tmp
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    let srcv = load_value(out, names, source, "src", split);
+                    *split += 1;
+                    let tmp = format!("srcl{split}");
+                    let _ = writeln!(out, "  %{tmp} = lshr i64 %{srcv}, 32");
+                    tmp
+                }
+            };
+            // Range validity: start <= end <= len(source), end-start <= cap.
+            *split += 1;
+            let tag = *split;
+            let _ = writeln!(out, "  %bad1{tag} = icmp ugt i64 %{startv}, %{endv}");
+            let _ = writeln!(out, "  %bad2{tag} = icmp ugt i64 %{endv}, %{source_len}");
+            let _ = writeln!(out, "  %span{tag} = sub i64 %{endv}, %{startv}");
+            let _ = writeln!(out, "  %bad3{tag} = icmp ugt i64 %span{tag}, {view_cap}");
+            let _ = writeln!(out, "  %bad12{tag} = or i1 %bad1{tag}, %bad2{tag}");
+            let _ = writeln!(out, "  %bad{tag} = or i1 %bad12{tag}, %bad3{tag}");
+            let _ = writeln!(
+                out,
+                "  br i1 %bad{tag}, label %mncs_fail, label %vr{tag}_ok"
+            );
+            let _ = writeln!(out, "vr{tag}_ok:");
+            // Pack (base + start*8) | ((end-start) << 32) into one i64.
+            let base = match source_bound {
+                mncs_model::SequenceBound::Exact(_) => {
+                    load_value(out, names, source, "srcb", split)
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    let srcv = load_value(out, names, source, "srcb", split);
+                    *split += 1;
+                    let b = format!("vb{split}");
+                    let _ = writeln!(out, "  %vb32{split} = trunc i64 %{srcv} to i32");
+                    let _ = writeln!(out, "  %{b} = zext i32 %vb32{split} to i64");
+                    b
+                }
+            };
+            *split += 1;
+            let addr = format!("va{split}");
+            let _ = writeln!(out, "  %vsx{split} = shl i64 %{startv}, 3");
+            let _ = writeln!(out, "  %{addr} = add i64 %{base}, %vsx{split}");
+            *split += 1;
+            let packed = format!("vp{split}");
+            let _ = writeln!(out, "  %pa{split} = and i64 %{addr}, 4294967295");
+            let _ = writeln!(out, "  %pl{split} = shl i64 %span{tag}, 32");
+            let _ = writeln!(out, "  %{packed} = or i64 %pa{split}, %pl{split}");
+            store_dest(out, names, dest, &packed);
         }
         ScalarInst::FiniteIsVariant {
             dest,
@@ -1115,10 +1355,46 @@ fn scalar_inst_dest(inst: &ScalarInst) -> Option<&ScalarValue> {
         | ScalarInst::CellAlloc { dest, .. }
         | ScalarInst::CellLoad { dest, .. }
         | ScalarInst::FiniteIsVariant { dest, .. }
+        | ScalarInst::ByteBitwise { dest, .. }
+        | ScalarInst::ByteShift { dest, .. }
+        | ScalarInst::Convert { dest, .. }
+        | ScalarInst::SequenceProject { dest, .. }
+        | ScalarInst::SequenceLength { dest, .. }
+        | ScalarInst::ViewConstruct { dest, .. }
         | ScalarInst::Call { dest, .. } => Some(dest),
         ScalarInst::CellStoreDiscriminant { .. } | ScalarInst::CellStore { .. } => None,
         ScalarInst::Sequence(_) => None,
     }
+}
+
+/// The IR type carried by one canonical slot payload: W64 slots hold full
+/// words; W32 slots keep the value's own (narrow) realization width so a
+/// byte stays a byte across the arena boundary.
+fn slot_payload_ty(width: crate::composite::SlotWidth, ty: ScalarTy) -> &'static str {
+    match width {
+        crate::composite::SlotWidth::W64 => "i64",
+        crate::composite::SlotWidth::W32 => match ty {
+            ScalarTy::Byte => "i8",
+            ScalarTy::Int(integer) if integer.bits <= 8 => "i8",
+            ScalarTy::Int(integer) if integer.bits <= 16 => "i16",
+            _ => "i32",
+        },
+    }
+}
+
+/// Bit width of a scalar realization kind for conversion decisions.
+fn bits_of(ty: ScalarTy) -> u16 {
+    match ty {
+        ScalarTy::Bool | ScalarTy::Finite => 32,
+        ScalarTy::Byte => 8,
+        ScalarTy::Int(integer) => integer.bits,
+        ScalarTy::Cell | ScalarTy::View => 64,
+    }
+}
+
+/// Signedness of a scalar realization kind for widening decisions.
+fn signed_of(ty: ScalarTy) -> bool {
+    matches!(ty, ScalarTy::Int(integer) if integer.signed)
 }
 
 struct NameMap {

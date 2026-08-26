@@ -85,6 +85,11 @@ pub enum Instr {
     I64Or,
     I64Xor,
     I64ShrS,
+    I32Shl,
+    I32ShrU,
+    I32ShrS,
+    I64Shl,
+    I64ShrU,
     I32WrapI64,
     I64ExtendI32S,
     I64ExtendI32U,
@@ -523,6 +528,12 @@ fn execute_raw(
                 "backend execution step budget exhausted",
             ));
         }
+        if std::env::var_os("MNCS_WASM_TRACE").is_some() {
+            eprintln!(
+                "wasm-trace {} {} {:?}",
+                function.name, ip, function.body[ip]
+            );
+        }
         match &function.body[ip] {
             Instr::Unreachable => {
                 return Err(trap(
@@ -573,7 +584,12 @@ fn execute_raw(
                 if stack.len() < callee.params.len() {
                     return Err(trap(
                         ExecutionStatus::InvalidRequest,
-                        "backend call operand stack underflow",
+                        format!(
+                            "backend call operand stack underflow: callee {} wants {} params, stack holds {}",
+                            callee.name,
+                            callee.params.len(),
+                            stack.len()
+                        ),
                     ));
                 }
                 let arguments = stack.split_off(stack.len() - callee.params.len());
@@ -647,6 +663,26 @@ fn execute_raw(
             Instr::I64And => bin_i64(&mut stack, |left, right| left & right)?,
             Instr::I64Or => bin_i64(&mut stack, |left, right| left | right)?,
             Instr::I64Xor => bin_i64(&mut stack, |left, right| left ^ right)?,
+            Instr::I32Shl => bin_i32(&mut stack, |left, right| {
+                let count = right % 32;
+                left.wrapping_shl(count as u32)
+            })?,
+            Instr::I32ShrU => bin_i32(&mut stack, |left, right| {
+                let count = right % 32;
+                ((left as u32).wrapping_shr(count as u32)) as i32
+            })?,
+            Instr::I32ShrS => bin_i32(&mut stack, |left, right| {
+                let count = right % 32;
+                left.wrapping_shr(count as u32)
+            })?,
+            Instr::I64Shl => bin_i64(&mut stack, |left, right| {
+                let count = (right as u64 % 64) as u32;
+                left.wrapping_shl(count)
+            })?,
+            Instr::I64ShrU => bin_i64(&mut stack, |left, right| {
+                let count = (right as u64 % 64) as u32;
+                ((left as u64).wrapping_shr(count)) as i64
+            })?,
             Instr::I64ShrS => bin_i64(&mut stack, |left, right| {
                 left.wrapping_shr(u32::try_from(right & 63).unwrap_or(0))
             })?,
@@ -1042,6 +1078,18 @@ fn write_marshal(
             }
             Ok(*value as i64)
         }
+        // Bytes marshal through their unsigned 8-bit domain.
+        (ExecutionValue::Byte { value }, MarshalTy::Int(integer))
+            if integer.bits == 8 && !integer.signed =>
+        {
+            if !(0..=255).contains(value) {
+                return Err(trap(
+                    ExecutionStatus::InvalidRequest,
+                    "argument is outside the byte domain",
+                ));
+            }
+            Ok(*value as i64)
+        }
         (ExecutionValue::Finite { discriminant, .. }, MarshalTy::BareFinite { .. }) => {
             Ok(i64::from(*discriminant))
         }
@@ -1427,6 +1475,11 @@ fn encode_instr(out: &mut Vec<u8>, instr: &Instr) {
         Instr::I64Or => out.push(0x84),
         Instr::I64Xor => out.push(0x85),
         Instr::I64ShrS => out.push(0x87),
+        Instr::I32Shl => out.push(0x74),
+        Instr::I32ShrU => out.push(0x76),
+        Instr::I32ShrS => out.push(0x78),
+        Instr::I64Shl => out.push(0x86),
+        Instr::I64ShrU => out.push(0x88),
         Instr::I32WrapI64 => out.push(0xa7),
         Instr::I64ExtendI32S => out.push(0xac),
         Instr::I64ExtendI32U => out.push(0xad),
@@ -1783,6 +1836,11 @@ fn decode_instr(payload: &[u8], cursor: usize) -> Result<(Instr, usize), WasmTra
         0x84 => Instr::I64Or,
         0x85 => Instr::I64Xor,
         0x87 => Instr::I64ShrS,
+        0x74 => Instr::I32Shl,
+        0x76 => Instr::I32ShrU,
+        0x78 => Instr::I32ShrS,
+        0x86 => Instr::I64Shl,
+        0x88 => Instr::I64ShrU,
         0x28 => {
             cursor = skip_memarg(payload, cursor)?;
             Instr::I32Load

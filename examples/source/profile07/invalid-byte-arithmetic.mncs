@@ -1,0 +1,9 @@
+mncs 0.7;
+
+// Negative fixture: bytes support byte-appropriate operations only;
+// arithmetic requires an explicit `as` conversion (MNE191).
+module examples.profile07.invalid_byte_arithmetic;
+
+fn combine(a: byte, b: byte) -> (result: byte) {
+    return a + b;
+}

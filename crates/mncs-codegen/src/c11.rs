@@ -505,6 +505,37 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 );
                 return;
             }
+            // Shifts are total: counts are taken modulo the declared width
+            // and every step avoids C undefined behavior explicitly.
+            if matches!(operator.as_str(), "shl" | "shr") {
+                let modulus = format!("{bits}u");
+                let count = format!("((uint32_t){} % {modulus})", rhs_n);
+                if operator == "shl" {
+                    // Shift in the unsigned domain, then mask into the
+                    // declared width; the destination cast restores sign.
+                    let _ = writeln!(
+                        out,
+                        "      {{ uint64_t mncs_w = (uint64_t)(uint64_t){lhs_n}; mncs_w = (bits > 63) ? (mncs_w << {count}) : (((mncs_w << {count})) & {mask}); {dest_n} = ({})mncs_w; }}",
+                        c_type(dest.ty),
+                    );
+                } else if signed {
+                    // Arithmetic right shift without relying on C's
+                    // implementation-defined `>>` for negatives:
+                    // ~logical-shift-of-complement preserves the sign digit.
+                    let _ = writeln!(
+                        out,
+                        "      {dest_n} = ({})(int64_t)(~(uint64_t)(~(int64_t){lhs_n} >> {count}));",
+                        c_type(dest.ty)
+                    );
+                } else {
+                    let _ = writeln!(
+                        out,
+                        "      {dest_n} = ({})((uint64_t){lhs_n} >> {count});",
+                        c_type(dest.ty)
+                    );
+                }
+                return;
+            }
             let op = match operator.as_str() {
                 "sub" => "-",
                 "mul" => "*",
@@ -720,6 +751,158 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 );
             }
         },
+        ScalarInst::ByteBitwise {
+            dest,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            let op = match operator.as_str() {
+                "and" => "&",
+                "or" => "|",
+                _ => "^",
+            };
+            let _ = writeln!(
+                out,
+                "      {} = ({})((uint8_t)((uint8_t){} {op} (uint8_t){}));",
+                names.value(&dest.id),
+                c_type(dest.ty),
+                names.value(lhs),
+                names.value(rhs)
+            );
+        }
+        ScalarInst::ByteShift {
+            dest,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            // Total semantics: the count is taken modulo 8; both shifts are
+            // logical because bytes are unsigned by definition.
+            let expr = match operator.as_str() {
+                "shl" => format!(
+                    "(uint8_t)((uint32_t){} << ((uint32_t){} % 8u))",
+                    names.value(lhs),
+                    names.value(rhs)
+                ),
+                _ => format!(
+                    "(uint8_t)((uint32_t){} >> ((uint32_t){} % 8u))",
+                    names.value(lhs),
+                    names.value(rhs)
+                ),
+            };
+            let _ = writeln!(
+                out,
+                "      {} = ({})({expr});",
+                names.value(&dest.id),
+                c_type(dest.ty)
+            );
+        }
+        ScalarInst::Convert { dest, src, .. } => {
+            // C casts implement exactly the declared total conversion:
+            // narrowing truncates high bits, widening extends by the source
+            // signedness (`byte` is unsigned).
+            let _ = writeln!(
+                out,
+                "      {} = ({}){};",
+                names.value(&dest.id),
+                c_type(dest.ty),
+                names.value(src)
+            );
+        }
+        ScalarInst::SequenceProject {
+            dest,
+            seq,
+            index,
+            bound,
+            evidence,
+            width,
+        } => {
+            let checked = matches!(evidence, mncs_model::BoundsEvidence::RuntimeChecked { .. });
+            let dest_n = names.value(&dest.id);
+            match bound {
+                mncs_model::SequenceBound::Exact(length) => {
+                    if checked {
+                        let _ = writeln!(
+                            out,
+                            "      if ((uint64_t){index} >= {length}ULL) {{ *mncs_status = 1; *mncs_value = 0; return; }}",
+                            index = names.value(index),
+                        );
+                    }
+                    let address = format!(
+                        "{} + (uint64_t){} * 8u",
+                        names.value(seq),
+                        names.value(index)
+                    );
+                    emit_slot_load(out, dest_n, dest.ty, &address, *width);
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    let view = names.value(seq);
+                    if checked {
+                        let _ = writeln!(
+                            out,
+                            "      if ((uint64_t){index} >= ({view} >> 32)) {{ *mncs_status = 1; *mncs_value = 0; return; }}",
+                            index = names.value(index),
+                        );
+                    }
+                    let address = format!(
+                        "(uint64_t)(uint32_t)({view}) + (uint64_t){} * 8u",
+                        names.value(index)
+                    );
+                    emit_slot_load(out, dest_n, dest.ty, &address, *width);
+                }
+            }
+        }
+        ScalarInst::SequenceLength { dest, bound, seq } => {
+            let dest_n = names.value(&dest.id);
+            match bound {
+                mncs_model::SequenceBound::Exact(length) => {
+                    let _ = writeln!(out, "      {dest_n} = ({}){length}ULL;", c_type(dest.ty));
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    let _ = writeln!(
+                        out,
+                        "      {dest_n} = ({})(({} >> 32));",
+                        c_type(dest.ty),
+                        names.value(seq)
+                    );
+                }
+            }
+        }
+        ScalarInst::ViewConstruct {
+            dest,
+            source_bound,
+            view_cap,
+            source,
+            start,
+            end,
+        } => {
+            let dest_n = names.value(&dest.id);
+            let start_n = names.value(start);
+            let end_n = names.value(end);
+            // The source length is static for exact sequences and observed
+            // from the packed descriptor for views.
+            let source_len = match source_bound {
+                mncs_model::SequenceBound::Exact(length) => format!("{length}ULL"),
+                mncs_model::SequenceBound::UpTo(_) => {
+                    format!("({} >> 32)", names.value(source))
+                }
+            };
+            let base = match source_bound {
+                mncs_model::SequenceBound::Exact(_) => names.value(source).to_owned(),
+                mncs_model::SequenceBound::UpTo(_) => {
+                    format!("(uint64_t)(uint32_t)({})", names.value(source))
+                }
+            };
+            let _ = writeln!(
+                out,
+                "      if ({start_n} > {end_n} || {end_n} > {source_len} || {end_n} - {start_n} > {view_cap}ULL) {{ *mncs_status = 1; *mncs_value = 0; return; }}",
+            );
+            let _ = writeln!(
+                out,
+                "      {dest_n} = (uint64_t)(uint32_t)({base} + {start_n} * 8u) | (((uint64_t)({end_n} - {start_n})) << 32);"
+            );
+        }
         ScalarInst::FiniteIsVariant {
             dest,
             src,
@@ -781,10 +964,42 @@ fn inst_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
         | ScalarInst::CellAlloc { dest, .. }
         | ScalarInst::CellLoad { dest, .. }
         | ScalarInst::FiniteIsVariant { dest, .. }
+        | ScalarInst::ByteBitwise { dest, .. }
+        | ScalarInst::ByteShift { dest, .. }
+        | ScalarInst::Convert { dest, .. }
+        | ScalarInst::SequenceProject { dest, .. }
+        | ScalarInst::SequenceLength { dest, .. }
+        | ScalarInst::ViewConstruct { dest, .. }
         | ScalarInst::Call { dest, .. } => Some(dest),
         // Cell stores produce no value; sequences declare through members.
         ScalarInst::CellStoreDiscriminant { .. } | ScalarInst::CellStore { .. } => None,
         ScalarInst::Sequence(_) => None,
+    }
+}
+
+/// Emit one slot load at a computed byte address inside the canonical arena.
+fn emit_slot_load(
+    out: &mut String,
+    dest_name: &str,
+    dest_ty: crate::scalar::ScalarTy,
+    address: &str,
+    width: SlotWidth,
+) {
+    match width {
+        SlotWidth::W32 => {
+            let _ = writeln!(
+                out,
+                "      {dest_name} = ({})mncs_slot_load32(mncs_arena, {address});",
+                c_type(dest_ty)
+            );
+        }
+        SlotWidth::W64 => {
+            let _ = writeln!(
+                out,
+                "      {dest_name} = ({})mncs_slot_load64(mncs_arena, {address});",
+                c_type(dest_ty)
+            );
+        }
     }
 }
 

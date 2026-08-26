@@ -10,6 +10,66 @@ use crate::{
 
 pub const EXECUTABLE_BODY_SCHEMA_VERSION: &str = "0.2";
 pub const SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND: u32 = 32;
+/// Inclusive upper bound for sequence lengths and view capacities
+/// (Source Profile 0.7). Bounds are semantic facts carried by types, so they
+/// must stay small enough to remain machine-checkable everywhere.
+pub const MAX_SEQUENCE_BOUND: u32 = 64;
+
+/// The declared length facts of a bounded sequence type. `Exact` sequences
+/// carry their length statically; `UpTo` views carry a maximum and a runtime
+/// length observation. The bound is part of logical type identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SequenceBound {
+    Exact(u32),
+    UpTo(u32),
+}
+
+impl SequenceBound {
+    /// The static ceiling this bound contributes to traversal step counts.
+    pub fn ceiling(self) -> u32 {
+        match self {
+            Self::Exact(length) | Self::UpTo(length) => length,
+        }
+    }
+
+    pub fn canonical_text(self) -> String {
+        match self {
+            Self::Exact(length) => format!("{length}"),
+            Self::UpTo(capacity) => format!("up_to {capacity}"),
+        }
+    }
+}
+
+/// How an index operation establishes that it is within bounds. This is
+/// first-class machine knowledge: realizations and downstream tooling must
+/// not have to rediscover it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BoundsEvidence {
+    /// A literal index inside an exact declared bound; validity is static.
+    StaticExact,
+    /// The index is the binding of an enclosing bounded traversal over this
+    /// exact sequence; traversal semantics discharge the check.
+    TraversalDomain,
+    /// Validity is not established statically; realization performs a
+    /// deterministic check whose failure is an explicit runtime failure and
+    /// whose obligation stays UNKNOWN until discharged.
+    RuntimeChecked { failure: FailureMode },
+}
+
+/// What domain a bounded iteration counts over. `Attempts` is the Profile 0.4
+/// counted form; `OverSequence` traverses a bounded sequence's index domain,
+/// so its step count derives from the sequence's declared bound.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IterationDomain {
+    #[default]
+    Attempts,
+    OverSequence {
+        element_type: Box<BodyType>,
+    },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FunctionBody {
@@ -43,6 +103,10 @@ pub struct BodyBoundedIteration {
     pub bound: u32,
     pub state_name: String,
     pub state_type: BodyType,
+    /// What the iteration counts over. Absent (legacy `Attempts`) forms
+    /// serialize unchanged; Profile 0.7 sequence traversal records its domain.
+    #[serde(default)]
+    pub domain: IterationDomain,
     pub initial_value: String,
     pub header_state: String,
     pub header_counter: String,
@@ -87,12 +151,34 @@ pub struct BodyValue {
 pub enum BodyType {
     Named(String),
     Integer(IntegerType),
-    Finite { identity: SemanticId, name: String },
-    Record { identity: SemanticId, name: String },
+    /// A byte-oriented 8-bit unsigned logical value (Profile 0.7). Distinct
+    /// from `u8`: bytes support byte-appropriate operations only.
+    Byte,
+    /// A bounded sequence with explicit length facts (Profile 0.7). The
+    /// logical value is the ordered element values plus the declared bound;
+    /// no storage shape participates in meaning.
+    Sequence {
+        element: Box<BodyType>,
+        bound: SequenceBound,
+    },
+    Finite {
+        identity: SemanticId,
+        name: String,
+    },
+    Record {
+        identity: SemanticId,
+        name: String,
+    },
 }
 
 impl BodyType {
     pub fn from_semantic_name(name: &str) -> Self {
+        if let Some(sequence) = Self::parse_sequence_name(name) {
+            return sequence;
+        }
+        if name == "byte" {
+            return Self::Byte;
+        }
         let (signed, digits) = if let Some(digits) = name.strip_prefix('i') {
             (true, digits)
         } else if let Some(digits) = name.strip_prefix('u') {
@@ -106,11 +192,44 @@ impl BodyType {
         }
     }
 
+    /// Parse a canonical bounded-sequence spelling `[E; N]` or
+    /// `[E; up_to M]`. Only canonical spellings parse; anything else stays
+    /// an ordinary named type so downstream diagnostics stay truthful.
+    fn parse_sequence_name(name: &str) -> Option<Self> {
+        let inner = name.strip_prefix('[')?.strip_suffix(']')?;
+        let separator = inner.rfind(';')?;
+        let (element_text, bound_text) = (inner[..separator].trim(), inner[separator + 1..].trim());
+        let bound = if let Some(capacity) = bound_text.strip_prefix("up_to") {
+            let capacity = capacity.trim().parse::<u32>().ok()?;
+            if capacity > MAX_SEQUENCE_BOUND {
+                return None;
+            }
+            SequenceBound::UpTo(capacity)
+        } else {
+            let length = bound_text.parse::<u32>().ok()?;
+            if length > MAX_SEQUENCE_BOUND {
+                return None;
+            }
+            SequenceBound::Exact(length)
+        };
+        let element = Box::new(Self::from_semantic_name(element_text));
+        match &*element {
+            // Element types must be fully resolved; unresolved named types
+            // cannot appear inside a canonical sequence spelling.
+            Self::Named(_) => None,
+            _ => Some(Self::Sequence { element, bound }),
+        }
+    }
+
     pub fn semantic_name(&self) -> String {
         match self {
             Self::Named(name) => name.clone(),
             Self::Integer(integer) => {
                 format!("{}{}", if integer.signed { 'i' } else { 'u' }, integer.bits)
+            }
+            Self::Byte => "byte".to_owned(),
+            Self::Sequence { element, bound } => {
+                format!("[{}; {}]", element.semantic_name(), bound.canonical_text())
             }
             Self::Finite { name, .. } => name.clone(),
             Self::Record { name, .. } => name.clone(),
@@ -173,6 +292,54 @@ pub enum BodyOperationKind {
     /// are total values; evaluation is not short-circuited.
     BooleanOp {
         operator: String,
+    },
+    /// Byte-oriented bitwise operation (Profile 0.7): `and` | `or` | `xor`
+    /// over two byte operands, producing a byte. Total.
+    ByteBitwise {
+        operator: String,
+    },
+    /// Byte shift (Profile 0.7): `shl` | `shr`. The left operand is a byte,
+    /// the right operand a u64 count taken modulo 8 (logical shifts). Total.
+    ByteShift {
+        operator: String,
+    },
+    /// Byte comparison (Profile 0.7): unsigned 8-bit ordering/equality.
+    ByteCompare {
+        predicate: String,
+    },
+    /// Explicit total scalar conversion (Profile 0.7). Truncation drops high
+    /// bits; widening extends by the *source* signedness (`byte` zero-extends).
+    /// Total by definition; no obligation survives.
+    Convert {
+        from: BodyType,
+        to: BodyType,
+    },
+    /// Construct an exact-length sequence from exactly `length` element
+    /// values in index order (Profile 0.7).
+    SequenceConstruct {
+        element_type: Box<BodyType>,
+        length: u32,
+    },
+    /// Project the element at the index operand (Profile 0.7). Operand 0 is
+    /// the sequence, operand 1 the u64 index. The evidence records how bounds
+    /// safety is established for this occurrence.
+    SequenceProject {
+        bound: SequenceBound,
+        evidence: BoundsEvidence,
+    },
+    /// Observe a sequence's length as u64 (Profile 0.7). Constant for exact
+    /// bounds; the runtime length observation for views.
+    SequenceLength {
+        bound: SequenceBound,
+    },
+    /// Derive a bounded view from a sequence over a checked half-open range
+    /// (Profile 0.7). Operands: source sequence, u64 start, u64 end. Checked
+    /// semantics require `start <= end`, `end <= len(source)`, and
+    /// `end - start <= view_capacity`; violations are explicit runtime
+    /// failures with a retained range-validity obligation.
+    ViewConstruct {
+        source_bound: SequenceBound,
+        view_bound: SequenceBound,
     },
     FiniteConstruct {
         type_identity: SemanticId,
@@ -600,15 +767,46 @@ fn validate_bounded_iterations(
                 "bounded iteration identities must be non-empty and unique per function",
             ));
         }
-        if !(1..=SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND).contains(&iteration.bound) {
-            errors.push(body_diagnostic(
-                "MNB062",
-                format!("{path}.bound"),
-                format!(
-                    "bounded iteration count must be between 1 and {}",
-                    SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND
-                ),
-            ));
+        match &iteration.domain {
+            IterationDomain::Attempts => {
+                if !(1..=SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND).contains(&iteration.bound) {
+                    errors.push(body_diagnostic(
+                        "MNB062",
+                        format!("{path}.bound"),
+                        format!(
+                            "bounded iteration count must be between 1 and {}",
+                            SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND
+                        ),
+                    ));
+                }
+            }
+            IterationDomain::OverSequence { element_type } => {
+                // Sequence traversal derives its step count from the
+                // traversed bound: an empty exact sequence legitimately has
+                // bound zero. The ceiling is the profile's declared maximum.
+                if iteration.bound > MAX_SEQUENCE_BOUND {
+                    errors.push(body_diagnostic(
+                        "MNB100",
+                        format!("{path}.bound"),
+                        format!(
+                            "sequence traversal bound must not exceed the profile ceiling {MAX_SEQUENCE_BOUND}"
+                        ),
+                    ));
+                }
+                let expected_counter = BodyType::Integer(IntegerType {
+                    bits: 64,
+                    signed: false,
+                });
+                if **element_type == expected_counter
+                    || matches!(**element_type, BodyType::Named(_))
+                {
+                    errors.push(body_diagnostic(
+                        "MNB101",
+                        format!("{path}.domain"),
+                        "sequence traversal domain must name a resolvable element type",
+                    ));
+                }
+            }
         }
         let blocks = [
             &iteration.preheader,
@@ -755,7 +953,7 @@ fn validate_operation(
         } => {
             if !matches!(
                 operator.as_str(),
-                "add" | "sub" | "mul" | "div" | "mod" | "and" | "or" | "xor"
+                "add" | "sub" | "mul" | "div" | "mod" | "and" | "or" | "xor" | "shl" | "shr"
             ) {
                 errors.push(body_diagnostic(
                     "MNB015",
@@ -763,7 +961,9 @@ fn validate_operation(
                     format!("unsupported symbolic integer operator {:?}", operator),
                 ));
             }
-            if matches!(operator.as_str(), "and" | "or" | "xor")
+            // Bitwise and shift operations are total by definition, so they
+            // require the wrapping intent: no overflow obligation survives.
+            if matches!(operator.as_str(), "and" | "or" | "xor" | "shl" | "shr")
                 && !matches!(
                     &operation.kind,
                     BodyOperationKind::Integer {
@@ -775,7 +975,7 @@ fn validate_operation(
                 errors.push(body_diagnostic(
                     "MNB043",
                     format!("{path}.kind.intent"),
-                    "bitwise integer operations currently require wrapping intent",
+                    "bitwise and shift integer operations currently require wrapping intent",
                 ));
             }
             if operation.operands.len() != 2 || operation.results.len() != 1 {
@@ -886,6 +1086,292 @@ fn validate_operation(
                     format!("{path}.results"),
                     "boolean operation result must have bool type",
                 ));
+            }
+        }
+        BodyOperationKind::ByteBitwise { operator } => {
+            if !matches!(operator.as_str(), "and" | "or" | "xor") {
+                errors.push(body_diagnostic(
+                    "MNB071",
+                    format!("{path}.kind"),
+                    format!("unsupported byte bitwise operator {:?}", operator),
+                ));
+            }
+            validate_byte_operands(operation, available, path, errors);
+        }
+        BodyOperationKind::ByteShift { operator } => {
+            if !matches!(operator.as_str(), "shl" | "shr") {
+                errors.push(body_diagnostic(
+                    "MNB072",
+                    format!("{path}.kind"),
+                    format!("unsupported byte shift operator {:?}", operator),
+                ));
+            }
+            if operation.operands.len() != 2 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB073",
+                    path.to_owned(),
+                    "byte shifts require two operands and one result",
+                ));
+            }
+            let byte_type = BodyType::Byte;
+            let counter_type = BodyType::Integer(IntegerType {
+                bits: 64,
+                signed: false,
+            });
+            if available.get(operation.operands.first().unwrap_or(&String::new()))
+                != Some(&byte_type)
+                || available.get(operation.operands.get(1).unwrap_or(&String::new()))
+                    != Some(&counter_type)
+            {
+                errors.push(body_diagnostic(
+                    "MNB074",
+                    format!("{path}.operands"),
+                    "byte shift operands must be a byte and a u64 count",
+                ));
+            }
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| result.ty != BodyType::Byte)
+            {
+                errors.push(body_diagnostic(
+                    "MNB075",
+                    format!("{path}.results"),
+                    "byte shift result must have byte type",
+                ));
+            }
+        }
+        BodyOperationKind::ByteCompare { predicate } => {
+            if !matches!(predicate.as_str(), "eq" | "ne" | "lt" | "le" | "gt" | "ge") {
+                errors.push(body_diagnostic(
+                    "MNB076",
+                    format!("{path}.kind.predicate"),
+                    format!("unsupported byte comparison predicate {predicate:?}"),
+                ));
+            }
+            validate_byte_operands(operation, available, path, errors);
+        }
+        BodyOperationKind::Convert { from, to } => {
+            if !is_convertible_scalar(from) || !is_convertible_scalar(to) {
+                errors.push(body_diagnostic(
+                    "MNB077",
+                    format!("{path}.kind"),
+                    "explicit conversions require scalar integer or byte types",
+                ));
+            }
+            if operation.operands.len() != 1 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB078",
+                    path.to_owned(),
+                    "explicit conversion requires one operand and one result",
+                ));
+            }
+            if available.get(operation.operands.first().unwrap_or(&String::new())) != Some(from) {
+                errors.push(body_diagnostic(
+                    "MNB079",
+                    format!("{path}.operands"),
+                    "conversion operand does not have the declared source type",
+                ));
+            }
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| &result.ty != to)
+            {
+                errors.push(body_diagnostic(
+                    "MNB080",
+                    format!("{path}.results"),
+                    "conversion result does not have the declared target type",
+                ));
+            }
+        }
+        BodyOperationKind::SequenceConstruct {
+            element_type,
+            length,
+        } => {
+            if *length > MAX_SEQUENCE_BOUND {
+                errors.push(body_diagnostic(
+                    "MNB081",
+                    format!("{path}.kind.length"),
+                    format!(
+                        "sequence length exceeds the declared profile ceiling {MAX_SEQUENCE_BOUND}"
+                    ),
+                ));
+            }
+            if operation.operands.len() != *length as usize || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB082",
+                    path.to_owned(),
+                    "sequence construction requires exactly one operand per element and one result",
+                ));
+            }
+            for (index, operand) in operation.operands.iter().enumerate() {
+                if available.get(operand) != Some(element_type.as_ref()) {
+                    errors.push(body_diagnostic(
+                        "MNB083",
+                        format!("{path}.operands[{index}]"),
+                        "sequence element value does not have the declared element type",
+                    ));
+                }
+            }
+            if let Some(result) = operation.results.first() {
+                let expected = BodyType::Sequence {
+                    element: element_type.clone(),
+                    bound: SequenceBound::Exact(*length),
+                };
+                if result.ty != expected {
+                    errors.push(body_diagnostic(
+                        "MNB084",
+                        format!("{path}.results"),
+                        "sequence construction result does not have the exact constructed type",
+                    ));
+                }
+            }
+        }
+        BodyOperationKind::SequenceProject { bound, evidence } => {
+            if operation.operands.len() != 2 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB085",
+                    path.to_owned(),
+                    "sequence projection requires a sequence operand, an index operand, and one result",
+                ));
+            }
+            let counter_type = BodyType::Integer(IntegerType {
+                bits: 64,
+                signed: false,
+            });
+            if available.get(operation.operands.get(1).unwrap_or(&String::new()))
+                != Some(&counter_type)
+            {
+                errors.push(body_diagnostic(
+                    "MNB086",
+                    format!("{path}.operands[1]"),
+                    "sequence index must have u64 type",
+                ));
+            }
+            let expected_sequence = BodyType::Sequence {
+                // The element type is established by the result; validation
+                // compares it below against this projection's operand.
+                element: operation
+                    .results
+                    .first()
+                    .map(|result| Box::new(result.ty.clone()))
+                    .unwrap_or_else(|| Box::new(BodyType::Named("invalid".to_owned()))),
+                bound: *bound,
+            };
+            if available.get(operation.operands.first().unwrap_or(&String::new()))
+                != Some(&expected_sequence)
+            {
+                errors.push(body_diagnostic(
+                    "MNB087",
+                    format!("{path}.operands[0]"),
+                    "sequence projection operand does not have the declared bounded-sequence type",
+                ));
+            }
+            if matches!(evidence, BoundsEvidence::RuntimeChecked { failure: _ })
+                && matches!(bound, SequenceBound::UpTo(_))
+            {
+                // Views always check against their runtime length; evidence is
+                // recorded but never claims static validity for views.
+            }
+        }
+        BodyOperationKind::SequenceLength { .. } => {
+            if operation.operands.len() != 1 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB088",
+                    path.to_owned(),
+                    "length observation requires one operand and one u64 result",
+                ));
+                return;
+            }
+            let counter_type = BodyType::Integer(IntegerType {
+                bits: 64,
+                signed: false,
+            });
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| result.ty != counter_type)
+            {
+                errors.push(body_diagnostic(
+                    "MNB089",
+                    format!("{path}.results"),
+                    "length observation result must have u64 type",
+                ));
+            }
+        }
+        BodyOperationKind::ViewConstruct {
+            source_bound,
+            view_bound,
+        } => {
+            if operation.operands.len() != 3 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB090",
+                    path.to_owned(),
+                    "view construction requires source, start, end operands and one result",
+                ));
+                return;
+            }
+            let counter_type = BodyType::Integer(IntegerType {
+                bits: 64,
+                signed: false,
+            });
+            if available.get(operation.operands.get(1).unwrap_or(&String::new()))
+                != Some(&counter_type)
+                || available.get(operation.operands.get(2).unwrap_or(&String::new()))
+                    != Some(&counter_type)
+            {
+                errors.push(body_diagnostic(
+                    "MNB091",
+                    format!("{path}.operands"),
+                    "view range endpoints must have u64 type",
+                ));
+            }
+            let SequenceBound::UpTo(capacity) = view_bound else {
+                errors.push(body_diagnostic(
+                    "MNB092",
+                    format!("{path}.kind.view_bound"),
+                    "view construction results must carry an UpTo bound",
+                ));
+                return;
+            };
+            let expected_result = BodyType::Sequence {
+                // Element type agreement with the source is checked below via
+                // the operand's declared type.
+                element: match available.get(operation.operands.first().unwrap_or(&String::new())) {
+                    Some(BodyType::Sequence { element, .. }) => element.clone(),
+                    _ => Box::new(BodyType::Named("invalid".to_owned())),
+                },
+                bound: *view_bound,
+            };
+            let source_matches = matches!(
+                available.get(operation.operands.first().unwrap_or(&String::new())),
+                Some(BodyType::Sequence { bound, .. }) if bound == source_bound
+            );
+            if !source_matches {
+                errors.push(body_diagnostic(
+                    "MNB093",
+                    format!("{path}.operands[0]"),
+                    "view construction source does not have the declared source bound",
+                ));
+            }
+            if let Some(result) = operation.results.first() {
+                if result.ty != expected_result && !matches!(&result.ty, BodyType::Named(_)) {
+                    errors.push(body_diagnostic(
+                        "MNB094",
+                        format!("{path}.results"),
+                        "view construction result does not match its declared view type",
+                    ));
+                }
+                if !matches!(result.ty, BodyType::Named(_)) && *capacity > MAX_SEQUENCE_BOUND {
+                    errors.push(body_diagnostic(
+                        "MNB095",
+                        format!("{path}.kind.view_bound"),
+                        format!(
+                            "view capacity exceeds the declared profile ceiling {MAX_SEQUENCE_BOUND}"
+                        ),
+                    ));
+                }
             }
         }
         BodyOperationKind::FiniteConstruct {
@@ -1626,6 +2112,9 @@ fn validate_return_types(
 }
 
 fn semantic_body_type(program: &Program, name: &str) -> BodyType {
+    if let Some(sequence) = semantic_sequence_type(program, name) {
+        return sequence;
+    }
     if let Some(record_type) = program.record_types.iter().find(|item| item.name == name) {
         return BodyType::Record {
             identity: record_type.identity.clone(),
@@ -1643,9 +2132,82 @@ fn semantic_body_type(program: &Program, name: &str) -> BodyType {
         .unwrap_or_else(|| BodyType::from_semantic_name(name))
 }
 
+/// Resolve a canonical bounded-sequence spelling `[E; N]` / `[E; up_to M]`
+/// whose element type may be a declared nominal type of this program.
+fn semantic_sequence_type(program: &Program, name: &str) -> Option<BodyType> {
+    let inner = name.strip_prefix('[')?.strip_suffix(']')?;
+    let separator = inner.rfind(';')?;
+    let (element_text, bound_text) = (inner[..separator].trim(), inner[separator + 1..].trim());
+    let bound = if let Some(capacity) = bound_text.strip_prefix("up_to") {
+        SequenceBound::UpTo(capacity.trim().parse().ok()?)
+    } else {
+        SequenceBound::Exact(bound_text.parse().ok()?)
+    };
+    if bound.ceiling() > MAX_SEQUENCE_BOUND {
+        return None;
+    }
+    let element = Box::new(semantic_body_type(program, element_text));
+    match &*element {
+        // Unresolvable element spellings cannot form a canonical sequence.
+        BodyType::Named(_) => None,
+        _ => Some(BodyType::Sequence { element, bound }),
+    }
+}
+
 /// Resolve a declared record field's semantic body type at validation time.
 fn semantic_record_field_type(program: &Program, field: &crate::core::RecordField) -> BodyType {
     semantic_body_type(program, &field.field_type)
+}
+
+fn validate_byte_operands(
+    operation: &BodyOperation,
+    available: &BTreeMap<String, BodyType>,
+    path: &str,
+    errors: &mut Vec<Diagnostic>,
+) {
+    if operation.operands.len() != 2 || operation.results.len() != 1 {
+        errors.push(body_diagnostic(
+            "MNB096",
+            path.to_owned(),
+            "byte operations require two operands and one result",
+        ));
+        return;
+    }
+    let byte_type = BodyType::Byte;
+    for (index, operand) in operation.operands.iter().enumerate() {
+        if available.get(operand) != Some(&byte_type) {
+            errors.push(body_diagnostic(
+                "MNB097",
+                format!("{path}.operands[{index}]"),
+                "byte operands must have byte type",
+            ));
+        }
+    }
+    let produces_bool = matches!(operation.kind, BodyOperationKind::ByteCompare { .. });
+    let expected_result = if produces_bool {
+        BodyType::Named("bool".to_owned())
+    } else {
+        BodyType::Byte
+    };
+    if operation.results.first().map(|result| &result.ty) != Some(&expected_result) {
+        errors.push(body_diagnostic(
+            if produces_bool { "MNB098" } else { "MNB099" },
+            format!("{path}.results"),
+            if produces_bool {
+                "byte comparison result must have boolean type"
+            } else {
+                "bitwise byte operation result must have byte type"
+            },
+        ));
+    }
+}
+
+/// Scalars that explicit total conversions may cross between. Booleans
+/// convert outward as 0/1; they are never conversion targets.
+fn is_convertible_scalar(ty: &BodyType) -> bool {
+    matches!(ty, BodyType::Byte)
+        || matches!(ty, BodyType::Integer(integer) if matches!(integer.bits, 1..=64))
+        || matches!(ty, BodyType::Named(name) if name == "bool")
 }
 
 fn body_diagnostic(code: &str, path: String, message: impl Into<String>) -> Diagnostic {

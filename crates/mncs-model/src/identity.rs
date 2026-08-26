@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::body::BoundsEvidence;
 use crate::canonical::{
     canonical_assumption, canonical_contract, canonical_effect, canonical_evidence,
     canonical_function, canonical_json_value, sha256_hex,
@@ -233,7 +234,27 @@ impl Program {
                             | crate::BodyOperationKind::FinitePayloadProject { .. }
                             | crate::BodyOperationKind::FiniteIsVariant { .. }
                             | crate::BodyOperationKind::RecordConstruct { .. }
-                            | crate::BodyOperationKind::RecordProject { .. } => None,
+                            | crate::BodyOperationKind::RecordProject { .. }
+                            | crate::BodyOperationKind::ByteBitwise { .. }
+                            | crate::BodyOperationKind::ByteShift { .. }
+                            | crate::BodyOperationKind::ByteCompare { .. }
+                            | crate::BodyOperationKind::Convert { .. }
+                            | crate::BodyOperationKind::SequenceConstruct { .. }
+                            | crate::BodyOperationKind::SequenceLength { .. } => None,
+                            crate::BodyOperationKind::SequenceProject {
+                                evidence: BoundsEvidence::RuntimeChecked { .. },
+                                ..
+                            } => Some(crate::obligations::body_obligation_id(
+                                "sequence-index-bounds",
+                                &operation_identity,
+                            )),
+                            crate::BodyOperationKind::SequenceProject { .. } => None,
+                            crate::BodyOperationKind::ViewConstruct { .. } => {
+                                Some(crate::obligations::body_obligation_id(
+                                    "view-range-valid",
+                                    &operation_identity,
+                                ))
+                            }
                             crate::BodyOperationKind::Call { .. } => {
                                 Some(crate::obligations::body_obligation_id(
                                     "call-authority-closure",
