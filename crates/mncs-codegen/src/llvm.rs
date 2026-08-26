@@ -15,7 +15,7 @@ use mncs_model::{
 };
 
 use crate::native::{
-    argv_from_request, compile_and_run, decode_native_value, host_matches_triple, host_triple,
+    argv_from_request, compile_and_run_with_call_file_full, host_matches_triple, host_triple,
     probe_clang, probe_llc,
 };
 use crate::scalar::{
@@ -81,10 +81,12 @@ pub fn llvm_capabilities() -> BackendCapabilityManifest {
         [
             "checked_integer",
             "wrapping_integer",
+            "saturating_integer",
             "trapping_integer",
             "explicit_failure",
             "semantic_bounded_iteration",
             "finite_values",
+            "canonical_composite_cells",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -92,9 +94,7 @@ pub fn llvm_capabilities() -> BackendCapabilityManifest {
         [
             "memory",
             "effects",
-            "saturating_integer",
             "widening_integer",
-            "record_values",
             "host_effects",
         ]
         .into_iter()
@@ -350,11 +350,27 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
     let _ = writeln!(out, "target datalayout = \"{layout}\"");
     let _ = writeln!(out, "target triple = \"{triple}\"");
     out.push('\n');
+    if module_uses_cells(module) {
+        // Canonical composite cell arena (MNCS cell layout v0.1): 8-byte
+        // aligned cells; slot access is plain i32/i64 load/store at 8-byte
+        // strides so alignment holds by construction.
+        out.push_str("; Canonical composite cell arena (v0.1)\n");
+        out.push_str("@mncs_arena = global [4194304 x i8] zeroinitializer\n");
+        out.push_str("@mncs_bump = global i64 0\n\n");
+    }
     for width in ["i8", "i16", "i32", "i64"] {
         for op in ["sadd", "uadd", "ssub", "usub", "smul", "umul"] {
             let _ = writeln!(
                 out,
                 "declare {{{width}, i1}} @llvm.{op}.with.overflow.{width}({width}, {width})"
+            );
+        }
+    }
+    for width in ["i8", "i16", "i32", "i64"] {
+        for op in ["sadd", "uadd", "ssub", "usub"] {
+            let _ = writeln!(
+                out,
+                "declare {width} @llvm.{op}.sat.{width}({width}, {width})"
             );
         }
     }
@@ -364,6 +380,32 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
         out.push('\n');
     }
     out
+}
+
+/// Whether any lowered function manipulates canonical cells.
+fn module_uses_cells(module: &ScalarModule) -> bool {
+    module.functions.iter().any(|function| {
+        function.params.iter().any(|param| param.ty.is_cell())
+            || function.result.ty.is_cell()
+            || function.blocks.iter().any(|block| {
+                block.insts.iter().any(|inst| match inst {
+                    ScalarInst::CellAlloc { .. }
+                    | ScalarInst::CellStoreDiscriminant { .. }
+                    | ScalarInst::CellStore { .. }
+                    | ScalarInst::CellLoad { .. } => true,
+                    ScalarInst::Sequence(nested) => nested.iter().any(|nested| {
+                        matches!(
+                            nested,
+                            ScalarInst::CellAlloc { .. }
+                                | ScalarInst::CellStoreDiscriminant { .. }
+                                | ScalarInst::CellStore { .. }
+                                | ScalarInst::CellLoad { .. }
+                        )
+                    }),
+                    _ => false,
+                })
+            })
+    })
 }
 
 fn emit_function(out: &mut String, function: &ScalarFunction) {
@@ -417,7 +459,7 @@ fn emit_block(
 ) {
     let label = names.block(&block.id);
     let _ = writeln!(out, "{label}:");
-    for inst in &block.insts {
+    for inst in flatten_scalar_insts(&block.insts) {
         emit_inst(out, inst, names, split);
     }
     match &block.term {
@@ -426,9 +468,16 @@ fn emit_block(
             let ty = names.ty(value);
             let bits = abi_bits(ty);
             if bits < 64 {
+                // Unsigned narrow values extend by zero so a wrapping edge
+                // value (u16 `0xFFFF`) decodes as its declared magnitude.
+                let ext = if matches!(ty, ScalarTy::Int(integer) if !integer.signed) {
+                    "zext"
+                } else {
+                    "sext"
+                };
                 let _ = writeln!(
                     out,
-                    "  %ret_ext_{} = sext {} %{loaded} to i64",
+                    "  %ret_ext_{} = {ext} {} %{loaded} to i64",
                     names.value(value),
                     llvm_type(ty)
                 );
@@ -589,6 +638,16 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 // behavior in LLVM: guard them into the shared fail block so
                 // failure statuses match the reference executors.
                 emit_checked_division(out, dest, operator, &left, &right, names, split);
+            } else if matches!(intent, ArithmeticIntent::Saturating) {
+                // Saturating arithmetic is total by definition. Add/sub use
+                // the saturating intrinsics; multiplication has no saturating
+                // intrinsic, so it computes with an exact overflow flag and
+                // selects the signed or unsigned clamp boundary.
+                if let Some(clamped) =
+                    emit_saturating(out, dest, operator, &left, &right, names, split)
+                {
+                    store_dest(out, names, dest, &clamped);
+                }
             } else if matches!(
                 intent,
                 ArithmeticIntent::Checked | ArithmeticIntent::Trapping
@@ -648,10 +707,145 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             );
             store_dest(out, names, dest, &tmp);
         }
+        ScalarInst::Sequence(insts) => {
+            for nested in insts {
+                emit_inst(out, nested, names, split);
+            }
+        }
         ScalarInst::FiniteConstruct { dest, discriminant } => {
             *split += 1;
             let tmp = format!("fc{split}");
             let _ = writeln!(out, "  %{tmp} = add i32 {discriminant}, 0");
+            store_dest(out, names, dest, &tmp);
+        }
+        ScalarInst::CellAlloc { dest, bytes } => {
+            // Bump allocation against the module arena, 8-byte aligned. The
+            // destination slot already exists from the entry alloca block.
+            let d = names.value(&dest.id);
+            *split += 1;
+            let bump = format!("bump{split}");
+            let bumped = format!("bb{split}");
+            let aligned = format!("al{split}");
+            let newbump = format!("nb{split}");
+            let _ = writeln!(out, "  %{bump} = load i64, ptr @mncs_bump");
+            let _ = writeln!(out, "  %{bumped} = add i64 %{bump}, 7");
+            let _ = writeln!(out, "  %{aligned} = and i64 %{bumped}, -8");
+            let _ = writeln!(out, "  %{newbump} = add i64 %{aligned}, {bytes}");
+            let _ = writeln!(out, "  store i64 %{newbump}, ptr @mncs_bump");
+            let _ = writeln!(out, "  store i64 %{aligned}, ptr %{d}_slot");
+        }
+        ScalarInst::CellStoreDiscriminant { cell, discriminant } => {
+            *split += 1;
+            let c = names.value(cell);
+            let cellv = format!("cs_cell{split}");
+            let addr = format!("cs_addr{split}");
+            let gep = format!("cs_gep{split}");
+            let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
+            let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, 0");
+            let _ = writeln!(
+                out,
+                "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
+            );
+            let _ = writeln!(out, "  store i32 {discriminant}, ptr %{gep}");
+        }
+        ScalarInst::CellStore {
+            cell,
+            byte_offset,
+            width,
+            value,
+        } => {
+            *split += 1;
+            let c = names.value(cell);
+            let v = names.value(value);
+            let cellv = format!("st_cell{split}");
+            let addr = format!("st_addr{split}");
+            let gep = format!("st_gep{split}");
+            let raw = format!("st_raw{split}");
+            match width {
+                crate::composite::SlotWidth::W32 => {
+                    let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
+                    let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
+                    let _ = writeln!(
+                        out,
+                        "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
+                    );
+                    let _ = writeln!(out, "  %{raw} = load i32, ptr %{v}_slot");
+                    let _ = writeln!(out, "  store i32 %{raw}, ptr %{gep}");
+                }
+                crate::composite::SlotWidth::W64 => {
+                    let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
+                    let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
+                    let _ = writeln!(
+                        out,
+                        "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
+                    );
+                    let _ = writeln!(out, "  %{raw} = load i64, ptr %{v}_slot");
+                    let _ = writeln!(out, "  store i64 %{raw}, ptr %{gep}");
+                }
+            }
+        }
+        ScalarInst::CellLoad {
+            dest,
+            cell,
+            byte_offset,
+            width,
+        } => {
+            *split += 1;
+            let d = names.value(&dest.id);
+            let c = names.value(cell);
+            let cellv = format!("ld_cell{split}");
+            let addr = format!("ld_addr{split}");
+            let gep = format!("ld_gep{split}");
+            match width {
+                crate::composite::SlotWidth::W32 => {
+                    let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
+                    let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
+                    let _ = writeln!(
+                        out,
+                        "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
+                    );
+                    let _ = writeln!(out, "  %{d}_v32 = load i32, ptr %{gep}");
+                    let _ = writeln!(out, "  store i32 %{d}_v32, ptr %{d}_slot");
+                }
+                crate::composite::SlotWidth::W64 => {
+                    let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
+                    let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
+                    let _ = writeln!(
+                        out,
+                        "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
+                    );
+                    let _ = writeln!(out, "  %{d}_v64 = load i64, ptr %{gep}");
+                    let _ = writeln!(out, "  store i64 %{d}_v64, ptr %{d}_slot");
+                }
+            }
+        }
+        ScalarInst::FiniteIsVariant {
+            dest,
+            src,
+            discriminant,
+        } if names.ty(src).is_cell() => {
+            // Boxed finite: compare the canonical cell's tag word.
+            let srcv = load_value(out, names, src, "src", split);
+            *split += 1;
+            let tagptr = format!("tag{split}");
+            let tag = format!("tagv{split}");
+            let _ = writeln!(
+                out,
+                "  %{tagptr} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{srcv}"
+            );
+            let _ = writeln!(out, "  %{tag} = load i32, ptr %{tagptr}");
+            let _ = writeln!(
+                out,
+                "  %cmp_{} = icmp eq i32 %{tag}, {discriminant}",
+                names.value(&dest.id)
+            );
+            let tmp = format!("isz_{}", names.value(&dest.id));
+            let _ = writeln!(
+                out,
+                "  %{tmp} = zext i1 %cmp_{} to {}",
+                names.value(&dest.id),
+                llvm_type(dest.ty)
+            );
             store_dest(out, names, dest, &tmp);
         }
         ScalarInst::FiniteIsVariant {
@@ -659,6 +853,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             src,
             discriminant,
         } => {
+            // Unboxed finite: the value itself is the bare discriminant.
             let srcv = load_value(out, names, src, "src", split);
             let _ = writeln!(
                 out,
@@ -702,6 +897,94 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             store_dest(out, names, dest, &format!("{tmp}_v"));
         }
     }
+}
+
+/// Saturating add/sub/mul: total clamping arithmetic. Returns the temp name
+/// holding the clamped result. Add/sub lower to the saturating intrinsics;
+/// multiplication has no saturating intrinsic, so it computes with an exact
+/// overflow flag and selects between the true product and the clamp boundary.
+fn emit_saturating(
+    out: &mut String,
+    dest: &ScalarValue,
+    operator: &str,
+    lhs: &str,
+    rhs: &str,
+    _names: &NameMap,
+    split: &mut u32,
+) -> Option<String> {
+    let ty = llvm_type(dest.ty);
+    let width = ty
+        .trim_start_matches('i')
+        .parse::<u32>()
+        .unwrap_or(32)
+        .min(64);
+    let signed = matches!(dest.ty, ScalarTy::Int(integer) if integer.signed)
+        || matches!(dest.ty, ScalarTy::Bool);
+    let (min_const, max_const): (i128, i128) = if signed {
+        let top = 1_i128 << (width - 1);
+        (-top, top - 1)
+    } else {
+        (0, (1_i128 << width) - 1)
+    };
+    *split += 1;
+    let tmp = format!("sat{split}");
+    match (operator, signed) {
+        ("add", true) => {
+            let _ = writeln!(
+                out,
+                "  %{tmp} = call {ty} @llvm.sadd.sat.{ty}({ty} %{lhs}, {ty} %{rhs})"
+            );
+        }
+        ("sub", true) => {
+            let _ = writeln!(
+                out,
+                "  %{tmp} = call {ty} @llvm.ssub.sat.{ty}({ty} %{lhs}, {ty} %{rhs})"
+            );
+        }
+        ("add", false) => {
+            let _ = writeln!(
+                out,
+                "  %{tmp} = call {ty} @llvm.uadd.sat.{ty}({ty} %{lhs}, {ty} %{rhs})"
+            );
+        }
+        ("sub", false) => {
+            let _ = writeln!(
+                out,
+                "  %{tmp} = call {ty} @llvm.usub.sat.{ty}({ty} %{lhs}, {ty} %{rhs})"
+            );
+        }
+        _ => {
+            // Multiplication: exact overflow flag, then select the boundary
+            // in the overflowing direction. A signed product overflows toward
+            // MIN exactly when the operand signs differ.
+            let kind = if signed { "smul" } else { "umul" };
+            let pair = format!("mulov{tmp}");
+            let _ = writeln!(
+                out,
+                "  %{pair} = call {{{ty}, i1}} @llvm.{kind}.with.overflow.{ty}({ty} %{lhs}, {ty} %{rhs})"
+            );
+            let _ = writeln!(out, "  %{pair}_v = extractvalue {{{ty}, i1}} %{pair}, 0");
+            let _ = writeln!(out, "  %{pair}_f = extractvalue {{{ty}, i1}} %{pair}, 1");
+            if signed {
+                let _ = writeln!(out, "  %{}_a = icmp slt {ty} %{lhs}, 0", pair);
+                let _ = writeln!(out, "  %{}_b = icmp slt {ty} %{rhs}, 0", pair);
+                let _ = writeln!(out, "  %{}_dir = xor i1 %{}_a, %{}_b", pair, pair, pair);
+                let _ = writeln!(
+                    out,
+                    "  %{tmp}_b = select i1 %{pair}_dir, {ty} {min_const}, {ty} {max_const}"
+                );
+            } else {
+                // Unsigned products can only overflow upward.
+                let _ = writeln!(out, "  %{tmp}_b = add {ty} {max_const}, 0");
+            }
+            let _ = writeln!(
+                out,
+                "  %{tmp}_r = select i1 %{pair}_f, {ty} %{tmp}_b, {ty} %{pair}_v"
+            );
+            return Some(format!("{tmp}_r"));
+        }
+    }
+    Some(tmp)
 }
 
 fn emit_checked(
@@ -809,6 +1092,35 @@ fn llvm_pred(predicate: &str, ty: mncs_model::IntegerType) -> &'static str {
     }
 }
 
+/// Flatten sequence groups so registration and emission see every concrete
+/// instruction exactly once.
+fn flatten_scalar_insts(insts: &[ScalarInst]) -> Vec<&ScalarInst> {
+    let mut flat = Vec::new();
+    for inst in insts {
+        match inst {
+            ScalarInst::Sequence(nested) => flat.extend(flatten_scalar_insts(nested)),
+            other => flat.push(other),
+        }
+    }
+    flat
+}
+
+fn scalar_inst_dest(inst: &ScalarInst) -> Option<&ScalarValue> {
+    match inst {
+        ScalarInst::Const { dest, .. }
+        | ScalarInst::Integer { dest, .. }
+        | ScalarInst::Boolean { dest, .. }
+        | ScalarInst::Compare { dest, .. }
+        | ScalarInst::FiniteConstruct { dest, .. }
+        | ScalarInst::CellAlloc { dest, .. }
+        | ScalarInst::CellLoad { dest, .. }
+        | ScalarInst::FiniteIsVariant { dest, .. }
+        | ScalarInst::Call { dest, .. } => Some(dest),
+        ScalarInst::CellStoreDiscriminant { .. } | ScalarInst::CellStore { .. } => None,
+        ScalarInst::Sequence(_) => None,
+    }
+}
+
 struct NameMap {
     values: BTreeMap<mncs_model::SemanticId, String>,
     types: BTreeMap<mncs_model::SemanticId, ScalarTy>,
@@ -835,15 +1147,9 @@ impl NameMap {
             for param in &block.params {
                 push(param);
             }
-            for inst in &block.insts {
-                match inst {
-                    ScalarInst::Const { dest, .. }
-                    | ScalarInst::Integer { dest, .. }
-                    | ScalarInst::Boolean { dest, .. }
-                    | ScalarInst::Compare { dest, .. }
-                    | ScalarInst::FiniteConstruct { dest, .. }
-                    | ScalarInst::FiniteIsVariant { dest, .. }
-                    | ScalarInst::Call { dest, .. } => push(dest),
+            for inst in flatten_scalar_insts(&block.insts) {
+                if let Some(dest) = scalar_inst_dest(inst) {
+                    push(dest);
                 }
             }
         }
@@ -945,96 +1251,76 @@ pub fn execute_llvm(
             "backend request violates the language-owned value contract",
         );
     }
-    let driver = llvm_driver(&request.target.function, &contract.inputs);
-    let args = match argv_from_request(request) {
-        Ok(args) => args,
-        Err(reason) => return execution_failure(result, ExecutionStatus::Unsupported, &reason),
+    // Composite arguments and results cross through the canonical call
+    // file; pure scalar calls keep the historical argv-only protocol.
+    let driver = llvm_driver(
+        &request.target.function,
+        &contract.inputs,
+        contract.outputs.first(),
+    );
+    let call_blob = match crate::support::build_call_file(
+        &request.arguments,
+        &contract.inputs,
+        contract.outputs.first(),
+        &artifact.composite_value_contracts,
+    ) {
+        Ok(blob) => blob,
+        Err(reason) => {
+            return execution_failure(result, ExecutionStatus::InvalidRequest, reason);
+        }
     };
-    match compile_and_run(
+    let call_path = call_blob.as_ref().map(|bytes| {
+        let digest = crate::support::sha256_hex(bytes);
+        let path = std::env::temp_dir().join(format!("mncs-call-{digest}.bin"));
+        let _ = std::fs::write(&path, bytes);
+        path
+    });
+    // In call-file mode every value crosses canonically; argv stays empty.
+    let args = match &call_blob {
+        Some(_) => Vec::new(),
+        None => match argv_from_request(request) {
+            Ok(args) => args,
+            Err(reason) => return execution_failure(result, ExecutionStatus::Unsupported, reason),
+        },
+    };
+    match compile_and_run_with_call_file_full(
         &[("module.ll", ir.as_str()), ("driver.c", driver.as_str())],
         &clang,
         &["-Wno-override-module", "-O0", "-no-pie"],
         &args,
+        call_path.as_deref(),
     ) {
-        Ok((value, status, toolchain)) => {
+        Ok((run, _toolchain)) => {
             result.failure = None;
-            result.status = status;
+            result.status = run.status;
             result.steps = 1;
-            match decode_native_value(Some(&contract.outputs[0]), status, value) {
+            match crate::support::decode_native_observation(
+                contract.outputs.first(),
+                run.status,
+                run.value,
+                run.arena_hex.as_deref(),
+                &artifact.composite_value_contracts,
+            ) {
                 Ok(returned) => {
                     result.returned = returned;
-                    let _ = toolchain;
                     result
                 }
-                Err(error) => execution_failure(result, error.status(), error.reason()),
+                Err(reason) => execution_failure(result, ExecutionStatus::InvalidRequest, reason),
             }
         }
         Err(error) => execution_failure(result, error.status(), error.reason()),
     }
 }
 
-fn llvm_driver(function: &str, inputs: &[mncs_model::BackendValueContract]) -> String {
-    // Parameter types follow each declared scalar so the driver prototype
-    // matches the LLVM function signature exactly; a width mismatch would be
-    // C undefined behavior at the call boundary.
-    fn scalar_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
-        match contract {
-            mncs_model::BackendValueContract::Scalar { semantic_type } => {
-                match mncs_model::BodyType::from_semantic_name(semantic_type) {
-                    mncs_model::BodyType::Integer(ty) if ty.bits == 64 => "int64_t",
-                    _ => "int32_t",
-                }
-            }
-            mncs_model::BackendValueContract::Finite { payloads, .. } if payloads.is_empty() => {
-                "int32_t"
-            }
-            _ => "int64_t",
-        }
-    }
-    let mut args = Vec::new();
-    let mut parse = Vec::new();
-    for (index, input) in inputs.iter().enumerate() {
-        args.push(format!("({})a{index}", scalar_c_type(input)));
-        parse.push(format!(
-            "  long long a{index} = strtoll(argv[{}], 0, 10);",
-            index + 1
-        ));
-    }
-    let proto_args = inputs
-        .iter()
-        .map(scalar_c_type)
-        .map(str::to_owned)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .chain(["int32_t*".to_owned(), "int64_t*".to_owned()])
-        .collect::<Vec<_>>()
-        .join(", ");
-    let call_args = args
-        .into_iter()
-        .chain(["&status".to_owned(), "&value".to_owned()])
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!(
-        r#"#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-void {function}({proto_args});
-int main(int argc, char **argv) {{
-  (void)argc;
-{}
-  int32_t status = 2;
-  int64_t value = 0;
-  {function}({call_args});
-  if (status == 0) {{
-    printf("{{\"status\":\"returned\",\"value\":%lld}}\n", (long long)value);
-  }} else {{
-    printf("{{\"status\":\"runtime_failure\"}}\n");
-  }}
-  return 0;
-}}
-"#,
-        parse.join("\n")
-    )
+fn llvm_driver(
+    function: &str,
+    inputs: &[mncs_model::BackendValueContract],
+    output: Option<&mncs_model::BackendValueContract>,
+) -> String {
+    // The shared C driver template matches the LLVM function ABI exactly:
+    // typed scalar parameters, uint64_t cell offsets, and status/value
+    // out-pointers. The module realizes the same arena symbols as C11.
+    crate::support::process_driver(function, inputs, output)
 }
 
 pub fn llc_object_available() -> bool {

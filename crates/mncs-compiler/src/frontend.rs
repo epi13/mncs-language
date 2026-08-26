@@ -843,16 +843,22 @@ fn elaborate_linked_module(
     let mut declarations = DeclarationSpans::from_ast(ast);
     declarations.merge_missing(&context.imported_declarations);
     record_annotation_type_resolutions(ast, &declarations, resolutions);
-    let declared_finite_names: BTreeSet<String> = ast
+    // Type names visible to field/payload positions include imported
+    // bindings: cross-module composition requires a record field or variant
+    // payload to be able to name an imported type (collisions were already
+    // rejected during merging, so the union is unambiguous).
+    let mut declared_finite_names: BTreeSet<String> = ast
         .finite_types
         .iter()
         .map(|finite| finite.name.text.clone())
         .collect();
-    let declared_record_names: BTreeSet<String> = ast
+    declared_finite_names.extend(context.finite_types_by_name.keys().cloned());
+    let mut declared_record_names: BTreeSet<String> = ast
         .record_types
         .iter()
         .map(|record| record.name.text.clone())
         .collect();
+    declared_record_names.extend(context.record_types_by_name.keys().cloned());
     let mut finite_types = Vec::new();
     let mut finite_type_names = BTreeSet::new();
     for declaration in &ast.finite_types {
@@ -965,11 +971,14 @@ fn elaborate_linked_module(
         record_types.push((declaration.clone(), duplicate_fields));
     }
     // Field types may name other records regardless of declaration order, so
-    // resolution runs after every valid record name is registered.
-    let provisional_names = record_types
+    // resolution runs after every valid record name is registered. Imported
+    // record names participate too: a local record field may reference an
+    // imported type.
+    let mut provisional_names = record_types
         .iter()
         .map(|(declaration, _)| declaration.name.text.clone())
         .collect::<BTreeSet<_>>();
+    provisional_names.extend(context.record_types_by_name.keys().cloned());
     let mut resolved_records = Vec::new();
     for (declaration, duplicate_fields) in &record_types {
         if *duplicate_fields > 0 {

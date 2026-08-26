@@ -339,6 +339,192 @@ pub(crate) fn backend_output_value_from_i128(
     .map_err(crate::native::NativeError::InvalidOutput)
 }
 
+/// Whether one value contract crosses the boundary as a canonical cell.
+pub(crate) fn contract_is_cell(contract: &BackendValueContract) -> bool {
+    match contract {
+        BackendValueContract::Record { .. } => true,
+        BackendValueContract::Finite { payloads, .. } => {
+            crate::composite::finite_payloads_declare_payloads(payloads)
+        }
+        BackendValueContract::Scalar { .. } => false,
+    }
+}
+
+/// Build the canonical call file for one execution request. Returns `None`
+/// when every argument crosses as a plain scalar (no call file needed).
+pub(crate) fn build_call_file(
+    arguments: &[ExecutionValue],
+    input_contracts: &[BackendValueContract],
+    output_contract: Option<&BackendValueContract>,
+    composite_contracts: &BTreeMap<String, BackendValueContract>,
+) -> Result<Option<Vec<u8>>, String> {
+    let needs_cells = arguments.iter().any(|value| match value {
+        ExecutionValue::Record { .. } => true,
+        ExecutionValue::Finite { payload, .. } => !payload.is_empty(),
+        _ => false,
+    }) || input_contracts.iter().any(contract_is_cell)
+        || output_contract.is_some_and(contract_is_cell);
+    if !needs_cells {
+        // Pure scalar calls keep the historical argv-only protocol.
+        return Ok(None);
+    }
+    let mut writer = crate::composite::ArenaWriter::new(composite_contracts.clone());
+    let mut entries: Vec<(u64, u64)> = Vec::new();
+    for (index, value) in arguments.iter().enumerate() {
+        let contract = input_contracts.get(index);
+        let boundary = match contract {
+            Some(BackendValueContract::Record { .. }) => writer.encode_argument(value)?,
+            Some(BackendValueContract::Finite { payloads, .. }) if !payloads.is_empty() => {
+                writer.encode_argument(value)?
+            }
+            _ => writer.encode_argument(value)?,
+        };
+        match boundary {
+            crate::composite::BoundaryValue::Bits(bits) => {
+                entries.push((0, bits));
+            }
+            crate::composite::BoundaryValue::Cell(root) => {
+                entries.push((1, root));
+            }
+        }
+    }
+    let image = writer.into_image();
+    let mut blob = Vec::new();
+    blob.extend_from_slice(&0x4d4e435331_u64.to_le_bytes()); // "MNCS1"
+    blob.extend_from_slice(&(entries.len() as u64).to_le_bytes());
+    for (kind, payload) in entries {
+        blob.extend_from_slice(&kind.to_le_bytes());
+        blob.extend_from_slice(&payload.to_le_bytes());
+    }
+    blob.extend_from_slice(&(image.len() as u64).to_le_bytes());
+    blob.extend_from_slice(&image);
+    Ok(Some(blob))
+}
+
+/// Decode one returned observation into language values, resolving
+/// composite results through the finished arena image when present.
+pub(crate) fn decode_native_observation(
+    output_contract: Option<&BackendValueContract>,
+    status: ExecutionStatus,
+    value: i128,
+    arena_hex: Option<&str>,
+    composite_contracts: &BTreeMap<String, BackendValueContract>,
+) -> Result<Vec<ExecutionValue>, String> {
+    if status != ExecutionStatus::Returned {
+        return Ok(Vec::new());
+    }
+    let composite_output = output_contract.is_some_and(contract_is_cell);
+    match (composite_output, arena_hex, output_contract) {
+        (true, Some(hex), Some(contract)) => {
+            let image = hex_decode_bytes(hex)?;
+            let reader = crate::composite::ArenaReader::new(&image, composite_contracts);
+            Ok(vec![reader.decode(value as u64, contract)?])
+        }
+        (true, _, _) => {
+            Err("composite result was returned without a decodable arena image".to_owned())
+        }
+        (false, ..) => match output_contract {
+            Some(contract) => backend_output_value_from_i128(contract, value)
+                .map(|decoded| vec![decoded])
+                .map_err(|error| error.reason()),
+            None => Ok(vec![ExecutionValue::Integer {
+                value,
+                ty: IntegerType {
+                    bits: 64,
+                    signed: true,
+                },
+            }]),
+        },
+    }
+}
+
+fn hex_decode_bytes(hex: &str) -> Result<Vec<u8>, String> {
+    if hex.len() % 2 != 0 {
+        return Err("arena hex has odd length".to_owned());
+    }
+    (0..hex.len() / 2)
+        .map(|index| {
+            u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16)
+                .map_err(|error| format!("arena hex is malformed: {error}"))
+        })
+        .collect()
+}
+
+/// Full native observation handed back across the process boundary.
+pub struct NativeRunView {
+    pub status: ExecutionStatus,
+    pub value: i128,
+    pub arena_hex: Option<String>,
+}
+
+/// Driver variant for realizations whose code calls the canonical-cell
+/// runtime entry points (mncs_cell_alloc / mncs_slot_*): the driver defines
+/// the arena itself instead of importing module symbols.
+pub(crate) fn process_driver_cell_runtime(
+    function: &str,
+    inputs: &[BackendValueContract],
+    _output: Option<&BackendValueContract>,
+) -> String {
+    let base = process_driver_full(function, inputs);
+    // Replace the extern declarations with local definitions of the same
+    // names so imported cell libcalls resolve against this driver.
+    base.replace(
+        r#"extern unsigned char mncs_arena[4194304];
+extern uint64_t mncs_bump;"#,
+        r#"static unsigned char mncs_arena[4194304];
+static uint64_t mncs_bump = 0;
+uint64_t mncs_cell_alloc(uint64_t bytes) {
+  uint64_t base = (mncs_bump + 7u) & ~(uint64_t)7u;
+  mncs_bump = base + bytes;
+  return base;
+}
+void mncs_slot_store32(uint64_t at, uint64_t v) {
+  uint32_t x = (uint32_t)v;
+  memcpy(mncs_arena + at, &x, sizeof x);
+}
+void mncs_slot_store64(uint64_t at, uint64_t v) {
+  memcpy(mncs_arena + at, &v, sizeof v);
+}
+uint64_t mncs_slot_load32(uint64_t at) {
+  uint32_t x;
+  memcpy(&x, mncs_arena + at, sizeof x);
+  return x;
+}
+uint64_t mncs_slot_load64(uint64_t at) {
+  uint64_t x;
+  memcpy(&x, mncs_arena + at, sizeof x);
+  return x;
+}"#,
+    )
+}
+
+/// Whether any lowered function in the module manipulates canonical cells.
+pub(crate) fn scalar_module_uses_cells(module: &crate::scalar::ScalarModule) -> bool {
+    use crate::scalar::ScalarInst;
+    module.functions.iter().any(|function| {
+        function.params.iter().any(|param| param.ty.is_cell())
+            || function.result.ty.is_cell()
+            || function.blocks.iter().any(|block| {
+                block.insts.iter().any(|inst| match inst {
+                    ScalarInst::CellAlloc { .. }
+                    | ScalarInst::CellStoreDiscriminant { .. }
+                    | ScalarInst::CellStore { .. }
+                    | ScalarInst::CellLoad { .. } => true,
+                    ScalarInst::Sequence(nested) => nested.iter().any(|nested| {
+                        matches!(
+                            nested,
+                            ScalarInst::CellAlloc { .. }
+                                | ScalarInst::CellStoreDiscriminant { .. }
+                                | ScalarInst::CellStore { .. }
+                                | ScalarInst::CellLoad { .. }
+                        )
+                    }),
+                    _ => false,
+                })
+            })
+    })
+}
+
 pub(crate) fn integer_fits(value: i128, ty: IntegerType) -> bool {
     if ty.signed {
         let bound = 1_i128 << (ty.bits - 1);
@@ -350,62 +536,33 @@ pub(crate) fn integer_fits(value: i128, ty: IntegerType) -> bool {
 
 /// Process driver for the Cranelift realization whose ABI passes every
 /// parameter as a 64-bit register value regardless of logical width.
-pub(crate) fn process_driver_i64(function: &str, arity: usize) -> String {
-    let parse_and_args = (0..arity)
-        .map(|index| {
-            (
-                format!(
-                    "  long long a{index} = strtoll(argv[{}], 0, 10);",
-                    index + 1
-                ),
-                format!("a{index}"),
-            )
-        })
-        .collect::<Vec<_>>();
-    let parse = parse_and_args
-        .iter()
-        .map(|(parse, _)| parse.clone())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let call_args = parse_and_args
-        .into_iter()
-        .map(|(_, arg)| arg)
-        .collect::<Vec<_>>();
-    let mut proto_parts: Vec<String> = (0..arity).map(|_| "int64_t".to_owned()).collect();
-    proto_parts.push("int32_t*".to_owned());
-    proto_parts.push("int64_t*".to_owned());
-    let proto = proto_parts.join(", ");
-    let mut call_parts = call_args;
-    call_parts.push("&status".to_owned());
-    call_parts.push("&value".to_owned());
-    let call = call_parts.join(", ");
-    format!(
-        r#"#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-void {function}({proto});
-int main(int argc, char **argv) {{
-  (void)argc;
-{parse}
-  int32_t status = 2;
-  int64_t value = 0;
-  {function}({call});
-  if (status == 0) printf("{{\"status\":\"returned\",\"value\":%lld}}\n", (long long)value);
-  else printf("{{\"status\":\"runtime_failure\"}}\n");
-  return 0;
-}}
-"#
-    )
-}
-
+/// Driver selection: pure scalar exports keep the historical argv-only
+/// driver; exports touching canonical cells use the call-file protocol.
 pub(crate) fn process_driver(
     function: &str,
     inputs: &[mncs_model::BackendValueContract],
+    output: Option<&mncs_model::BackendValueContract>,
 ) -> String {
-    // Parameter types follow each declared scalar so the generated prototype
-    // matches the module definition exactly (an int32/int64 mismatch would be
-    // C undefined behavior at every call boundary). Composite parameters never
-    // reach this driver: they fail closed in the execute path above.
+    let uses_cells = inputs.iter().any(is_cell_contract) || output.is_some_and(is_cell_contract);
+    if !uses_cells {
+        return process_driver_scalar_only(function, inputs);
+    }
+    process_driver_full(function, inputs)
+}
+
+fn is_cell_contract(contract: &mncs_model::BackendValueContract) -> bool {
+    match contract {
+        mncs_model::BackendValueContract::Record { .. } => true,
+        mncs_model::BackendValueContract::Finite { payloads, .. } => !payloads.is_empty(),
+        mncs_model::BackendValueContract::Scalar { .. } => false,
+    }
+}
+
+/// Historical argv-only driver for pure scalar exports.
+fn process_driver_scalar_only(
+    function: &str,
+    inputs: &[mncs_model::BackendValueContract],
+) -> String {
     fn scalar_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
         match contract {
             mncs_model::BackendValueContract::Scalar { semantic_type } => {
@@ -424,12 +581,13 @@ pub(crate) fn process_driver(
         .iter()
         .enumerate()
         .map(|(index, ty)| {
-            let parse = format!(
-                "  long long a{index} = strtoll(argv[{}], 0, 10);",
-                index + 1
-            );
-            let arg = format!("({})a{index}", scalar_c_type(ty));
-            (parse, arg)
+            (
+                format!(
+                    "  long long a{index} = strtoll(argv[{}], 0, 10);",
+                    index + 1
+                ),
+                format!("({})a{index}", scalar_c_type(ty)),
+            )
         })
         .collect::<Vec<_>>();
     let parse = parse_and_args
@@ -437,20 +595,18 @@ pub(crate) fn process_driver(
         .map(|(parse, _)| parse.clone())
         .collect::<Vec<_>>()
         .join("\n");
-    let call_args = parse_and_args
-        .iter()
-        .map(|(_, arg)| arg.clone())
-        .collect::<Vec<_>>();
     let proto = inputs
         .iter()
-        .map(scalar_c_type)
-        .map(str::to_owned)
+        .map(|contract| scalar_c_type(contract).to_owned())
         .collect::<Vec<_>>()
         .into_iter()
         .chain(["int32_t*".to_owned(), "int64_t*".to_owned()])
         .collect::<Vec<_>>()
         .join(", ");
-    let mut call_parts = call_args;
+    let mut call_parts = parse_and_args
+        .into_iter()
+        .map(|(_, arg)| arg)
+        .collect::<Vec<_>>();
     call_parts.push("&status".to_owned());
     call_parts.push("&value".to_owned());
     let call = call_parts.join(", ");
@@ -471,4 +627,198 @@ int main(int argc, char **argv) {{
 }}
 "#
     )
+}
+
+fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContract]) -> String {
+    // Parameter types follow each declared contract so the generated
+    // prototype matches the module definition exactly (an int32/int64
+    // mismatch would be C undefined behavior at every call boundary).
+    // Composite parameters receive canonical cell offsets through the
+    // MNCS call file; their C type is the offset word.
+    fn is_cell(contract: &mncs_model::BackendValueContract) -> bool {
+        match contract {
+            mncs_model::BackendValueContract::Record { .. } => true,
+            mncs_model::BackendValueContract::Finite { payloads, .. } => {
+                crate::composite::finite_payloads_declare_payloads(payloads)
+            }
+            mncs_model::BackendValueContract::Scalar { .. } => false,
+        }
+    }
+    fn scalar_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
+        match contract {
+            mncs_model::BackendValueContract::Scalar { semantic_type } => {
+                match mncs_model::BodyType::from_semantic_name(semantic_type) {
+                    mncs_model::BodyType::Integer(ty) if ty.bits == 64 => "int64_t",
+                    _ => "int32_t",
+                }
+            }
+            mncs_model::BackendValueContract::Finite { payloads, .. }
+                if !crate::composite::finite_payloads_declare_payloads(payloads) =>
+            {
+                "int32_t"
+            }
+            _ => "int64_t",
+        }
+    }
+    fn arg_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
+        if is_cell(contract) {
+            "uint64_t"
+        } else {
+            scalar_c_type(contract)
+        }
+    }
+    let prepare = inputs
+        .iter()
+        .enumerate()
+        .map(|(index, ty)| {
+            // Every parameter crosses through the call file in this mode:
+            // scalar bits and cell roots share the same entry array.
+            let ctype = arg_c_type(ty);
+            format!(
+                "  {ctype} a{index} = (arg_count > {index}) ? ({ctype})values[{index}] : ({ctype})0;"
+            )
+        })
+        .collect::<Vec<_>>();
+    let parse = prepare.join("\n");
+    let prepare_legacy = inputs
+        .iter()
+        .enumerate()
+        .map(|(index, _ty)| {
+            format!(
+                "  long long a{index} = ({index} < scalar_argc) ? strtoll(scalar_argv[{index}], 0, 10) : 0;"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let proto = inputs
+        .iter()
+        .map(|contract| arg_c_type(contract).to_owned())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .chain(["int32_t*".to_owned(), "int64_t*".to_owned()])
+        .collect::<Vec<_>>()
+        .join(", ");
+    let call_args = (0..inputs.len())
+        .map(|index| {
+            let ctype = arg_c_type(&inputs[index]);
+            format!("({ctype})a{index}")
+        })
+        .collect::<Vec<_>>();
+    let mut call_parts = call_args;
+    call_parts.push("&status".to_owned());
+    call_parts.push("&value".to_owned());
+    let call = call_parts.join(", ");
+    let n = inputs.len();
+    format!(
+        r#"#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+extern unsigned char mncs_arena[4194304];
+extern uint64_t mncs_bump;
+
+void {function}({proto});
+
+static unsigned char *mncs_read_file(const char *path, long *out_len) {{
+  FILE *f = fopen(path, "rb");
+  if (!f) return 0;
+  fseek(f, 0, SEEK_END);
+  long len = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  unsigned char *blob = (unsigned char *)malloc((size_t)len);
+  if (!blob) {{ fclose(f); return 0; }}
+  if (fread(blob, 1, (size_t)len, f) != (size_t)len) {{ free(blob); fclose(f); return 0; }}
+  fclose(f);
+  *out_len = len;
+  return blob;
+}}
+
+int main(int argc, char **argv) {{
+  (void)argc;
+  int32_t status = 2;
+  int64_t value = 0;
+  const char *call_path = getenv("MNCS_CALL_FILE");
+  if (call_path) {{
+    /* Canonical call file v0.1:
+       [u64 magic][u64 arg_count]{{ [u64 kind][u64 payload] }}*
+       [u64 arena_bytes][arena image]
+       kind 0 = scalar bits passed on argv as well, 1 = cell root. */
+    long flen = 0;
+    unsigned char *blob = mncs_read_file(call_path, &flen);
+    if (!blob || flen < 16) {{ free(blob); return 2; }}
+    uint64_t magic = 0, arg_count = 0;
+    memcpy(&magic, blob, 8);
+    memcpy(&arg_count, blob + 8, 8);
+    if (magic != 0x4d4e435331ULL) {{ free(blob); return 2; }}
+    uint64_t values[{n}] = {{0}};
+    const unsigned char *p = blob + 16;
+    for (uint64_t i = 0; i < arg_count && (long)(p - blob) + 16 <= flen; i++) {{
+      uint64_t kind = 0, payload = 0;
+      memcpy(&kind, p, 8); p += 8;
+      memcpy(&payload, p, 8); p += 8;
+      (void)kind;
+      if (i < {n}) values[i] = payload;
+    }}
+    uint64_t arena_bytes = 0;
+    if ((long)(p - blob) + 8 <= flen) {{ memcpy(&arena_bytes, p, 8); p += 8; }}
+    if (arena_bytes > sizeof(mncs_arena) || (long)(p - blob) + (long)arena_bytes > flen) {{
+      free(blob); return 2;
+    }}
+    memcpy(mncs_arena, p, arena_bytes);
+    mncs_bump = arena_bytes;
+    free(blob);
+    (void)argc;
+    (void)argv;
+    {parse}
+    {function}({call});
+    if (status != 0) {{
+      printf("{{\"status\":\"runtime_failure\"}}\n");
+      return 0;
+    }}
+    printf("{{\"status\":\"returned\",\"value\":%lld,\"arena_hex\":\"", (long long)value);
+    static const char *hex = "0123456789abcdef";
+    for (uint64_t i = 0; i < mncs_bump && i < sizeof(mncs_arena); i++) {{
+      putchar(hex[mncs_arena[i] >> 4]);
+      putchar(hex[mncs_arena[i] & 15]);
+    }}
+    printf("\"}}\n");
+    return 0;
+  }}
+  const char **scalar_argv = (const char **)argv + 1;
+  int scalar_argc = argc - 1;
+  (void)scalar_argv;
+  (void)scalar_argc;
+{prepare_legacy}
+  {function}({call});
+  if (status == 0) printf("{{\"status\":\"returned\",\"value\":%lld}}\n", (long long)value);
+  else printf("{{\"status\":\"runtime_failure\"}}\n");
+  return 0;
+}}
+"#
+    )
+}
+
+#[cfg(test)]
+mod driver_tests {
+    use super::*;
+
+    #[test]
+    fn cell_runtime_driver_defines_the_canonical_symbols() {
+        let record = BackendValueContract::Record {
+            type_identity: mncs_model::SemanticId("T:Pair".to_owned()),
+            name: "Pair".to_owned(),
+            fields: vec![],
+        };
+        let driver = process_driver_cell_runtime("f", &[record], None);
+        assert!(
+            driver.contains("uint64_t mncs_cell_alloc"),
+            "alloc symbol defined"
+        );
+        assert!(driver.contains("mncs_slot_load32"), "load32 defined");
+        assert!(
+            !driver.contains("extern unsigned char mncs_arena"),
+            "no externs remain"
+        );
+    }
 }

@@ -10,12 +10,13 @@ use std::fmt::Write;
 use mncs_model::{
     ArithmeticIntent, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
     BackendIdentity, BackendResult, CompilerArtifactRef, CompilerDiagnostic,
-    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, ExecutionValue, Program, SsaModule,
+    CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SsaModule,
     TargetContractRef, TargetLoweringPlan, TransformationStatus, SSA_SCHEMA_VERSION,
 };
 
+use crate::composite::SlotWidth;
 use crate::native::{
-    argv_from_request, compile_and_run, decode_native_value, probe_clang, probe_gcc,
+    argv_from_request, compile_and_run_with_call_file_full, probe_clang, probe_gcc,
 };
 use crate::scalar::{
     c_type, lower_to_scalar, ScalarFunction, ScalarInst, ScalarModule, ScalarTerm, ScalarTy,
@@ -75,19 +76,19 @@ pub fn c11_capabilities() -> BackendCapabilityManifest {
         [
             "checked_integer",
             "wrapping_integer",
+            "saturating_integer",
             "trapping_integer",
             "explicit_failure",
             "semantic_bounded_iteration",
             "finite_values",
+            "canonical_composite_cells",
         ]
         .into_iter()
         .map(str::to_owned)
         .collect(),
         [
-            "record_values",
             "memory",
             "effects",
-            "saturating_integer",
             "widening_integer",
             "undefined_behavior",
         ]
@@ -295,8 +296,13 @@ pub fn lower_c11(
 
 fn emit_module(module: &ScalarModule) -> String {
     let mut out = String::from(
-        "/* MNCS C11 realization 0.1. Not MNCS semantics. No C undefined behavior for integers. */\n#include <stdint.h>\n#include <stdbool.h>\n\n",
+        "/* MNCS C11 realization 0.2. Not MNCS semantics. No C undefined behavior for integers. */\n#include <stdint.h>\n#include <stdbool.h>\n#include <string.h>\n\n",
     );
+    if module_uses_cells(module) {
+        out.push_str(
+            "/* Canonical composite cell arena (MNCS cell layout v0.1): 8-byte\n   aligned cells, record field i at byte offset i*8, boxed finite tag\n   in slot 0 with payloads from byte 8. Slot access uses memcpy so no\n   alignment or aliasing assumptions are made. */\n#define MNCS_ARENA_BYTES (4u * 1024u * 1024u)\nunsigned char mncs_arena[MNCS_ARENA_BYTES];\nuint64_t mncs_bump = 0;\nuint64_t mncs_cell_alloc(uint64_t bytes) {\n  uint64_t base = (mncs_bump + 7u) & ~(uint64_t)7u;\n  mncs_bump = base + bytes;\n  return base;\n}\nvoid mncs_slot_store32(unsigned char *a, uint64_t at, uint32_t v) {\n  memcpy(a + at, &v, sizeof v);\n}\nvoid mncs_slot_store64(unsigned char *a, uint64_t at, uint64_t v) {\n  memcpy(a + at, &v, sizeof v);\n}\nuint32_t mncs_slot_load32(const unsigned char *a, uint64_t at) {\n  uint32_t v;\n  memcpy(&v, a + at, sizeof v);\n  return v;\n}\nuint64_t mncs_slot_load64(const unsigned char *a, uint64_t at) {\n  uint64_t v;\n  memcpy(&v, a + at, sizeof v);\n  return v;\n}\n\n",
+        );
+    }
     for function in &module.functions {
         emit_prototype(&mut out, function);
     }
@@ -306,6 +312,32 @@ fn emit_module(module: &ScalarModule) -> String {
         out.push('\n');
     }
     out
+}
+
+/// Whether any lowered function manipulates canonical cells.
+fn module_uses_cells(module: &ScalarModule) -> bool {
+    module.functions.iter().any(|function| {
+        function.params.iter().any(|param| param.ty.is_cell())
+            || function.result.ty.is_cell()
+            || function.blocks.iter().any(|block| {
+                block.insts.iter().any(|inst| match inst {
+                    ScalarInst::CellAlloc { .. }
+                    | ScalarInst::CellStoreDiscriminant { .. }
+                    | ScalarInst::CellStore { .. }
+                    | ScalarInst::CellLoad { .. } => true,
+                    ScalarInst::Sequence(nested) => nested.iter().any(|nested| {
+                        matches!(
+                            nested,
+                            ScalarInst::CellAlloc { .. }
+                                | ScalarInst::CellStoreDiscriminant { .. }
+                                | ScalarInst::CellStore { .. }
+                                | ScalarInst::CellLoad { .. }
+                        )
+                    }),
+                    _ => false,
+                })
+            })
+    })
 }
 
 fn emit_prototype(out: &mut String, function: &ScalarFunction) {
@@ -345,10 +377,11 @@ fn emit_function(out: &mut String, function: &ScalarFunction) {
                 let _ = writeln!(out, "  {} {};", c_type(param.ty), names.value(&param.id));
             }
         }
-        for inst in &block.insts {
-            let dest = inst_dest(inst);
-            if declared.insert(dest.id.clone()) {
-                let _ = writeln!(out, "  {} {};", c_type(dest.ty), names.value(&dest.id));
+        for inst in flatten_insts(&block.insts) {
+            if let Some(dest) = inst_dest(inst) {
+                if declared.insert(dest.id.clone()) {
+                    let _ = writeln!(out, "  {} {};", c_type(dest.ty), names.value(&dest.id));
+                }
             }
         }
     }
@@ -356,7 +389,7 @@ fn emit_function(out: &mut String, function: &ScalarFunction) {
     out.push_str("  for (;;) {\n    switch (mncs_pc) {\n");
     for (index, block) in function.blocks.iter().enumerate() {
         let _ = writeln!(out, "    case {index}: {{");
-        for inst in &block.insts {
+        for inst in flatten_insts(&block.insts) {
             emit_inst(out, inst, &names);
         }
         match &block.term {
@@ -510,21 +543,64 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 );
                 return;
             }
+            let bounds = if signed {
+                let top = 1i128 << (bits - 1);
+                (-top, top - 1)
+            } else {
+                (0i128, (1i128 << bits) - 1)
+            };
+            // Decimal literals are emitted with explicit suffixes (and the
+            // signed minimum is built by subtraction) because a bare
+            // `-9223372036854775808` would first materialize an unsigned
+            // constant that does not fit `long long`.
+            let literal = |value: i128| -> String {
+                if signed {
+                    format!("{value}LL")
+                } else {
+                    format!("{value}ULL")
+                }
+            };
+            let max_text = literal(bounds.1);
+            let min_text = if signed && bounds.0 == -(1i128 << 63) {
+                "(-9223372036854775807LL - 1)".to_owned()
+            } else {
+                literal(bounds.0)
+            };
             if matches!(
                 intent,
                 ArithmeticIntent::Checked | ArithmeticIntent::Trapping
             ) && !promise.decision.permitted
             {
-                let (min, max) = if signed {
-                    let top = 1i128 << (bits - 1);
-                    ((-top).to_string(), (top - 1).to_string())
+                // The wide intermediate is 128-bit so a 64-bit overflow is
+                // still exactly detectable; narrower operands cannot overflow
+                // an int128/uint128 intermediate at all, but the guard stays
+                // uniform so failure semantics are identical at every width.
+                let wide_ty = if signed {
+                    "__int128"
                 } else {
-                    ("0".to_owned(), ((1i128 << bits) - 1).to_string())
+                    "unsigned __int128"
                 };
                 let _ = writeln!(
                     out,
-                    "      {{ int64_t mncs_wide = (int64_t){lhs_n} {op} (int64_t){rhs_n}; if (mncs_wide > {max} || mncs_wide < {min}) {{ *mncs_status = 1; *mncs_value = 0; return; }} {dest_n} = ({})mncs_wide; }}",
-                    c_type(dest.ty)
+                    "      {{ {wide_ty} mncs_wide = ({wide_ty}){lhs_n} {op} ({wide_ty}){rhs_n}; if (mncs_wide > {max} || mncs_wide < {min}) {{ *mncs_status = 1; *mncs_value = 0; return; }} {dest_n} = ({})mncs_wide; }}",
+                    c_type(dest.ty),
+                    max = max_text,
+                    min = min_text,
+                );
+            } else if matches!(intent, ArithmeticIntent::Saturating) {
+                // Total by definition: compute in the wide domain, then clamp
+                // into the declared representable range.
+                let wide_ty = if signed {
+                    "__int128"
+                } else {
+                    "unsigned __int128"
+                };
+                let _ = writeln!(
+                    out,
+                    "      {{ {wide_ty} mncs_wide = ({wide_ty}){lhs_n} {op} ({wide_ty}){rhs_n}; if (mncs_wide > {max}) {{ mncs_wide = {max}; }} if (mncs_wide < {min}) {{ mncs_wide = {min}; }} {dest_n} = ({})mncs_wide; }}",
+                    c_type(dest.ty),
+                    max = max_text,
+                    min = min_text,
                 );
             } else {
                 let _ = writeln!(
@@ -581,6 +657,83 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
         ScalarInst::FiniteConstruct { dest, discriminant } => {
             let _ = writeln!(out, "      {} = {};", names.value(&dest.id), discriminant);
         }
+        ScalarInst::CellAlloc { dest, bytes } => {
+            let _ = writeln!(
+                out,
+                "      {} = mncs_cell_alloc({bytes});",
+                names.value(&dest.id)
+            );
+        }
+        ScalarInst::CellStoreDiscriminant { cell, discriminant } => {
+            let _ = writeln!(
+                out,
+                "      mncs_slot_store32(mncs_arena, {}, (uint32_t){});",
+                names.value(cell),
+                discriminant
+            );
+        }
+        ScalarInst::CellStore {
+            cell,
+            byte_offset,
+            width,
+            value,
+        } => match width {
+            SlotWidth::W32 => {
+                let _ = writeln!(
+                    out,
+                    "      mncs_slot_store32(mncs_arena, {} + {byte_offset}, (uint32_t){});",
+                    names.value(cell),
+                    names.value(value)
+                );
+            }
+            SlotWidth::W64 => {
+                let _ = writeln!(
+                    out,
+                    "      mncs_slot_store64(mncs_arena, {} + {byte_offset}, (uint64_t){});",
+                    names.value(cell),
+                    names.value(value)
+                );
+            }
+        },
+        ScalarInst::CellLoad {
+            dest,
+            cell,
+            byte_offset,
+            width,
+        } => match width {
+            SlotWidth::W32 => {
+                let _ = writeln!(
+                    out,
+                    "      {} = ({})mncs_slot_load32(mncs_arena, {} + {byte_offset});",
+                    names.value(&dest.id),
+                    c_type(dest.ty),
+                    names.value(cell)
+                );
+            }
+            SlotWidth::W64 => {
+                let _ = writeln!(
+                    out,
+                    "      {} = ({})mncs_slot_load64(mncs_arena, {} + {byte_offset});",
+                    names.value(&dest.id),
+                    c_type(dest.ty),
+                    names.value(cell)
+                );
+            }
+        },
+        ScalarInst::FiniteIsVariant {
+            dest,
+            src,
+            discriminant,
+        } if names.ty(src).is_cell() => {
+            // Boxed finite: compare the canonical cell's tag word.
+            let _ = writeln!(
+                out,
+                "      {} = ((int32_t)mncs_slot_load32(mncs_arena, {}) == (int32_t){});",
+                names.value(&dest.id),
+                names.value(src),
+                discriminant
+            );
+        }
         ScalarInst::FiniteIsVariant {
             dest,
             src,
@@ -588,11 +741,16 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
         } => {
             let _ = writeln!(
                 out,
-                "      {} = ({} == {});",
+                "      {} = ((int32_t){} == (int32_t){});",
                 names.value(&dest.id),
                 names.value(src),
                 discriminant
             );
+        }
+        ScalarInst::Sequence(insts) => {
+            for nested in insts {
+                emit_inst(out, nested, names);
+            }
         }
         ScalarInst::Call { dest, callee, args } => {
             let list = args
@@ -613,43 +771,72 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
     }
 }
 
-fn inst_dest(inst: &ScalarInst) -> &crate::scalar::ScalarValue {
+fn inst_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
     match inst {
         ScalarInst::Const { dest, .. }
         | ScalarInst::Integer { dest, .. }
         | ScalarInst::Boolean { dest, .. }
         | ScalarInst::Compare { dest, .. }
         | ScalarInst::FiniteConstruct { dest, .. }
+        | ScalarInst::CellAlloc { dest, .. }
+        | ScalarInst::CellLoad { dest, .. }
         | ScalarInst::FiniteIsVariant { dest, .. }
-        | ScalarInst::Call { dest, .. } => dest,
+        | ScalarInst::Call { dest, .. } => Some(dest),
+        // Cell stores produce no value; sequences declare through members.
+        ScalarInst::CellStoreDiscriminant { .. } | ScalarInst::CellStore { .. } => None,
+        ScalarInst::Sequence(_) => None,
     }
+}
+
+/// Flatten sequence groups so declaration and emission walk every concrete
+/// instruction exactly once, in order.
+fn flatten_insts(insts: &[ScalarInst]) -> Vec<&ScalarInst> {
+    let mut flat = Vec::new();
+    for inst in insts {
+        match inst {
+            ScalarInst::Sequence(nested) => flat.extend(flatten_insts(nested)),
+            other => flat.push(other),
+        }
+    }
+    flat
 }
 
 struct CNames {
     values: BTreeMap<mncs_model::SemanticId, String>,
     blocks: BTreeMap<mncs_model::SemanticId, usize>,
+    types: BTreeMap<mncs_model::SemanticId, ScalarTy>,
+}
+
+impl CNames {
+    fn ty(&self, id: &mncs_model::SemanticId) -> ScalarTy {
+        self.types.get(id).copied().unwrap_or(ScalarTy::Finite)
+    }
 }
 
 impl CNames {
     fn new(function: &ScalarFunction) -> Self {
         let mut values = BTreeMap::new();
+        let mut types: BTreeMap<mncs_model::SemanticId, ScalarTy> = BTreeMap::new();
         let mut next = 0u32;
-        let mut push = |id: &mncs_model::SemanticId| {
-            values.entry(id.clone()).or_insert_with(|| {
+        let mut push = |value: &crate::scalar::ScalarValue| {
+            values.entry(value.id.clone()).or_insert_with(|| {
                 let name = format!("v{next}");
                 next += 1;
                 name
             });
+            types.insert(value.id.clone(), value.ty);
         };
         for param in &function.params {
-            push(&param.id);
+            push(param);
         }
         for block in &function.blocks {
             for param in &block.params {
-                push(&param.id);
+                push(param);
             }
-            for inst in &block.insts {
-                push(&inst_dest(inst).id);
+            for inst in flatten_insts(&block.insts) {
+                if let Some(dest) = inst_dest(inst) {
+                    push(dest);
+                }
             }
         }
         let blocks = function
@@ -658,7 +845,11 @@ impl CNames {
             .enumerate()
             .map(|(index, block)| (block.id.clone(), index))
             .collect();
-        Self { values, blocks }
+        Self {
+            values,
+            blocks,
+            types,
+        }
     }
 
     fn value(&self, id: &mncs_model::SemanticId) -> &str {
@@ -701,40 +892,60 @@ pub fn execute_c11(
             "C11 execution requires a language-owned function value contract",
         );
     };
-    // Composite arguments cannot cross this process-argument realization
-    // boundary; they fail closed before any code is compiled.
-    for value in &request.arguments {
-        if !matches!(
-            value,
-            ExecutionValue::Boolean { .. } | ExecutionValue::Integer { .. }
-        ) {
-            return execution_failure(
-                result,
-                ExecutionStatus::Unsupported,
-                "composite arguments are outside the current C11 process-boundary envelope; records and payload sums realize through WASM and the research bytecode interpreter",
-            );
+    // Composite arguments and results cross through the canonical call
+    // file; pure scalar calls keep the historical argv-only protocol.
+    let driver = c_driver(
+        &request.target.function,
+        &contract.inputs,
+        contract.outputs.first(),
+    );
+    let call_blob = match crate::support::build_call_file(
+        &request.arguments,
+        &contract.inputs,
+        contract.outputs.first(),
+        &artifact.composite_value_contracts,
+    ) {
+        Ok(blob) => blob,
+        Err(reason) => {
+            return execution_failure(result, ExecutionStatus::InvalidRequest, reason);
         }
-    }
-    let driver = c_driver(&request.target.function, &contract.inputs);
-    let argv = match argv_from_request(request) {
-        Ok(argv) => argv,
-        Err(reason) => return execution_failure(result, ExecutionStatus::Unsupported, &reason),
     };
-    match compile_and_run(
+    let call_path = call_blob.as_ref().map(|bytes| {
+        let digest = crate::support::sha256_hex(bytes);
+        let path = std::env::temp_dir().join(format!("mncs-call-{digest}.bin"));
+        let _ = std::fs::write(&path, bytes);
+        path
+    });
+    // In call-file mode every value crosses canonically; argv stays empty.
+    let argv = match &call_blob {
+        Some(_) => Vec::new(),
+        None => match argv_from_request(request) {
+            Ok(argv) => argv,
+            Err(reason) => return execution_failure(result, ExecutionStatus::Unsupported, reason),
+        },
+    };
+    match compile_and_run_with_call_file_full(
         &[("module.c", source.as_str()), ("driver.c", driver.as_str())],
         &compiler,
         &["-std=c11", "-O0", "-Wall"],
         &argv,
+        call_path.as_deref(),
     ) {
-        Ok((value, status, _)) => {
-            result.status = status;
+        Ok((run, _)) => {
+            result.status = run.status;
             result.steps = 1;
-            match decode_native_value(contract.outputs.first(), status, value) {
+            match crate::support::decode_native_observation(
+                contract.outputs.first(),
+                run.status,
+                run.value,
+                run.arena_hex.as_deref(),
+                &artifact.composite_value_contracts,
+            ) {
                 Ok(returned) => {
                     result.returned = returned;
                     result
                 }
-                Err(error) => execution_failure(result, error.status(), error.reason()),
+                Err(reason) => execution_failure(result, ExecutionStatus::InvalidRequest, reason),
             }
         }
         Err(error) => execution_failure(result, error.status(), error.reason()),

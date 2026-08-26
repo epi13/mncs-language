@@ -132,42 +132,41 @@ fn strict_booleans_agree_across_executable_backends() {
     }
 }
 
-/// The core library runs end to end on bytecode and WASM (records, payload
-/// sums); C11/LLVM/Cranelift refuse composite signatures explicitly instead
-/// of mis-typing them.
+/// The core status lattice (records + payload-free sums) agrees across all
+/// five executable backends. Canonical composite cells made records and
+/// boxed variants real on C11, LLVM, and Cranelift rather than refused.
 #[test]
 fn core_status_module_envelope_per_backend() {
     let source = library("core/status.mncs");
     let corpus = example("execution/library-core-status-corpus.json");
 
-    for backend in ["mncs-research-bytecode", "mncs-portable-wasm-mvp"] {
+    for backend in [
+        "mncs-research-bytecode",
+        "mncs-portable-wasm-mvp",
+        "mncs-c11",
+        "mncs-llvm-ir",
+        "mncs-cranelift",
+    ] {
         let result = run_experiment(&source, backend, &corpus);
         assert_eq!(result["status"], "PASS", "{backend}");
         assert_eq!(cases_met(&result), 30, "{backend}");
     }
-
-    for backend in ["mncs-c11", "mncs-llvm-ir"] {
-        let result = run_experiment(&source, backend, &corpus);
-        assert_ne!(
-            result["status"], "PASS",
-            "{backend} must not claim composite support it does not have"
-        );
-        let codes = refusal_codes(&result);
-        assert!(
-            codes.iter().any(|code| code.starts_with("CG")),
-            "{backend}: expected a structured capability refusal, got {codes:?}"
-        );
-    }
 }
 
-/// The Result payload-sum module executes identically on bytecode and WASM.
+/// The Result payload-sum module executes identically on every executable
+/// backend; UNKNOWN comes only from honest checked-arithmetic obligations.
 #[test]
-fn core_result_payload_sums_on_bytecode_and_wasm() {
+fn core_result_payload_sums_across_executable_backends() {
     let source = library("core/result.mncs");
     let corpus = example("execution/library-core-result-corpus.json");
-    for backend in ["mncs-research-bytecode", "mncs-portable-wasm-mvp"] {
+    for backend in [
+        "mncs-research-bytecode",
+        "mncs-portable-wasm-mvp",
+        "mncs-c11",
+        "mncs-llvm-ir",
+        "mncs-cranelift",
+    ] {
         let result = run_experiment(&source, backend, &corpus);
-        // UNKNOWN only from honest checked-arithmetic obligations.
         assert_eq!(result["status"], "UNKNOWN", "{backend}");
         assert_eq!(cases_met(&result), 8, "{backend}");
     }

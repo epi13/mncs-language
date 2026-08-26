@@ -15,7 +15,7 @@ use mncs_model::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::native::{argv_from_request, decode_native_value, host_triple};
+use crate::native::{argv_from_request, host_triple};
 use crate::scalar::{
     lower_to_scalar, ScalarFunction, ScalarInst, ScalarModule, ScalarTerm, ScalarTy,
 };
@@ -83,25 +83,20 @@ pub fn cranelift_capabilities() -> BackendCapabilityManifest {
         [
             "checked_integer",
             "wrapping_integer",
+            "saturating_integer",
             "trapping_integer",
             "explicit_failure",
             "semantic_bounded_iteration",
             "finite_values",
+            "canonical_composite_cells",
         ]
         .into_iter()
         .map(str::to_owned)
         .collect(),
-        [
-            "record_values",
-            "memory",
-            "effects",
-            "saturating_integer",
-            "widening_integer",
-            "non_host_isa_jit",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect(),
+        ["memory", "effects", "widening_integer", "non_host_isa_jit"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
         [CRANELIFT_ARTIFACT_KIND.to_owned()].into_iter().collect(),
         ["bounded_execution_agreement".to_owned()]
             .into_iter()
@@ -345,6 +340,7 @@ fn emit_clif_function(out: &mut String, function: &ScalarFunction) {
         sig.join(", ")
     );
     for (index, block) in function.blocks.iter().enumerate() {
+        let _ = index;
         let params = if index == 0 {
             let mut list = function
                 .params
@@ -363,7 +359,7 @@ fn emit_clif_function(out: &mut String, function: &ScalarFunction) {
                 .join(", ")
         };
         let _ = writeln!(out, "    {}({params}):", names.block(&block.id));
-        for inst in &block.insts {
+        for inst in flatten_scalar(&block.insts) {
             emit_clif_inst(out, inst, &names);
         }
         match &block.term {
@@ -585,6 +581,71 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                 names.value(&dest.id)
             );
         }
+        ScalarInst::CellAlloc { dest, bytes } => {
+            let _ = writeln!(
+                out,
+                "        {} = call %mncs_cell_alloc({bytes})",
+                names.value(&dest.id)
+            );
+        }
+        ScalarInst::CellStoreDiscriminant { cell, discriminant } => {
+            let _ = writeln!(
+                out,
+                "        v_tmp = iconst.i32 {discriminant}\n        call %mncs_slot_store32({}, 0, v_tmp)",
+                names.value(cell)
+            );
+        }
+        ScalarInst::CellStore {
+            cell,
+            byte_offset,
+            width,
+            value,
+        } => match width {
+            crate::composite::SlotWidth::W32 => {
+                let _ = writeln!(
+                    out,
+                    "        call %mncs_slot_store32({}, {byte_offset}, {})",
+                    names.value(cell),
+                    names.value(value)
+                );
+            }
+            crate::composite::SlotWidth::W64 => {
+                let _ = writeln!(
+                    out,
+                    "        call %mncs_slot_store64({}, {byte_offset}, {})",
+                    names.value(cell),
+                    names.value(value)
+                );
+            }
+        },
+        ScalarInst::CellLoad {
+            dest,
+            cell,
+            byte_offset,
+            width,
+        } => match width {
+            crate::composite::SlotWidth::W32 => {
+                let _ = writeln!(
+                    out,
+                    "        {} = load.u32({}, {byte_offset})",
+                    names.value(&dest.id),
+                    names.value(cell)
+                );
+            }
+            crate::composite::SlotWidth::W64 => {
+                let _ = writeln!(
+                    out,
+                    "        {} = load.i64({}, {byte_offset})",
+                    names.value(&dest.id),
+                    names.value(cell)
+                );
+            }
+        },
+        ScalarInst::Sequence(insts) => {
+            for nested in insts {
+                emit_clif_inst(out, nested, names);
+            }
+        }
         ScalarInst::FiniteIsVariant {
             dest,
             src,
@@ -647,6 +708,35 @@ fn emit_width_normalize(
     (lhs_v, rhs_v)
 }
 
+/// Flatten sequence groups so naming and emission walk every concrete
+/// instruction exactly once.
+fn flatten_scalar(insts: &[ScalarInst]) -> Vec<&ScalarInst> {
+    let mut flat = Vec::new();
+    for inst in insts {
+        match inst {
+            ScalarInst::Sequence(nested) => flat.extend(flatten_scalar(nested)),
+            other => flat.push(other),
+        }
+    }
+    flat
+}
+
+fn scalar_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
+    match inst {
+        ScalarInst::Const { dest, .. }
+        | ScalarInst::Integer { dest, .. }
+        | ScalarInst::Boolean { dest, .. }
+        | ScalarInst::Compare { dest, .. }
+        | ScalarInst::FiniteConstruct { dest, .. }
+        | ScalarInst::CellAlloc { dest, .. }
+        | ScalarInst::CellLoad { dest, .. }
+        | ScalarInst::FiniteIsVariant { dest, .. }
+        | ScalarInst::Call { dest, .. } => Some(dest),
+        ScalarInst::CellStoreDiscriminant { .. } | ScalarInst::CellStore { .. } => None,
+        ScalarInst::Sequence(_) => None,
+    }
+}
+
 struct ClifNames {
     values: BTreeMap<mncs_model::SemanticId, String>,
     blocks: BTreeMap<mncs_model::SemanticId, String>,
@@ -670,15 +760,9 @@ impl ClifNames {
             for param in &block.params {
                 push(&param.id);
             }
-            for inst in &block.insts {
-                let dest = match inst {
-                    ScalarInst::Const { dest, .. }
-                    | ScalarInst::Integer { dest, .. }
-                    | ScalarInst::Boolean { dest, .. }
-                    | ScalarInst::Compare { dest, .. }
-                    | ScalarInst::FiniteConstruct { dest, .. }
-                    | ScalarInst::FiniteIsVariant { dest, .. }
-                    | ScalarInst::Call { dest, .. } => dest,
+            for inst in flatten_scalar(&block.insts) {
+                let Some(dest) = scalar_dest(inst) else {
+                    continue;
                 };
                 push(&dest.id);
             }
@@ -737,16 +821,43 @@ pub fn execute_cranelift(
             "Cranelift execution requires a language-owned function value contract",
         );
     };
-    match jit_execute(&payload, request) {
+    // Canonical boundary values (scalar bits or cell roots) shared by the
+    // JIT and AOT realizations so both behave identically.
+    let (raw_args, arena_image) = match jit_boundary_arguments(
+        &payload,
+        &contract.inputs,
+        contract.outputs.first(),
+        &artifact.composite_value_contracts,
+        request,
+    ) {
+        Ok(outcome) => outcome,
+        Err(reason) => {
+            return execution_failure(result, ExecutionStatus::InvalidRequest, reason);
+        }
+    };
+    if let Some(image) = &arena_image {
+        // Install the canonical argument arena before the call.
+        with_jit_arena(|arena| {
+            arena.clear();
+            arena.extend_from_slice(image);
+        });
+    }
+    match jit_execute_with_arguments(&payload, request.target.function.as_str(), &raw_args) {
         Ok((status, value)) => {
             result.status = status;
             result.steps = 1;
-            match decode_native_value(contract.outputs.first(), status, value) {
+            match crate::support::decode_native_observation(
+                contract.outputs.first(),
+                status,
+                value,
+                read_jit_arena_hex(arena_image.is_some()).as_deref(),
+                &artifact.composite_value_contracts,
+            ) {
                 Ok(returned) => {
                     result.returned = returned;
                     result
                 }
-                Err(error) => execution_failure(result, error.status(), error.reason()),
+                Err(reason) => execution_failure(result, ExecutionStatus::InvalidRequest, reason),
             }
         }
         Err(reason) => {
@@ -755,16 +866,24 @@ pub fn execute_cranelift(
             // fall back to the AOT object + external-link route when a
             // toolchain is present.
             if reason.contains("readable+executable") || reason.contains("executable memory") {
-                match aot_fallback_execute(artifact, &payload, request) {
-                    Ok((status, value)) => {
-                        result.status = status;
+                match aot_fallback_execute(artifact, &payload, request, &raw_args, &arena_image) {
+                    Ok(run) => {
+                        result.status = run.status;
                         result.steps = 1;
-                        match decode_native_value(contract.outputs.first(), status, value) {
+                        match crate::support::decode_native_observation(
+                            contract.outputs.first(),
+                            run.status,
+                            run.value,
+                            run.arena_hex.as_deref(),
+                            &artifact.composite_value_contracts,
+                        ) {
                             Ok(returned) => {
                                 result.returned = returned;
                                 result
                             }
-                            Err(error) => execution_failure(result, error.status(), error.reason()),
+                            Err(reason) => {
+                                execution_failure(result, ExecutionStatus::InvalidRequest, reason)
+                            }
                         }
                     }
                     Err(fallback_error) => execution_failure(
@@ -781,13 +900,15 @@ pub fn execute_cranelift(
 }
 
 /// AOT fallback: emit a host-ISA ELF object from the same scalar lowering,
-/// link it against the shared process driver, and observe it externally.
+/// link it against the cell-runtime process driver, and observe it externally.
 fn aot_fallback_execute(
     artifact: &mncs_model::BackendArtifact,
     payload: &CraneliftPayload,
     request: &ExecutionRequest,
-) -> Result<(ExecutionStatus, i128), String> {
-    use crate::native::{compile_object_and_run, probe_clang, probe_gcc};
+    raw_args: &[i64],
+    arena_image: &Option<Vec<u8>>,
+) -> Result<crate::support::NativeRunView, String> {
+    use crate::native::{compile_object_and_run_full, probe_clang, probe_gcc};
     let Some(contract) = artifact
         .function_value_contracts
         .get(&request.target.function)
@@ -796,30 +917,77 @@ fn aot_fallback_execute(
             "Cranelift AOT execution requires a language-owned function value contract".to_owned(),
         );
     };
+    if arena_image.is_none() && contract.inputs.iter().any(crate::support::contract_is_cell) {
+        return Err(
+            "composite parameters require a canonical call file for this request".to_owned(),
+        );
+    }
     let names = function_names(&payload.program, &payload.ssa);
     let scalar = lower_to_scalar(&payload.program, &payload.ssa, &names);
-    for value in &request.arguments {
-        if !matches!(
-            value,
-            mncs_model::ExecutionValue::Boolean { .. } | mncs_model::ExecutionValue::Integer { .. }
-        ) {
-            return Err("composite arguments are outside the current Cranelift AOT process-boundary envelope".to_owned());
-        }
-    }
     let object = aot_object_bytes(&scalar)?;
     let linker = probe_clang()
         .or_else(probe_gcc)
         .ok_or_else(|| "neither clang nor gcc is present".to_owned())?;
-    let driver =
-        crate::support::process_driver_i64(&request.target.function, contract.inputs.len());
-    let argv = argv_from_request(request)?;
-    compile_object_and_run("mncs.o", &object, "driver.c", &driver, &linker, &argv)
-        .map_err(|error| format!("{:?}: {}", error.status(), error.reason()))
+    // The linked object contains every module function, so the driver must
+    // define the cell runtime whenever any function manipulates cells.
+    let driver = if crate::support::scalar_module_uses_cells(&scalar) {
+        crate::support::process_driver_cell_runtime(
+            &request.target.function,
+            &contract.inputs,
+            contract.outputs.first(),
+        )
+    } else {
+        crate::support::process_driver(
+            &request.target.function,
+            &contract.inputs,
+            contract.outputs.first(),
+        )
+    };
+    let argv: Vec<String> = if arena_image.is_some() {
+        Vec::new()
+    } else {
+        raw_args.iter().map(|value| value.to_string()).collect()
+    };
+    let call_path = arena_image.as_ref().map(|image| {
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&0x4d4e435331_u64.to_le_bytes());
+        blob.extend_from_slice(&(raw_args.len() as u64).to_le_bytes());
+        for (index, argument) in raw_args.iter().enumerate() {
+            let kind = if contract
+                .inputs
+                .get(index)
+                .is_some_and(crate::support::contract_is_cell)
+            {
+                1u64
+            } else {
+                0u64
+            };
+            blob.extend_from_slice(&kind.to_le_bytes());
+            blob.extend_from_slice(&(*argument as u64).to_le_bytes());
+        }
+        blob.extend_from_slice(&(image.len() as u64).to_le_bytes());
+        blob.extend_from_slice(image);
+        let digest = crate::support::sha256_hex(&blob);
+        let path = std::env::temp_dir().join(format!("mncs-call-{digest}.bin"));
+        let _ = std::fs::write(&path, &blob);
+        path
+    });
+    compile_object_and_run_full(
+        "mncs.o",
+        &object,
+        "driver.c",
+        &driver,
+        &linker,
+        &argv,
+        call_path.as_deref(),
+    )
+    .map_err(|error| format!("{:?}: {}", error.status(), error.reason()))
 }
 
-fn jit_execute(
+fn jit_execute_with_arguments(
     payload: &CraneliftPayload,
-    request: &ExecutionRequest,
+    function_name: &str,
+    raw_args: &[i64],
 ) -> Result<(ExecutionStatus, i128), String> {
     if payload.clif.trim().is_empty() {
         return Err("Cranelift artifact has empty CLIF".to_owned());
@@ -831,7 +999,7 @@ fn jit_execute(
             "Cranelift CLIF identity does not match the selected SSA in the payload".to_owned(),
         );
     }
-    jit_scalar(&scalar, &request.target.function, request)
+    jit_scalar(&scalar, function_name, raw_args)
 }
 
 fn integer_bounds(bits: u16, signed: bool) -> (i64, i64) {
@@ -893,6 +1061,36 @@ pub fn aot_object_bytes(scalar: &ScalarModule) -> Result<Vec<u8>, String> {
     Ok(written)
 }
 
+/// Declare (once per function build) one of the canonical-cell runtime
+/// entry points. All share the uniform i64 signature family:
+///   mncs_cell_alloc(bytes) -> offset
+///   mncs_slot_store32/64(at, value)
+///   mncs_slot_load32/64(at) -> zero-extended value
+fn cell_libcall<M: cranelift_module::Module>(
+    module: &mut M,
+    func: &mut cranelift_codegen::ir::Function,
+    name: &'static str,
+) -> cranelift_codegen::ir::FuncRef {
+    use cranelift_codegen::ir::{types, AbiParam, Signature};
+    use cranelift_module::Linkage;
+    let mut sig = Signature::new(module.target_config().default_call_conv);
+    match name {
+        "mncs_slot_store32" | "mncs_slot_store64" => {
+            sig.params.push(AbiParam::new(types::I64));
+            sig.params.push(AbiParam::new(types::I64));
+        }
+        "mncs_cell_alloc" | "mncs_slot_load32" | "mncs_slot_load64" => {
+            sig.params.push(AbiParam::new(types::I64));
+            sig.returns.push(AbiParam::new(types::I64));
+        }
+        _ => unreachable!("unknown cell libcall {name}"),
+    }
+    let id = module
+        .declare_function(name, Linkage::Import, &sig)
+        .expect("declare cell libcall");
+    module.declare_func_in_func(id, func)
+}
+
 /// Build every scalar function into any Cranelift module realization.
 fn declare_and_build<M>(
     module: &mut M,
@@ -934,6 +1132,36 @@ where
             let mut builder = FunctionBuilder::new(&mut ctx.func, &mut fn_ctx);
             let mut blocks = BTreeMap::new();
             let mut values: BTreeMap<SemanticId, Value> = BTreeMap::new();
+            // Value types for boxed-variant decisions during building.
+            let mut value_types: BTreeMap<SemanticId, crate::scalar::ScalarTy> = BTreeMap::new();
+            {
+                fn record_type(
+                    value: &crate::scalar::ScalarValue,
+                    map: &mut BTreeMap<SemanticId, crate::scalar::ScalarTy>,
+                ) {
+                    map.insert(value.id.clone(), value.ty);
+                }
+                for param in &function.params {
+                    record_type(param, &mut value_types);
+                }
+                for block in &function.blocks {
+                    for param in &block.params {
+                        record_type(param, &mut value_types);
+                    }
+                    for inst in flatten_scalar(&block.insts) {
+                        if let Some(dest) = scalar_dest(inst) {
+                            record_type(dest, &mut value_types);
+                        }
+                    }
+                }
+            }
+            let value_is_cell = |id: &SemanticId| {
+                value_types
+                    .get(id)
+                    .copied()
+                    .unwrap_or(crate::scalar::ScalarTy::Finite)
+                    .is_cell()
+            };
             for block in &function.blocks {
                 blocks.insert(block.id.clone(), builder.create_block());
             }
@@ -961,7 +1189,7 @@ where
                 if block_index != 0 {
                     builder.switch_to_block(clif_block);
                 }
-                for inst in &block.insts {
+                for inst in flatten_scalar(&block.insts) {
                     match inst {
                         ScalarInst::Const { dest, value } => {
                             let produced = builder
@@ -1075,35 +1303,183 @@ where
                             };
                             let signed =
                                 matches!(dest.ty, ScalarTy::Int(integer) if integer.signed);
-                            let produced = match operator.as_str() {
+                            if matches!(intent, ArithmeticIntent::Saturating) {
+                                // Saturating arithmetic is total by definition:
+                                // widen to i128 so the wide result can never
+                                // wrap, clamp into the declared range, then
+                                // narrow back. This is exact at every width.
+                                let wide_ty = types::I128;
+                                let (min, max) = integer_bounds(bits, signed);
+                                let left_wide = if signed {
+                                    builder.ins().sextend(wide_ty, left)
+                                } else {
+                                    builder.ins().uextend(wide_ty, left)
+                                };
+                                let right_wide = if signed {
+                                    builder.ins().sextend(wide_ty, right)
+                                } else {
+                                    builder.ins().uextend(wide_ty, right)
+                                };
+                                let produced_wide = match operator.as_str() {
+                                    "sub" => builder.ins().isub(left_wide, right_wide),
+                                    "mul" => builder.ins().imul(left_wide, right_wide),
+                                    _ => builder.ins().iadd(left_wide, right_wide),
+                                };
+                                // Every declared range fits an i64 cell, so
+                                // boundaries are built there and widened.
+                                let max64 = builder.ins().iconst(types::I64, max);
+                                let max_v = if signed {
+                                    builder.ins().sextend(wide_ty, max64)
+                                } else {
+                                    builder.ins().uextend(wide_ty, max64)
+                                };
+                                let over = builder.ins().icmp(
+                                    if signed {
+                                        IntCC::SignedGreaterThan
+                                    } else {
+                                        IntCC::UnsignedGreaterThan
+                                    },
+                                    produced_wide,
+                                    max_v,
+                                );
+                                let min64 = builder.ins().iconst(types::I64, min);
+                                let min_v = if signed {
+                                    builder.ins().sextend(wide_ty, min64)
+                                } else {
+                                    builder.ins().uextend(wide_ty, min64)
+                                };
+                                let under = builder.ins().icmp(
+                                    if signed {
+                                        IntCC::SignedLessThan
+                                    } else {
+                                        IntCC::UnsignedLessThan
+                                    },
+                                    produced_wide,
+                                    min_v,
+                                );
+                                let clamped_high = builder.ins().select(over, max_v, produced_wide);
+                                let clamped = builder.ins().select(under, min_v, clamped_high);
+                                let narrowed = builder.ins().ireduce(types::I64, clamped);
+                                values.insert(dest.id.clone(), narrowed);
+                                continue;
+                            }
+                            let mut produced = match operator.as_str() {
                                 "sub" => builder.ins().isub(left, right),
                                 "mul" => builder.ins().imul(left, right),
                                 _ => builder.ins().iadd(left, right),
                             };
-                            if matches!(
+                            let needs_overflow_guard = matches!(
                                 intent,
                                 ArithmeticIntent::Checked | ArithmeticIntent::Trapping
-                            ) && !promise.decision.permitted
-                            {
-                                let (min, max) = integer_bounds(bits, signed);
-                                let max_v = builder.ins().iconst(types::I64, max);
-                                let min_v = builder.ins().iconst(types::I64, min);
-                                let hi =
-                                    builder
+                            ) && !promise.decision.permitted;
+                            if !needs_overflow_guard && bits < 64 {
+                                // Narrow wrapping results are normalized back
+                                // into their declared width inside the shared
+                                // i64 cell so a wrapping edge value (for
+                                // example `0 -% 1` in u16) remains
+                                // representable instead of surfacing as an
+                                // unrelated negative i64. The guard below must
+                                // observe the raw value, so normalization is
+                                // skipped when a guard will run.
+                                if signed {
+                                    let shift =
+                                        builder.ins().iconst(types::I64, i64::from(64 - bits));
+                                    let widened = builder.ins().ishl(produced, shift);
+                                    produced = builder.ins().sshr(widened, shift)
+                                } else {
+                                    let mask = builder
                                         .ins()
-                                        .icmp(IntCC::SignedGreaterThan, produced, max_v);
-                                let lo = builder.ins().icmp(IntCC::SignedLessThan, produced, min_v);
-                                let ov = builder.ins().bor(hi, lo);
-                                let cont = builder.create_block();
-                                builder.ins().brif(
-                                    ov,
-                                    fail,
-                                    &[] as &[BlockArg],
-                                    cont,
-                                    &[] as &[BlockArg],
-                                );
-                                builder.switch_to_block(cont);
-                                builder.seal_block(cont);
+                                        .iconst(types::I64, ((1i128 << bits) - 1) as i64);
+                                    produced = builder.ins().band(produced, mask)
+                                }
+                            }
+                            if needs_overflow_guard {
+                                if bits >= 64 {
+                                    // A wrapped i64 result can no longer be
+                                    // distinguished from a legal one after
+                                    // the fact; recompute in i128 where the
+                                    // overflow is exactly detectable.
+                                    let wide_ty = types::I128;
+                                    let (min, max) = integer_bounds(bits, signed);
+                                    let left_wide = if signed {
+                                        builder.ins().sextend(wide_ty, left)
+                                    } else {
+                                        builder.ins().uextend(wide_ty, left)
+                                    };
+                                    let right_wide = if signed {
+                                        builder.ins().sextend(wide_ty, right)
+                                    } else {
+                                        builder.ins().uextend(wide_ty, right)
+                                    };
+                                    let produced_wide = match operator.as_str() {
+                                        "sub" => builder.ins().isub(left_wide, right_wide),
+                                        "mul" => builder.ins().imul(left_wide, right_wide),
+                                        _ => builder.ins().iadd(left_wide, right_wide),
+                                    };
+                                    let max64 = builder.ins().iconst(types::I64, max);
+                                    let max_v = if signed {
+                                        builder.ins().sextend(wide_ty, max64)
+                                    } else {
+                                        builder.ins().uextend(wide_ty, max64)
+                                    };
+                                    let min64 = builder.ins().iconst(types::I64, min);
+                                    let min_v = if signed {
+                                        builder.ins().sextend(wide_ty, min64)
+                                    } else {
+                                        builder.ins().uextend(wide_ty, min64)
+                                    };
+                                    let hi = builder.ins().icmp(
+                                        if signed {
+                                            IntCC::SignedGreaterThan
+                                        } else {
+                                            IntCC::UnsignedGreaterThan
+                                        },
+                                        produced_wide,
+                                        max_v,
+                                    );
+                                    let lo = builder.ins().icmp(
+                                        if signed {
+                                            IntCC::SignedLessThan
+                                        } else {
+                                            IntCC::UnsignedLessThan
+                                        },
+                                        produced_wide,
+                                        min_v,
+                                    );
+                                    let ov = builder.ins().bor(hi, lo);
+                                    let cont = builder.create_block();
+                                    builder.ins().brif(
+                                        ov,
+                                        fail,
+                                        &[] as &[BlockArg],
+                                        cont,
+                                        &[] as &[BlockArg],
+                                    );
+                                    builder.switch_to_block(cont);
+                                    builder.seal_block(cont);
+                                } else {
+                                    let (min, max) = integer_bounds(bits, signed);
+                                    let max_v = builder.ins().iconst(types::I64, max);
+                                    let min_v = builder.ins().iconst(types::I64, min);
+                                    let hi = builder.ins().icmp(
+                                        IntCC::SignedGreaterThan,
+                                        produced,
+                                        max_v,
+                                    );
+                                    let lo =
+                                        builder.ins().icmp(IntCC::SignedLessThan, produced, min_v);
+                                    let ov = builder.ins().bor(hi, lo);
+                                    let cont = builder.create_block();
+                                    builder.ins().brif(
+                                        ov,
+                                        fail,
+                                        &[] as &[BlockArg],
+                                        cont,
+                                        &[] as &[BlockArg],
+                                    );
+                                    builder.switch_to_block(cont);
+                                    builder.seal_block(cont);
+                                }
                             }
                             values.insert(dest.id.clone(), produced);
                         }
@@ -1133,6 +1509,73 @@ where
                         ScalarInst::FiniteConstruct { dest, discriminant } => {
                             let produced =
                                 builder.ins().iconst(types::I64, i64::from(*discriminant));
+                            values.insert(dest.id.clone(), produced);
+                        }
+                        ScalarInst::CellAlloc { dest, bytes } => {
+                            let callee = cell_libcall(module, builder.func, "mncs_cell_alloc");
+                            let bytes_v = builder.ins().iconst(types::I64, *bytes as i64);
+                            let call = builder.ins().call(callee, &[bytes_v]);
+                            values.insert(dest.id.clone(), builder.inst_results(call)[0]);
+                        }
+                        ScalarInst::CellStoreDiscriminant { cell, discriminant } => {
+                            let callee = cell_libcall(module, builder.func, "mncs_slot_store32");
+                            let zero = builder.ins().iconst(types::I64, 0);
+                            let addr = builder.ins().iadd(values[cell], zero);
+                            let disc = builder.ins().iconst(types::I64, i64::from(*discriminant));
+                            let args = [addr, disc];
+                            builder.ins().call(callee, &args);
+                        }
+                        ScalarInst::CellStore {
+                            cell,
+                            byte_offset,
+                            width,
+                            value,
+                        } => {
+                            let name = match width {
+                                crate::composite::SlotWidth::W32 => "mncs_slot_store32",
+                                crate::composite::SlotWidth::W64 => "mncs_slot_store64",
+                            };
+                            let callee = cell_libcall(module, builder.func, name);
+                            let offset = builder.ins().iconst(types::I64, *byte_offset as i64);
+                            let addr = builder.ins().iadd(values[cell], offset);
+                            let args = [addr, values[value]];
+                            builder.ins().call(callee, &args);
+                        }
+                        ScalarInst::CellLoad {
+                            dest,
+                            cell,
+                            byte_offset,
+                            width,
+                        } => {
+                            let name = match width {
+                                crate::composite::SlotWidth::W32 => "mncs_slot_load32",
+                                crate::composite::SlotWidth::W64 => "mncs_slot_load64",
+                            };
+                            let callee = cell_libcall(module, builder.func, name);
+                            let offset = builder.ins().iconst(types::I64, *byte_offset as i64);
+                            let addr = builder.ins().iadd(values[cell], offset);
+                            let call = builder.ins().call(callee, &[addr]);
+                            // Load libcalls return zero-extended i64 slot
+                            // payloads in the uniform value domain.
+                            values.insert(dest.id.clone(), builder.inst_results(call)[0]);
+                        }
+                        ScalarInst::Sequence(_) => {
+                            unreachable!("Sequence must be flattened before building")
+                        }
+                        ScalarInst::FiniteIsVariant {
+                            dest,
+                            src,
+                            discriminant,
+                        } if value_is_cell(src) => {
+                            // Boxed finite: load the canonical tag word.
+                            let callee = cell_libcall(module, builder.func, "mncs_slot_load32");
+                            let zero = builder.ins().iconst(types::I64, 0);
+                            let addr = builder.ins().iadd(values[src], zero);
+                            let call = builder.ins().call(callee, &[addr]);
+                            let tag = builder.inst_results(call)[0];
+                            let disc = builder.ins().iconst(types::I64, i64::from(*discriminant));
+                            let flag = builder.ins().icmp(IntCC::Equal, tag, disc);
+                            let produced = builder.ins().uextend(types::I64, flag);
                             values.insert(dest.id.clone(), produced);
                         }
                         ScalarInst::FiniteIsVariant {
@@ -1280,15 +1723,149 @@ fn normalize_one(
     }
 }
 
+/// Process-global canonical arena backing the JIT cell libcalls. The image
+/// is installed before each call and read back afterwards, mirroring the
+/// call-file protocol used by the AOT and C realizations.
+static JIT_ARENA: std::sync::Mutex<Vec<u8>> = std::sync::Mutex::new(Vec::new());
+
+fn with_jit_arena<T>(operation: impl FnOnce(&mut Vec<u8>) -> T) -> T {
+    let mut arena = JIT_ARENA.lock().expect("JIT arena mutex");
+    operation(&mut arena)
+}
+
+extern "C" fn host_cell_alloc(bytes: u64) -> u64 {
+    with_jit_arena(|arena| {
+        let base = (arena.len() as u64 + 7) & !7u64;
+        let end = base + bytes;
+        if end > 4 * 1024 * 1024 {
+            return u64::MAX;
+        }
+        arena.resize(end as usize, 0);
+        base
+    })
+}
+
+extern "C" fn host_slot_store32(at: u64, value: u64) {
+    with_jit_arena(|arena| {
+        let at = at as usize;
+        if at + 4 <= arena.len() {
+            arena[at..at + 4].copy_from_slice(&(value as u32).to_le_bytes());
+        }
+    });
+}
+
+extern "C" fn host_slot_store64(at: u64, value: u64) {
+    with_jit_arena(|arena| {
+        let at = at as usize;
+        if at + 8 <= arena.len() {
+            arena[at..at + 8].copy_from_slice(&value.to_le_bytes());
+        }
+    });
+}
+
+extern "C" fn host_slot_load32(at: u64) -> u64 {
+    with_jit_arena(|arena| {
+        let at = at as usize;
+        if at + 4 <= arena.len() {
+            u32::from_le_bytes(arena[at..at + 4].try_into().unwrap()) as u64
+        } else {
+            0
+        }
+    })
+}
+
+extern "C" fn host_slot_load64(at: u64) -> u64 {
+    with_jit_arena(|arena| {
+        let at = at as usize;
+        if at + 8 <= arena.len() {
+            u64::from_le_bytes(arena[at..at + 8].try_into().unwrap())
+        } else {
+            0
+        }
+    })
+}
+
+/// Whether the scalar module manipulates canonical cells.
+fn module_uses_cells(module: &ScalarModule) -> bool {
+    crate::support::scalar_module_uses_cells(module)
+}
+
+/// Marshal one request into JIT-callable 64-bit arguments plus the canonical
+/// arena image that must be installed before the call.
+fn jit_boundary_arguments(
+    payload: &CraneliftPayload,
+    input_contracts: &[mncs_model::BackendValueContract],
+    output_contract: Option<&mncs_model::BackendValueContract>,
+    composite_contracts: &std::collections::BTreeMap<String, mncs_model::BackendValueContract>,
+    request: &ExecutionRequest,
+) -> Result<(Vec<i64>, Option<Vec<u8>>), String> {
+    let names = function_names(&payload.program, &payload.ssa);
+    let lowered = lower_to_scalar(&payload.program, &payload.ssa, &names);
+    let _ = lowered.functions.first();
+    let uses_cells = crate::support::scalar_module_uses_cells(&lowered);
+    let needs_cells = uses_cells
+        || request.arguments.iter().any(|value| match value {
+            mncs_model::ExecutionValue::Record { .. } => true,
+            mncs_model::ExecutionValue::Finite { payload, .. } => !payload.is_empty(),
+            _ => false,
+        })
+        || input_contracts.iter().any(crate::support::contract_is_cell)
+        || output_contract.is_some_and(crate::support::contract_is_cell);
+    if !needs_cells {
+        // Historical scalar protocol: decimal argv strings.
+        let raw_args = argv_from_request(request)?
+            .iter()
+            .map(|arg| arg.parse::<i64>().map_err(|error| error.to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok((raw_args, None));
+    }
+    let mut writer = crate::composite::ArenaWriter::new(composite_contracts.clone());
+    let mut raw_args = Vec::new();
+    for value in &request.arguments {
+        match writer.encode_argument(value)? {
+            crate::composite::BoundaryValue::Bits(bits) => raw_args.push(bits as i64),
+            crate::composite::BoundaryValue::Cell(root) => raw_args.push(root as i64),
+        }
+    }
+    Ok((raw_args, Some(writer.into_image())))
+}
+
+/// Hex-encode the post-call JIT arena so composite results decode through
+/// the same observation path as the C realizations.
+fn read_jit_arena_hex(installed: bool) -> Option<String> {
+    if !installed {
+        return None;
+    }
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    with_jit_arena(|arena| {
+        if arena.is_empty() {
+            return None;
+        }
+        let mut out = String::with_capacity(arena.len() * 2);
+        for byte in arena.iter() {
+            out.push(HEX[(byte >> 4) as usize] as char);
+            out.push(HEX[(byte & 15) as usize] as char);
+        }
+        Some(out)
+    })
+}
+
 fn jit_scalar(
     scalar: &ScalarModule,
     function_name: &str,
-    request: &ExecutionRequest,
+    raw_args: &[i64],
 ) -> Result<(ExecutionStatus, i128), String> {
     use cranelift_jit::{JITBuilder, JITModule};
 
     let isa = host_isa()?;
-    let jit_builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+    let mut jit_builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+    if module_uses_cells(scalar) {
+        jit_builder.symbol("mncs_cell_alloc", host_cell_alloc as *const u8);
+        jit_builder.symbol("mncs_slot_store32", host_slot_store32 as *const u8);
+        jit_builder.symbol("mncs_slot_store64", host_slot_store64 as *const u8);
+        jit_builder.symbol("mncs_slot_load32", host_slot_load32 as *const u8);
+        jit_builder.symbol("mncs_slot_load64", host_slot_load64 as *const u8);
+    }
     let mut module = JITModule::new(jit_builder);
     let declared = declare_and_build(&mut module, scalar)?;
     module
@@ -1301,10 +1878,6 @@ fn jit_scalar(
     let ptr = module.get_finalized_function(func_id);
     let mut status: i32 = 2;
     let mut value: i64 = 0;
-    let raw_args: Vec<i64> = argv_from_request(request)?
-        .iter()
-        .map(|arg| arg.parse::<i64>().unwrap_or(0))
-        .collect();
     unsafe {
         match raw_args.len() {
             0 => {
@@ -1347,7 +1920,6 @@ fn jit_scalar(
 #[cfg(test)]
 mod guarded_division_tests {
     use super::*;
-    use mncs_model::{ExecutionPolicy, ExecutionTarget, ExecutionValue, IntegerType};
 
     fn div_program() -> Program {
         Program::from_json(include_str!(concat!(
@@ -1355,28 +1927,6 @@ mod guarded_division_tests {
             "/../../examples/executable/checked-div.mncs.json"
         )))
         .unwrap()
-    }
-
-    fn request(function: &str, a: i128, b: i128, bits: u16, signed: bool) -> ExecutionRequest {
-        ExecutionRequest {
-            schema_version: mncs_model::EXECUTION_REQUEST_SCHEMA_VERSION.to_owned(),
-            target: ExecutionTarget {
-                module: "probe.div".to_owned(),
-                function: function.to_owned(),
-            },
-            arguments: vec![
-                ExecutionValue::Integer {
-                    value: a,
-                    ty: IntegerType { bits, signed },
-                },
-                ExecutionValue::Integer {
-                    value: b,
-                    ty: IntegerType { bits, signed },
-                },
-            ],
-            step_budget: 64,
-            policy: ExecutionPolicy::default(),
-        }
     }
 
     /// Where host policy allows JIT executable memory (as on the Linux and
@@ -1401,8 +1951,8 @@ mod guarded_division_tests {
             ("checked_mod", vec![7, 0], false, 0),
         ];
         for (function, arguments, returns, expected) in cases {
-            let request = request(function, arguments[0], arguments[1], 64, true);
-            let outcome = jit_scalar(&scalar, function, &request);
+            let raw_args: Vec<i64> = arguments.iter().map(|value| *value as i64).collect();
+            let outcome = jit_scalar(&scalar, function, &raw_args);
             match outcome {
                 Err(reason)
                     if reason.contains("readable+executable")
