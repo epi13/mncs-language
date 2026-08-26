@@ -73,7 +73,20 @@ fn bounded_data_flagship_agrees_per_backend() {
 
     for backend in EXECUTABLE_BACKENDS {
         let result = run_experiment(&source, backend, &corpus);
-        assert_eq!(cases_met(&result), 5, "{backend}");
+        let met = cases_met(&result);
+        if met != 5 {
+            panic!(
+                "{backend}: expected 5 met cases, got {met}; statuses: {:?}",
+                result["cases"].as_array().map(|cases| cases
+                    .iter()
+                    .map(|case| (
+                        case["case_id"].as_str().unwrap_or("").to_owned(),
+                        case["status"].as_str().unwrap_or("").to_owned(),
+                        case["failure_reason"].as_str().unwrap_or("").to_owned(),
+                    ))
+                    .collect::<Vec<_>>())
+            );
+        }
         assert_eq!(result["status"], "UNKNOWN", "{backend}");
         let validation = &result["translation_validations"][0];
         assert_eq!(
