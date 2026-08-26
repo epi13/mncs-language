@@ -87,6 +87,11 @@ pub fn llvm_capabilities() -> BackendCapabilityManifest {
             "semantic_bounded_iteration",
             "finite_values",
             "canonical_composite_cells",
+            "byte_operations",
+            "explicit_scalar_conversion",
+            "integer_shifts",
+            "bounded_sequences_internal",
+            "bounded_views_internal",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -94,6 +99,7 @@ pub fn llvm_capabilities() -> BackendCapabilityManifest {
         [
             "memory",
             "effects",
+            "sequence_or_view_boundary_crossing",
             "widening_integer",
             "host_effects",
         ]

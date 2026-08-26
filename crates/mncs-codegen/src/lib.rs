@@ -194,6 +194,12 @@ pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
             "immutable_record_values",
             "payload_bearing_finite_variants",
             "strict_boolean_operators",
+            "byte_operations",
+            "explicit_scalar_conversion",
+            "integer_shifts",
+            "bounded_sequences_internal",
+            "bounded_views_internal",
+            "sequence_traversal",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -203,6 +209,7 @@ pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
             "effects",
             "saturating_integer_above_bounded_width",
             "widening_integer_above_64_bits",
+            "sequence_or_view_boundary_crossing",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -356,6 +363,12 @@ pub fn research_bytecode_capabilities() -> BackendCapabilityManifest {
             "bounded_control_flow",
             "semantic_bounded_iteration",
             "immutable_record_values",
+            "byte_operations",
+            "explicit_scalar_conversion",
+            "integer_shifts",
+            "bounded_sequences",
+            "bounded_views",
+            "sequence_traversal",
         ]
         .into_iter()
         .map(str::to_owned)
