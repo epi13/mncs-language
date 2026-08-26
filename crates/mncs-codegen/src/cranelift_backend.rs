@@ -2393,9 +2393,48 @@ fn jit_scalar(
                     &mut value,
                 );
             }
+            4 => {
+                let f: extern "C" fn(i64, i64, i64, i64, *mut i32, *mut i64) =
+                    std::mem::transmute(ptr);
+                f(
+                    raw_args[0],
+                    raw_args[1],
+                    raw_args[2],
+                    raw_args[3],
+                    &mut status,
+                    &mut value,
+                );
+            }
+            5 => {
+                let f: extern "C" fn(i64, i64, i64, i64, i64, *mut i32, *mut i64) =
+                    std::mem::transmute(ptr);
+                f(
+                    raw_args[0],
+                    raw_args[1],
+                    raw_args[2],
+                    raw_args[3],
+                    raw_args[4],
+                    &mut status,
+                    &mut value,
+                );
+            }
+            6 => {
+                let f: extern "C" fn(i64, i64, i64, i64, i64, i64, *mut i32, *mut i64) =
+                    std::mem::transmute(ptr);
+                f(
+                    raw_args[0],
+                    raw_args[1],
+                    raw_args[2],
+                    raw_args[3],
+                    raw_args[4],
+                    raw_args[5],
+                    &mut status,
+                    &mut value,
+                );
+            }
             _ => {
                 return Err(
-                    "Cranelift host trampoline currently supports at most three scalar arguments"
+                    "Cranelift host trampoline currently supports at most six scalar arguments"
                         .to_owned(),
                 );
             }
