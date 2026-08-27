@@ -11,9 +11,10 @@ same helpers ad hoc.
 ```text
 library/
   core/         foundational total operations (status lattice, boolean algebra,
-                ordering/selection; bounded sequences; byte, mask, and vector primitives)
-  std/          portable abstractions over core — encoding.v1 begins the
-                canonical serialization groundwork (RFC 0027 direction)
+                ordering/selection; bounded sequences; byte, mask, vector, and
+                weighted-partition primitives)
+  std/          portable abstractions over core — encoding.v1 and ansi.v1
+                provide canonical serialization and generic terminal events
   capability/   reserved for capability/effect-shape declarations
 ```
 
@@ -54,7 +55,9 @@ realizations; native SIMD selection remains a later target-specific step.
 | `core/vector.mncs` | `mncs.core.vector.v1` (Profile 0.8) | wrapping dot product, masked positive sum, and functional lane replacement |
 | `core/mask.mncs` | `mncs.core.mask.v1` (Profile 0.8) | bounded any/all/none predicate kernels |
 | `core/geometry.mncs` | `mncs.core.geometry.v1` (Profile 0.8) | typed Point/Size/Rect/Insets with containment, intersection, union, clipping, translation, and branchless selection helpers |
+| `core/partition.mncs` | `mncs.core.partition.v1` | overflow-safe weighted four-lane partitioning with deterministic remainder allocation, zero/negative-weight normalization, cap-friendly leftovers, and explicit validity |
 | `std/simd.mncs` | `mncs.std.simd.v1` (Profile 0.8) | explicit-intent affine/ReLU/reduction kernel |
+| `std/ansi.mncs` | `mncs.std.ansi.v1` | bounded ANSI/VT parsing into generic Character, Arrow, Focus, Paste, Mouse, Resize, and Unknown events |
 
 ## Current constraint: one module per file
 
@@ -77,6 +80,13 @@ see `docs/source-profile-0.6.md`.
   Preconditions are documented in comments instead.
 - Exact-cost obligations remain UNKNOWN where arithmetic exists elsewhere;
   these modules use comparisons/matches only and decide PASS end to end.
+- `partition.v1` owns weighted allocation arithmetic used by consumers such as
+  `mncs-tui`; consumers do not copy its quotient/remainder logic. Its
+  large-product corpus keeps the unsafe `request * weight` shortcut out of the
+  authority implementation.
+- `ansi.v1` owns terminal sequence meaning but not terminal I/O. A TUI or host
+  adapter maps its generic events into application-specific events and retains
+  malformed or unsupported input as `Unknown`.
 
 ## Backend envelope (observed 2026-08)
 
@@ -85,6 +95,8 @@ see `docs/source-profile-0.6.md`.
 | status | PASS (30 cases) | refuses record parameter `StatusPair` (CGN302) | not exercised (scalar-envelope refusals expected) |
 | logic | PASS (18 cases) | PASS (18 cases) | not exercised |
 | ordering | PASS (36 cases) | PASS (36 cases) | not exercised |
+| partition | 2-case corpus returned; exact-cost status remains `UNKNOWN` | not exercised | not exercised |
+| ansi consumer probe | 7-case corpus returned; exact-cost status remains `UNKNOWN` | not exercised | not exercised |
 
 WASM's refusal of the record parameter is an intentional realization envelope,
 not semantic disagreement; see `docs/development-evidence/ox-alpha-tranche-2026-08.md`.

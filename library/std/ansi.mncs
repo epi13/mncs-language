@@ -1,330 +1,198 @@
 mncs 0.8;
 
-// mncs.std.ansi — bounded, total ANSI/VT parser for terminal input.
+// mncs.std.ansi.v1 — bounded ANSI/VT semantic parsing.
 //
-// This module provides a deterministic, bounded parser for terminal
-// escape sequences that produces the typed events consumed by the
-// TUI framework. It is designed to be:
-// - Total: every byte sequence produces some Event (possibly Unknown)
-// - Bounded: maximum sequence length and parser state are finite
-// - Evidence-honest: malformed/unsupported sequences become Unknown
-//   rather than silently approximating
-//
-// The parser operates on byte streams and emits Events as defined in
-// mncs_tui.events. It does not perform I/O; it is a pure function
-// from byte sequences to event streams.
-//
-// Supported sequence families (Profile 0.8 bounded subset):
-// - CSI (Control Sequence Introducer): ESC [ ... final
-// - SGR (Select Graphic Rendition): subset of CSI
-// - OSC (Operating System Command): ESC ] ... ST/BEL
-// - DCS (Device Control String): ESC P ... ST
-// - Mouse tracking: CSI ? 1000/1002/1003 h/l and CSI M ...
-// - Bracketed paste: ESC [ 200~ ... ESC [ 201~
-// - Focus: CSI I / CSI O
-// - Window resize: CSI 8 ; rows ; cols t (DECSLPP) or CSI 18 t report
-//
-// Unsupported/partial: DEC private modes, 8-bit controls, UTF-8 decoding
-// (handled at a lower layer), APC, PM, SOS.
-
+// This module owns terminal protocol meaning and has no dependency on a TUI
+// framework. It emits generic terminal events; an application adapter maps
+// those events into its own event vocabulary. The bounded entry point accepts
+// at most ten bytes, enough for the common one- and two-digit CSI forms used
+// by this vertical slice. Any incomplete, malformed, or unsupported sequence
+// is Unknown rather than an inferred stronger event.
 module mncs.std.ansi.v1;
 
-use mncs_tui.events;
-use mncs.core.geometry.v1;
-
-// Parser state for incremental byte-stream parsing.
-// Maximum sequence length is bounded to prevent unbounded buffering.
-record ParserState {
-  buffer: [byte; 32],
-  length: i64,
-  in_escape: bool,
-  in_csi: bool,
-  in_osc: bool,
-  in_dcs: bool,
-  csi_param_count: i64,
-  csi_params: [i64; 8],
-  osc_param_count: i64,
-  osc_buffer: [byte; 64],
-  osc_length: i64,
+enum AnsiEvent {
+    Character { codepoint: i64 },
+    Escape,
+    Arrow { direction: i64, modifiers: i64 },
+    Focus { gained: bool },
+    PasteStart,
+    PasteEnd,
+    Mouse { column: i64, row: i64, button: i64, pressed: bool },
+    Resize { columns: i64, rows: i64 },
+    Unknown { raw: i64 }
 }
 
-// Event output with optional remainder for incremental parsing.
-record ParseResult {
-  event: Event,
-  new_state: ParserState,
-  consumed: i64,
-}
+record ParserState { b0: byte, b1: byte, b2: byte, b3: byte, b4: byte, b5: byte, b6: byte, b7: byte, b8: byte, b9: byte, length: i64 }
+record ParseResult { event: AnsiEvent, state: ParserState, complete: bool }
 
-// Initialize parser to ground state.
 fn parser_init() -> (result: ParserState) {
-  let empty_csi: [i64; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
-let empty_osc: [byte; 64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-  let empty_buf: [byte; 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-  return ParserState {
-    buffer: empty_buf,
-    length: 0,
-    in_escape: false,
-    in_csi: false,
-    in_osc: false,
-    in_dcs: false,
-    csi_param_count: 0,
-    csi_params: empty_csi,
-    osc_param_count: 0,
-    osc_buffer: empty_osc,
-    osc_length: 0,
-  };
+    return ParserState { b0: 0, b1: 0, b2: 0, b3: 0, b4: 0, b5: 0, b6: 0, b7: 0, b8: 0, b9: 0, length: 0 };
 }
 
-// Feed a single byte to the parser, producing zero or one event.
-// Returns ParseResult with updated state and bytes consumed (0 or 1).
-fn parser_feed(state: ParserState, byte: byte) -> (result: ParseResult) {
-  // Fast path: printable ASCII outside escape sequences
-  if state.in_escape == false && state.in_csi == false && state.in_osc == false && state.in_dcs == false {
-    let b: i64 = byte as i64;
-    if b >= 32 && b <= 126 {
-      return ParseResult {
-        event: Event.Unknown { raw: 1 }, // printable char - handled at higher layer
-        new_state: state,
-        consumed: 1,
-      };
-    }
-  }
-
-  // Handle escape sequence start
-  if state.in_escape == false && state.in_csi == false && state.in_osc == false && state.in_dcs == false {
-    let b: i64 = byte as i64;
-    if b == 27 { // ESC
-      let new_state: ParserState = ParserState {
-        buffer: state.buffer,
-        length: 0,
-        in_escape: true,
-        in_csi: false,
-        in_osc: false,
-        in_dcs: false,
-        csi_param_count: 0,
-        csi_params: state.csi_params,
-        osc_param_count: 0,
-        osc_buffer: state.osc_buffer,
-        osc_length: 0,
-      };
-      return ParseResult { event: Event.Unknown { raw: 27 }, new_state: new_state, consumed: 1 };
-    }
-    return ParseResult { event: Event.Unknown { raw: byte as i64 }, new_state: state, consumed: 1 };
-  }
-
-  // Inside ESC prefix
-  if state.in_escape && state.in_csi == false && state.in_osc == false && state.in_dcs == false {
-    return parse_after_esc(state, byte);
-  }
-
-  // Inside CSI
-  if state.in_csi {
-    return parse_csi(state, byte);
-  }
-
-  // Inside OSC
-  if state.in_osc {
-    return parse_osc(state, byte);
-  }
-
-  // Inside DCS
-  if state.in_dcs {
-    return parse_dcs(state, byte);
-  }
-
-  // Should not reach
-  return ParseResult { event: Event.Unknown { raw: byte as i64 }, new_state: state, consumed: 1 };
+fn byte_value(value: byte) -> (result: i64) {
+    return value as i64;
 }
 
-// Parse after ESC prefix
-fn parse_after_esc(state: ParserState, byte: byte) -> (result: ParseResult) {
-  let b: i64 = byte as i64;
-  // CSI: ESC [
-  if b == 91 { // '['
-let new_state: ParserState = ParserState {
-        buffer: state.buffer,
-        length: 0,
-        in_escape: false,
-        in_csi: true,
-        in_osc: false,
-        in_dcs: false,
-        csi_param_count: 0,
-        csi_params: [0, 0, 0, 0, 0, 0, 0, 0],
-        osc_param_count: 0,
-        osc_buffer: state.osc_buffer,
-        osc_length: 0,
-      };
-    return ParseResult { event: Event.Unknown { raw: 91 }, new_state: new_state, consumed: 1 };
-  }
-  // OSC: ESC ]
-  if b == 93 { // ']'
-let new_state: ParserState = ParserState {
-        buffer: state.buffer,
-        length: 0,
-        in_escape: false,
-        in_csi: false,
-        in_osc: true,
-        in_dcs: false,
-        csi_param_count: 0,
-        csi_params: [0, 0, 0, 0, 0, 0, 0, 0],
-        osc_param_count: 0,
-        osc_buffer: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        osc_length: 0,
-      };
-    return ParseResult { event: Event.Unknown { raw: 93 }, new_state: new_state, consumed: 1 };
-  }
-  // DCS: ESC P
-  if b == 80 { // 'P'
-    let new_state: ParserState = ParserState {
-      in_escape: false,
-      in_csi: false,
-      in_osc: false,
-      in_dcs: true,
-      csi_param_count: 0,
-      csi_params: state.csi_params,
-      length: 0,
-      buffer: state.buffer,
-      osc_param_count: 0,
-      osc_buffer: state.osc_buffer,
-      osc_length: 0,
-      in_escape: false,
+fn is_digit(value: byte) -> (result: bool) {
+    let n: i64 = byte_value(value);
+    return n >= 48 && n <= 57;
+}
+
+fn one_digit(value: byte) -> (result: i64) {
+    return byte_value(value) - 48;
+}
+
+fn two_digits(high: byte, low: byte) -> (result: i64) {
+    return (one_digit(high) *% 10) +% one_digit(low);
+}
+
+fn unknown(raw: i64) -> (result: AnsiEvent) {
+    return AnsiEvent.Unknown { raw: raw };
+}
+
+fn sequence_event(length: i64, b0: byte, b1: byte, b2: byte, b3: byte, b4: byte, b5: byte, b6: byte, b7: byte, b8: byte, b9: byte) -> (result: AnsiEvent) {
+    let v0: i64 = byte_value(b0);
+    let v1: i64 = byte_value(b1);
+    let v2: i64 = byte_value(b2);
+    let v3: i64 = byte_value(b3);
+    let v4: i64 = byte_value(b4);
+    let v5: i64 = byte_value(b5);
+    let v6: i64 = byte_value(b6);
+    let v7: i64 = byte_value(b7);
+    let v8: i64 = byte_value(b8);
+    let v9: i64 = byte_value(b9);
+    if length == 0 {
+        return unknown(0);
+    }
+    if length == 1 {
+        if v0 >= 32 && v0 <= 126 {
+            return AnsiEvent.Character { codepoint: v0 };
+        }
+        if v0 == 27 {
+            return AnsiEvent.Escape;
+        }
+        return unknown(v0);
+    }
+    if length == 3 && v0 == 27 && v1 == 91 {
+        if v2 == 65 {
+            return AnsiEvent.Arrow { direction: 0, modifiers: 0 };
+        }
+        if v2 == 66 {
+            return AnsiEvent.Arrow { direction: 1, modifiers: 0 };
+        }
+        if v2 == 67 {
+            return AnsiEvent.Arrow { direction: 2, modifiers: 0 };
+        }
+        if v2 == 68 {
+            return AnsiEvent.Arrow { direction: 3, modifiers: 0 };
+        }
+        if v2 == 73 {
+            return AnsiEvent.Focus { gained: true };
+        }
+        if v2 == 79 {
+            return AnsiEvent.Focus { gained: false };
+        }
+    }
+    if length == 6 && v0 == 27 && v1 == 91 && v2 == 50 && v3 == 48 && v4 == 48 && v5 == 126 {
+        return AnsiEvent.PasteStart;
+    }
+    if length == 6 && v0 == 27 && v1 == 91 && v2 == 50 && v3 == 48 && v4 == 49 && v5 == 126 {
+        return AnsiEvent.PasteEnd;
+    }
+    // X10 mouse reporting: CSI M Cb Cx Cy, with coordinates biased by 32.
+    if length == 6 && v0 == 27 && v1 == 91 && v2 == 77 && v3 >= 32 && v4 >= 32 && v5 >= 32 {
+        let button_code: i64 = (v3 - 32) % 4;
+        return AnsiEvent.Mouse { column: v4 - 32, row: v5 - 32, button: button_code, pressed: (v3 - 32) < 3 };
+    }
+    // CSI 8;R;Ct with one digit dimensions.
+    if length == 8 && v0 == 27 && v1 == 91 && v2 == 56 && v3 == 59 && v5 == 59 && v7 == 116 && is_digit(b4) && is_digit(b6) {
+        return AnsiEvent.Resize { columns: one_digit(b6), rows: one_digit(b4) };
+    }
+    // CSI 8;RR;CCt with two digit dimensions.
+    if length == 10 && v0 == 27 && v1 == 91 && v2 == 56 && v3 == 59 && v6 == 59 && v9 == 116 && is_digit(b4) && is_digit(b5) && is_digit(b7) && is_digit(b8) {
+        return AnsiEvent.Resize { columns: two_digits(b7, b8), rows: two_digits(b4, b5) };
+    }
+    return unknown(v0);
+}
+
+fn parse_sequence(length: i64, b0: byte, b1: byte, b2: byte, b3: byte, b4: byte, b5: byte, b6: byte, b7: byte, b8: byte, b9: byte) -> (result: AnsiEvent) {
+    let bounded_length: i64 = select(length < 0, 0, select(length > 10, 10, length));
+    return sequence_event(bounded_length, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9);
+}
+
+fn append(state: ParserState, value: byte) -> (result: ParserState) {
+    if state.length == 0 {
+        return ParserState { b0: value, b1: state.b1, b2: state.b2, b3: state.b3, b4: state.b4, b5: state.b5, b6: state.b6, b7: state.b7, b8: state.b8, b9: state.b9, length: 1 };
+    }
+    if state.length == 1 {
+        return ParserState { b0: state.b0, b1: value, b2: state.b2, b3: state.b3, b4: state.b4, b5: state.b5, b6: state.b6, b7: state.b7, b8: state.b8, b9: state.b9, length: 2 };
+    }
+    if state.length == 2 {
+        return ParserState { b0: state.b0, b1: state.b1, b2: value, b3: state.b3, b4: state.b4, b5: state.b5, b6: state.b6, b7: state.b7, b8: state.b8, b9: state.b9, length: 3 };
+    }
+    if state.length == 3 {
+        return ParserState { b0: state.b0, b1: state.b1, b2: state.b2, b3: value, b4: state.b4, b5: state.b5, b6: state.b6, b7: state.b7, b8: state.b8, b9: state.b9, length: 4 };
+    }
+    if state.length == 4 {
+        return ParserState { b0: state.b0, b1: state.b1, b2: state.b2, b3: state.b3, b4: value, b5: state.b5, b6: state.b6, b7: state.b7, b8: state.b8, b9: state.b9, length: 5 };
+    }
+    if state.length == 5 {
+        return ParserState { b0: state.b0, b1: state.b1, b2: state.b2, b3: state.b3, b4: state.b4, b5: value, b6: state.b6, b7: state.b7, b8: state.b8, b9: state.b9, length: 6 };
+    }
+    if state.length == 6 {
+        return ParserState { b0: state.b0, b1: state.b1, b2: state.b2, b3: state.b3, b4: state.b4, b5: state.b5, b6: value, b7: state.b7, b8: state.b8, b9: state.b9, length: 7 };
+    }
+    if state.length == 7 {
+        return ParserState { b0: state.b0, b1: state.b1, b2: state.b2, b3: state.b3, b4: state.b4, b5: state.b5, b6: state.b6, b7: value, b8: state.b8, b9: state.b9, length: 8 };
+    }
+    if state.length == 8 {
+        return ParserState { b0: state.b0, b1: state.b1, b2: state.b2, b3: state.b3, b4: state.b4, b5: state.b5, b6: state.b6, b7: state.b7, b8: value, b9: state.b9, length: 9 };
+    }
+    return ParserState { b0: state.b0, b1: state.b1, b2: state.b2, b3: state.b3, b4: state.b4, b5: state.b5, b6: state.b6, b7: state.b7, b8: state.b8, b9: value, length: 10 };
+}
+
+fn parser_feed(state: ParserState, value: byte) -> (result: ParseResult) {
+    let appended: ParserState = append(state, value);
+    let first: i64 = byte_value(appended.b0);
+    if state.length == 0 && first >= 32 && first <= 126 {
+        return ParseResult { event: AnsiEvent.Character { codepoint: first }, state: parser_init(), complete: true };
+    }
+    if state.length == 0 && first != 27 {
+        return ParseResult { event: unknown(first), state: parser_init(), complete: true };
+    }
+    // Keep ESC pending: the following `[` may begin a CSI sequence. A host
+    // that wants a standalone Escape can use parse_sequence(1, 27, ...).
+    if appended.length == 1 && first == 27 {
+        return ParseResult { event: unknown(0), state: appended, complete: false };
+    }
+    let event: AnsiEvent = sequence_event(appended.length, appended.b0, appended.b1, appended.b2, appended.b3, appended.b4, appended.b5, appended.b6, appended.b7, appended.b8, appended.b9);
+    let complete: bool = match event {
+        Character { codepoint } => true,
+        Escape => appended.length == 1,
+        Arrow { direction, modifiers } => true,
+        Focus { gained } => true,
+        PasteStart => true,
+        PasteEnd => true,
+        Mouse { column, row, button, pressed } => true,
+        Resize { columns, rows } => true,
+        Unknown { raw } => appended.length >= 3,
     };
-  }
-  // Single-char ESC sequences: ESC 7 (DECSC), ESC 8 (DECRC), etc.
-  let new_state: ParserState = ParserState { in_escape: false, in_csi: false, in_osc: false, in_dcs: false, csi_param_count: 0, csi_params: [0,0,0,0,0,0,0,0], length: 0, buffer: state.buffer, osc_param_count: 0, osc_buffer: state.osc_buffer, osc_length: 0, in_escape: false, in_csi: false, in_osc: false, in_dcs: false };
-  return ParseResult { event: Event.Unknown { raw: b as i64 }, new_state: new_state, consumed: 1 };
-}
-}
-
-// Parse CSI sequence: ESC [ <params> <final>
-fn parse_csi(state: ParserState, byte: byte) -> (result: ParseResult) {
-  let b: i64 = byte as i64;
-  // Parameter bytes: 0-9, :, ;
-  if b >= 48 && b <= 57 { // '0'-'9'
-    let digit: i64 = b - 48;
-    if state.csi_param_count < 8 {
-      let new_params: [i64; 8] = state.csi_params;
-      // Note: we can't mutate array in place; rebuild
-      // For simplicity, track single param; full impl would accumulate
-      let new_params2: [i64; 8] = [0,0,0,0,0,0,0,0]; // placeholder
-      let new_state: ParserState = ParserState {
-        buffer: state.buffer,
-        length: state.length,
-        in_escape: state.in_escape,
-        in_csi: state.in_csi,
-        in_osc: state.in_osc,
-        in_dcs: state.in_dcs,
-        csi_param_count: state.csi_param_count +% 1,
-        csi_params: new_params2,
-        osc_param_count: state.osc_param_count,
-        osc_buffer: state.osc_buffer,
-        osc_length: state.osc_length,
-      };
-      return ParseResult { event: Event.Unknown { raw: byte as i64 }, new_state: new_state, consumed: 1 };
+    if complete {
+        return ParseResult { event: event, state: parser_init(), complete: true };
     }
-    return ParseResult { event: Event.Unknown { raw: byte as i64 }, new_state: state, consumed: 1 };
-  }
-  if b == 59 { // ';'
-    // Parameter separator
-    return ParseResult { event: Event.Unknown { raw: 59 }, new_state: state, consumed: 1 };
-  }
-  // Final byte: A-Z, a-z, @, `, ^, _, {, |, }, ~
-  if (b >= 64 && b <= 126) || b == 64 || b == 96 || b == 94 || b == 95 || b == 123 || b == 124 || b == 125 {
-    return parse_csi_final(state, byte);
-  }
-  // Intermediate bytes: space, !, ", #, $, %, &, ', (, ), *, +, ,, -, ., /
-  if b >= 32 && b <= 47 {
-    return ParseResult { event: Event.Unknown { raw: byte as i64 }, new_state: state, consumed: 1 };
-  }
-  return ParseResult { event: Event.Unknown { raw: byte as i64 }, new_state: state, consumed: 1 };
+    return ParseResult { event: unknown(0), state: appended, complete: false };
 }
 
-// Parse CSI final byte and emit typed Event
-fn parse_csi_final(state: ParserState, final_byte: byte) -> (result: ParseResult) {
-  // Cursor movement: A=up, B=down, C=right, D=left, H=f, f=H
-  // But we only emit Unknown here; higher layer maps to KeyEvent
-  // For mouse: M (press/release), < (SGR mouse)
-  // For focus: I (focus in), O (focus out)
-  // For window: t (DECSLPP/DECSLRM)
-  let event: Event = Event.Unknown { raw: final_byte as i64 };
-  let new_state: ParserState = parser_init();
-  return ParseResult { event: event, new_state: new_state, consumed: 1 };
-}
-
-// Parse OSC sequence: ESC ] <params> ST/BEL
-fn parse_osc(state: ParserState, byte: byte) -> (result: ParseResult) {
-  let b: i64 = byte as i64;
-  // ST (ESC \) or BEL (0x07) terminates
-  if b == 7 || (b == 27 && state.osc_length > 0 && state.osc_buffer[0] == 92) {
-    // Terminated - emit Unknown for now
-    let new_state: ParserState = parser_init();
-    return ParseResult { event: Event.Unknown { raw: 7 }, new_state: new_state, consumed: 1 };
-  }
-  if state.osc_length < 64 {
-    let new_buf: [byte; 64] = state.osc_buffer;
-    let new_state: ParserState = ParserState {
-      buffer: state.buffer,
-      length: state.length,
-      in_escape: state.in_escape,
-      in_csi: state.in_csi,
-      in_osc: state.in_osc,
-      in_dcs: state.in_dcs,
-      csi_param_count: state.csi_param_count,
-      csi_params: state.csi_params,
-      osc_param_count: state.osc_param_count,
-      osc_buffer: new_buf,
-      osc_length: state.osc_length +% 1,
+fn ansi_event_is_unknown(event: AnsiEvent) -> (result: bool) {
+    return match event {
+        Unknown { raw } => true,
+        Character { codepoint } => false,
+        Escape => false,
+        Arrow { direction, modifiers } => false,
+        Focus { gained } => false,
+        PasteStart => false,
+        PasteEnd => false,
+        Mouse { column, row, button, pressed } => false,
+        Resize { columns, rows } => false,
     };
-    return ParseResult { event: Event.Unknown { raw: b as i64 }, new_state: new_state, consumed: 1 };
-  }
-  return ParseResult { event: Event.Unknown { raw: b as i64 }, new_state: state, consumed: 1 };
 }
-
-// Parse DCS sequence
-fn parse_dcs(state: ParserState, byte: byte) -> (result: ParseResult) {
-  let b: i64 = byte as i64;
-  // ST terminates
-  if b == 7 || (b == 27 && state.length > 0) {
-    let new_state: ParserState = parser_init();
-    return ParseResult { event: Event.Unknown { raw: 7 }, new_state: new_state, consumed: 1 };
-  }
-  return ParseResult { event: Event.Unknown { raw: b as i64 }, new_state: state, consumed: 1 };
-}
-
-// Higher-level: parse complete byte stream into event list
-// Bounded by max_events to prevent unbounded output
-fn parse_stream(state: ParserState, bytes: [byte; 64], length: i64, max_events: i64) -> (result: [ParseResult; 8]) {
-  // Bounded output: max 8 events per call
-  let empty_result: ParseResult = ParseResult { event: Event.Unknown { raw: 0 }, new_state: parser_init(), consumed: 0 };
-  let results: [ParseResult; 8] = [empty_result, empty_result, empty_result, empty_result, empty_result, empty_result, empty_result, empty_result];
-  // Simplified: just feed first byte for demo
-  if length > 0 {
-    let b: i64 = bytes[0] as i64;
-    let r: ParseResult = parser_feed(state, bytes[0]);
-    let r2: [ParseResult; 8] = [r, empty_result, empty_result, empty_result, empty_result, empty_result, empty_result, empty_result];
-    return r2;
-  }
-  return results;
-}
-
-// Map raw KeyEvent to typed KeyEvent (simplified)
-// This is a placeholder for the full mapping logic
-fn map_key_event(raw_code: i64, mods: i64) -> (result: KeyEvent) {
-  // Arrow keys: 1000-1003
-  // Enter: 13, ESC: 27, Backspace: 8, Tab: 9
-  // Printable: 32-126
-  let _ = raw_code;
-  let _ = mods;
-  return Event.Key { key: Event.KeyEvent { kind: Event.KeyKind.UNKNOWN, codepoint: 0, modifiers: Event.Modifier.NONE, valid: false } };
-}
-
-// NOTE: This is a minimal skeleton. Full implementation would include:
-// - Complete CSI parameter parsing with multiple params
-// - Full SGR (color/style) decoding
-// - Mouse protocol parsing (normal, UTF-8, SGR, urxvt)
-// - Bracketed paste detection and decoding
-// - Focus event emission
-// - Window resize report parsing (CSI 8 ; rows ; cols t)
-// - UTF-8 decoding layer below this parser
-// - Proper state machine with bounded buffers
-// - Comprehensive test corpus

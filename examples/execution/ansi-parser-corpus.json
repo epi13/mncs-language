@@ -1,0 +1,14 @@
+{
+  "schema_version": "0.2",
+  "name": "ansi-parser-v1",
+  "cases": [
+    { "id": "arrow-up", "request": { "schema_version": "0.1", "target": { "module": "examples.ansi_parser_probe", "function": "arrow_up" }, "arguments": [], "step_budget": 10000 }, "expected_status": "returned", "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }] },
+    { "id": "focus-in", "request": { "schema_version": "0.1", "target": { "module": "examples.ansi_parser_probe", "function": "focus_in" }, "arguments": [], "step_budget": 10000 }, "expected_status": "returned", "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }] },
+    { "id": "paste-start", "request": { "schema_version": "0.1", "target": { "module": "examples.ansi_parser_probe", "function": "bracketed_paste_start" }, "arguments": [], "step_budget": 10000 }, "expected_status": "returned", "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }] },
+    { "id": "x10-mouse", "request": { "schema_version": "0.1", "target": { "module": "examples.ansi_parser_probe", "function": "x10_mouse" }, "arguments": [], "step_budget": 10000 }, "expected_status": "returned", "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }] },
+    { "id": "resize-80x24", "request": { "schema_version": "0.1", "target": { "module": "examples.ansi_parser_probe", "function": "resize_80x24" }, "arguments": [], "step_budget": 10000 }, "expected_status": "returned", "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }] },
+    { "id": "malformed-unknown", "request": { "schema_version": "0.1", "target": { "module": "examples.ansi_parser_probe", "function": "malformed_is_unknown" }, "arguments": [], "step_budget": 10000 }, "expected_status": "returned", "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }] },
+    { "id": "streaming-arrow-up", "request": { "schema_version": "0.1", "target": { "module": "examples.ansi_parser_probe", "function": "streaming_arrow_up" }, "arguments": [], "step_budget": 10000 }, "expected_status": "returned", "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }] }
+  ],
+  "properties": []
+}
