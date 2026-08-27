@@ -1,0 +1,36 @@
+{
+  "schema_version": "0.1",
+  "name": "partition-v1",
+  "cases": [
+    {
+      "id": "large-product-3-over-7",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.partition.v1", "function": "weighted_floor" },
+        "arguments": [
+          { "integer": { "value": 9223372036854775807, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 7, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 3952873730080618203, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "large-product-7-over-13",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.partition.v1", "function": "weighted_floor" },
+        "arguments": [
+          { "integer": { "value": 9223372036854775807, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 7, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 13, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 4966431096767956203, "type": { "bits": 64, "signed": true } } }]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Core Standard Library Direction
 
-Status: **planned / research-active** (2026-08-24).
+Status: **research-active / partially realized** (2026-08-27).
 
 MNCS should develop a standard library, but it should not begin as a monolithic host-runtime API patterned after an existing language. The library must preserve the same separation already enforced by the language architecture: logical semantics are authoritative, capabilities are explicit, physical representation is a realization choice, and target-specific implementations do not redefine meaning.
 
@@ -60,6 +60,13 @@ Candidate responsibilities include:
 - small conversion/validation operations with explicit failure behavior;
 - primitives required by the rest of the portable library.
 
+The first reusable allocation primitive is now `mncs.core.partition.v1`. It
+implements a bounded four-lane weighted split with nonnegative normalized
+weights, deterministic remainder assignment, explicit invalid-weight-sum
+reporting, and an overflow-safe quotient/remainder path. Layout consumers use
+this module as their arithmetic authority and add only consumer-specific cap
+projection.
+
 `mncs.core` should avoid:
 
 - filesystem, network, clock, process, randomness, environment, or credential authority;
@@ -89,6 +96,12 @@ Candidate domains include:
 - portable data transformation utilities;
 - higher-level error/result composition;
 - common proof/evidence-aware adapters where they belong at library rather than language level.
+
+`mncs.std.ansi.v1` is the first terminal-protocol adapter in this layer. It
+accepts bounded byte sequences and emits generic semantic events (including
+`Unknown` for malformed or unsupported input). It deliberately has no TUI
+dependency and does not perform host I/O; applications map the generic events
+at their own boundary.
 
 Portable library semantics should remain independent from their physical representation. A string, sequence, map, record collection, or encoded value must not be forced into one physical layout merely because the first implementation used it.
 

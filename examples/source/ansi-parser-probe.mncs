@@ -1,0 +1,126 @@
+mncs 0.8;
+
+// Consumer-side regression target: the application sees generic ANSI events;
+// sequence meaning is supplied exclusively by mncs.std.ansi.v1.
+module examples.ansi_parser_probe;
+
+use mncs.std.ansi.v1;
+
+fn is_arrow_up(event: AnsiEvent) -> (result: i64) {
+    return match event {
+        Arrow { direction, modifiers } => select(direction == 0, 1, 0),
+        Character { codepoint } => 0,
+        Escape => 0,
+        Focus { gained } => 0,
+        PasteStart => 0,
+        PasteEnd => 0,
+        Mouse { column, row, button, pressed } => 0,
+        Resize { columns, rows } => 0,
+        Unknown { raw } => 0,
+    };
+}
+
+fn is_focus(event: AnsiEvent) -> (result: i64) {
+    return match event {
+        Focus { gained } => 1,
+        Character { codepoint } => 0,
+        Escape => 0,
+        Arrow { direction, modifiers } => 0,
+        PasteStart => 0,
+        PasteEnd => 0,
+        Mouse { column, row, button, pressed } => 0,
+        Resize { columns, rows } => 0,
+        Unknown { raw } => 0,
+    };
+}
+
+fn is_paste_start(event: AnsiEvent) -> (result: i64) {
+    return match event {
+        PasteStart => 1,
+        Character { codepoint } => 0,
+        Escape => 0,
+        Arrow { direction, modifiers } => 0,
+        PasteEnd => 0,
+        Focus { gained } => 0,
+        Mouse { column, row, button, pressed } => 0,
+        Resize { columns, rows } => 0,
+        Unknown { raw } => 0,
+    };
+}
+
+fn is_mouse(event: AnsiEvent) -> (result: i64) {
+    return match event {
+        Mouse { column, row, button, pressed } => 1,
+        Character { codepoint } => 0,
+        Escape => 0,
+        Arrow { direction, modifiers } => 0,
+        Focus { gained } => 0,
+        PasteStart => 0,
+        PasteEnd => 0,
+        Resize { columns, rows } => 0,
+        Unknown { raw } => 0,
+    };
+}
+
+fn is_resize(event: AnsiEvent) -> (result: i64) {
+    return match event {
+        Resize { columns, rows } => select(columns == 80 && rows == 24, 1, 0),
+        Character { codepoint } => 0,
+        Escape => 0,
+        Arrow { direction, modifiers } => 0,
+        Focus { gained } => 0,
+        PasteStart => 0,
+        PasteEnd => 0,
+        Mouse { column, row, button, pressed } => 0,
+        Unknown { raw } => 0,
+    };
+}
+
+fn bool_not(value: bool) -> (result: bool) {
+    return select(value, false, true);
+}
+
+fn is_unknown(event: AnsiEvent) -> (result: i64) {
+    return match event {
+        Unknown { raw } => 1,
+        Character { codepoint } => 0,
+        Escape => 0,
+        Arrow { direction, modifiers } => 0,
+        Focus { gained } => 0,
+        PasteStart => 0,
+        PasteEnd => 0,
+        Mouse { column, row, button, pressed } => 0,
+        Resize { columns, rows } => 0,
+    };
+}
+
+fn arrow_up() -> (result: i64) {
+    return is_arrow_up(parse_sequence(3, 27, 91, 65, 0, 0, 0, 0, 0, 0, 0));
+}
+
+fn focus_in() -> (result: i64) {
+    return is_focus(parse_sequence(3, 27, 91, 73, 0, 0, 0, 0, 0, 0, 0));
+}
+
+fn bracketed_paste_start() -> (result: i64) {
+    return is_paste_start(parse_sequence(6, 27, 91, 50, 48, 48, 126, 0, 0, 0, 0));
+}
+
+fn x10_mouse() -> (result: i64) {
+    return is_mouse(parse_sequence(6, 27, 91, 77, 32, 35, 36, 0, 0, 0, 0));
+}
+
+fn resize_80x24() -> (result: i64) {
+    return is_resize(parse_sequence(10, 27, 91, 56, 59, 50, 52, 59, 56, 48, 116));
+}
+
+fn malformed_is_unknown() -> (result: i64) {
+    return is_unknown(parse_sequence(3, 27, 91, 90, 0, 0, 0, 0, 0, 0, 0));
+}
+
+fn streaming_arrow_up() -> (result: i64) {
+    let first: ParseResult = parser_feed(parser_init(), 27);
+    let second: ParseResult = parser_feed(first.state, 91);
+    let third: ParseResult = parser_feed(second.state, 65);
+    return select(bool_not(first.complete) && bool_not(second.complete) && third.complete && is_arrow_up(third.event) == 1, 1, 0);
+}
