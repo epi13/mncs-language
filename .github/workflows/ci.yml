@@ -33,6 +33,8 @@ jobs:
       - name: Validate accepted example
         run: cargo run -p mncs-cli -- validate examples/account-transfer.mncs.json
       - name: Validate extracted TUI primitives and parser consumer
+        env:
+          MNCS_LIBRARY_PATH: ${{ github.workspace }}/library
         run: |
           cargo run -p mncs-cli -- validate library/core/partition.mncs
           cargo run -p mncs-cli -- validate library/std/ansi.mncs
@@ -49,6 +51,8 @@ jobs:
             /tmp/mncs-partition-ci/result.json
       - name: Exercise generic ANSI parser semantics
         shell: bash
+        env:
+          MNCS_LIBRARY_PATH: ${{ github.workspace }}/library
         run: |
           set -euo pipefail
           timeout 600s cargo run -p mncs-cli -- experiment run examples/source/ansi-parser-probe.mncs \
