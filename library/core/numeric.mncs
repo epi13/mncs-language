@@ -1,0 +1,80 @@
+mncs 0.8;
+
+// mncs.core.numeric — small integer-vector numeric kernels.
+//
+// These are reusable, total building blocks for simulation, geometry,
+// statistics, and learning workloads. They are deliberately integer-only
+// and bounded, so no floating-point folklore or unbounded allocation
+// participates in meaning. Every arithmetic intent is explicit (`+%`,
+// `*%`, `/`) and the wrapping variants discharge their overflow
+// obligations by definition.
+//
+// Realization envelope: reference executors and research bytecode realize
+// every operation fully; portable WASM, C11, LLVM, and Cranelift realize
+// the vector kernels through conservative scalarized fallbacks with the
+// same bounded agreement.
+module mncs.core.numeric.v1;
+
+// Wrapping sum of four i64 lanes via a bounded traversal. The traversal
+// discharges element bounds checks; wrapping addition discharges overflow.
+fn sum4_wrap(a: i64, b: i64, c: i64, d: i64) -> (result: i64) {
+    let xs: [i64; 4] = [a, b, c, d];
+    iterate i over xs carrying acc: i64 = 0 {
+        next acc = acc +% xs[i];
+    }
+    return acc;
+}
+
+// Checked wrapping mean: (a +% b +% c +% d) / 4 . Division by literal 4
+// is total for all i64 values (only MIN / -1 can overflow, and divisor
+// is 4), but the obligation stays UNKNOWN until a prover discharges it;
+// the conservative fallback is retained as evidence.
+fn mean4_wrap(a: i64, b: i64, c: i64, d: i64) -> (result: i64) {
+    let s: i64 = sum4_wrap(a, b, c, d);
+    return s / 4;
+}
+
+// Wrapping dot product of two 4-lane i32 vectors. Uses the 0.8 vector
+// vocabulary so the lane and predication semantics are explicit.
+fn dot4_wrap(a0: i32, a1: i32, a2: i32, a3: i32, b0: i32, b1: i32, b2: i32, b3: i32) -> (result: i32) {
+    let left: vec<i32, 4> = vector(a0, a1, a2, a3);
+    let right: vec<i32, 4> = vector(b0, b1, b2, b3);
+    let products: vec<i32, 4> = vec_mul_wrap(left, right);
+    return reduce_sum_wrap(products);
+}
+
+// Sum of strictly positive lanes: lane-wise select via a logical mask.
+fn positive_sum4(a: i32, b: i32, c: i32, d: i32) -> (result: i32) {
+    let values: vec<i32, 4> = vector(a, b, c, d);
+    let zero: vec<i32, 4> = splat(0);
+    let positive: mask<4> = vec_gt(values, zero);
+    let selected: vec<i32, 4> = select(positive, values, zero);
+    return reduce_sum_wrap(selected);
+}
+
+// Squared L2 distance between two 4-lane vectors: sum( (a-b)^2 ) wrapping.
+fn l2_squared4(a0: i32, a1: i32, a2: i32, a3: i32, b0: i32, b1: i32, b2: i32, b3: i32) -> (result: i32) {
+    let left: vec<i32, 4> = vector(a0, a1, a2, a3);
+    let right: vec<i32, 4> = vector(b0, b1, b2, b3);
+    let diff: vec<i32, 4> = vec_sub_wrap(left, right);
+    let squared: vec<i32, 4> = vec_mul_wrap(diff, diff);
+    return reduce_sum_wrap(squared);
+}
+
+// Wrapping centroid (arithmetic mean) of four i32 values via vector reduce.
+fn centroid4(a: i32, b: i32, c: i32, d: i32) -> (result: i32) {
+    let values: vec<i32, 4> = vector(a, b, c, d);
+    let s: i32 = reduce_sum_wrap(values);
+    return s / 4;
+}
+
+// Clamp a single i32 value to [lo, hi] using only comparisons (no arithmetic).
+fn clamp4(a: i32, lo: i32, hi: i32) -> (result: i32) {
+    if a < lo {
+        return lo;
+    }
+    if a > hi {
+        return hi;
+    }
+    return a;
+}
