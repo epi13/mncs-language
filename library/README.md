@@ -53,6 +53,7 @@ realizations; native SIMD selection remains a later target-specific step.
 | `core/result.mncs` | `mncs.core.result.v1` (Profile 0.6) | the standard Result shape with real reason payloads: `Ok { value }`, `Err { reason }`, `divide`, `bounded_divide`, `value_or`, `reason_of`; exhaustive matching with payload binders |
 | `core/vector.mncs` | `mncs.core.vector.v1` (Profile 0.8) | wrapping dot product, masked positive sum, and functional lane replacement |
 | `core/mask.mncs` | `mncs.core.mask.v1` (Profile 0.8) | bounded any/all/none predicate kernels |
+| `core/geometry.mncs` | `mncs.core.geometry.v1` (Profile 0.8) | typed Point/Size/Rect/Insets with containment, intersection, union, clipping, translation, and branchless selection helpers |
 | `std/simd.mncs` | `mncs.std.simd.v1` (Profile 0.8) | explicit-intent affine/ReLU/reduction kernel |
 
 ## Current constraint: one module per file

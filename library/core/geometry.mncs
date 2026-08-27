@@ -1,0 +1,288 @@
+mncs 0.8;
+
+// mncs.core.geometry — typed spatial primitives for machine-native layout.
+//
+// Geometry is semantic data, not string offsets. Points, sizes, and
+// rectangles carry their spatial meaning through the pipeline until the
+// terminal projection boundary. Every operation here is total, bounded, and
+// effect-free: no allocation, no failure, no host resource.
+//
+// This module is the reusable core extracted from the MNCS TUI pressure
+// program: the same primitives serve TUI layout, hittesting, damage
+// tracking, and any future spatial model that needs evidence-honest
+// containment, intersection, and clipping.
+//
+// Arithmetic is intentionally plain: translations use the declared wrapping
+// addition intent (`+%`) so overflow is total and explicit; callers that
+// need saturation must use the `+|` family explicitly. Clamping is via
+// comparisons only, so no overflow obligation survives. Bounds checks
+// return false rather than failing.
+module mncs.core.geometry.v1;
+
+record Point { column: i64, row: i64 }
+record Size { columns: i64, rows: i64 }
+record Rect { origin: Point, size: Size }
+record Insets { top: i64, right: i64, bottom: i64, left: i64 }
+
+// ---- Point ----
+
+fn point_equal(a: Point, b: Point) -> (result: bool) {
+    return (a.column == b.column) && (a.row == b.row);
+}
+
+fn point_translate(p: Point, dx: i64, dy: i64) -> (result: Point) {
+    return Point { column: p.column +% dx, row: p.row +% dy };
+}
+
+fn point_add(a: Point, b: Point) -> (result: Point) {
+    return Point { column: a.column +% b.column, row: a.row +% b.row };
+}
+
+fn point_sub(a: Point, b: Point) -> (result: Point) {
+    return Point { column: a.column -% b.column, row: a.row -% b.row };
+}
+
+// ---- Size ----
+
+fn size_equal(a: Size, b: Size) -> (result: bool) {
+    return (a.columns == b.columns) && (a.rows == b.rows);
+}
+
+fn size_is_empty(s: Size) -> (result: bool) {
+    return (s.columns <= 0) || (s.rows <= 0);
+}
+
+fn size_area(s: Size) -> (result: i64) {
+    if size_is_empty(s) {
+        return 0;
+    }
+    return s.columns *% s.rows;
+}
+
+fn size_min(a: Size, b: Size) -> (result: Size) {
+    let cols: i64 = select(a.columns <= b.columns, a.columns, b.columns);
+    let rows: i64 = select(a.rows <= b.rows, a.rows, b.rows);
+    return Size { columns: cols, rows: rows };
+}
+
+fn size_max(a: Size, b: Size) -> (result: Size) {
+    let cols: i64 = select(a.columns >= b.columns, a.columns, b.columns);
+    let rows: i64 = select(a.rows >= b.rows, a.rows, b.rows);
+    return Size { columns: cols, rows: rows };
+}
+
+fn size_clamp(s: Size, lo: Size, hi: Size) -> (result: Size) {
+    let cols: i64 = clamp_i64(s.columns, lo.columns, hi.columns);
+    let rows: i64 = clamp_i64(s.rows, lo.rows, hi.rows);
+    return Size { columns: cols, rows: rows };
+}
+
+fn clamp_i64(value: i64, lo: i64, hi: i64) -> (result: i64) {
+    if value < lo {
+        return lo;
+    }
+    if value > hi {
+        return hi;
+    }
+    return value;
+}
+
+// ---- Rect helpers ----
+
+fn rect_right(r: Rect) -> (result: i64) {
+    return r.origin.column +% r.size.columns;
+}
+
+fn rect_bottom(r: Rect) -> (result: i64) {
+    return r.origin.row +% r.size.rows;
+}
+
+fn rect_equal(a: Rect, b: Rect) -> (result: bool) {
+    return point_equal(a.origin, b.origin) && size_equal(a.size, b.size);
+}
+
+fn rect_is_empty(r: Rect) -> (result: bool) {
+    return size_is_empty(r.size);
+}
+
+fn rect_area(r: Rect) -> (result: i64) {
+    return size_area(r.size);
+}
+
+fn rect_contains_point(r: Rect, p: Point) -> (result: bool) {
+    if rect_is_empty(r) {
+        return false;
+    }
+    let right: i64 = rect_right(r);
+    let bottom: i64 = rect_bottom(r);
+    let in_col: bool = (p.column >= r.origin.column) && (p.column < right);
+    let in_row: bool = (p.row >= r.origin.row) && (p.row < bottom);
+    return in_col && in_row;
+}
+
+fn rect_contains_rect(outer: Rect, inner: Rect) -> (result: bool) {
+    if rect_is_empty(outer) {
+        return rect_is_empty(inner);
+    }
+    if rect_is_empty(inner) {
+        return true;
+    }
+    let outer_right: i64 = rect_right(outer);
+    let outer_bottom: i64 = rect_bottom(outer);
+    let inner_right: i64 = rect_right(inner);
+    let inner_bottom: i64 = rect_bottom(inner);
+    let col_ok: bool = (inner.origin.column >= outer.origin.column) && (inner_right <= outer_right);
+    let row_ok: bool = (inner.origin.row >= outer.origin.row) && (inner_bottom <= outer_bottom);
+    return col_ok && row_ok;
+}
+
+fn rect_intersects(a: Rect, b: Rect) -> (result: bool) {
+    if rect_is_empty(a) {
+        return false;
+    }
+    if rect_is_empty(b) {
+        return false;
+    }
+    let a_right: i64 = rect_right(a);
+    let a_bottom: i64 = rect_bottom(a);
+    let b_right: i64 = rect_right(b);
+    let b_bottom: i64 = rect_bottom(b);
+    let col_overlap: bool = (a.origin.column < b_right) && (b.origin.column < a_right);
+    let row_overlap: bool = (a.origin.row < b_bottom) && (b.origin.row < a_bottom);
+    return col_overlap && row_overlap;
+}
+
+fn max_i64(a: i64, b: i64) -> (result: i64) {
+    if a >= b {
+        return a;
+    }
+    return b;
+}
+
+fn min_i64(a: i64, b: i64) -> (result: i64) {
+    if a <= b {
+        return a;
+    }
+    return b;
+}
+
+fn rect_intersect(a: Rect, b: Rect) -> (result: Rect) {
+    if rect_intersects(a, b) {
+        let left: i64 = max_i64(a.origin.column, b.origin.column);
+        let top: i64 = max_i64(a.origin.row, b.origin.row);
+        let right: i64 = min_i64(rect_right(a), rect_right(b));
+        let bottom: i64 = min_i64(rect_bottom(a), rect_bottom(b));
+        let w: i64 = right -% left;
+        let h: i64 = bottom -% top;
+        let cw: i64 = select(w < 0, 0, w);
+        let ch: i64 = select(h < 0, 0, h);
+        return Rect { origin: Point { column: left, row: top }, size: Size { columns: cw, rows: ch } };
+    }
+    return Rect { origin: Point { column: 0, row: 0 }, size: Size { columns: 0, rows: 0 } };
+}
+
+fn rect_union(a: Rect, b: Rect) -> (result: Rect) {
+    if rect_is_empty(a) {
+        return b;
+    }
+    if rect_is_empty(b) {
+        return a;
+    }
+    let left: i64 = min_i64(a.origin.column, b.origin.column);
+    let top: i64 = min_i64(a.origin.row, b.origin.row);
+    let right: i64 = max_i64(rect_right(a), rect_right(b));
+    let bottom: i64 = max_i64(rect_bottom(a), rect_bottom(b));
+    let w: i64 = right -% left;
+    let h: i64 = bottom -% top;
+    return Rect { origin: Point { column: left, row: top }, size: Size { columns: w, rows: h } };
+}
+
+fn rect_translate(r: Rect, dx: i64, dy: i64) -> (result: Rect) {
+    return Rect { origin: point_translate(r.origin, dx, dy), size: r.size };
+}
+
+fn rect_clip(r: Rect, bounds: Rect) -> (result: Rect) {
+    return rect_intersect(r, bounds);
+}
+
+fn rect_shrink(r: Rect, amount: i64) -> (result: Rect) {
+    if rect_is_empty(r) {
+        return r;
+    }
+    let new_cols: i64 = r.size.columns -% (amount *% 2);
+    let new_rows: i64 = r.size.rows -% (amount *% 2);
+    if (new_cols <= 0) || (new_rows <= 0) {
+        return Rect { origin: Point { column: r.origin.column +% amount, row: r.origin.row +% amount }, size: Size { columns: 0, rows: 0 } };
+    }
+    return Rect { origin: Point { column: r.origin.column +% amount, row: r.origin.row +% amount }, size: Size { columns: new_cols, rows: new_rows } };
+}
+
+// ---- Insets ----
+
+fn insets_uniform(value: i64) -> (result: Insets) {
+    return Insets { top: value, right: value, bottom: value, left: value };
+}
+
+fn insets_equal(a: Insets, b: Insets) -> (result: bool) {
+    return (a.top == b.top) && (a.right == b.right) && (a.bottom == b.bottom) && (a.left == b.left);
+}
+
+fn insets_is_empty(i: Insets) -> (result: bool) {
+    return (i.top == 0) && (i.right == 0) && (i.bottom == 0) && (i.left == 0);
+}
+
+fn rect_apply_insets(r: Rect, pad: Insets) -> (result: Rect) {
+    if rect_is_empty(r) {
+        return r;
+    }
+    let new_col: i64 = r.origin.column +% pad.left;
+    let new_row: i64 = r.origin.row +% pad.top;
+    let horiz: i64 = pad.left +% pad.right;
+    let vert: i64 = pad.top +% pad.bottom;
+    let new_cols: i64 = r.size.columns -% horiz;
+    let new_rows: i64 = r.size.rows -% vert;
+    let cc: i64 = select(new_cols < 0, 0, new_cols);
+    let rr: i64 = select(new_rows < 0, 0, new_rows);
+    return Rect { origin: Point { column: new_col, row: new_row }, size: Size { columns: cc, rows: rr } };
+}
+
+fn rect_expand(r: Rect, pad: Insets) -> (result: Rect) {
+    let new_col: i64 = r.origin.column -% pad.left;
+    let new_row: i64 = r.origin.row -% pad.top;
+    let new_cols: i64 = r.size.columns +% pad.left +% pad.right;
+    let new_rows: i64 = r.size.rows +% pad.top +% pad.bottom;
+    let cc: i64 = select(new_cols < 0, 0, new_cols);
+    let rr: i64 = select(new_rows < 0, 0, new_rows);
+    return Rect { origin: Point { column: new_col, row: new_row }, size: Size { columns: cc, rows: rr } };
+}
+
+fn rect_from_point_size(p: Point, s: Size) -> (result: Rect) {
+    return Rect { origin: p, size: s };
+}
+
+fn rect_center(r: Rect) -> (result: Point) {
+    if rect_is_empty(r) {
+        return r.origin;
+    }
+    let cx: i64 = r.origin.column +% (r.size.columns / 2);
+    let cy: i64 = r.origin.row +% (r.size.rows / 2);
+    return Point { column: cx, row: cy };
+}
+
+// Branchless selection helpers used by layout.
+// `select` is the language primitive: both candidates are evaluated eagerly
+// and the condition chooses lane-wise without introducing control divergence.
+// Exposing thin wrappers here keeps call sites uniform.
+fn pick_i64(condition: bool, when_true: i64, when_false: i64) -> (result: i64) {
+    return select(condition, when_true, when_false);
+}
+
+fn clamp_between(value: i64, lo: i64, hi: i64) -> (result: i64) {
+    let lower: i64 = select(value < lo, lo, value);
+    return select(lower > hi, hi, lower);
+}
+
+// Size clamp between inclusive bounds for layout remainder distribution.
+fn size_clamp_between(s: Size, lo: Size, hi: Size) -> (result: Size) {
+    return size_clamp(s, lo, hi);
+}
