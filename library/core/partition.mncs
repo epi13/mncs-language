@@ -1,0 +1,105 @@
+mncs 0.8;
+
+// mncs.core.partition — bounded weighted distribution / partitioning.
+//
+// This is the reusable core for layout, scheduling, and any bounded
+// integer partitioning that must be deterministic, total, and evidence-
+// honest. It is the upstream extraction of the TUI pressure: the first
+// TUI solver dropped remainders and ignored weights; fixing it forced a
+// canonical, testable primitive here.
+//
+// All operations are total: no failure, no allocation beyond the bounded
+// fixed 4-lane records, no overflow before wrapping (`*%`, `+%`).
+//
+// Remainder policy is deterministic by index order: after floor division,
+// the first `leftover` lanes in index order receive +1. When weights are
+// equal this is fair; when weights differ the weighted floor already
+// reflects weight, and the +1 remainder is still index-ordered for
+// determinism. A weight-ordered remainder variant is left for future
+// work if needed.
+module mncs.core.partition.v1;
+
+record Split4 { v0: i64, v1: i64, v2: i64, v3: i64 }
+record WeightedSplit { s0: i64, s1: i64, s2: i64, s3: i64, allocated: i64, leftover: i64 }
+
+fn sum4(a: i64, b: i64, c: i64, d: i64) -> (result: i64) {
+    return (a +% b) +% (c +% d);
+}
+
+fn total_weight4(w0: i64, w1: i64, w2: i64, w3: i64) -> (result: i64) {
+    return sum4(w0, w1, w2, w3);
+}
+
+// Floor shares for weighted distribution: share_i = floor(remaining * weight_i / total).
+// Uses wrapping multiply then checked division; division by zero is guarded to 0.
+
+fn weighted_floor(remaining: i64, weight: i64, total: i64) -> (result: i64) {
+    if total <= 0 {
+        return 0;
+    }
+    if weight <= 0 {
+        return 0;
+    }
+    let prod: i64 = remaining *% weight;
+    return prod / total;
+}
+
+fn equal_split(remaining: i64) -> (result: Split4) {
+    let per: i64 = remaining / 4;
+    let extra: i64 = remaining % 4;
+    let e0: i64 = select(extra > 0, 1, 0);
+    let e1: i64 = select(extra > 1, 1, 0);
+    let e2: i64 = select(extra > 2, 1, 0);
+    let v0: i64 = per +% e0;
+    let v1: i64 = per +% e1;
+    let v2: i64 = per +% e2;
+    let v3: i64 = per;
+    return Split4 { v0: v0, v1: v1, v2: v2, v3: v3 };
+}
+
+fn weighted_split4(remaining: i64, w0: i64, w1: i64, w2: i64, w3: i64) -> (result: WeightedSplit) {
+    let total: i64 = total_weight4(w0, w1, w2, w3);
+    if total <= 0 {
+        let eq: Split4 = equal_split(remaining);
+        let allocated: i64 = eq.v0 +% eq.v1 +% eq.v2 +% eq.v3;
+        return WeightedSplit { s0: eq.v0, s1: eq.v1, s2: eq.v2, s3: eq.v3, allocated: allocated, leftover: remaining -% allocated };
+    }
+    let s0: i64 = weighted_floor(remaining, w0, total);
+    let s1: i64 = weighted_floor(remaining, w1, total);
+    let s2: i64 = weighted_floor(remaining, w2, total);
+    let s3: i64 = weighted_floor(remaining, w3, total);
+    let floor_sum: i64 = sum4(s0, s1, s2, s3);
+    let leftover: i64 = remaining -% floor_sum;
+    // Deterministic remainder: first `leftover` lanes with positive weight get +1.
+    let add0: i64 = select(leftover > 0 && w0 > 0, 1, 0);
+    let r1: i64 = leftover -% add0;
+    let add1: i64 = select(r1 > 0 && w1 > 0, 1, 0);
+    let r2: i64 = r1 -% add1;
+    let add2: i64 = select(r2 > 0 && w2 > 0, 1, 0);
+    let r3: i64 = r2 -% add2;
+    let add3: i64 = select(r3 > 0 && w3 > 0, 1, 0);
+    let f0: i64 = s0 +% add0;
+    let f1: i64 = s1 +% add1;
+    let f2: i64 = s2 +% add2;
+    let f3: i64 = s3 +% add3;
+    let allocated: i64 = sum4(f0, f1, f2, f3);
+    return WeightedSplit { s0: f0, s1: f1, s2: f2, s3: f3, allocated: allocated, leftover: remaining -% allocated };
+}
+
+// Convenience: split remaining equally among lanes that have positive weight.
+
+fn split_among_grow(remaining: i64, w0: i64, w1: i64, w2: i64, w3: i64) -> (result: Split4) {
+    let weighted: WeightedSplit = weighted_split4(remaining, w0, w1, w2, w3);
+    return Split4 { v0: weighted.s0, v1: weighted.s1, v2: weighted.s2, v3: weighted.s3 };
+}
+
+// Sum check: does the split exactly consume remaining?
+
+fn split_consumes_all(split: Split4, remaining: i64) -> (result: bool) {
+    let sum: i64 = sum4(split.v0, split.v1, split.v2, split.v3);
+    return sum == remaining;
+}
+
+fn weighted_consumes_all(ws: WeightedSplit, remaining: i64) -> (result: bool) {
+    return ws.allocated == remaining && ws.leftover == 0;
+}
