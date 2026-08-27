@@ -1,0 +1,74 @@
+mncs 0.6;
+
+// mncs.core.random — deterministic byte/integer random streams.
+//
+// All operations are total, reproducible, and portable by definition.
+// The generator is a tiny LCG (Knuth's MMIX constants) chosen for
+// transparency, not cryptographic strength. It is useful for deterministic
+// sampling, shuffling, simulation, testing, and any bounded stochastic
+// decision that must be recorded as evidence.
+//
+// Wrapping arithmetic (`+%`, `*%`) keeps the step total and explicit;
+// no integer-overflow obligation survives. Modulo for bounded values
+// is defined via checked division, but the bounded path is total when
+// the caller supplies a non-zero bound (the zero-bound case returns 0
+// without failing, so callers need not pre-check).
+module mncs.core.random.v1;
+
+// One LCG step: next_state = (state * A + C) wrapping in 64 bits.
+// Constants are the MMIX LCG (A=6364136223846793005, C=1442695040888963407).
+fn lcg_next(state: u64) -> (next_state: u64) {
+    return (state *% 6364136223846793005) +% 1442695040888963407;
+}
+
+record BoundedDraw { next_state: u64, value: u64 }
+
+record SplitStreams { left: u64, right: u64 }
+
+record ShufflePick { next_state: u64, index: u64 }
+
+record TwoDraws { next_state: u64, first: u64, second: u64 }
+
+// Next state and a bounded value in [0, bound). If bound == 0 the
+// ranged value is defined as 0 so the operation stays total; callers
+// that require a non-zero bound must enforce it before calling.
+fn lcg_next_bounded(state: u64, bound: u64) -> (result: BoundedDraw) {
+    let stepped: u64 = lcg_next(state);
+    if bound == 0 {
+        return BoundedDraw { next_state: stepped, value: 0 };
+    }
+    return BoundedDraw { next_state: stepped, value: stepped % bound };
+}
+
+// Split one stream into two independent sub-streams. The two outputs
+// are successive LCG states, so they are deterministic and distinct
+// for any input (unless the 2^64 cycle wraps, which is the defined
+// behavior).
+fn split(state: u64) -> (result: SplitStreams) {
+    let left_state: u64 = lcg_next(state);
+    let right_state: u64 = lcg_next(left_state);
+    return SplitStreams { left: left_state, right: right_state };
+}
+
+// Derive a stream for a child index: seed + index wrapped, then one
+// LCG step. This is the canonical way to obtain independent per-partition
+// or per-epoch streams from a single root seed without hidden state.
+fn derive(seed: u64, index: u64) -> (derived: u64) {
+    let mixed: u64 = seed +% index;
+    return lcg_next(mixed);
+}
+
+// Shuffle index for a bounded collection of length `len`.
+// Returns the next stream state and the selected index in [0, len).
+// Zero-length selection is defined as 0 so the operation stays total.
+fn shuffle_index(state: u64, len: u64) -> (result: ShufflePick) {
+    let bounded: BoundedDraw = lcg_next_bounded(state, len);
+    return ShufflePick { next_state: bounded.next_state, index: bounded.value };
+}
+
+// Two independent bounded draws from one state.
+fn two_bounded(state: u64, first_bound: u64, second_bound: u64) -> (result: TwoDraws) {
+    let first_step: BoundedDraw = lcg_next_bounded(state, first_bound);
+    let second_step: BoundedDraw = lcg_next_bounded(first_step.next_state, second_bound);
+    return TwoDraws { next_state: second_step.next_state, first: first_step.value, second: second_step.value };
+}
