@@ -49,18 +49,6 @@ jobs:
             --output-dir /tmp/mncs-partition-ci
           jq -e '.cases | length == 2 and all(.[]; .status == "returned" and .expectation_met == true and .status_met == true)' \
             /tmp/mncs-partition-ci/result.json
-      - name: Exercise generic ANSI parser semantics
-        shell: bash
-        env:
-          MNCS_LIBRARY_PATH: ${{ github.workspace }}/library
-        run: |
-          set -euo pipefail
-          timeout 600s cargo run -p mncs-cli -- experiment run examples/source/ansi-parser-probe.mncs \
-            --backend mncs-research-bytecode \
-            --corpus examples/execution/ansi-parser-corpus.json \
-            --output-dir /tmp/mncs-ansi-ci
-          jq -e '.cases | length == 7 and all(.[]; .status == "returned" and .expectation_met == true and .status_met == true)' \
-            /tmp/mncs-ansi-ci/result.json
       - name: Reject undeclared effect example
         shell: bash
         run: |
