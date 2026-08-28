@@ -19,7 +19,7 @@ use mncs_model::{
 
 use crate::support::{
     artifact_ref, empty_execution, execution_failure, function_names, unknown,
-    validate_selected_ssa,
+    validate_realizable_ssa, validate_selected_ssa,
 };
 use crate::{support, BackendAdapter, BackendExecutionResult};
 
@@ -518,6 +518,9 @@ pub fn lower_external(
     plan: &TargetLoweringPlan,
 ) -> BackendResult {
     if let Err(result) = validate_selected_ssa(ssa, &selected_ssa, "CGX101") {
+        return *result;
+    }
+    if let Err(result) = validate_realizable_ssa(program, ssa, "CGX102") {
         return *result;
     }
     if plan.status != TransformationStatus::Pass {

@@ -34,10 +34,221 @@ impl ModuleResolver for MapResolver {
 fn elaborate(resolver: &MapResolver, text: &str) -> Result<mncs_model::Program, Vec<String>> {
     let envelope = resolver.envelope("root", text.to_owned());
     let parsed = parse(&envelope);
+    assert!(
+        parsed.is_valid(),
+        "fixture parses: {:?}",
+        parsed.diagnostics
+    );
     let ast = parsed.ast.expect("fixture parses");
     match elaborate_program_with_resolver(&ast, resolver).0 {
         Ok(program) => Ok(program),
         Err(errors) => Err(errors.iter().map(|d| d.code.clone()).collect()),
+    }
+}
+
+#[test]
+fn profile_010_specializes_qualified_and_aliased_generic_calls_once() {
+    let resolver = MapResolver::default().with(
+        "lib.generic",
+        r#"
+mncs 0.10;
+module lib.generic;
+record Point { x: i64, y: i64 }
+fn first<T, N: Nat>(xs: [T; N]) -> (result: T) { return xs[0]; }
+"#,
+    );
+    let program = elaborate(
+        &resolver,
+        r#"
+mncs 0.10;
+module app.generic;
+use lib.generic;
+use lib.generic as g;
+fn unqualified() -> (result: i64) {
+    let p: lib.generic.Point = lib.generic.Point { x: 7, y: 8 };
+    let xs: [lib.generic.Point; 2] = [p, p];
+    return first<lib.generic.Point, 2>(xs).x;
+}
+fn qualified() -> (result: i64) {
+    let p: lib.generic.Point = lib.generic.Point { x: 9, y: 10 };
+    let xs: [lib.generic.Point; 2] = [p, p];
+    return lib.generic.first<lib.generic.Point, 2>(xs).x;
+}
+fn aliased() -> (result: i64) {
+    let p: lib.generic.Point = lib.generic.Point { x: 11, y: 12 };
+    let xs: [lib.generic.Point; 2] = [p, p];
+    return g.first<lib.generic.Point, 2>(xs).x;
+}
+"#,
+    )
+    .expect("generic module calls elaborate");
+
+    assert_eq!(
+        program
+            .generic_specializations
+            .iter()
+            .filter(|record| record.canonical_args.contains("record:"))
+            .count(),
+        1
+    );
+    assert!(program.functions.iter().any(|function| {
+        function.name.starts_with("first__spec_") && function.generic_params.is_empty()
+    }));
+    for function in &program.functions {
+        if function.generic_params.is_empty() {
+            if let Some(body) = &function.body {
+                assert!(body
+                    .blocks
+                    .iter()
+                    .flat_map(|block| &block.operations)
+                    .all(|op| {
+                        !matches!(
+                            &op.kind,
+                            mncs_model::BodyOperationKind::Call { generic_args, .. }
+                                if !generic_args.is_empty()
+                        )
+                    }));
+            }
+        }
+    }
+    let ssa = program.lower_to_ssa().expect("specialized program lowers");
+    assert!(ssa.validate_lowering_boundary(&program).valid);
+}
+
+#[test]
+fn profile_010_covers_zero_one_large_nested_bool_u64_and_empty_view_arguments() {
+    let values = (1..=64)
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let source = format!(
+        r#"
+mncs 0.10;
+module app.generic_edges;
+record Packet {{ payload: [i64; 2] }}
+
+fn count<N: Nat>(xs: [i64; N]) -> (result: i64) {{
+    iterate i over xs carrying total: i64 = 0 {{
+        next total = total + xs[i];
+    }}
+    return total;
+}}
+
+fn identity<T>(value: T) -> (result: T) {{ return value; }}
+
+fn first_or<N: Nat>(view: [i64; up_to N], fallback: i64) -> (result: i64) {{
+    if view.len == 0 {{ return fallback; }}
+    return view[0];
+}}
+
+fn demo() -> (result: i64) {{
+    let zero: [i64; 0] = [];
+    let one: [i64; 1] = [7];
+    let large: [i64; 64] = [{values}];
+    let nested: [i64; 2] = [3, 4];
+    let flags: [bool; 1] = [true];
+    let unsigned: u64 = 7;
+    let small: [i64; 4] = [1, 2, 3, 4];
+    let window: [i64; up_to 4] = small[0..0];
+    let a: i64 = count<0>(zero);
+    let b: i64 = count<1>(one);
+    let c: i64 = count<64>(large);
+    let d: [i64; 2] = identity<[i64; 2]>(nested);
+    let e: [bool; 1] = identity<[bool; 1]>(flags);
+    let f: u64 = identity<u64>(unsigned);
+    let g: i64 = first_or<4>(window, 99);
+    return a + b + c + d[0] + e[0] as i64 + f as i64 + g;
+}}
+"#
+    );
+    let resolver = MapResolver::default();
+    let program = elaborate(&resolver, &source).expect("edge-case generic program elaborates");
+    let canonical_args = program
+        .generic_specializations
+        .iter()
+        .map(|record| record.canonical_args.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(canonical_args.iter().any(|args| args.contains("value:0")));
+    assert!(canonical_args.iter().any(|args| args.contains("value:1")));
+    assert!(canonical_args.iter().any(|args| args.contains("value:64")));
+    assert!(canonical_args.iter().any(|args| args.contains("sequence<")));
+    assert!(canonical_args.iter().any(|args| args.contains("bool")));
+    assert!(canonical_args
+        .iter()
+        .any(|args| args.contains("unsigned:64")));
+    assert!(program
+        .functions
+        .iter()
+        .filter(|function| function.name.starts_with("count__spec_"))
+        .all(|function| function.generic_params.is_empty()));
+    let ssa = program
+        .lower_to_ssa()
+        .expect("edge-case specializations lower");
+    assert!(ssa.validate_lowering_boundary(&program).valid);
+}
+
+#[test]
+fn profile_010_refuses_unbounded_specialization_expansion() {
+    let mut source = String::from("mncs 0.10;\nmodule app.generic_expansion;\n");
+    for index in 0..130 {
+        source.push_str(&format!("record R{index} {{ value: i64 }}\n"));
+    }
+    source.push_str("fn identity<T>(value: T) -> (result: T) { return value; }\n");
+    source.push_str("fn demo() -> (result: i64) {\n");
+    for index in 0..130 {
+        source.push_str(&format!(
+            "    let r{index}: R{index} = identity<R{index}>(R{index} {{ value: {index} }});\n"
+        ));
+    }
+    source.push_str("    return 0;\n}\n");
+
+    let errors = elaborate(&MapResolver::default(), &source)
+        .expect_err("specialization expansion must fail closed");
+    assert!(errors.contains(&"MNE227".to_owned()), "got {errors:?}");
+}
+
+#[test]
+fn profile_010_rejects_invalid_or_ambiguous_generic_arguments() {
+    let cases = [
+        (
+            "missing",
+            "fn id<T>(value: T) -> (result: T) { return value; }\nfn demo() -> (result: i64) { return id(1); }",
+            "MNE220",
+        ),
+        (
+            "count",
+            "fn id<T>(value: T) -> (result: T) { return value; }\nfn demo() -> (result: i64) { return id<i64, 1>(1); }",
+            "MNE221",
+        ),
+        (
+            "wrong_kind",
+            "fn width<N: Nat>(xs: [i64; N]) -> (result: i64) { return xs[0]; }\nfn demo() -> (result: i64) { let xs: [i64; 1] = [1]; return width<i64>(xs); }",
+            "MNE222",
+        ),
+        (
+            "non_constant",
+            "fn width<N: Nat>(xs: [i64; N]) -> (result: i64) { return xs[0]; }\nfn demo(n: i64) -> (result: i64) { let xs: [i64; 1] = [1]; return width<n>(xs); }",
+            "MNE224",
+        ),
+        (
+            "out_of_range",
+            "fn width<N: Nat>(xs: [i64; N]) -> (result: i64) { return xs[0]; }\nfn demo() -> (result: i64) { let xs: [i64; 1] = [1]; return width<65>(xs); }",
+            "MNE225",
+        ),
+        (
+            "unsupported_kind",
+            "fn higher<F: Type -> Type>(value: i64) -> (result: i64) { return value; }",
+            "MNE229",
+        ),
+    ];
+    for (label, body, expected) in cases {
+        let source = format!("mncs 0.10;\nmodule app.generic_invalid_{label};\n{body}\n");
+        let errors = elaborate(&MapResolver::default(), &source)
+            .expect_err("invalid generic source must fail closed");
+        assert!(
+            errors.contains(&expected.to_owned()),
+            "{label} expected {expected}, got {errors:?}"
+        );
     }
 }
 

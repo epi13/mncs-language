@@ -1108,6 +1108,10 @@ struct Parser<'a> {
     cursor: usize,
     diagnostics: Vec<SourceDiagnostic>,
     profile: String,
+    /// The lexer intentionally keeps `>>` as a shift token. When a nested
+    /// generic type ends immediately before its enclosing `>`, the parser
+    /// consumes one closer and carries the other one here.
+    pending_generic_closers: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -1123,6 +1127,7 @@ impl<'a> Parser<'a> {
             cursor: 0,
             diagnostics: Vec::new(),
             profile: SOURCE_PROFILE_VERSION.to_owned(),
+            pending_generic_closers: 0,
         }
     }
 
@@ -2364,12 +2369,13 @@ impl<'a> Parser<'a> {
                 )
                 .and_then(|index| self.tokens.get(index))
                 .map_or(path_span, |token| token.span);
-            return Some(AstExpr::Call {
+            let call = AstExpr::Call {
                 function: path_name,
                 generic_args: qualified_generic_args,
                 arguments,
                 span: SourceSpan::covering(&self.envelope.text, path_span, end),
-            });
+            };
+            return Some(self.project_chain(call));
         } else if !qualified_generic_args.is_empty() {
             // generic args without call: ignore for now, treat as path without args
             return Some(AstExpr::QualifiedPath {
@@ -2969,21 +2975,35 @@ impl<'a> Parser<'a> {
             }
             let constraint = if self.current_kind() == Some(TokenKind::Colon) {
                 self.cursor += 1;
-                let constraint = self.spanned(
+                let first = self.spanned(
                     TokenKind::Identifier,
                     "MNP187",
                     "expected generic constraint 'Type' or 'Nat'",
                 );
-                if let Some(c) = &constraint {
-                    if c.text != "Type" && c.text != "Nat" {
+                let Some(first) = first else { break };
+                if self.current_kind() == Some(TokenKind::Arrow) {
+                    self.cursor += 1;
+                    let Some(second) = self.spanned(
+                        TokenKind::Identifier,
+                        "MNP187",
+                        "expected result type after generic constraint arrow",
+                    ) else {
+                        break;
+                    };
+                    Some(SpannedText {
+                        text: format!("{} -> {}", first.text, second.text),
+                        span: SourceSpan::covering(&self.envelope.text, first.span, second.span),
+                    })
+                } else {
+                    if first.text != "Type" && first.text != "Nat" {
                         self.error(
                             "MNP187",
                             "generic constraint must be 'Type' or 'Nat'",
                             vec![TokenKind::Identifier],
                         );
                     }
+                    Some(first)
                 }
-                constraint
             } else {
                 None
             };
@@ -3037,30 +3057,49 @@ impl<'a> Parser<'a> {
         // Otherwise `<` is a binary comparison operator, not a generic.
         {
             let mut ahead = self.cursor + 1;
+            let mut depth = 1usize;
+            let mut square_depth = 0usize;
             let mut found_gt = false;
             let mut gt_pos = None;
             while ahead < self.significant.len() {
                 let kind = self.tokens[self.significant[ahead]].kind;
-                if kind == TokenKind::Gt {
-                    found_gt = true;
-                    gt_pos = Some(ahead);
-                    break;
+                match kind {
+                    TokenKind::Lt => depth += 1,
+                    TokenKind::LeftBracket => square_depth += 1,
+                    TokenKind::RightBracket => square_depth = square_depth.saturating_sub(1),
+                    TokenKind::Gt => {
+                        depth -= 1;
+                        if depth == 0 {
+                            found_gt = true;
+                            gt_pos = Some(ahead);
+                            break;
+                        }
+                    }
+                    TokenKind::Shr => {
+                        // `>>` contributes two closers in a nested type
+                        // argument list. It closes the outer list only when
+                        // both closers have reached depth zero.
+                        if depth <= 2 {
+                            found_gt = true;
+                            gt_pos = Some(ahead);
+                            break;
+                        }
+                        depth -= 2;
+                    }
+                    _ => {}
                 }
-                if kind == TokenKind::Shr {
-                    // `>>` contains a `>`; treat as found
-                    found_gt = true;
-                    gt_pos = Some(ahead);
-                    break;
-                }
-                if matches!(
-                    kind,
-                    TokenKind::LeftParen
-                        | TokenKind::RightParen
-                        | TokenKind::LeftBrace
-                        | TokenKind::RightBrace
-                        | TokenKind::Semicolon
-                        | TokenKind::Comma
-                ) {
+                if depth == 1
+                    && square_depth == 0
+                    && matches!(
+                        kind,
+                        TokenKind::LeftParen
+                            | TokenKind::RightParen
+                            | TokenKind::LeftBrace
+                            | TokenKind::RightBrace
+                            | TokenKind::Semicolon
+                            | TokenKind::Comma
+                    )
+                {
                     // Stop before hitting a delimiter that would end the generic arg list without a `>`
                     // For `value < lo {`, after `<` is `lo` then `{`, we would hit `LeftBrace` before `Gt`, so not generic.
                     if kind == TokenKind::LeftBrace
@@ -3104,9 +3143,11 @@ impl<'a> Parser<'a> {
         }
         let saved = self.cursor;
         let saved_diags = self.diagnostics.len();
+        let saved_pending = self.pending_generic_closers;
         self.cursor += 1;
         let mut args = Vec::new();
-        while self.current_kind() != Some(TokenKind::Gt)
+        while self.pending_generic_closers == 0
+            && self.current_kind() != Some(TokenKind::Gt)
             && self.current_kind() != Some(TokenKind::Shr)
             && self.cursor < self.significant.len()
         {
@@ -3114,14 +3155,12 @@ impl<'a> Parser<'a> {
             // value (literal `4` or Nat-param name `N`). We store raw text
             // and let elaboration interpret based on the declared param kind.
             let text = if self.current_kind() == Some(TokenKind::IntegerLiteral) {
-                let lit = self
-                    .spanned(
-                        TokenKind::IntegerLiteral,
-                        "MNP190",
-                        "expected generic argument",
-                    )
-                    .expect("integer literal present");
-                lit
+                self.spanned(
+                    TokenKind::IntegerLiteral,
+                    "MNP190",
+                    "expected generic argument",
+                )
+                .expect("integer literal present")
             } else {
                 let start = self.current_token_index();
                 let ty = match self.type_annotation("MNP190", "expected generic type argument") {
@@ -3138,7 +3177,10 @@ impl<'a> Parser<'a> {
             }
             self.cursor += 1;
         }
-        let close = if self.current_kind() == Some(TokenKind::Shr) {
+        let close = if self.pending_generic_closers > 0 {
+            self.pending_generic_closers -= 1;
+            Some(self.previous_token_index(saved))
+        } else if self.current_kind() == Some(TokenKind::Shr) {
             self.error(
                 "MNP190",
                 "unexpected '>>' in generic argument list",
@@ -3159,6 +3201,7 @@ impl<'a> Parser<'a> {
             // Not a generic call: backtrack and treat `<` as binary operator.
             self.cursor = saved;
             self.diagnostics.truncate(saved_diags);
+            self.pending_generic_closers = saved_pending;
             return None;
         }
         if close.is_none() && !args.is_empty() {
@@ -3299,11 +3342,18 @@ impl<'a> Parser<'a> {
                 )?;
                 format!("mask<{}>", lanes.text)
             };
-            let end = self.expect(
-                TokenKind::Gt,
-                "MNP167",
-                "expected '>' after vector or mask type",
-            )?;
+            let end = if self.current_kind() == Some(TokenKind::Shr) {
+                let index = self.significant[self.cursor];
+                self.cursor += 1;
+                self.pending_generic_closers += 1;
+                index
+            } else {
+                self.expect(
+                    TokenKind::Gt,
+                    "MNP167",
+                    "expected '>' after vector or mask type",
+                )?
+            };
             let span = SourceSpan::covering(&self.envelope.text, name.span, self.tokens[end].span);
             return Some(SpannedText { text, span });
         }
@@ -3720,6 +3770,73 @@ mod tests {
                 .text,
             "order"
         );
+    }
+
+    #[test]
+    fn profile_010_keeps_generic_calls_inside_projection_chains() {
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "generic-projection",
+            "mncs 0.10;\nmodule example.generic;\nrecord Point { x: i64 }\nfn first<T>(value: T) -> (result: T) { return value; }\nfn read(point: Point) -> (result: i64) { return first<Point>(point).x; }\n",
+        );
+        let parsed = parse(&envelope);
+        assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+        let ast = parsed.ast.expect("generic AST");
+        let AstExpr::FieldProject { base, field, .. } = &ast.functions[1].body.returned_value
+        else {
+            panic!("expected a projection over a generic call");
+        };
+        assert_eq!(field.text, "x");
+        let AstExpr::Call {
+            function,
+            generic_args,
+            ..
+        } = base.as_ref()
+        else {
+            panic!("expected generic call under projection");
+        };
+        assert_eq!(function.text, "first");
+        assert_eq!(generic_args.len(), 1);
+        assert_eq!(generic_args[0].text.text, "Point");
+    }
+
+    #[test]
+    fn profile_010_parses_nested_generic_type_closers_and_constraint_text() {
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "generic-nesting",
+            "mncs 0.10;\nmodule example.generic_nesting;\nfn id<T>(value: T) -> (result: T) { return value; }\nfn call() -> (result: i64) { return id<vec<i64, 4>>(1); }\nfn higher<F: Type -> Type>(value: i64) -> (result: i64) { return value; }\n",
+        );
+        let parsed = parse(&envelope);
+        assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+        let ast = parsed.ast.expect("nested generic AST");
+        let AstExpr::Call { generic_args, .. } = &ast.functions[1].body.returned_value else {
+            panic!("expected nested generic call");
+        };
+        assert_eq!(generic_args[0].text.text, "vec<i64, 4>");
+        assert_eq!(
+            ast.functions[2].generic_params[0]
+                .constraint
+                .as_ref()
+                .unwrap()
+                .text,
+            "Type -> Type"
+        );
+    }
+
+    #[test]
+    fn profile_010_rejects_malformed_generic_constraints() {
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "generic-malformed",
+            "mncs 0.10;\nmodule example.generic_malformed;\nfn id<T: Type ->>(value: T) -> (result: T) { return value; }\n",
+        );
+        let parsed = parse(&envelope);
+        assert!(!parsed.is_valid());
+        assert!(parsed
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "MNP187"));
     }
 
     #[test]

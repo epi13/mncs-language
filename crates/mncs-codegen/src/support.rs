@@ -59,6 +59,31 @@ pub(crate) fn validate_selected_ssa(
     Ok(())
 }
 
+pub(crate) fn validate_realizable_ssa(
+    program: &Program,
+    ssa: &SsaModule,
+    code: &str,
+) -> Result<(), Box<BackendResult>> {
+    let report = ssa.validate_lowering_boundary(program);
+    if report.valid {
+        return Ok(());
+    }
+    let diagnostics = report
+        .errors
+        .into_iter()
+        .map(|error| {
+            let mut diagnostic = CompilerDiagnostic::new(
+                code,
+                CompilerDiagnosticKind::InternalCompilerDefect,
+                error.message,
+            );
+            diagnostic.path = Some(error.path);
+            diagnostic
+        })
+        .collect();
+    Err(Box::new(failed(diagnostics)))
+}
+
 pub(crate) fn function_names(program: &Program, ssa: &SsaModule) -> Vec<String> {
     ssa.functions
         .iter()

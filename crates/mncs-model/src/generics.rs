@@ -1,11 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::body::{
-    BodyBlock, BodyOperation, BodyOperationKind, BodyType, FunctionBody, GenericArg,
-    GenericParamKind, SequenceBound,
+    BodyOperationKind, BodyType, FunctionBody, GenericArg, GenericParamKind, SequenceBound,
 };
 use crate::canonical::sha256_hex;
-use crate::identity::{function_id, instantiation_id, specialization_id, SemanticId};
+use crate::identity::{function_id, instantiation_id, SemanticId};
 use crate::{Function, Program, Value};
 
 pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagnostic>> {
@@ -132,6 +131,7 @@ pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagn
         }
         let mut type_map: BTreeMap<String, BodyType> = BTreeMap::new();
         let mut value_concrete: BTreeMap<String, u32> = BTreeMap::new();
+        let mut kind_mismatch = false;
         for (param, arg) in generic_fn.generic_params.iter().zip(&inst.args) {
             match (&param.kind, arg) {
                 (GenericParamKind::Type, GenericArg::Type { ty }) => {
@@ -141,6 +141,7 @@ pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagn
                     value_concrete.insert(param.name.clone(), *value);
                 }
                 _ => {
+                    kind_mismatch = true;
                     diagnostics.push(Diagnostic {
                         code: "MNE222".to_owned(),
                         path: generic_fn.name.clone(),
@@ -149,10 +150,16 @@ pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagn
                 }
             }
         }
-        // Detect expanding
+        if kind_mismatch {
+            in_progress.remove(&inst.key);
+            continue;
+        }
+        // Detect a directly self-referential type substitution before it can
+        // enter the fixed-point queue. The bounded queue below still handles
+        // indirect expansion chains conservatively.
+        let mut expanding = false;
         for (param_name, ty) in &type_map {
-            let sem = ty.semantic_name();
-            if sem.contains(param_name) && sem.contains('[') {
+            if contains_type_parameter(ty, param_name) {
                 diagnostics.push(Diagnostic {
                     code: "MNE227".to_owned(),
                     path: generic_fn.name.clone(),
@@ -161,9 +168,12 @@ pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagn
                         param_name
                     ),
                 });
-                in_progress.remove(&inst.key);
-                continue;
+                expanding = true;
             }
+        }
+        if expanding {
+            in_progress.remove(&inst.key);
+            continue;
         }
         let orig_body = match &generic_fn.body {
             Some(b) => b,
@@ -193,7 +203,7 @@ pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagn
         let hash = inst.hash.clone();
         let new_name = format!("{}__spec_{}", generic_fn.name, &hash[0..8]);
         let home = generic_fn.home_module.clone();
-        let inst_id = instantiation_id(&inst.generic_id, &hash);
+        let inst_id = instantiation_id(&inst.generic_id, &inst.canonical);
 
         // For inputs/outputs, substitute
         let mut new_inputs = Vec::new();
@@ -372,10 +382,9 @@ pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagn
                             .get(&spec_id)
                             .cloned()
                             .unwrap_or_else(|| "unknown".to_owned());
-                        let hash = sha256_hex(canonical.as_bytes());
                         *callee_id = spec_id.clone();
                         *function_name = spec_name;
-                        *instantiation = Some(instantiation_id(&generic_id_clone, &hash));
+                        *instantiation = Some(instantiation_id(&generic_id_clone, &canonical));
                         *specialization = Some(spec_id.clone());
                         *generic_args = Vec::new();
                     }
@@ -436,12 +445,12 @@ fn substitute_function_body(
             }
             match &mut op.kind {
                 BodyOperationKind::SequenceConstruct { element_type, .. } => {
-                    *element_type = Box::new(substitute_body_type(
+                    **element_type = substitute_body_type(
                         (**element_type).clone(),
                         type_map,
                         value_concrete,
                         value_param_map,
-                    ));
+                    );
                 }
                 BodyOperationKind::SequenceProject { bound, .. } => {
                     *bound =
@@ -471,12 +480,12 @@ fn substitute_function_body(
                     bound,
                     ..
                 } => {
-                    *element_type = Box::new(substitute_body_type(
+                    **element_type = substitute_body_type(
                         (**element_type).clone(),
                         type_map,
                         value_concrete,
                         value_param_map,
-                    ));
+                    );
                     *bound =
                         substitute_sequence_bound(bound.clone(), value_concrete, value_param_map);
                 }
@@ -487,12 +496,12 @@ fn substitute_function_body(
                 | BodyOperationKind::VectorBinary { element_type, .. }
                 | BodyOperationKind::VectorCompare { element_type, .. }
                 | BodyOperationKind::VectorReduce { element_type, .. } => {
-                    *element_type = Box::new(substitute_body_type(
+                    **element_type = substitute_body_type(
                         (**element_type).clone(),
                         type_map,
                         value_concrete,
                         value_param_map,
-                    ));
+                    );
                 }
                 BodyOperationKind::Convert { from, to } => {
                     *from = substitute_body_type(
@@ -505,12 +514,12 @@ fn substitute_function_body(
                         substitute_body_type(to.clone(), type_map, value_concrete, value_param_map);
                 }
                 BodyOperationKind::Select { operand_type } => {
-                    *operand_type = Box::new(substitute_body_type(
+                    **operand_type = substitute_body_type(
                         (**operand_type).clone(),
                         type_map,
                         value_concrete,
                         value_param_map,
-                    ));
+                    );
                 }
                 BodyOperationKind::Call { generic_args, .. } => {
                     for arg in generic_args.iter_mut() {
@@ -547,21 +556,18 @@ fn substitute_function_body(
             value_concrete,
             value_param_map,
         );
-        match &mut iter.domain {
-            crate::body::IterationDomain::OverSequence { element_type } => {
-                *element_type = Box::new(substitute_body_type(
-                    (**element_type).clone(),
-                    type_map,
-                    value_concrete,
-                    value_param_map,
-                ));
-            }
-            _ => {}
+        if let crate::body::IterationDomain::OverSequence { element_type } = &mut iter.domain {
+            **element_type = substitute_body_type(
+                (**element_type).clone(),
+                type_map,
+                value_concrete,
+                value_param_map,
+            );
         }
-        if iter.bound == crate::body::MAX_SEQUENCE_BOUND {
-            if let Some((_k, v)) = value_concrete.iter().next() {
-                iter.bound = *v;
-            }
+        if let Some(sequence_bound) = &mut iter.sequence_bound {
+            *sequence_bound =
+                substitute_sequence_bound(sequence_bound.clone(), value_concrete, value_param_map);
+            iter.bound = sequence_bound.ceiling();
         }
     }
     new_body
@@ -635,19 +641,19 @@ fn substitute_sequence_bound(
 
 fn body_has_unresolved_generics(body: &FunctionBody) -> bool {
     for param in &body.parameters {
-        if matches!(param.ty, BodyType::GenericParam { .. }) || param.ty.is_generic() {
+        if param.ty.contains_generic_parameter() {
             return true;
         }
     }
     for block in &body.blocks {
         for param in &block.parameters {
-            if matches!(param.ty, BodyType::GenericParam { .. }) || param.ty.is_generic() {
+            if param.ty.contains_generic_parameter() {
                 return true;
             }
         }
         for op in &block.operations {
             for res in &op.results {
-                if matches!(res.ty, BodyType::GenericParam { .. }) || res.ty.is_generic() {
+                if res.ty.contains_generic_parameter() {
                     return true;
                 }
             }
@@ -667,61 +673,61 @@ fn body_has_unresolved_generics(body: &FunctionBody) -> bool {
                 BodyOperationKind::ViewConstruct {
                     source_bound,
                     view_bound,
-                } => {
-                    if source_bound.is_generic() || view_bound.is_generic() {
-                        return true;
-                    }
-                }
+                } if source_bound.is_generic() || view_bound.is_generic() => return true,
                 _ => {}
             }
+        }
+    }
+    for iter in &body.bounded_iterations {
+        if iter.state_type.contains_generic_parameter()
+            || iter
+                .sequence_bound
+                .as_ref()
+                .is_some_and(SequenceBound::is_generic)
+            || matches!(&iter.domain, crate::body::IterationDomain::OverSequence { element_type } if element_type.contains_generic_parameter())
+        {
+            return true;
         }
     }
     false
 }
 
-trait BodyTypeExt2 {
-    fn is_generic(&self) -> bool;
+fn body_type_for_standalone(program: &Program, function: &Function, value_type: &str) -> BodyType {
+    let parsed = BodyType::from_semantic_name(value_type);
+    resolve_generic_type(program, function, parsed)
 }
-impl BodyTypeExt2 for BodyType {
-    fn is_generic(&self) -> bool {
-        match self {
-            BodyType::GenericParam { .. } => true,
-            BodyType::Sequence { element, bound } => element.is_generic() || bound.is_generic(),
-            BodyType::Vector { element, .. } => element.is_generic(),
-            _ => false,
+
+fn resolve_generic_type(program: &Program, function: &Function, ty: BodyType) -> BodyType {
+    match ty {
+        BodyType::Named(name) => {
+            if function
+                .generic_params
+                .iter()
+                .any(|param| param.name == name && param.kind == GenericParamKind::Type)
+            {
+                BodyType::GenericParam { name }
+            } else {
+                BodyType::from_program(program, &name)
+            }
         }
+        BodyType::Sequence { element, bound } => BodyType::Sequence {
+            element: Box::new(resolve_generic_type(program, function, *element)),
+            bound,
+        },
+        BodyType::Vector { element, lanes } => BodyType::Vector {
+            element: Box::new(resolve_generic_type(program, function, *element)),
+            lanes,
+        },
+        other => other,
     }
 }
 
-fn body_type_for_standalone(program: &Program, function: &Function, value_type: &str) -> BodyType {
-    if let Some(gp) = function
-        .generic_params
-        .iter()
-        .find(|p| p.name == value_type && p.kind == GenericParamKind::Type)
-    {
-        return BodyType::GenericParam {
-            name: gp.name.clone(),
-        };
-    }
-    if value_type.trim_start().starts_with('[') {
-        let parsed = BodyType::from_semantic_name(value_type);
-        if let BodyType::Sequence { element, bound } = parsed {
-            let new_element = match *element {
-                BodyType::Named(n)
-                    if function
-                        .generic_params
-                        .iter()
-                        .any(|p| p.name == n && p.kind == GenericParamKind::Type) =>
-                {
-                    Box::new(BodyType::GenericParam { name: n })
-                }
-                other => Box::new(other),
-            };
-            return BodyType::Sequence {
-                element: new_element,
-                bound,
-            };
+fn contains_type_parameter(ty: &BodyType, name: &str) -> bool {
+    match ty {
+        BodyType::GenericParam { name: candidate } => candidate == name,
+        BodyType::Sequence { element, .. } | BodyType::Vector { element, .. } => {
+            contains_type_parameter(element, name)
         }
+        _ => false,
     }
-    BodyType::from_program(program, value_type)
 }

@@ -683,11 +683,9 @@ fn link_module_with_closure(
     for use_decl in &ast.uses {
         let name = use_decl.module.text.clone();
         if !seen.insert(name.clone()) {
-            diagnostics.push(elaboration_diagnostic(
-                "MNE170",
-                format!("module '{name}' is imported more than once"),
-                use_decl.module.span,
-            ));
+            // Re-importing one module under a second alias is intentional and
+            // preserves both qualification routes. The module is linked once;
+            // `namespace_routes` registers every spelling below.
             continue;
         }
         let _ = &name;
@@ -755,7 +753,13 @@ fn merge_imported_declarations(
     // Register explicit and implicit qualification routes before declarations.
     // An alias is a namespace route only; it never grants authority.
     if namespaced {
-        for (use_decl, module) in ast.uses.iter().zip(imported) {
+        for use_decl in &ast.uses {
+            let Some(module) = imported
+                .iter()
+                .find(|module| module.requested_name == use_decl.module.text)
+            else {
+                continue;
+            };
             let route = use_decl
                 .alias
                 .as_ref()
@@ -1063,19 +1067,20 @@ fn merge_imported_declarations(
 }
 
 fn namespace_routes(ast: &AbstractSyntaxTree, module: &ImportedModule) -> Vec<String> {
-    ast.uses
+    let mut routes = vec![module.program.module.clone()];
+    for use_decl in ast
+        .uses
         .iter()
-        .find(|use_decl| use_decl.module.text == module.requested_name)
-        .map(|use_decl| {
-            let mut routes = vec![use_decl.module.text.clone(), module.program.module.clone()];
-            if let Some(alias) = &use_decl.alias {
-                routes.push(alias.text.clone());
-            }
-            routes.sort();
-            routes.dedup();
-            routes
-        })
-        .unwrap_or_else(|| vec![module.program.module.clone()])
+        .filter(|use_decl| use_decl.module.text == module.requested_name)
+    {
+        routes.push(use_decl.module.text.clone());
+        if let Some(alias) = &use_decl.alias {
+            routes.push(alias.text.clone());
+        }
+    }
+    routes.sort();
+    routes.dedup();
+    routes
 }
 
 /// Existing semantic IDs intentionally keep their canonical components
@@ -1142,7 +1147,7 @@ fn signature_from_function(module: &ImportedModule, function: &Function) -> Func
         .filter(|p| p.kind == mncs_model::GenericParamKind::Type)
         .map(|p| p.name.clone())
         .collect();
-    let mut remap = |ty: BodyType| -> BodyType {
+    let remap = |ty: BodyType| -> BodyType {
         match ty {
             BodyType::Named(n) if generic_type_names.contains(&n) => {
                 BodyType::GenericParam { name: n }
@@ -1162,7 +1167,7 @@ fn signature_from_function(module: &ImportedModule, function: &Function) -> Func
             other => other,
         }
     };
-    inputs = inputs.into_iter().map(|ty| remap(ty)).collect::<Vec<_>>();
+    inputs = inputs.into_iter().map(&remap).collect::<Vec<_>>();
     output = remap(output);
     let mut capabilities = function.capabilities.clone();
     capabilities.sort();
@@ -2212,7 +2217,23 @@ fn elaborate_function(
                 ));
                 continue;
             }
-            let kind = match gp.constraint.as_ref().map(|c| c.text.as_str()) {
+            let constraint = gp
+                .constraint
+                .as_ref()
+                .map(|constraint| constraint.text.as_str());
+            if gp
+                .constraint
+                .as_ref()
+                .is_some_and(|c| c.text.contains("->"))
+            {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE229",
+                    "higher-kinded generic parameters are not supported in this tranche",
+                    gp.span,
+                ));
+                continue;
+            }
+            let kind = match constraint {
                 Some("Nat") => mncs_model::GenericParamKind::Nat,
                 Some("Type") | None => mncs_model::GenericParamKind::Type,
                 Some(other) => {
@@ -2226,21 +2247,6 @@ fn elaborate_function(
                     continue;
                 }
             };
-            // Higher-kinded placeholder: reject `F : Type -> Type` style
-            // The parser currently only accepts single identifier constraints,
-            // so this is a future-proof diagnostic path.
-            if gp
-                .constraint
-                .as_ref()
-                .is_some_and(|c| c.text.contains("->"))
-            {
-                diagnostics.push(elaboration_diagnostic(
-                    "MNE229",
-                    "higher-kinded generic parameters are not supported in this tranche",
-                    gp.span,
-                ));
-                continue;
-            }
             parsed.push(mncs_model::GenericParam { name, kind });
         }
         // Validate generic param names don't shadow function parameter names (value namespace)
@@ -3684,6 +3690,12 @@ impl<'a> BodyBuilder<'a> {
                 },
                 _ => IterationDomain::Attempts,
             },
+            sequence_bound: traversal.as_ref().and_then(|(_, resolved)| {
+                resolved.as_ref().and_then(|resolved| match &resolved.ty {
+                    BodyType::Sequence { bound, .. } => Some(bound.clone()),
+                    _ => None,
+                })
+            }),
             initial_value: initial_value.id,
             header_state,
             header_counter,
@@ -4096,7 +4108,7 @@ impl<'a> BodyBuilder<'a> {
                                         diagnostics,
                                     );
                                     // Reject Nat value being passed as Type
-                                    if let Ok(val) = arg.text.text.parse::<u32>() {
+                                    if arg.text.text.parse::<u32>().is_ok() {
                                         // If arg text parses as integer but param expects Type, it's wrong kind
                                         diagnostics.push(elaboration_diagnostic(
                                             "MNE222",
@@ -4143,6 +4155,20 @@ impl<'a> BodyBuilder<'a> {
                                             ));
                                             return None;
                                         }
+                                    } else if profile_type_supported_for_generic_kind(
+                                        text,
+                                        self.finite_types,
+                                        self.record_types,
+                                    ) {
+                                        diagnostics.push(elaboration_diagnostic(
+                                            "MNE222",
+                                            format!(
+                                                "generic value parameter '{}' received type argument '{}'",
+                                                param.name, text
+                                            ),
+                                            arg.text.span,
+                                        ));
+                                        return None;
                                     } else if text.chars().all(|c| c.is_ascii_digit()) {
                                         diagnostics.push(elaboration_diagnostic(
                                             "MNE224",
@@ -4193,7 +4219,7 @@ impl<'a> BodyBuilder<'a> {
                             }
                             (
                                 mncs_model::GenericParamKind::Nat,
-                                mncs_model::GenericArg::ValueParam { name },
+                                mncs_model::GenericArg::ValueParam { name: _ },
                             ) => {
                                 // Forwarding: keep as param reference for now, but we need to preserve the reference
                                 // Instead we store a placeholder that will be resolved during specialization.
@@ -4306,9 +4332,9 @@ impl<'a> BodyBuilder<'a> {
                 }
                 let id = self.new_value("call");
                 // Compute instantiation identity for concrete substitutions; forwarding keeps symbolic
-                let instantiation = if elaborated_generic_args.iter().any(|a| !a.is_concrete()) {
-                    None
-                } else if elaborated_generic_args.is_empty() {
+                let instantiation = if elaborated_generic_args.is_empty()
+                    || elaborated_generic_args.iter().any(|a| !a.is_concrete())
+                {
                     None
                 } else {
                     let canonical = elaborated_generic_args
@@ -6378,58 +6404,6 @@ fn profile_type_with_generics(
     profile_type(name, span, finite_types, record_types, diagnostics)
 }
 
-fn apply_generics_to_body_type(
-    ty: BodyType,
-    generics: &BTreeMap<String, mncs_model::GenericParamKind>,
-    diagnostics: &mut Vec<SourceDiagnostic>,
-    span: SourceSpan,
-) -> BodyType {
-    match ty {
-        BodyType::Named(name) => {
-            if let Some(kind) = generics.get(&name) {
-                if *kind == mncs_model::GenericParamKind::Type {
-                    BodyType::GenericParam { name }
-                } else {
-                    diagnostics.push(elaboration_diagnostic(
-                        "MNE232",
-                        format!("value parameter '{name}' cannot be used as a type"),
-                        span,
-                    ));
-                    BodyType::Named(name)
-                }
-            } else {
-                BodyType::Named(name)
-            }
-        }
-        BodyType::Sequence { element, bound } => {
-            let new_element = Box::new(apply_generics_to_body_type(
-                *element,
-                generics,
-                diagnostics,
-                span,
-            ));
-            // Bound already may be Param/UpToParam; keep as is (validated above)
-            BodyType::Sequence {
-                element: new_element,
-                bound,
-            }
-        }
-        BodyType::Vector { element, lanes } => {
-            let new_element = Box::new(apply_generics_to_body_type(
-                *element,
-                generics,
-                diagnostics,
-                span,
-            ));
-            BodyType::Vector {
-                element: new_element,
-                lanes,
-            }
-        }
-        other => other,
-    }
-}
-
 fn substitute_body_type(
     ty: BodyType,
     type_map: &std::collections::BTreeMap<String, BodyType>,
@@ -6553,6 +6527,9 @@ fn profile_sequence_type(
         Some(scalar) => scalar,
         None => profile_sequence_type(element_text, finite_types, record_types)?,
     });
+    if matches!(&*element, BodyType::Mask { .. } | BodyType::Vector { .. }) {
+        return None;
+    }
     match &*element {
         BodyType::Named(name) if name != "bool" => None,
         _ => Some(BodyType::Sequence { element, bound }),
@@ -6655,6 +6632,9 @@ fn profile_sequence_type_with_generics(
             _ => ty,
         }
     };
+    if matches!(&element, BodyType::Mask { .. } | BodyType::Vector { .. }) {
+        return None;
+    }
     Some(BodyType::Sequence {
         element: Box::new(element),
         bound,
@@ -6672,6 +6652,20 @@ fn profile_scalar_supported(name: &str) -> Option<BodyType> {
             }) | BodyType::Byte
         );
     supported.then_some(ty)
+}
+
+fn profile_type_supported_for_generic_kind(
+    name: &str,
+    finite_types: &BTreeMap<String, FiniteType>,
+    record_types: &BTreeMap<String, RecordType>,
+) -> bool {
+    profile_scalar_supported(name).is_some()
+        || finite_types.contains_key(name)
+        || record_types.contains_key(name)
+        || name.contains('.')
+        || name.starts_with('[')
+        || name.starts_with("vec<")
+        || name.starts_with("mask<")
 }
 
 fn statement_span(statement: &AstStmt) -> SourceSpan {

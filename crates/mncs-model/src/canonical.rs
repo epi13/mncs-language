@@ -201,13 +201,13 @@ pub(crate) fn canonical_function(function: &Function) -> JsonValue {
     ]);
     if !function.generic_params.is_empty() {
         if let JsonValue::Object(fields) = &mut result {
-            let mut params = function.generic_params.clone();
-            params.sort_by(|a, b| a.name.cmp(&b.name));
             fields.insert(
                 "generic_params".to_owned(),
                 JsonValue::Array(
-                    params
-                        .into_iter()
+                    function
+                        .generic_params
+                        .iter()
+                        .cloned()
                         .map(|p| {
                             object([
                                 ("name", JsonValue::String(p.name)),

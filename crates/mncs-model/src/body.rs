@@ -116,7 +116,7 @@ pub enum GenericArg {
 impl GenericArg {
     pub fn canonical_string(&self) -> String {
         match self {
-            Self::Type { ty } => format!("type:{}", ty.semantic_name()),
+            Self::Type { ty } => format!("type:{}", ty.canonical_identity()),
             Self::Value { value } => format!("value:{value}"),
             Self::ValueParam { name } => format!("value_param:{name}"),
         }
@@ -125,7 +125,7 @@ impl GenericArg {
     pub fn is_concrete(&self) -> bool {
         !matches!(self, Self::ValueParam { .. })
             && match self {
-                Self::Type { ty } => !matches!(ty, BodyType::GenericParam { .. }),
+                Self::Type { ty } => !ty.contains_generic_parameter(),
                 _ => true,
             }
     }
@@ -202,6 +202,11 @@ pub struct BodyBoundedIteration {
     /// serialize unchanged; Profile 0.7 sequence traversal records its domain.
     #[serde(default)]
     pub domain: IterationDomain,
+    /// The source sequence bound, when this is a sequence traversal. Keeping
+    /// it separate from `bound` lets generic specialization replace `N`
+    /// precisely instead of guessing from the profile ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence_bound: Option<SequenceBound>,
     pub initial_value: String,
     pub header_state: String,
     pub header_counter: String,
@@ -442,6 +447,44 @@ impl BodyType {
             Self::Finite { name, .. } => name.clone(),
             Self::Record { name, .. } => name.clone(),
             Self::GenericParam { name } => name.clone(),
+        }
+    }
+
+    /// Stable type identity for generic instantiation keys. `semantic_name`
+    /// is source-friendly and omits nominal identity; specialization keys
+    /// must retain it so same-named records from two modules cannot collide.
+    pub fn canonical_identity(&self) -> String {
+        match self {
+            Self::Named(name) => format!("named:{name}"),
+            Self::Integer(integer) => format!(
+                "integer:{}:{}",
+                if integer.signed { "signed" } else { "unsigned" },
+                integer.bits
+            ),
+            Self::Byte => "byte".to_owned(),
+            Self::Sequence { element, bound } => format!(
+                "sequence<{};{}>",
+                element.canonical_identity(),
+                bound.canonical_text()
+            ),
+            Self::Vector { element, lanes } => {
+                format!("vector<{},{}>", element.canonical_identity(), lanes)
+            }
+            Self::Mask { lanes } => format!("mask<{lanes}>"),
+            Self::Finite { identity, .. } => format!("finite:{}", identity.0),
+            Self::Record { identity, .. } => format!("record:{}", identity.0),
+            Self::GenericParam { name } => format!("generic:{name}"),
+        }
+    }
+
+    pub fn contains_generic_parameter(&self) -> bool {
+        match self {
+            Self::GenericParam { .. } => true,
+            Self::Sequence { element, bound } => {
+                element.contains_generic_parameter() || bound.is_generic()
+            }
+            Self::Vector { element, .. } => element.contains_generic_parameter(),
+            _ => false,
         }
     }
 
@@ -2407,6 +2450,38 @@ fn validate_operation(
                     "non-generic function cannot be called with generic arguments",
                 ));
             }
+            if is_generic_callee {
+                if generic_args.len() != callee.generic_params.len() {
+                    errors.push(body_diagnostic(
+                        "MNB077",
+                        format!("{path}.kind.generic_args"),
+                        "generic call argument count does not match the callee declaration",
+                    ));
+                }
+                for (index, (param, arg)) in
+                    callee.generic_params.iter().zip(generic_args).enumerate()
+                {
+                    let kind_matches = match (&param.kind, arg) {
+                        (GenericParamKind::Type, GenericArg::Type { ty }) => {
+                            !generic_type_references_are_foreign(ty, function)
+                        }
+                        (GenericParamKind::Nat, GenericArg::Value { .. }) => true,
+                        (GenericParamKind::Nat, GenericArg::ValueParam { name }) => {
+                            function.generic_params.iter().any(|candidate| {
+                                candidate.name == *name && candidate.kind == GenericParamKind::Nat
+                            })
+                        }
+                        _ => false,
+                    };
+                    if !kind_matches {
+                        errors.push(body_diagnostic(
+                            "MNB078",
+                            format!("{path}.kind.generic_args[{index}]"),
+                            "generic call argument kind or forwarding scope does not match the callee parameter",
+                        ));
+                    }
+                }
+            }
             // Helper to compute expected callee parameter/output types after generic substitution
             let expected_callee_input = |idx: usize| -> BodyType {
                 let param = &callee.inputs[idx];
@@ -2834,6 +2909,19 @@ fn validate_return_types(
 
 fn semantic_body_type(program: &Program, name: &str) -> BodyType {
     BodyType::from_program(program, name)
+}
+
+fn generic_type_references_are_foreign(ty: &BodyType, function: &Function) -> bool {
+    match ty {
+        BodyType::GenericParam { name } => !function
+            .generic_params
+            .iter()
+            .any(|param| param.name == *name && param.kind == GenericParamKind::Type),
+        BodyType::Sequence { element, .. } | BodyType::Vector { element, .. } => {
+            generic_type_references_are_foreign(element, function)
+        }
+        _ => false,
+    }
 }
 
 /// Resolve a canonical bounded-sequence spelling `[E; N]` / `[E; up_to M]`

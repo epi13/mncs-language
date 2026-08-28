@@ -256,6 +256,11 @@ pub struct SsaBoundedIteration {
     /// serialize unchanged.
     #[serde(default)]
     pub domain: crate::IterationDomain,
+    /// The source sequence bound, when this is a sequence traversal. Keeping
+    /// it in selected SSA lets the lowering boundary reject symbolic bounds
+    /// instead of relying only on the profile ceiling in `bound`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence_bound: Option<crate::SequenceBound>,
     pub state_type: IrType,
     pub preheader: SemanticId,
     pub header: SemanticId,
@@ -390,6 +395,150 @@ impl SsaModule {
         }
     }
 
+    /// Validate the contract that must hold before any executable backend is
+    /// entered. Generic templates may remain in the semantic program, but no
+    /// template, generic argument, parameterized bound, or unresolved type
+    /// may be present in selected SSA. This check is intentionally repeated at
+    /// the backend boundary so direct adapter callers fail closed as well.
+    pub fn validate_lowering_boundary(&self, program: &Program) -> SsaValidationReport {
+        let mut errors = self.validate().errors;
+        for (function_index, function) in self.functions.iter().enumerate() {
+            let path = format!("functions[{function_index}]");
+            let source = program.functions.iter().find(|candidate| {
+                function_id(
+                    candidate.identity_namespace(&program.module),
+                    &candidate.name,
+                ) == function.semantic_identity
+            });
+            let Some(source) = source else {
+                errors.push(diagnostic(
+                    "SSA040",
+                    &path,
+                    "selected SSA function does not resolve to a program function",
+                ));
+                continue;
+            };
+            if !source.generic_params.is_empty() {
+                errors.push(diagnostic(
+                    "SSA041",
+                    &path,
+                    "generic function template reached the backend lowering boundary",
+                ));
+            }
+            let generic_names = source
+                .generic_params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect::<BTreeSet<_>>();
+            for (value_index, value) in function.inputs.iter().enumerate() {
+                check_ir_type(
+                    &value.ty,
+                    &generic_names,
+                    &format!("{path}.inputs[{value_index}].type"),
+                    &mut errors,
+                );
+            }
+            for (value_index, value) in function.outputs.iter().enumerate() {
+                check_ir_type(
+                    &value.ty,
+                    &generic_names,
+                    &format!("{path}.outputs[{value_index}].type"),
+                    &mut errors,
+                );
+            }
+            for (iteration_index, iteration) in function.bounded_iterations.iter().enumerate() {
+                check_ir_type(
+                    &iteration.state_type,
+                    &generic_names,
+                    &format!("{path}.bounded_iterations[{iteration_index}].state_type"),
+                    &mut errors,
+                );
+                if let crate::IterationDomain::OverSequence { element_type } = &iteration.domain {
+                    check_body_type(
+                        element_type,
+                        &generic_names,
+                        &format!("{path}.bounded_iterations[{iteration_index}].domain"),
+                        &mut errors,
+                    );
+                }
+                if let Some(sequence_bound) = &iteration.sequence_bound {
+                    check_bound(
+                        sequence_bound,
+                        &format!("{path}.bounded_iterations[{iteration_index}].sequence_bound"),
+                        &mut errors,
+                    );
+                }
+            }
+            for (block_index, block) in function.blocks.iter().enumerate() {
+                let block_path = format!("{path}.blocks[{block_index}]");
+                for (value_index, value) in block.parameters.iter().enumerate() {
+                    check_ir_type(
+                        &value.ty,
+                        &generic_names,
+                        &format!("{block_path}.parameters[{value_index}].type"),
+                        &mut errors,
+                    );
+                }
+                for (instruction_index, instruction) in block.instructions.iter().enumerate() {
+                    check_instruction_types(
+                        &instruction.kind,
+                        &generic_names,
+                        &format!("{block_path}.instructions[{instruction_index}]"),
+                        &mut errors,
+                    );
+                    for (value_index, value) in instruction.outputs.iter().enumerate() {
+                        check_ir_type(
+                            &value.ty,
+                            &generic_names,
+                            &format!(
+                                "{block_path}.instructions[{instruction_index}].outputs[{value_index}].type"
+                            ),
+                            &mut errors,
+                        );
+                    }
+                }
+            }
+        }
+
+        for (record_index, record) in self.generic_specializations.iter().enumerate() {
+            let path = format!("generic_specializations[{record_index}]");
+            let generic = program.functions.iter().find(|function| {
+                function_id(function.identity_namespace(&program.module), &function.name)
+                    == record.generic_function
+            });
+            if generic.is_none_or(|function| function.generic_params.is_empty()) {
+                errors.push(diagnostic(
+                    "SSA042",
+                    &path,
+                    "specialization record does not reference a generic declaration",
+                ));
+            }
+            let specialization = program.functions.iter().find(|function| {
+                function_id(function.identity_namespace(&program.module), &function.name)
+                    == record.specialization_function
+            });
+            if specialization.is_none_or(|function| !function.generic_params.is_empty()) {
+                errors.push(diagnostic(
+                    "SSA043",
+                    &path,
+                    "specialization record does not reference a concrete function",
+                ));
+            }
+            if record.args.iter().any(|arg| !arg.is_concrete()) {
+                errors.push(diagnostic(
+                    "SSA044",
+                    &path,
+                    "specialization record retains a symbolic generic argument",
+                ));
+            }
+        }
+
+        SsaValidationReport {
+            valid: errors.is_empty(),
+            errors,
+        }
+    }
+
     /// Permit one deliberately narrow evidence-gated experiment: eliminating
     /// the checked failure behavior of one integer operation only when an
     /// exact current verifier PASS is bound to that operation and obligation.
@@ -481,6 +630,122 @@ impl SsaModule {
                     .to_owned()
             },
         }
+    }
+}
+
+fn check_ir_type(
+    ty: &IrType,
+    generic_names: &BTreeSet<String>,
+    path: &str,
+    errors: &mut Vec<SsaDiagnostic>,
+) {
+    if let IrType::Named(name) = ty {
+        if generic_names.contains(name) {
+            errors.push(diagnostic(
+                "SSA045",
+                path,
+                "unresolved generic type reached the backend lowering boundary",
+            ));
+        }
+    }
+}
+
+fn check_bound(bound: &crate::SequenceBound, path: &str, errors: &mut Vec<SsaDiagnostic>) {
+    if bound.is_generic() {
+        errors.push(diagnostic(
+            "SSA046",
+            path,
+            "parameterized sequence bound reached the backend lowering boundary",
+        ));
+    }
+}
+
+fn check_body_type(
+    ty: &crate::BodyType,
+    generic_names: &BTreeSet<String>,
+    path: &str,
+    errors: &mut Vec<SsaDiagnostic>,
+) {
+    match ty {
+        crate::BodyType::GenericParam { .. } => errors.push(diagnostic(
+            "SSA045",
+            path,
+            "unresolved generic type reached the backend lowering boundary",
+        )),
+        crate::BodyType::Named(name) if generic_names.contains(name) => errors.push(diagnostic(
+            "SSA045",
+            path,
+            "unresolved generic type reached the backend lowering boundary",
+        )),
+        crate::BodyType::Sequence { element, bound } => {
+            check_body_type(element, generic_names, path, errors);
+            check_bound(bound, path, errors);
+        }
+        crate::BodyType::Vector { element, .. } => {
+            check_body_type(element, generic_names, path, errors);
+        }
+        _ => {}
+    }
+}
+
+fn check_instruction_types(
+    kind: &SsaInstructionKind,
+    generic_names: &BTreeSet<String>,
+    path: &str,
+    errors: &mut Vec<SsaDiagnostic>,
+) {
+    match kind {
+        SsaInstructionKind::Constant { ty, .. } => check_ir_type(ty, generic_names, path, errors),
+        SsaInstructionKind::Select { operand_type }
+        | SsaInstructionKind::SequenceReplace {
+            element_type: operand_type,
+            ..
+        }
+        | SsaInstructionKind::VectorConstruct {
+            element_type: operand_type,
+            ..
+        }
+        | SsaInstructionKind::VectorSplat {
+            element_type: operand_type,
+            ..
+        }
+        | SsaInstructionKind::VectorExtract {
+            element_type: operand_type,
+            ..
+        }
+        | SsaInstructionKind::VectorReplace {
+            element_type: operand_type,
+            ..
+        }
+        | SsaInstructionKind::VectorBinary {
+            element_type: operand_type,
+            ..
+        }
+        | SsaInstructionKind::VectorCompare {
+            element_type: operand_type,
+            ..
+        }
+        | SsaInstructionKind::VectorReduce {
+            element_type: operand_type,
+            ..
+        } => check_body_type(operand_type, generic_names, path, errors),
+        SsaInstructionKind::Convert { from, to } => {
+            check_body_type(from, generic_names, path, errors);
+            check_body_type(to, generic_names, path, errors);
+        }
+        SsaInstructionKind::SequenceConstruct { element_type, .. } => {
+            check_body_type(element_type, generic_names, path, errors)
+        }
+        SsaInstructionKind::SequenceProject { bound, .. }
+        | SsaInstructionKind::SequenceLength { bound } => check_bound(bound, path, errors),
+        SsaInstructionKind::ViewConstruct {
+            source_bound,
+            view_bound,
+        } => {
+            check_bound(source_bound, path, errors);
+            check_bound(view_bound, path, errors);
+        }
+        _ => {}
     }
 }
 
@@ -903,6 +1168,7 @@ fn lower_body(
                 .find(|candidate| candidate.identity == identity);
             SsaBoundedIteration {
                 domain: iteration.domain.clone(),
+                sequence_bound: iteration.sequence_bound.clone(),
                 identity,
                 bound: iteration.bound,
                 state_type: body_type(&iteration.state_type),

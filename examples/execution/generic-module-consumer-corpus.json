@@ -1,0 +1,40 @@
+{
+  "schema_version": "0.1",
+  "name": "generic-module-consumer",
+  "cases": [
+    {
+      "id": "demo_unqualified",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "test.generic.consumer", "function": "demo_unqualified" },
+        "arguments": [],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "demo_qualified",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "test.generic.consumer", "function": "demo_qualified" },
+        "arguments": [],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "demo_aliased",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "test.generic.consumer", "function": "demo_aliased" },
+        "arguments": [],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }]
+    }
+  ],
+  "properties": []
+}

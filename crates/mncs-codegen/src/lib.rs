@@ -33,7 +33,7 @@ use mncs_model::{
 use serde::{Deserialize, Serialize};
 
 use crate::lower::lower_module;
-use crate::support::function_value_contracts;
+use crate::support::{function_value_contracts, validate_realizable_ssa};
 use crate::wasm::{decode_module, encode_module, execute_function_typed, WASM_MAGIC, WASM_VERSION};
 
 pub const PORTABLE_WASM_FORMAT: &str = "application/wasm; mncs-portable-wasm-mvp-0.1";
@@ -494,6 +494,9 @@ pub fn lower_selected_ssa(
         ));
         return failed(diagnostics);
     }
+    if let Err(result) = validate_realizable_ssa(program, ssa, "CGN103") {
+        return *result;
+    }
     if !target_is_portable_wasm(&plan.target) {
         diagnostics.push(CompilerDiagnostic::new(
             "CGN201",
@@ -654,6 +657,9 @@ pub fn lower_research_bytecode(
             "research bytecode requires the exact selected SSA identity",
         ));
         return failed(diagnostics);
+    }
+    if let Err(result) = validate_realizable_ssa(program, ssa, "CGR102") {
+        return *result;
     }
     if !target_is_research_bytecode(&plan.target) {
         diagnostics.push(CompilerDiagnostic::new(
@@ -1972,6 +1978,26 @@ mod tests {
             let overflow = execute_backend(&artifact, &request(i128::from(i32::MAX), 1));
             assert_eq!(overflow.status, ExecutionStatus::RuntimeFailure, "{name}");
         }
+    }
+
+    #[test]
+    fn executable_lowering_rejects_generic_templates_at_the_backend_boundary() {
+        let mut program = program();
+        let ssa = program.lower_to_ssa().expect("baseline SSA");
+        program.functions[0]
+            .generic_params
+            .push(mncs_model::GenericParam {
+                name: "T".to_owned(),
+                kind: mncs_model::GenericParamKind::Type,
+            });
+        let selected = selected_ssa_ref(&ssa);
+        let plan = portable_wasm_plan(selected.clone());
+        let result = lower_selected_ssa(&program, &ssa, selected, &plan);
+        assert_eq!(result.status, TransformationStatus::Fail);
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "CGN103"));
     }
 
     #[test]

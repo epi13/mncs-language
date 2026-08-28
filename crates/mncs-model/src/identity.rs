@@ -489,8 +489,7 @@ impl Program {
                 kind: IdentityKind::Instantiation,
                 fingerprint: fingerprint_json(&serde_json::to_string(spec).expect("instantiation")),
             });
-            let hash = crate::canonical::sha256_hex(spec.canonical_args.as_bytes());
-            let spec_id = specialization_id(&spec.generic_function, &hash);
+            let spec_id = specialization_id(&spec.generic_function, &spec.canonical_args);
             objects.push(IdentityRecord {
                 identity: spec_id,
                 kind: IdentityKind::Specialization,

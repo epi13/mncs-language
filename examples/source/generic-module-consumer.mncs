@@ -12,7 +12,7 @@ fn demo_qualified() -> (result: i64) {
     let p1: test.generic.lib.Point = test.generic.lib.Point { x: 1, y: 2 };
     let p2: test.generic.lib.Point = test.generic.lib.Point { x: 3, y: 4 };
     let xs: [test.generic.lib.Point; 2] = [p1, p2];
-    return lib.first<test.generic.lib.Point, 2>(xs).x;
+    return test.generic.lib.first<test.generic.lib.Point, 2>(xs).x;
 }
 fn demo_aliased() -> (result: i64) {
     let p1: test.generic.lib.Point = test.generic.lib.Point { x: 1, y: 2 };

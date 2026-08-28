@@ -21,7 +21,7 @@ use crate::scalar::{
 };
 use crate::support::{
     artifact_ref, empty_execution, execution_failure, function_names, function_value_contracts,
-    unknown, validate_selected_ssa,
+    unknown, validate_realizable_ssa, validate_selected_ssa,
 };
 use crate::{BackendAdapter, BackendExecutionResult};
 
@@ -230,6 +230,9 @@ pub fn lower_cranelift(
     plan: &TargetLoweringPlan,
 ) -> BackendResult {
     if let Err(result) = validate_selected_ssa(ssa, &selected_ssa, "CGF101") {
+        return *result;
+    }
+    if let Err(result) = validate_realizable_ssa(program, ssa, "CGF102") {
         return *result;
     }
     if !target_is_cranelift(&plan.target) {
