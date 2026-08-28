@@ -861,7 +861,16 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
             evidence,
             width,
         } => {
-            emit_clif_sequence_project(out, dest, seq, index, *bound, evidence, *width, names);
+            emit_clif_sequence_project(
+                out,
+                dest,
+                seq,
+                index,
+                bound.clone(),
+                evidence,
+                *width,
+                names,
+            );
         }
         ScalarInst::SequenceLength { dest, bound, seq } => match bound {
             mncs_model::SequenceBound::Exact(length) => {
@@ -878,6 +887,9 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                     names.value(&dest.id),
                     names.value(seq)
                 );
+            }
+            mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                unreachable!("generic SequenceBound must be specialized before backend lowering")
             }
         },
         ScalarInst::ViewConstruct {
@@ -904,6 +916,11 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                     );
                     format!("{d}_sl")
                 }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
+                }
             };
             let base = match source_bound {
                 mncs_model::SequenceBound::Exact(_) => names.value(source).to_owned(),
@@ -914,6 +931,11 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                         names.value(source)
                     );
                     format!("{d}_b32")
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
                 }
             };
             let _ = writeln!(out, "        {d}_gt = icmp ug {start_n}, {end_n}");
@@ -1028,6 +1050,9 @@ fn emit_clif_sequence_project(
             }
             let _ = writeln!(out, "        {d}_base = band {seq_n}, 4294967295");
             let _ = writeln!(out, "        {d}_off = ishl_imm.i64 {idx_n}, 3");
+        }
+        mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+            unreachable!("generic SequenceBound must be specialized before backend lowering")
         }
     }
     if checked {
@@ -2190,7 +2215,8 @@ where
                                         builder.ins().ishl_imm(idx_v, 3),
                                     )
                                 }
-                            };
+                                            mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => unreachable!("generic SequenceBound must be specialized before backend lowering"),
+};
                             let addr = builder.ins().iadd(base, offset);
                             // Slot access goes through the shared libcalls:
                             // addresses are canonical arena offsets, never
@@ -2211,7 +2237,8 @@ where
                                 mncs_model::SequenceBound::UpTo(_) => {
                                     builder.ins().ushr_imm(values[seq], 32)
                                 }
-                            };
+                                            mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => unreachable!("generic SequenceBound must be specialized before backend lowering"),
+};
                             values.insert(dest.id.clone(), produced);
                         }
                         ScalarInst::ViewConstruct {
@@ -2231,7 +2258,8 @@ where
                                 mncs_model::SequenceBound::UpTo(_) => {
                                     builder.ins().ushr_imm(values[source], 32)
                                 }
-                            };
+                                            mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => unreachable!("generic SequenceBound must be specialized before backend lowering"),
+};
                             let span = builder.ins().isub(end_v, start_v);
                             let gt = builder
                                 .ins()
@@ -2260,7 +2288,8 @@ where
                                     let mask = builder.ins().iconst(types::I64, 4_294_967_295);
                                     builder.ins().band(values[source], mask)
                                 }
-                            };
+                                            mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => unreachable!("generic SequenceBound must be specialized before backend lowering"),
+};
                             let scaled = builder.ins().ishl_imm(start_v, 3);
                             let addr = builder.ins().iadd(base, scaled);
                             let lo = builder.ins().band_imm(addr, 4_294_967_295);

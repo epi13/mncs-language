@@ -1,0 +1,3 @@
+mncs 0.10;
+module test.negative.duplicate_param;
+fn foo<T, T>(x: T) -> (result: T) { return x; }

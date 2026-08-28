@@ -1,0 +1,135 @@
+{
+  "schema_version": "0.1",
+  "name": "generic-polymorphism",
+  "cases": [
+    {
+      "id": "demo_repeated",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.generic.polymorphism", "function": "demo_repeated" },
+        "arguments": [],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "demo_different",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.generic.polymorphism", "function": "demo_different" },
+        "arguments": [],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "demo_identity_i64",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.generic.polymorphism", "function": "demo_identity_i64" },
+        "arguments": [],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 42, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "demo_identity_point",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.generic.polymorphism", "function": "demo_identity_point" },
+        "arguments": [],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "record": {
+          "type_identity": "mncs:0.2:record-type:examples.generic.polymorphism::Point::x%3Ai64%3By%3Ai64%3B",
+          "name": "Point",
+          "fields": [
+            ["x", { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } }],
+            ["y", { "integer": { "value": 20, "type": { "bits": 64, "signed": true } } }]
+          ]
+        }
+      }]
+    },
+    {
+      "id": "demo_first_point",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.generic.polymorphism", "function": "demo_first_point" },
+        "arguments": [],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "record": {
+          "type_identity": "mncs:0.2:record-type:examples.generic.polymorphism::Point::x%3Ai64%3By%3Ai64%3B",
+          "name": "Point",
+          "fields": [
+            ["x", { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }],
+            ["y", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }]
+          ]
+        }
+      }]
+    },
+    {
+      "id": "demo_first_i64",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.generic.polymorphism", "function": "demo_first_i64" },
+        "arguments": [],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 10, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "demo_sum4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.generic.polymorphism", "function": "demo_sum4" },
+        "arguments": [],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 10, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "demo_sum8",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.generic.polymorphism", "function": "demo_sum8" },
+        "arguments": [],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 36, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "demo_count_true",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.generic.polymorphism", "function": "demo_count_true" },
+        "arguments": [],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 3, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "demo_any_all",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.generic.polymorphism", "function": "demo_any_all" },
+        "arguments": [],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }]
+    }
+  ],
+  "properties": []
+}

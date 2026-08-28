@@ -919,6 +919,11 @@ fn lower_instruction(
                     body.push(Instr::I32Add);
                     load_element_width(layout, instruction, body)?;
                 }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
+                }
             }
             body.push(Instr::LocalSet(dest));
         }
@@ -933,6 +938,11 @@ fn lower_instruction(
                     body.push(Instr::LocalGet(seq));
                     body.push(Instr::I64Const(32));
                     body.push(Instr::I64ShrU);
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
                 }
             }
             body.push(Instr::LocalSet(dest));
@@ -957,6 +967,11 @@ fn lower_instruction(
                     body.push(Instr::LocalGet(seq));
                     body.push(Instr::I64Const(32));
                     body.push(Instr::I64ShrU);
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
                 }
             };
             // start > end -> trap
@@ -992,6 +1007,11 @@ fn lower_instruction(
                     body.push(Instr::LocalGet(seq));
                     body.push(Instr::I64Const(4_294_967_295));
                     body.push(Instr::I64And);
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
                 }
             }
             body.push(Instr::LocalGet(start));
@@ -2316,10 +2336,19 @@ fn wasm_type(ty: &IrType) -> Result<(ValType, Option<IntegerType>), String> {
                 bound: mncs_model::SequenceBound::UpTo(_),
                 ..
             } => Ok((ValType::I64, None)),
+            BodyType::Sequence {
+                bound: mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_),
+                ..
+            } => {
+                Err("generic SequenceBound must be specialized before backend lowering".to_owned())
+            }
             BodyType::Vector { .. } => Ok((ValType::I32, None)),
             BodyType::Mask { .. } => Ok((ValType::I64, None)),
             BodyType::Named(_) | BodyType::Finite { .. } | BodyType::Record { .. } => {
                 Err(format!("unsupported SSA type {name}"))
+            }
+            BodyType::GenericParam { .. } => {
+                Err("generic type parameter must be specialized before backend lowering".to_owned())
             }
         },
     }

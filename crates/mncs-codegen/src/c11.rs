@@ -936,6 +936,11 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                     );
                     emit_slot_load(out, dest_n, dest.ty, &address, *width);
                 }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
+                }
             }
         }
         ScalarInst::SequenceLength { dest, bound, seq } => {
@@ -951,6 +956,11 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                         c_type(dest.ty),
                         names.value(seq)
                     );
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
                 }
             }
         }
@@ -972,11 +982,21 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 mncs_model::SequenceBound::UpTo(_) => {
                     format!("({} >> 32)", names.value(source))
                 }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
+                }
             };
             let base = match source_bound {
                 mncs_model::SequenceBound::Exact(_) => names.value(source).to_owned(),
                 mncs_model::SequenceBound::UpTo(_) => {
                     format!("(uint64_t)(uint32_t)({})", names.value(source))
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
                 }
             };
             let _ = writeln!(

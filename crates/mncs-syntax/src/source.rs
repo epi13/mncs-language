@@ -13,6 +13,8 @@ pub const SOURCE_PROFILE_VERSION_0_6: &str = "0.6";
 pub const SOURCE_PROFILE_VERSION_0_7: &str = "0.7";
 pub const SOURCE_PROFILE_VERSION_0_8: &str = "0.8";
 pub const SOURCE_PROFILE_VERSION_0_9: &str = "0.9";
+pub const SOURCE_PROFILE_VERSION_0_10: &str = "0.10";
+pub const SOURCE_PROFILE_VERSION_1_0: &str = "1.0";
 
 /// True when the active source profile declares at least `version`. Profile
 /// features are strictly additive, so a numeric comparison replaces the
@@ -505,6 +507,8 @@ pub enum AstExpr {
     },
     Call {
         function: SpannedText,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        generic_args: Vec<AstGenericArg>,
         arguments: Vec<AstExpr>,
         span: SourceSpan,
     },
@@ -682,8 +686,23 @@ pub struct AstEffect {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AstGenericParam {
+    pub name: SpannedText,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<SpannedText>,
+    pub span: SourceSpan,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AstGenericArg {
+    pub text: SpannedText,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AstFunction {
     pub name: SpannedText,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generic_params: Vec<AstGenericParam>,
     pub inputs: Vec<AstParameter>,
     pub outputs: Vec<AstParameter>,
     #[serde(default)]
@@ -1492,6 +1511,7 @@ impl<'a> Parser<'a> {
         let start = self.current_token_index();
         self.expect(TokenKind::FunctionKeyword, "MNP010", "expected 'fn'");
         let name = self.spanned(TokenKind::Identifier, "MNP011", "expected function name");
+        let generic_params = self.generic_params();
         let (input_node, inputs) = self.parameter_list("input");
         self.expect(TokenKind::Arrow, "MNP012", "expected '->' before outputs");
         let (output_node, outputs) = self.parameter_list("output");
@@ -1550,6 +1570,7 @@ impl<'a> Parser<'a> {
         let function = match (name, returned_value) {
             (Some(name), Some(returned_value)) => Some(AstFunction {
                 name,
+                generic_params: generic_params.unwrap_or_default(),
                 inputs,
                 outputs,
                 contracts,
@@ -2132,34 +2153,49 @@ impl<'a> Parser<'a> {
                         span,
                     };
                     self.project_chain(base)
-                } else if self.current_kind() == Some(TokenKind::LeftParen) {
-                    self.cursor += 1;
-                    let mut arguments = Vec::new();
-                    while self.current_kind() != Some(TokenKind::RightParen)
-                        && self.cursor < self.significant.len()
-                    {
-                        arguments.push(self.expression()?);
-                        if self.current_kind() != Some(TokenKind::Comma) {
-                            break;
-                        }
-                        self.cursor += 1;
-                    }
-                    let end = self
-                        .expect(
-                            TokenKind::RightParen,
-                            "MNP066",
-                            "expected ')' after call arguments",
-                        )
-                        .and_then(|index| self.tokens.get(index))
-                        .map_or(name.span, |token| token.span);
-                    let call = AstExpr::Call {
-                        function: name.clone(),
-                        arguments,
-                        span: SourceSpan::covering(&self.envelope.text, name.span, end),
-                    };
-                    self.project_chain(call)
                 } else {
-                    self.project_chain(AstExpr::Name(name))
+                    let generic_args = self.generic_args().unwrap_or_default();
+                    if !generic_args.is_empty() && self.current_kind() != Some(TokenKind::LeftParen)
+                    {
+                        self.error(
+                            "MNP191",
+                            "generic arguments must be followed by a call argument list",
+                            vec![TokenKind::LeftParen],
+                        );
+                    }
+                    if self.current_kind() == Some(TokenKind::LeftParen) {
+                        self.cursor += 1;
+                        let mut arguments = Vec::new();
+                        while self.current_kind() != Some(TokenKind::RightParen)
+                            && self.cursor < self.significant.len()
+                        {
+                            arguments.push(self.expression()?);
+                            if self.current_kind() != Some(TokenKind::Comma) {
+                                break;
+                            }
+                            self.cursor += 1;
+                        }
+                        let end = self
+                            .expect(
+                                TokenKind::RightParen,
+                                "MNP066",
+                                "expected ')' after call arguments",
+                            )
+                            .and_then(|index| self.tokens.get(index))
+                            .map_or(name.span, |token| token.span);
+                        let call = AstExpr::Call {
+                            function: name.clone(),
+                            generic_args,
+                            arguments,
+                            span: SourceSpan::covering(&self.envelope.text, name.span, end),
+                        };
+                        self.project_chain(call)
+                    } else if !generic_args.is_empty() {
+                        // Generic args without call: preserve as name for diagnostics
+                        self.project_chain(AstExpr::Name(name))
+                    } else {
+                        self.project_chain(AstExpr::Name(name))
+                    }
                 };
                 Some(primary_expr)
             }
@@ -2255,8 +2291,58 @@ impl<'a> Parser<'a> {
             text: path_text,
             span: path_span,
         };
+        if segments.len() == 2 && self.at_payload_construct() {
+            self.cursor += 1;
+            let mut fields = Vec::new();
+            while self.current_kind() != Some(TokenKind::RightBrace)
+                && self.cursor < self.significant.len()
+            {
+                let Some(field_name) = self.spanned(
+                    TokenKind::Identifier,
+                    "MNP140",
+                    "expected payload field name",
+                ) else {
+                    break;
+                };
+                self.expect(
+                    TokenKind::Colon,
+                    "MNP141",
+                    "expected ':' after payload field name",
+                );
+                let Some(field_value) = self.expression() else {
+                    break;
+                };
+                fields.push((field_name, field_value));
+                if self.current_kind() != Some(TokenKind::Comma) {
+                    break;
+                }
+                self.cursor += 1;
+            }
+            let end = self
+                .expect(
+                    TokenKind::RightBrace,
+                    "MNP142",
+                    "expected '}' after payload fields",
+                )
+                .and_then(|i| self.tokens.get(i))
+                .map_or(path_span, |t| t.span);
+            return Some(AstExpr::FiniteVariant {
+                type_name: segments[0].clone(),
+                variant: segments[1].clone(),
+                fields,
+                span: SourceSpan::covering(&self.envelope.text, path_span, end),
+            });
+        }
         if self.current_kind() == Some(TokenKind::LeftBrace) && self.at_record_literal() {
             return self.record_literal(path_name);
+        }
+        let qualified_generic_args = self.generic_args().unwrap_or_default();
+        if !qualified_generic_args.is_empty() && self.current_kind() != Some(TokenKind::LeftParen) {
+            self.error(
+                "MNP191",
+                "generic arguments must be followed by a call argument list",
+                vec![TokenKind::LeftParen],
+            );
         }
         if self.current_kind() == Some(TokenKind::LeftParen) {
             self.cursor += 1;
@@ -2280,8 +2366,15 @@ impl<'a> Parser<'a> {
                 .map_or(path_span, |token| token.span);
             return Some(AstExpr::Call {
                 function: path_name,
+                generic_args: qualified_generic_args,
                 arguments,
                 span: SourceSpan::covering(&self.envelope.text, path_span, end),
+            });
+        } else if !qualified_generic_args.is_empty() {
+            // generic args without call: ignore for now, treat as path without args
+            return Some(AstExpr::QualifiedPath {
+                segments,
+                span: path_span,
             });
         }
         if segments.len() == 2 {
@@ -2838,6 +2931,242 @@ impl<'a> Parser<'a> {
         )
     }
 
+    /// Parse an optional generic parameter list `<T, N: Nat, ...>` after a
+    /// function name. Generic polymorphism is gated to Profile 0.10.
+    fn generic_params(&mut self) -> Option<Vec<AstGenericParam>> {
+        if self.current_kind() != Some(TokenKind::Lt) {
+            return None;
+        }
+        if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_10) {
+            self.error(
+                "MNP184",
+                "generic parameters require source profile 0.10 or later",
+                vec![TokenKind::Lt],
+            );
+            return None;
+        }
+        self.cursor += 1;
+        let mut params = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        while self.current_kind() != Some(TokenKind::Gt)
+            && self.current_kind() != Some(TokenKind::Shr)
+            && self.cursor < self.significant.len()
+        {
+            let name = match self.spanned(
+                TokenKind::Identifier,
+                "MNP185",
+                "expected generic parameter name",
+            ) {
+                Some(v) => v,
+                None => break,
+            };
+            if !seen.insert(name.text.clone()) {
+                self.error(
+                    "MNP186",
+                    "duplicate generic parameter name",
+                    vec![TokenKind::Identifier],
+                );
+            }
+            let constraint = if self.current_kind() == Some(TokenKind::Colon) {
+                self.cursor += 1;
+                let constraint = self.spanned(
+                    TokenKind::Identifier,
+                    "MNP187",
+                    "expected generic constraint 'Type' or 'Nat'",
+                );
+                if let Some(c) = &constraint {
+                    if c.text != "Type" && c.text != "Nat" {
+                        self.error(
+                            "MNP187",
+                            "generic constraint must be 'Type' or 'Nat'",
+                            vec![TokenKind::Identifier],
+                        );
+                    }
+                }
+                constraint
+            } else {
+                None
+            };
+            let span = if let Some(c) = &constraint {
+                SourceSpan::covering(&self.envelope.text, name.span, c.span)
+            } else {
+                name.span
+            };
+            params.push(AstGenericParam {
+                name: name.clone(),
+                constraint,
+                span,
+            });
+            if self.current_kind() != Some(TokenKind::Comma) {
+                break;
+            }
+            self.cursor += 1;
+        }
+        // Handle `>>` closing for empty outer? The inner `>>` token is not used here.
+        let close = if self.current_kind() == Some(TokenKind::Shr) {
+            // `>>` contains two `>`; we treat outer generic close as one.
+            // Split handling: leave one `>` for outer context? But for function
+            // params we never have nested, so error if Shr present.
+            self.error(
+                "MNP188",
+                "unexpected '>>' in generic parameter list",
+                vec![TokenKind::Gt],
+            );
+            None
+        } else {
+            self.expect(
+                TokenKind::Gt,
+                "MNP188",
+                "expected '>' after generic parameters",
+            )
+        };
+        if close.is_none() {
+            return Some(params);
+        }
+        Some(params)
+    }
+
+    /// Parse optional generic arguments `<T, 4, ...>` after a callee name
+    /// and before its value argument list. Value arguments are integer
+    /// literals for `Nat` parameters; type arguments are type annotations.
+    fn generic_args(&mut self) -> Option<Vec<AstGenericArg>> {
+        if self.current_kind() != Some(TokenKind::Lt) {
+            return None;
+        }
+        // Only treat `<` as a generic bracket if it is followed by a matching `>` and then `(` (a generic call).
+        // Otherwise `<` is a binary comparison operator, not a generic.
+        {
+            let mut ahead = self.cursor + 1;
+            let mut found_gt = false;
+            let mut gt_pos = None;
+            while ahead < self.significant.len() {
+                let kind = self.tokens[self.significant[ahead]].kind;
+                if kind == TokenKind::Gt {
+                    found_gt = true;
+                    gt_pos = Some(ahead);
+                    break;
+                }
+                if kind == TokenKind::Shr {
+                    // `>>` contains a `>`; treat as found
+                    found_gt = true;
+                    gt_pos = Some(ahead);
+                    break;
+                }
+                if matches!(
+                    kind,
+                    TokenKind::LeftParen
+                        | TokenKind::RightParen
+                        | TokenKind::LeftBrace
+                        | TokenKind::RightBrace
+                        | TokenKind::Semicolon
+                        | TokenKind::Comma
+                ) {
+                    // Stop before hitting a delimiter that would end the generic arg list without a `>`
+                    // For `value < lo {`, after `<` is `lo` then `{`, we would hit `LeftBrace` before `Gt`, so not generic.
+                    if kind == TokenKind::LeftBrace
+                        || kind == TokenKind::RightBrace
+                        || kind == TokenKind::Semicolon
+                    {
+                        break;
+                    }
+                }
+                ahead += 1;
+                if ahead - self.cursor > 32 {
+                    break;
+                }
+            }
+            if !found_gt {
+                return None;
+            }
+            let gt_pos = gt_pos.unwrap();
+            let next_idx = self
+                .significant
+                .get(gt_pos + 1)
+                .and_then(|idx| self.tokens.get(*idx))
+                .map(|t| t.kind);
+            // For `>>`, the `>` is part of `Shr`, but the next after `Shr` should be `(` for a generic call like `foo<bar<Baz>>(...)` with nested.
+            // For our simple `<T>(` or `<4>(`, the `>` is `Gt` and next is `LeftParen`.
+            if next_idx != Some(TokenKind::LeftParen) {
+                // Check if `Gt` was actually `Shr` (`>>`) and the next after `Shr` is `(`?
+                // For `>>`, the `Shr` token is one, and next after it should be `(`.
+                // Our `found_gt` for `Shr` already handles, but we need to check next after `Shr` is `(`.
+                // If not, then `<` is not a generic bracket.
+                return None;
+            }
+        }
+        if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_10) {
+            self.error(
+                "MNP189",
+                "generic arguments require source profile 0.10 or later",
+                vec![TokenKind::Lt],
+            );
+            return None;
+        }
+        let saved = self.cursor;
+        let saved_diags = self.diagnostics.len();
+        self.cursor += 1;
+        let mut args = Vec::new();
+        while self.current_kind() != Some(TokenKind::Gt)
+            && self.current_kind() != Some(TokenKind::Shr)
+            && self.cursor < self.significant.len()
+        {
+            // Generic argument may be a type (including `T` or `[T; N]`) or a
+            // value (literal `4` or Nat-param name `N`). We store raw text
+            // and let elaboration interpret based on the declared param kind.
+            let text = if self.current_kind() == Some(TokenKind::IntegerLiteral) {
+                let lit = self
+                    .spanned(
+                        TokenKind::IntegerLiteral,
+                        "MNP190",
+                        "expected generic argument",
+                    )
+                    .expect("integer literal present");
+                lit
+            } else {
+                let start = self.current_token_index();
+                let ty = match self.type_annotation("MNP190", "expected generic type argument") {
+                    Some(t) => t,
+                    None => break,
+                };
+                let end = self.previous_token_index(start);
+                let _ = end;
+                ty
+            };
+            args.push(AstGenericArg { text });
+            if self.current_kind() != Some(TokenKind::Comma) {
+                break;
+            }
+            self.cursor += 1;
+        }
+        let close = if self.current_kind() == Some(TokenKind::Shr) {
+            self.error(
+                "MNP190",
+                "unexpected '>>' in generic argument list",
+                vec![TokenKind::Gt],
+            );
+            None
+        } else {
+            self.expect(
+                TokenKind::Gt,
+                "MNP190",
+                "expected '>' after generic arguments",
+            )
+        };
+        // Only treat `< ... >` as generic args if it is followed by `(` (a call).
+        // Otherwise `<` is a binary comparison operator, not a generic bracket.
+        let is_generic_call = close.is_some() && self.current_kind() == Some(TokenKind::LeftParen);
+        if !is_generic_call {
+            // Not a generic call: backtrack and treat `<` as binary operator.
+            self.cursor = saved;
+            self.diagnostics.truncate(saved_diags);
+            return None;
+        }
+        if close.is_none() && !args.is_empty() {
+            return Some(args);
+        }
+        Some(args)
+    }
+
     fn qualified_name(&mut self) -> Option<SpannedText> {
         let first = self.name_segment("MNP030", "expected module name")?;
         let mut text = first.text.clone();
@@ -2937,12 +3266,31 @@ impl<'a> Parser<'a> {
                     "MNP164",
                     "expected ',' between vector element type and lane count",
                 );
-                let lanes = self.spanned(
-                    TokenKind::IntegerLiteral,
-                    "MNP165",
-                    "expected a literal vector lane count",
-                )?;
+                let lanes = if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_10)
+                    && self.current_kind() == Some(TokenKind::Identifier)
+                {
+                    self.spanned(
+                        TokenKind::Identifier,
+                        "MNP165",
+                        "expected a literal vector lane count",
+                    )?
+                } else {
+                    self.spanned(
+                        TokenKind::IntegerLiteral,
+                        "MNP165",
+                        "expected a literal vector lane count",
+                    )?
+                };
                 format!("vec<{}, {}>", element.text, lanes.text)
+            } else if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_10)
+                && self.current_kind() == Some(TokenKind::Identifier)
+            {
+                let lanes = self.spanned(
+                    TokenKind::Identifier,
+                    "MNP166",
+                    "expected a literal mask lane count",
+                )?;
+                format!("mask<{}>", lanes.text)
             } else {
                 let lanes = self.spanned(
                     TokenKind::IntegerLiteral,
@@ -2976,12 +3324,32 @@ impl<'a> Parser<'a> {
         );
         let bound_text = if self.current_kind() == Some(TokenKind::UpToKeyword) {
             self.cursor += 1;
-            let capacity = self.spanned(
-                TokenKind::IntegerLiteral,
-                "MNP147",
-                "expected a literal view capacity after 'up_to'",
+            if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_10)
+                && self.current_kind() == Some(TokenKind::Identifier)
+            {
+                let cap = self.spanned(
+                    TokenKind::Identifier,
+                    "MNP147",
+                    "expected a literal view capacity after 'up_to'",
+                )?;
+                format!("up_to {}", cap.text)
+            } else {
+                let capacity = self.spanned(
+                    TokenKind::IntegerLiteral,
+                    "MNP147",
+                    "expected a literal view capacity after 'up_to'",
+                )?;
+                format!("up_to {}", capacity.text)
+            }
+        } else if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_10)
+            && self.current_kind() == Some(TokenKind::Identifier)
+        {
+            let id = self.spanned(
+                TokenKind::Identifier,
+                "MNP148",
+                "expected a literal sequence length or 'up_to M'",
             )?;
-            format!("up_to {}", capacity.text)
+            id.text.clone()
         } else {
             let length = self.spanned(
                 TokenKind::IntegerLiteral,
@@ -3165,6 +3533,8 @@ pub fn source_profile_supported(version: &str) -> bool {
             | SOURCE_PROFILE_VERSION_0_7
             | SOURCE_PROFILE_VERSION_0_8
             | SOURCE_PROFILE_VERSION_0_9
+            | SOURCE_PROFILE_VERSION_0_10
+            | SOURCE_PROFILE_VERSION_1_0
     )
 }
 
@@ -3219,6 +3589,8 @@ fn infer_source_profile(text: &str) -> &'static str {
         !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with("/*")
     });
     match header {
+        Some(line) if line.trim_start().starts_with("mncs 1.0") => SOURCE_PROFILE_VERSION_1_0,
+        Some(line) if line.trim_start().starts_with("mncs 0.10") => SOURCE_PROFILE_VERSION_0_10,
         Some(line) if line.trim_start().starts_with("mncs 0.9") => SOURCE_PROFILE_VERSION_0_9,
         Some(line) if line.trim_start().starts_with("mncs 0.8") => SOURCE_PROFILE_VERSION_0_8,
         Some(line) if line.trim_start().starts_with("mncs 0.7") => SOURCE_PROFILE_VERSION_0_7,

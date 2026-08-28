@@ -21,26 +21,113 @@ pub const MAX_VECTOR_LANES: u32 = 64;
 /// The declared length facts of a bounded sequence type. `Exact` sequences
 /// carry their length statically; `UpTo` views carry a maximum and a runtime
 /// length observation. The bound is part of logical type identity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// Profile 0.10 adds value-parameterized bounds (`Param`) where the length
+/// is a compile-time `Nat` instantiation argument.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SequenceBound {
     Exact(u32),
     UpTo(u32),
+    /// Generic value parameter as exact bound: `[E; N]`
+    Param(String),
+    /// Generic value parameter as view capacity: `[E; up_to N]`
+    UpToParam(String),
 }
 
 impl SequenceBound {
     /// The static ceiling this bound contributes to traversal step counts.
-    pub fn ceiling(self) -> u32 {
+    /// For generic params the ceiling is the profile maximum; instantiation
+    /// will substitute a concrete bound that must respect it.
+    pub fn ceiling(&self) -> u32 {
         match self {
-            Self::Exact(length) | Self::UpTo(length) => length,
+            Self::Exact(length) | Self::UpTo(length) => *length,
+            Self::Param(_) | Self::UpToParam(_) => MAX_SEQUENCE_BOUND,
         }
     }
 
-    pub fn canonical_text(self) -> String {
+    pub fn canonical_text(&self) -> String {
         match self {
             Self::Exact(length) => format!("{length}"),
             Self::UpTo(capacity) => format!("up_to {capacity}"),
+            Self::Param(name) => name.clone(),
+            Self::UpToParam(name) => format!("up_to {name}"),
         }
+    }
+
+    pub fn is_generic(&self) -> bool {
+        matches!(self, Self::Param(_) | Self::UpToParam(_))
+    }
+
+    pub fn generic_param_name(&self) -> Option<&str> {
+        match self {
+            Self::Param(n) | Self::UpToParam(n) => Some(n.as_str()),
+            _ => None,
+        }
+    }
+}
+
+/// The kind of a generic parameter (RFC 0013): type vs value/index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GenericParamKind {
+    Type,
+    Nat,
+}
+
+/// Declaration of a generic parameter. Stored with its declaring function
+/// body; kind distinguishes `T : Type` from `N : Nat`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GenericParam {
+    pub name: String,
+    pub kind: GenericParamKind,
+}
+
+fn is_valid_ident(text: &str) -> bool {
+    !text.is_empty() && {
+        let mut chars = text.chars();
+        chars
+            .next()
+            .map(|c| c == '_' || c.is_alphabetic())
+            .unwrap_or(false)
+            && chars.all(|c| c == '_' || c.is_alphanumeric())
+    }
+}
+
+/// A value substituted for a generic `Nat` parameter or a type substituted
+/// for a generic `Type` parameter (RFC 0013, Profile 0.10). The variant
+/// distinguishes the semantic kind so value/type substitution identity stays
+/// stable across encodings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum GenericArg {
+    Type {
+        ty: BodyType,
+    },
+    Value {
+        value: u32,
+    },
+    /// A value-parameter reference used when a generic caller forwards its
+    /// own `Nat` parameter as a generic argument to another generic.
+    ValueParam {
+        name: String,
+    },
+}
+
+impl GenericArg {
+    pub fn canonical_string(&self) -> String {
+        match self {
+            Self::Type { ty } => format!("type:{}", ty.semantic_name()),
+            Self::Value { value } => format!("value:{value}"),
+            Self::ValueParam { name } => format!("value_param:{name}"),
+        }
+    }
+
+    pub fn is_concrete(&self) -> bool {
+        !matches!(self, Self::ValueParam { .. })
+            && match self {
+                Self::Type { ty } => !matches!(ty, BodyType::GenericParam { .. }),
+                _ => true,
+            }
     }
 }
 
@@ -79,6 +166,11 @@ pub struct FunctionBody {
     pub schema_version: String,
     pub entry: String,
     pub parameters: Vec<BodyParameter>,
+    /// Generic parameters for this function (Profile 0.10). Empty for
+    /// non-generic functions; serialized absent when empty so pre-0.10
+    /// artifacts canonicalize identically.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generic_params: Vec<GenericParam>,
     #[serde(default, skip_serializing_if = "BodyCyclePolicy::is_legacy")]
     pub cycle_policy: BodyCyclePolicy,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -183,6 +275,13 @@ pub enum BodyType {
         identity: SemanticId,
         name: String,
     },
+    /// A generic type parameter reference `T` (Profile 0.10, RFC 0013).
+    /// Carries the parameter name only; resolution knows its declaring
+    /// generic function. Distinct from `Named` so substitution identity is
+    /// precise and aliases cannot accidentally collapse.
+    GenericParam {
+        name: String,
+    },
 }
 
 impl BodyType {
@@ -262,22 +361,33 @@ impl BodyType {
     /// Parse a canonical bounded-sequence spelling `[E; N]` or
     /// `[E; up_to M]`. Only canonical spellings parse; anything else stays
     /// an ordinary named type so downstream diagnostics stay truthful.
+    /// Generic value-parameter bounds `N` / `up_to N` are accepted and
+    /// represented as parameterised bounds.
     fn parse_sequence_name(name: &str) -> Option<Self> {
         let inner = name.strip_prefix('[')?.strip_suffix(']')?;
         let separator = inner.rfind(';')?;
         let (element_text, bound_text) = (inner[..separator].trim(), inner[separator + 1..].trim());
         let bound = if let Some(capacity) = bound_text.strip_prefix("up_to") {
-            let capacity = capacity.trim().parse::<u32>().ok()?;
-            if capacity > MAX_SEQUENCE_BOUND {
+            let cap_text = capacity.trim();
+            if let Ok(capacity) = cap_text.parse::<u32>() {
+                if capacity > MAX_SEQUENCE_BOUND {
+                    return None;
+                }
+                SequenceBound::UpTo(capacity)
+            } else if is_valid_ident(cap_text) {
+                SequenceBound::UpToParam(cap_text.to_owned())
+            } else {
                 return None;
             }
-            SequenceBound::UpTo(capacity)
-        } else {
-            let length = bound_text.parse::<u32>().ok()?;
+        } else if let Ok(length) = bound_text.parse::<u32>() {
             if length > MAX_SEQUENCE_BOUND {
                 return None;
             }
             SequenceBound::Exact(length)
+        } else if is_valid_ident(bound_text) {
+            SequenceBound::Param(bound_text.to_owned())
+        } else {
+            return None;
         };
         if element_text.is_empty() {
             return None;
@@ -331,6 +441,7 @@ impl BodyType {
             Self::Mask { lanes } => format!("mask<{lanes}>"),
             Self::Finite { name, .. } => name.clone(),
             Self::Record { name, .. } => name.clone(),
+            Self::GenericParam { name } => name.clone(),
         }
     }
 
@@ -549,6 +660,12 @@ pub enum BodyOperationKind {
         function_name: String,
         required_capabilities: Vec<String>,
         effects: Vec<Effect>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        generic_args: Vec<GenericArg>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        instantiation: Option<SemanticId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        specialization: Option<SemanticId>,
     },
     Effect {
         effect: Effect,
@@ -700,9 +817,9 @@ impl FunctionBody {
                 ));
             }
             if let Some(input) = function.inputs.get(index) {
-                if parameter.name != input.name
-                    || parameter.ty != semantic_body_type(program, &input.value_type)
-                {
+                let expected_ty =
+                    body_type_for_function_value(program, function, &input.value_type);
+                if parameter.name != input.name || parameter.ty != expected_ty {
                     errors.push(body_diagnostic(
                         "MNB005",
                         path,
@@ -1431,7 +1548,7 @@ fn validate_operation(
                     .first()
                     .map(|result| Box::new(result.ty.clone()))
                     .unwrap_or_else(|| Box::new(BodyType::Named("invalid".to_owned()))),
-                bound: *bound,
+                bound: bound.clone(),
             };
             if available.get(operation.operands.first().unwrap_or(&String::new()))
                 != Some(&expected_sequence)
@@ -1533,7 +1650,7 @@ fn validate_operation(
             }
             let expected_sequence = BodyType::Sequence {
                 element: element_type.clone(),
-                bound: *bound,
+                bound: bound.clone(),
             };
             if available.get(operation.operands.first().unwrap_or(&String::new()))
                 != Some(&expected_sequence)
@@ -1873,7 +1990,7 @@ fn validate_operation(
                     Some(BodyType::Sequence { element, .. }) => element.clone(),
                     _ => Box::new(BodyType::Named("invalid".to_owned())),
                 },
-                bound: *view_bound,
+                bound: view_bound.clone(),
             };
             let source_matches = matches!(
                 available.get(operation.operands.first().unwrap_or(&String::new())),
@@ -2252,6 +2369,8 @@ fn validate_operation(
             function_name,
             required_capabilities,
             effects,
+            generic_args,
+            ..
         } => {
             // Call targets may live in this program's own namespace or in any
             // bound dependency namespace; identities stay anchored to the
@@ -2273,6 +2392,79 @@ fn validate_operation(
                 validate_metadata(program, function, operation, path, errors);
                 return;
             };
+            // Generic call validation: substitution for callee's generic params
+            let is_generic_callee = !callee.generic_params.is_empty();
+            if is_generic_callee && generic_args.is_empty() {
+                errors.push(body_diagnostic(
+                    "MNB075",
+                    format!("{path}.kind.generic_args"),
+                    "generic function requires explicit type/value arguments; unresolved generic call must not reach backend lowering",
+                ));
+            } else if !is_generic_callee && !generic_args.is_empty() {
+                errors.push(body_diagnostic(
+                    "MNB076",
+                    format!("{path}.kind.generic_args"),
+                    "non-generic function cannot be called with generic arguments",
+                ));
+            }
+            // Helper to compute expected callee parameter/output types after generic substitution
+            let expected_callee_input = |idx: usize| -> BodyType {
+                let param = &callee.inputs[idx];
+                let base = body_type_for_function_value(program, callee, &param.value_type);
+                if generic_args.is_empty() {
+                    return base;
+                }
+                // Build substitution maps from callee generic params and call args
+                let mut type_map: std::collections::BTreeMap<String, BodyType> =
+                    std::collections::BTreeMap::new();
+                let mut value_concrete: std::collections::BTreeMap<String, u32> =
+                    std::collections::BTreeMap::new();
+                let mut value_param_map: std::collections::BTreeMap<String, String> =
+                    std::collections::BTreeMap::new();
+                for (gp, arg) in callee.generic_params.iter().zip(generic_args.iter()) {
+                    match (&gp.kind, arg) {
+                        (GenericParamKind::Type, GenericArg::Type { ty }) => {
+                            type_map.insert(gp.name.clone(), ty.clone());
+                        }
+                        (GenericParamKind::Nat, GenericArg::Value { value }) => {
+                            value_concrete.insert(gp.name.clone(), *value);
+                        }
+                        (GenericParamKind::Nat, GenericArg::ValueParam { name }) => {
+                            value_param_map.insert(gp.name.clone(), name.clone());
+                        }
+                        _ => {}
+                    }
+                }
+                substitute_body_type_for_call(base, &type_map, &value_concrete, &value_param_map)
+            };
+            let expected_callee_output = |idx: usize| -> BodyType {
+                let out = &callee.outputs[idx];
+                let base = body_type_for_function_value(program, callee, &out.value_type);
+                if generic_args.is_empty() {
+                    return base;
+                }
+                let mut type_map: std::collections::BTreeMap<String, BodyType> =
+                    std::collections::BTreeMap::new();
+                let mut value_concrete: std::collections::BTreeMap<String, u32> =
+                    std::collections::BTreeMap::new();
+                let mut value_param_map: std::collections::BTreeMap<String, String> =
+                    std::collections::BTreeMap::new();
+                for (gp, arg) in callee.generic_params.iter().zip(generic_args.iter()) {
+                    match (&gp.kind, arg) {
+                        (GenericParamKind::Type, GenericArg::Type { ty }) => {
+                            type_map.insert(gp.name.clone(), ty.clone());
+                        }
+                        (GenericParamKind::Nat, GenericArg::Value { value }) => {
+                            value_concrete.insert(gp.name.clone(), *value);
+                        }
+                        (GenericParamKind::Nat, GenericArg::ValueParam { name }) => {
+                            value_param_map.insert(gp.name.clone(), name.clone());
+                        }
+                        _ => {}
+                    }
+                }
+                substitute_body_type_for_call(base, &type_map, &value_concrete, &value_param_map)
+            };
             if operation.operands.len() != callee.inputs.len()
                 || operation.results.len() != callee.outputs.len()
             {
@@ -2282,10 +2474,11 @@ fn validate_operation(
                     "call arity does not match the callee signature",
                 ));
             }
-            for (operand, parameter) in operation.operands.iter().zip(&callee.inputs) {
-                if available.get(operand)
-                    != Some(&semantic_body_type(program, &parameter.value_type))
-                {
+            for (idx, (operand, _parameter)) in
+                operation.operands.iter().zip(&callee.inputs).enumerate()
+            {
+                let expected = expected_callee_input(idx);
+                if available.get(operand) != Some(&expected) {
                     errors.push(body_diagnostic(
                         "MNB051",
                         format!("{path}.operands"),
@@ -2293,8 +2486,11 @@ fn validate_operation(
                     ));
                 }
             }
-            for (result, output) in operation.results.iter().zip(&callee.outputs) {
-                if result.ty != semantic_body_type(program, &output.value_type) {
+            for (idx, (result, _output)) in
+                operation.results.iter().zip(&callee.outputs).enumerate()
+            {
+                let expected = expected_callee_output(idx);
+                if result.ty != expected {
                     errors.push(body_diagnostic(
                         "MNB052",
                         format!("{path}.results"),
@@ -2621,7 +2817,8 @@ fn validate_return_types(
         return;
     }
     for (index, value) in values.iter().enumerate() {
-        let expected = semantic_body_type(program, &function.outputs[index].value_type);
+        let expected =
+            body_type_for_function_value(program, function, &function.outputs[index].value_type);
         if available.get(value) != Some(&expected) {
             errors.push(body_diagnostic(
                 "MNB036",
@@ -2663,6 +2860,164 @@ fn semantic_sequence_type(program: &Program, name: &str) -> Option<BodyType> {
 /// Resolve a declared record field's semantic body type at validation time.
 fn semantic_record_field_type(program: &Program, field: &crate::core::RecordField) -> BodyType {
     semantic_body_type(program, &field.field_type)
+}
+
+fn body_type_for_function_value(
+    program: &Program,
+    function: &Function,
+    value_type: &str,
+) -> BodyType {
+    if let Some(gp) = function
+        .generic_params
+        .iter()
+        .find(|p| p.name == value_type && p.kind == GenericParamKind::Type)
+    {
+        return BodyType::GenericParam {
+            name: gp.name.clone(),
+        };
+    }
+    if value_type.trim_start().starts_with('[') {
+        let base = BodyType::from_program(program, value_type);
+        // from_program for "[Point; N]" where Point is a record and N is a value param
+        // will return Sequence with Named("Point") and Param("N") because
+        // semantic_sequence_type doesn't handle Param bounds. So we need to
+        // handle generic case via from_semantic_name fallback.
+        let base = if let BodyType::Sequence { .. } = base {
+            base
+        } else {
+            // Try generic-aware parsing for "[T; N]" where T is a type param
+            let alt = BodyType::from_semantic_name(value_type);
+            if let BodyType::Sequence { element, bound } = alt {
+                // Check if element is a generic param or a record that from_semantic_name left as Named
+                BodyType::Sequence { element, bound }
+            } else {
+                alt
+            }
+        };
+        if let BodyType::Sequence { element, bound } = base {
+            let new_element = match *element {
+                BodyType::Named(n)
+                    if function
+                        .generic_params
+                        .iter()
+                        .any(|p| p.name == n && p.kind == GenericParamKind::Type) =>
+                {
+                    Box::new(BodyType::GenericParam { name: n })
+                }
+                BodyType::Named(n) => {
+                    if let Some(rec) = program.record_types.iter().find(|r| r.name == n) {
+                        Box::new(BodyType::Record {
+                            identity: rec.identity.clone(),
+                            name: rec.name.clone(),
+                        })
+                    } else if let Some(fin) = program.finite_types.iter().find(|f| f.name == n) {
+                        Box::new(BodyType::Finite {
+                            identity: fin.identity.clone(),
+                            name: fin.name.clone(),
+                        })
+                    } else {
+                        Box::new(BodyType::Named(n))
+                    }
+                }
+                other => Box::new(other),
+            };
+            // Validate bound param kind if generic
+            if let Some(param_name) = bound.generic_param_name() {
+                if !function
+                    .generic_params
+                    .iter()
+                    .any(|p| p.name == param_name && p.kind == GenericParamKind::Nat)
+                {
+                    // Let validation error be emitted elsewhere; keep bound as is
+                }
+            }
+            return BodyType::Sequence {
+                element: new_element,
+                bound,
+            };
+        }
+        // If from_program didn't return a Sequence (e.g., for generic [T; N] where T is generic, from_program returns Named("T") not Record, but still Sequence with Named("T"))
+        // Fall through to generic handling already done via from_program's Named("T") case, but we already handled generic element above.
+        // For safety, try from_semantic_name as fallback for generic bounds.
+        let parsed = BodyType::from_semantic_name(value_type);
+        if let BodyType::Sequence { element, bound } = parsed {
+            let new_element = match *element {
+                BodyType::Named(n)
+                    if function
+                        .generic_params
+                        .iter()
+                        .any(|p| p.name == n && p.kind == GenericParamKind::Type) =>
+                {
+                    Box::new(BodyType::GenericParam { name: n })
+                }
+                other => Box::new(other),
+            };
+            return BodyType::Sequence {
+                element: new_element,
+                bound,
+            };
+        }
+    }
+    // For non-generic or generic param used as value type error will be caught elsewhere
+    semantic_body_type(program, value_type)
+}
+
+fn substitute_body_type_for_call(
+    ty: BodyType,
+    type_map: &std::collections::BTreeMap<String, BodyType>,
+    value_concrete: &std::collections::BTreeMap<String, u32>,
+    value_param_map: &std::collections::BTreeMap<String, String>,
+) -> BodyType {
+    match ty {
+        BodyType::GenericParam { name } => type_map
+            .get(&name)
+            .cloned()
+            .unwrap_or(BodyType::GenericParam { name }),
+        BodyType::Sequence { element, bound } => {
+            let new_elem = Box::new(substitute_body_type_for_call(
+                *element,
+                type_map,
+                value_concrete,
+                value_param_map,
+            ));
+            let new_bound = match bound {
+                SequenceBound::Exact(v) => SequenceBound::Exact(v),
+                SequenceBound::UpTo(v) => SequenceBound::UpTo(v),
+                SequenceBound::Param(n) => {
+                    if let Some(v) = value_concrete.get(&n) {
+                        SequenceBound::Exact(*v)
+                    } else if let Some(caller) = value_param_map.get(&n) {
+                        SequenceBound::Param(caller.clone())
+                    } else {
+                        SequenceBound::Param(n)
+                    }
+                }
+                SequenceBound::UpToParam(n) => {
+                    if let Some(v) = value_concrete.get(&n) {
+                        SequenceBound::UpTo(*v)
+                    } else if let Some(caller) = value_param_map.get(&n) {
+                        SequenceBound::UpToParam(caller.clone())
+                    } else {
+                        SequenceBound::UpToParam(n)
+                    }
+                }
+            };
+            BodyType::Sequence {
+                element: new_elem,
+                bound: new_bound,
+            }
+        }
+        BodyType::Vector { element, lanes } => BodyType::Vector {
+            element: Box::new(substitute_body_type_for_call(
+                *element,
+                type_map,
+                value_concrete,
+                value_param_map,
+            )),
+            lanes,
+        },
+        other => other,
+    }
 }
 
 fn validate_byte_operands(
@@ -2757,6 +3112,7 @@ pub(crate) mod tests {
                     signed: true,
                 }),
             }],
+            generic_params: Vec::new(),
             cycle_policy: BodyCyclePolicy::Legacy,
             bounded_iterations: Vec::new(),
             blocks: vec![BodyBlock {

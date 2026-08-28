@@ -1,4 +1,4 @@
-mncs 0.8;
+mncs 0.10;
 
 // mncs.core.geometry — typed spatial primitives for machine-native layout.
 //
@@ -241,23 +241,39 @@ fn rect_from_point_size(p: Point, s: Size) -> (result: Rect) {
     return Rect { origin: p, size: s };
 }
 
-// Sequence-typed spatial helpers. A window of points or rects is a
+// Sequence-typed spatial helpers are now generic over the bound `N: Nat`
+// (Profile 0.10, RFC 0013). The authoritative primitives are
+// `first_point<N>`, `contains_any<N>`, `union<N>`; the legacy `*4`
+// wrappers remain for compatibility. A window of points or rects is a
 // language-level `[Record; N]` value, not four scalar wrappers.
-fn first_point4(points: [Point; 4]) -> (result: Point) {
+fn first_point<N: Nat>(points: [Point; N]) -> (result: Point) {
     return points[0];
 }
 
-fn contains_any4(rects: [Rect; 4], p: Point) -> (result: bool) {
+fn contains_any<N: Nat>(rects: [Rect; N], p: Point) -> (result: bool) {
     iterate i over rects carrying hit: bool = false {
         next hit = hit || rect_contains_point(rects[i], p);
     }
     return hit;
 }
 
+fn union<N: Nat>(rects: [Rect; N]) -> (result: Rect) {
+    iterate i over rects carrying acc: Rect = rects[0] {
+        next acc = rect_union(acc, rects[i]);
+    }
+    return acc;
+}
+
+fn first_point4(points: [Point; 4]) -> (result: Point) {
+    return first_point<4>(points);
+}
+
+fn contains_any4(rects: [Rect; 4], p: Point) -> (result: bool) {
+    return contains_any<4>(rects, p);
+}
+
 fn union4(rects: [Rect; 4]) -> (result: Rect) {
-    let a: Rect = rect_union(rects[0], rects[1]);
-    let b: Rect = rect_union(rects[2], rects[3]);
-    return rect_union(a, b);
+    return union<4>(rects);
 }
 
 fn rect_center(r: Rect) -> (result: Point) {

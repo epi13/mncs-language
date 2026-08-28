@@ -55,6 +55,9 @@ pub enum IdentityKind {
     Scope,
     Binding,
     Reference,
+    GenericParam,
+    Instantiation,
+    Specialization,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -431,6 +434,16 @@ impl Program {
                     }
                 }
             }
+            for param in &function.generic_params {
+                let param_id = generic_param_id(namespace, &function.name, &param.name);
+                objects.push(IdentityRecord {
+                    identity: param_id,
+                    kind: IdentityKind::GenericParam,
+                    fingerprint: fingerprint_json(
+                        &serde_json::to_string(param).expect("generic param"),
+                    ),
+                });
+            }
             for contract in &function.contracts {
                 objects.push(IdentityRecord {
                     identity: contract_id(namespace, &function.name, &contract.id),
@@ -469,6 +482,22 @@ impl Program {
                 });
                 *occurrence += 1;
             }
+        }
+        for spec in &self.generic_specializations {
+            objects.push(IdentityRecord {
+                identity: spec.instantiation.clone(),
+                kind: IdentityKind::Instantiation,
+                fingerprint: fingerprint_json(&serde_json::to_string(spec).expect("instantiation")),
+            });
+            let hash = crate::canonical::sha256_hex(spec.canonical_args.as_bytes());
+            let spec_id = specialization_id(&spec.generic_function, &hash);
+            objects.push(IdentityRecord {
+                identity: spec_id,
+                kind: IdentityKind::Specialization,
+                fingerprint: fingerprint_json(
+                    &serde_json::to_string(spec).expect("specialization"),
+                ),
+            });
         }
         if let Some(table) = &self.binding_table {
             for namespace in &table.namespaces {
@@ -613,6 +642,24 @@ pub fn function_id(module: &str, function: &str) -> SemanticId {
     make_id(IdentityKind::Function, &[module, function])
 }
 
+pub fn generic_param_id(module: &str, function: &str, param: &str) -> SemanticId {
+    make_id(IdentityKind::GenericParam, &[module, function, param])
+}
+
+pub fn instantiation_id(generic_function: &SemanticId, canonical_args: &str) -> SemanticId {
+    make_id(
+        IdentityKind::Instantiation,
+        &[generic_function.as_str(), canonical_args],
+    )
+}
+
+pub fn specialization_id(generic_function: &SemanticId, canonical_args: &str) -> SemanticId {
+    make_id(
+        IdentityKind::Specialization,
+        &[generic_function.as_str(), canonical_args],
+    )
+}
+
 /// Public contract identity: `mncs:0.2:contract:<module>::<function>::<id>`.
 /// Generally useful for tools that must reference contract clauses without
 /// re-deriving identity rules.
@@ -728,6 +775,9 @@ fn make_id(kind: IdentityKind, components: &[&str]) -> SemanticId {
         IdentityKind::Scope => "scope",
         IdentityKind::Binding => "binding",
         IdentityKind::Reference => "reference",
+        IdentityKind::GenericParam => "generic-param",
+        IdentityKind::Instantiation => "instantiation",
+        IdentityKind::Specialization => "specialization",
     };
     SemanticId(format!(
         "mncs:0.2:{prefix}:{}",

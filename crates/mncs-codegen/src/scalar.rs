@@ -558,13 +558,13 @@ fn lower_instruction(
                 dest,
                 seq: operand(instruction, 0)?,
                 index: operand(instruction, 1)?,
-                bound: *bound,
+                bound: bound.clone(),
                 evidence: evidence.clone(),
                 width: slot_width_of(element_ty),
             })
         }
         SsaInstructionKind::SequenceLength { bound } => Ok(ScalarInst::SequenceLength {
-            bound: *bound,
+            bound: bound.clone(),
             dest,
             seq: operand(instruction, 0)?,
         }),
@@ -610,7 +610,7 @@ fn lower_instruction(
                 source: operand(instruction, 0)?,
                 index: operand(instruction, 1)?,
                 element: operand(instruction, 2)?,
-                bound: *bound,
+                bound: bound.clone(),
                 evidence: evidence.clone(),
                 length: *length,
                 element_width: width,
@@ -625,10 +625,15 @@ fn lower_instruction(
                 mncs_model::SequenceBound::Exact(_) => {
                     return Err("view construction must produce an UpTo view".to_owned())
                 }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
+                }
             };
             Ok(ScalarInst::ViewConstruct {
                 dest,
-                source_bound: *source_bound,
+                source_bound: source_bound.clone(),
                 view_cap: cap,
                 source: operand(instruction, 0)?,
                 start: operand(instruction, 1)?,

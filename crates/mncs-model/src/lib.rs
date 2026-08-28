@@ -15,6 +15,7 @@ mod delta;
 mod evidence;
 mod execution;
 mod experiment;
+pub mod generics;
 mod graph;
 mod identity;
 mod ir;
@@ -36,10 +37,12 @@ pub use bindings::{
 pub use body::{
     BodyBlock, BodyBoundedIteration, BodyCyclePolicy, BodyOperation, BodyOperationKind,
     BodyParameter, BodyTerminator, BodyType, BodyValue, BoundedIterationCompletion, BoundsEvidence,
-    FunctionBody, IterationDomain, LoweringEnvelope, MachineIntentSpec, PortabilityEnvelope,
-    PortabilityTarget, RealizationClass, SequenceBound, EXECUTABLE_BODY_SCHEMA_VERSION,
-    MAX_SEQUENCE_BOUND, MAX_VECTOR_LANES, SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
+    FunctionBody, GenericArg, GenericParam, GenericParamKind, IterationDomain, LoweringEnvelope,
+    MachineIntentSpec, PortabilityEnvelope, PortabilityTarget, RealizationClass, SequenceBound,
+    EXECUTABLE_BODY_SCHEMA_VERSION, MAX_SEQUENCE_BOUND, MAX_VECTOR_LANES,
+    SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
 };
+pub use canonical::sha256_hex;
 pub use canonical::{CanonicalError, CanonicalForm, CANONICAL_SCHEMA_VERSION};
 pub use cfg::{Cfg, CfgBlock, CFG_SCHEMA_VERSION};
 pub use compiler::{
@@ -67,8 +70,8 @@ pub use compiler_architecture::{
 };
 pub use core::{
     Assumption, AssumptionConfidence, ContractClause, ContractKind, Effect, EvidenceClaim,
-    EvidenceStatus, FailureMode, FiniteType, FiniteVariant, Function, ParseError, Program,
-    RecordField, RecordType, Value, SUPPORTED_SCHEMA_VERSION,
+    EvidenceStatus, FailureMode, FiniteType, FiniteVariant, Function, GenericSpecializationRecord,
+    ParseError, Program, RecordField, RecordType, Value, SUPPORTED_SCHEMA_VERSION,
 };
 pub use delta::{AuthorityDelta, EvidenceDelta, FailureChange, SemanticChangeSet, SemanticDelta};
 pub use evidence::{
@@ -98,8 +101,9 @@ pub use graph::{
 };
 pub use identity::{
     binding_id, binding_id_for, contract_id, finite_type_id, finite_variant_id, function_id,
-    module_id, record_field_id, record_type_id, reference_id, scope_id, IdentityChange,
-    IdentityKind, IdentityRecord, SemanticDiff, SemanticId, SemanticIdentities,
+    generic_param_id, instantiation_id, module_id, record_field_id, record_type_id, reference_id,
+    scope_id, specialization_id, IdentityChange, IdentityKind, IdentityRecord, SemanticDiff,
+    SemanticId, SemanticIdentities,
 };
 pub use ir::{
     CapabilityUse, FailurePathKind, HighLevelIr, IrBlock, IrBoundedIteration, IrError, IrFunction,

@@ -340,6 +340,8 @@ pub struct HighLevelIr {
     pub obligations: Vec<ObligationRecord>,
     pub trace: TraceMap,
     pub transformations: Vec<TransformationRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generic_specializations: Vec<crate::GenericSpecializationRecord>,
 }
 
 #[derive(Debug, Error)]
@@ -393,6 +395,11 @@ impl Program {
         let mut semantic_functions = self.functions.iter().collect::<Vec<_>>();
         semantic_functions.sort_by(|left, right| left.name.cmp(&right.name));
         for function in semantic_functions {
+            if !function.generic_params.is_empty() {
+                // Generic definitions are elaborated to specializations before lowering;
+                // the generic template itself is not directly lowered.
+                continue;
+            }
             let namespace = function.identity_namespace(&self.module);
             if let Some(body) = &function.body {
                 let (lowered, regions, body_transformations) = lower_executable_body(
@@ -687,6 +694,7 @@ impl Program {
             obligations,
             trace,
             transformations,
+            generic_specializations: self.generic_specializations.clone(),
         })
     }
 }
@@ -942,7 +950,7 @@ fn lower_executable_body(
                 } => (
                     IrOperationKind::SequenceReplace {
                         element_type: element_type.clone(),
-                        bound: *bound,
+                        bound: bound.clone(),
                         evidence: evidence.clone(),
                     },
                     Vec::new(),
@@ -1107,7 +1115,7 @@ fn lower_executable_body(
                 ),
                 BodyOperationKind::SequenceProject { bound, evidence } => (
                     IrOperationKind::SequenceProject {
-                        bound: *bound,
+                        bound: bound.clone(),
                         evidence: evidence.clone(),
                     },
                     Vec::new(),
@@ -1116,7 +1124,9 @@ fn lower_executable_body(
                     None,
                 ),
                 BodyOperationKind::SequenceLength { bound } => (
-                    IrOperationKind::SequenceLength { bound: *bound },
+                    IrOperationKind::SequenceLength {
+                        bound: bound.clone(),
+                    },
                     Vec::new(),
                     Vec::new(),
                     None,
@@ -1127,8 +1137,8 @@ fn lower_executable_body(
                     view_bound,
                 } => (
                     IrOperationKind::ViewConstruct {
-                        source_bound: *source_bound,
-                        view_bound: *view_bound,
+                        source_bound: source_bound.clone(),
+                        view_bound: view_bound.clone(),
                     },
                     Vec::new(),
                     Vec::new(),
@@ -1215,6 +1225,7 @@ fn lower_executable_body(
                     function_name,
                     required_capabilities,
                     effects,
+                    ..
                 } => {
                     let callee = program
                         .functions

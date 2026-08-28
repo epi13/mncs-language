@@ -97,6 +97,17 @@ Language-owned experiment and compiler-study records emit producer-native Family
    complete design; this run does not fake generic support. Native SIMD
    selection and executable RISC-V/eBPF/PTX remain later work.
 
+1. **Implemented / exercised (experimental):** Source Profile 0.10 explicit polymorphism (RFC 0013 Track 1 + Track 12).
+   Explicit generic parameters (`<T>`, `<N: Nat>`) on functions; generic calls with explicit arguments (`f<4>`, `f<Point, 4>`);
+   deterministic monomorphization with canonical instantiation/specialization identity and call-site rewriting;
+   provenance tracked through HIR/SSA/selected-SSA; generic specializations recorded in program/HIR/SSA artifacts.
+   Stdlib arity-specific families (`contains4`, `sum4`, `min4`, `max4`, `count4`, `contains_byte4`, `count_nonzero4`,
+   `count_true4`, `any_true4`, `all_true4`) delegate to N-parameterized generics (`contains<N>`, `sum<N>`, `min<N>`,
+   `max<N>`, `count<N>`, `contains_byte<N>`, `count_nonzero<N>`, `count_true<N>`, `any_true<N>`, `all_true<N>`).
+   Geometry stdlib sequence helpers generalized (`first_point<N>`, `contains_any<N>`, `union<N>`) with `*4` wrappers delegating.
+   Five executable backends agree on generic specialization corpus. Negative diagnostics cover missing/mismatched
+   args, kind errors, non-constant args, bound errors, recursion, and unsupported features.
+
 1. ~~Logical product/record values as Source Profile 0.5~~ — **implemented (experimental)** as of
    2026-08-23: nominal records with canonical field identity, construction, functional update,
    projection; differential agreement demonstrated across WASM (forwarding realization) and

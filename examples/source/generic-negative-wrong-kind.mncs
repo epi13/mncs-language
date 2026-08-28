@@ -1,0 +1,7 @@
+mncs 0.10;
+module test.negative.wrong_kind;
+fn foo<N: Nat>(xs: [i64; N]) -> (result: i64) { return xs[0]; }
+fn demo() -> (result: i64) {
+    let xs: [i64; 4] = [1, 2, 3, 4];
+    return foo<i64>(xs);
+}

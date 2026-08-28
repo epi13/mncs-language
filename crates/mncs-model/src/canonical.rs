@@ -50,7 +50,7 @@ impl Program {
     }
 }
 
-pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+pub fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     let mut hex = String::with_capacity(digest.len() * 2);
     for byte in digest {
@@ -122,6 +122,25 @@ fn canonical_program(program: &Program) -> JsonValue {
             ));
         }
     }
+    if !program.generic_specializations.is_empty() {
+        let mut specs = program.generic_specializations.clone();
+        specs.sort_by(|a, b| {
+            (
+                &a.generic_function,
+                &a.specialization_function,
+                &a.canonical_args,
+            )
+                .cmp(&(
+                    &b.generic_function,
+                    &b.specialization_function,
+                    &b.canonical_args,
+                ))
+        });
+        fields.push((
+            "generic_specializations",
+            serde_json::to_value(specs).expect("generic specializations are serializable"),
+        ));
+    }
     object(fields)
 }
 
@@ -180,6 +199,32 @@ pub(crate) fn canonical_function(function: &Function) -> JsonValue {
             JsonValue::Array(function.outputs.iter().map(canonical_value).collect()),
         ),
     ]);
+    if !function.generic_params.is_empty() {
+        if let JsonValue::Object(fields) = &mut result {
+            let mut params = function.generic_params.clone();
+            params.sort_by(|a, b| a.name.cmp(&b.name));
+            fields.insert(
+                "generic_params".to_owned(),
+                JsonValue::Array(
+                    params
+                        .into_iter()
+                        .map(|p| {
+                            object([
+                                ("name", JsonValue::String(p.name)),
+                                (
+                                    "kind",
+                                    JsonValue::String(match p.kind {
+                                        crate::GenericParamKind::Type => "type".to_owned(),
+                                        crate::GenericParamKind::Nat => "nat".to_owned(),
+                                    }),
+                                ),
+                            ])
+                        })
+                        .collect(),
+                ),
+            );
+        }
+    }
     if let Some(body) = &function.body {
         if let JsonValue::Object(fields) = &mut result {
             fields.insert(
@@ -453,6 +498,7 @@ mod tests {
             functions: vec![Function {
                 home_module: None,
                 name: "f".to_owned(),
+                generic_params: Vec::new(),
                 inputs: vec![],
                 outputs: vec![],
                 contracts: vec![ContractClause {
@@ -467,6 +513,7 @@ mod tests {
                 failure: FailureMode::default(),
                 body: None,
             }],
+            generic_specializations: Vec::new(),
         }
     }
 

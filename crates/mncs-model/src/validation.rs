@@ -371,8 +371,10 @@ pub(crate) mod tests {
                 confidence: AssumptionConfidence::External,
             }],
             binding_table: None,
+            generic_specializations: Vec::new(),
             functions: vec![Function {
                 home_module: None,
+                generic_params: Vec::new(),
                 name: "transfer".to_owned(),
                 inputs: vec![Value {
                     name: "amount".to_owned(),

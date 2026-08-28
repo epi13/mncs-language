@@ -1,0 +1,3 @@
+mncs 0.10;
+module test.negative.higher_kinded;
+fn foo<F: Type -> Type>(x: i64) -> (result: i64) { return x; }

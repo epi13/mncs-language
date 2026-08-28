@@ -306,6 +306,8 @@ pub struct SsaModule {
     pub obligations: Vec<ObligationRecord>,
     pub trace: SsaTraceMap,
     pub transformations: Vec<TransformationRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generic_specializations: Vec<crate::GenericSpecializationRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -504,6 +506,10 @@ impl Program {
         let mut semantic_functions = self.functions.iter().collect::<Vec<_>>();
         semantic_functions.sort_by(|left, right| left.name.cmp(&right.name));
         for function in semantic_functions {
+            if !function.generic_params.is_empty() {
+                // Generic templates are not directly lowered; their specializations are concrete functions.
+                continue;
+            }
             let semantic_function =
                 function_id(function.identity_namespace(&self.module), &function.name);
             let Some(body) = &function.body else {
@@ -604,6 +610,7 @@ impl Program {
                 entries: trace_entries.into_values().collect(),
             },
             transformations,
+            generic_specializations: ir.generic_specializations.clone(),
         };
         let validation = module.validate();
         if validation.valid {
@@ -1484,7 +1491,7 @@ fn ssa_kind(kind: &IrOperationKind) -> SsaInstructionKind {
             evidence,
         } => SsaInstructionKind::SequenceReplace {
             element_type: element_type.as_ref().clone(),
-            bound: *bound,
+            bound: bound.clone(),
             evidence: evidence.clone(),
         },
         IrOperationKind::VectorConstruct {
@@ -1572,19 +1579,19 @@ fn ssa_kind(kind: &IrOperationKind) -> SsaInstructionKind {
         },
         IrOperationKind::SequenceProject { bound, evidence } => {
             SsaInstructionKind::SequenceProject {
-                bound: *bound,
+                bound: bound.clone(),
                 evidence: evidence.clone(),
             }
         }
-        IrOperationKind::SequenceLength { bound } => {
-            SsaInstructionKind::SequenceLength { bound: *bound }
-        }
+        IrOperationKind::SequenceLength { bound } => SsaInstructionKind::SequenceLength {
+            bound: bound.clone(),
+        },
         IrOperationKind::ViewConstruct {
             source_bound,
             view_bound,
         } => SsaInstructionKind::ViewConstruct {
-            source_bound: *source_bound,
-            view_bound: *view_bound,
+            source_bound: source_bound.clone(),
+            view_bound: view_bound.clone(),
         },
         IrOperationKind::RecordConstruct {
             type_identity,
@@ -1695,7 +1702,7 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
             evidence,
         } => SsaInstructionKind::SequenceReplace {
             element_type: element_type.as_ref().clone(),
-            bound: *bound,
+            bound: bound.clone(),
             evidence: evidence.clone(),
         },
         BodyOperationKind::VectorConstruct {
@@ -1783,19 +1790,19 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
         },
         BodyOperationKind::SequenceProject { bound, evidence } => {
             SsaInstructionKind::SequenceProject {
-                bound: *bound,
+                bound: bound.clone(),
                 evidence: evidence.clone(),
             }
         }
-        BodyOperationKind::SequenceLength { bound } => {
-            SsaInstructionKind::SequenceLength { bound: *bound }
-        }
+        BodyOperationKind::SequenceLength { bound } => SsaInstructionKind::SequenceLength {
+            bound: bound.clone(),
+        },
         BodyOperationKind::ViewConstruct {
             source_bound,
             view_bound,
         } => SsaInstructionKind::ViewConstruct {
-            source_bound: *source_bound,
-            view_bound: *view_bound,
+            source_bound: source_bound.clone(),
+            view_bound: view_bound.clone(),
         },
         BodyOperationKind::RecordConstruct {
             type_identity,

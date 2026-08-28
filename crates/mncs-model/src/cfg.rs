@@ -197,6 +197,7 @@ mod tests {
                 name: "condition".to_owned(),
                 ty: BodyType::Named("bool".to_owned()),
             }],
+            generic_params: Vec::new(),
             cycle_policy: crate::BodyCyclePolicy::Legacy,
             bounded_iterations: Vec::new(),
             blocks: vec![

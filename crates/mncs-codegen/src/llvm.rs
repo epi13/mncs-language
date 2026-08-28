@@ -1005,6 +1005,10 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                         let _ = writeln!(out, "  %vlen{tag} = lshr i64 %{seqv}, 32");
                         let _ = writeln!(out, "  %oob{tag} = icmp uge i64 %{idx}, %vlen{tag}");
                     }
+                    mncs_model::SequenceBound::Param(_)
+                    | mncs_model::SequenceBound::UpToParam(_) => unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    ),
                 }
                 let _ = writeln!(
                     out,
@@ -1022,6 +1026,11 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                     let _ = writeln!(out, "  %base32{split} = trunc i64 %{seqv} to i32");
                     let _ = writeln!(out, "  %{base} = zext i32 %base32{split} to i64");
                     base
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
                 }
             };
             *split += 1;
@@ -1060,6 +1069,9 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 let _ = writeln!(out, "  %{tmp} = lshr i64 %{seqv}, 32");
                 store_dest(out, names, dest, &tmp);
             }
+            mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                unreachable!("generic SequenceBound must be specialized before backend lowering")
+            }
         },
         ScalarInst::ViewConstruct {
             dest,
@@ -1086,6 +1098,11 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                     let tmp = format!("srcl{split}");
                     let _ = writeln!(out, "  %{tmp} = lshr i64 %{srcv}, 32");
                     tmp
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
                 }
             };
             // Range validity: start <= end <= len(source), end-start <= cap.
@@ -1114,6 +1131,11 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                     let _ = writeln!(out, "  %vb32{split} = trunc i64 %{srcv} to i32");
                     let _ = writeln!(out, "  %{b} = zext i32 %vb32{split} to i64");
                     b
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
                 }
             };
             *split += 1;

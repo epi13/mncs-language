@@ -1,0 +1,108 @@
+mncs 0.10;
+module examples.generic.polymorphism;
+
+record Point { x: i64, y: i64 }
+
+fn identity<T>(value: T) -> (result: T) {
+    return value;
+}
+
+fn first<T, N: Nat>(xs: [T; N]) -> (result: T) {
+    return xs[0];
+}
+
+fn contains<N: Nat>(xs: [i64; N], needle: i64) -> (result: bool) {
+    iterate i over xs carrying hit: bool = false {
+        next hit = hit || xs[i] == needle;
+    }
+    return hit;
+}
+
+fn sum<N: Nat>(xs: [i64; N]) -> (result: i64) {
+    iterate i over xs carrying acc: i64 = 0 {
+        next acc = acc + xs[i];
+    }
+    return acc;
+}
+
+fn count_true<N: Nat>(xs: [bool; N]) -> (result: i64) {
+    iterate i over xs carrying hits: i64 = 0 {
+        next hits = hits + (xs[i] as i64);
+    }
+    return hits;
+}
+
+fn any_true<N: Nat>(xs: [bool; N]) -> (result: bool) {
+    iterate i over xs carrying hit: bool = false {
+        next hit = hit || xs[i];
+    }
+    return hit;
+}
+
+fn all_true<N: Nat>(xs: [bool; N]) -> (result: bool) {
+    iterate i over xs carrying hit: bool = true {
+        next hit = hit && xs[i];
+    }
+    return hit;
+}
+
+// Wrapper that exercises deterministic repeated instantiation: two calls with same args should canonicalize to same specialization
+fn demo_repeated() -> (result: i64) {
+    let xs: [i64; 4] = [1, 2, 3, 4];
+    let a: bool = contains<4>(xs, 2);
+    let b: bool = contains<4>(xs, 2);
+    return select(a && b, 1, 0);
+}
+
+// Different substitutions produce different identities
+fn demo_different() -> (result: i64) {
+    let xs4: [i64; 4] = [1, 2, 3, 4];
+    let xs2: [i64; 2] = [1, 2];
+    let c4: bool = contains<4>(xs4, 1);
+    let c2: bool = contains<2>(xs2, 1);
+    return select(c4 && c2, 1, 0);
+}
+
+fn demo_identity_i64() -> (result: i64) {
+    return identity<i64>(42);
+}
+
+fn demo_identity_point() -> (result: Point) {
+    let p: Point = Point { x: 10, y: 20 };
+    return identity<Point>(p);
+}
+
+fn demo_first_point() -> (result: Point) {
+    let p1: Point = Point { x: 1, y: 2 };
+    let p2: Point = Point { x: 3, y: 4 };
+    let xs: [Point; 2] = [p1, p2];
+    return first<Point, 2>(xs);
+}
+
+fn demo_first_i64() -> (result: i64) {
+    let xs: [i64; 4] = [10, 20, 30, 40];
+    return first<i64, 4>(xs);
+}
+
+fn demo_sum4() -> (result: i64) {
+    let xs: [i64; 4] = [1, 2, 3, 4];
+    return sum<4>(xs);
+}
+
+fn demo_sum8() -> (result: i64) {
+    let xs: [i64; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+    return sum<8>(xs);
+}
+
+fn demo_count_true() -> (result: i64) {
+    let xs: [bool; 4] = [true, false, true, true];
+    return count_true<4>(xs);
+}
+
+fn demo_any_all() -> (result: i64) {
+    let xs: [bool; 4] = [false, true, false, false];
+    let any: bool = any_true<4>(xs);
+    let all: bool = all_true<4>(xs);
+    let not_all: bool = select(all, false, true);
+    return select(any && not_all, 1, 0);
+}

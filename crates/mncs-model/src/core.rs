@@ -22,6 +22,11 @@ pub struct Program {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binding_table: Option<crate::SemanticBindingTable>,
     pub functions: Vec<Function>,
+    /// Generic instantiation provenance (Profile 0.10, RFC 0013). Each entry
+    /// records a deterministic specialization from a generic definition to a
+    /// concrete instantiated function.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generic_specializations: Vec<GenericSpecializationRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -73,6 +78,11 @@ pub struct Function {
     /// their semantic identities stay anchored to their home namespace.
     #[serde(default)]
     pub home_module: Option<String>,
+    /// Generic parameters (Profile 0.10, RFC 0013). Empty for non-generic
+    /// functions; serialized absent when empty to preserve pre-0.10 canonical
+    /// fingerprints.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generic_params: Vec<crate::GenericParam>,
     #[serde(default)]
     pub inputs: Vec<Value>,
     #[serde(default)]
@@ -189,6 +199,15 @@ pub enum FailureMode {
 pub enum ParseError {
     #[error("invalid semantic manifest: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GenericSpecializationRecord {
+    pub generic_function: crate::SemanticId,
+    pub specialization_function: crate::SemanticId,
+    pub instantiation: crate::SemanticId,
+    pub args: Vec<crate::GenericArg>,
+    pub canonical_args: String,
 }
 
 impl Program {

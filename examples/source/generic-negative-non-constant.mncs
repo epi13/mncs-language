@@ -1,0 +1,7 @@
+mncs 0.10;
+module test.negative.non_constant;
+fn foo<N: Nat>(xs: [i64; N]) -> (result: i64) { return xs[0]; }
+fn demo(n: i64) -> (result: i64) {
+    let xs: [i64; 4] = [1, 2, 3, 4];
+    return foo<n>(xs);
+}

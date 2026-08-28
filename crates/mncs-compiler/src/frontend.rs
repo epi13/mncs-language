@@ -472,7 +472,17 @@ pub fn elaborate_program_with_resolver_and_modules(
             &mut resolutions,
             &ast.module.text,
         ) {
-            Ok(program) => Ok(program),
+            Ok(program) => match mncs_model::generics::specialize_program(&program) {
+                Ok(specialized) => Ok(specialized),
+                Err(diags) => {
+                    let mut errors: Vec<SourceDiagnostic> = diags
+                        .into_iter()
+                        .map(|d| elaboration_diagnostic(&d.code, d.message, ast.module.span))
+                        .collect();
+                    diagnostics.append(&mut errors);
+                    Err(diagnostics)
+                }
+            },
             Err(mut errors) => {
                 diagnostics.append(&mut errors);
                 Err(diagnostics)
@@ -1113,15 +1123,47 @@ fn decode_identity_component(encoded: &str) -> String {
 /// itself arrived through linking keeps its original home namespace.
 fn signature_from_function(module: &ImportedModule, function: &Function) -> FunctionSignature {
     let body_type = |name: &str| body_type_from_name(module, name);
-    let inputs = function
+    let mut inputs: Vec<BodyType> = function
         .inputs
         .iter()
         .map(|value| body_type(&value.value_type))
         .collect();
-    let output = function.outputs.first().map_or_else(
+    let mut output = function.outputs.first().map_or_else(
         || BodyType::Named("invalid".to_owned()),
         |value| body_type(&value.value_type),
     );
+    // Rehydrate generic parameter occurrences in the signature types.
+    // Imported bodies already store GenericParam for direct `T` occurrences via
+    // canonical_value_type, but sequences like `[T; N]` parse the element as
+    // Named("T"); we transform those plus value-param bounds consistently.
+    let generic_type_names: std::collections::BTreeSet<String> = function
+        .generic_params
+        .iter()
+        .filter(|p| p.kind == mncs_model::GenericParamKind::Type)
+        .map(|p| p.name.clone())
+        .collect();
+    let mut remap = |ty: BodyType| -> BodyType {
+        match ty {
+            BodyType::Named(n) if generic_type_names.contains(&n) => {
+                BodyType::GenericParam { name: n }
+            }
+            BodyType::Sequence { element, bound } => {
+                let new_elem = match *element {
+                    BodyType::Named(n) if generic_type_names.contains(&n) => {
+                        Box::new(BodyType::GenericParam { name: n })
+                    }
+                    other => Box::new(other),
+                };
+                BodyType::Sequence {
+                    element: new_elem,
+                    bound,
+                }
+            }
+            other => other,
+        }
+    };
+    inputs = inputs.into_iter().map(|ty| remap(ty)).collect::<Vec<_>>();
+    output = remap(output);
     let mut capabilities = function.capabilities.clone();
     capabilities.sort();
     capabilities.dedup();
@@ -1132,6 +1174,7 @@ fn signature_from_function(module: &ImportedModule, function: &Function) -> Func
     FunctionSignature {
         identity: function_id(home, &function.name),
         namespace: home.to_owned(),
+        generic_params: function.generic_params.clone(),
         inputs,
         output,
         capabilities,
@@ -1571,6 +1614,7 @@ fn elaborate_linked_module(
             assumptions: Vec::new(),
             binding_table: None,
             functions: all_functions,
+            generic_specializations: Vec::new(),
         })
     } else {
         Err(diagnostics)
@@ -2134,6 +2178,93 @@ fn elaborate_function(
     resolutions: &mut Vec<NameResolution>,
 ) -> Result<Function, Vec<SourceDiagnostic>> {
     let mut diagnostics = Vec::new();
+    // ---- Generic parameter elaboration (Profile 0.10) ----
+    let generic_params = if function.generic_params.is_empty() {
+        Vec::new()
+    } else {
+        if !mncs_syntax::profile_at_least(
+            &ast.language_version.text,
+            mncs_syntax::SOURCE_PROFILE_VERSION_0_10,
+        ) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNP184",
+                "generic parameters require source profile 0.10 or later",
+                function.generic_params[0].span,
+            ));
+        }
+        let mut parsed: Vec<mncs_model::GenericParam> = Vec::new();
+        let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for gp in &function.generic_params {
+            let name = gp.name.text.clone();
+            if name.trim().is_empty() {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE228",
+                    "generic parameter name must not be empty",
+                    gp.name.span,
+                ));
+                continue;
+            }
+            if !seen.insert(name.clone()) {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE228",
+                    format!("duplicate generic parameter '{name}'"),
+                    gp.name.span,
+                ));
+                continue;
+            }
+            let kind = match gp.constraint.as_ref().map(|c| c.text.as_str()) {
+                Some("Nat") => mncs_model::GenericParamKind::Nat,
+                Some("Type") | None => mncs_model::GenericParamKind::Type,
+                Some(other) => {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE229",
+                        format!(
+                            "unsupported generic constraint '{other}'; expected 'Type' or 'Nat'"
+                        ),
+                        gp.constraint.as_ref().unwrap().span,
+                    ));
+                    continue;
+                }
+            };
+            // Higher-kinded placeholder: reject `F : Type -> Type` style
+            // The parser currently only accepts single identifier constraints,
+            // so this is a future-proof diagnostic path.
+            if gp
+                .constraint
+                .as_ref()
+                .is_some_and(|c| c.text.contains("->"))
+            {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE229",
+                    "higher-kinded generic parameters are not supported in this tranche",
+                    gp.span,
+                ));
+                continue;
+            }
+            parsed.push(mncs_model::GenericParam { name, kind });
+        }
+        // Validate generic param names don't shadow function parameter names (value namespace)
+        for gp in &parsed {
+            if function.inputs.iter().any(|p| p.name.text == gp.name)
+                || function.outputs.iter().any(|p| p.name.text == gp.name)
+            {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE228",
+                    format!(
+                        "generic parameter '{}' conflicts with a function parameter name",
+                        gp.name
+                    ),
+                    function.name.span,
+                ));
+            }
+        }
+        parsed
+    };
+    let generic_map: std::collections::BTreeMap<String, mncs_model::GenericParamKind> =
+        generic_params
+            .iter()
+            .map(|p| (p.name.clone(), p.kind))
+            .collect();
     if function.outputs.len() != 1 {
         diagnostics.push(elaboration_diagnostic(
             "MNE101",
@@ -2164,20 +2295,22 @@ fn elaborate_function(
         .map(|input| BodyParameter {
             id: input.name.text.clone(),
             name: input.name.text.clone(),
-            ty: profile_type(
+            ty: profile_type_with_generics(
                 &input.value_type.text,
                 input.value_type.span,
                 finite_types,
                 record_types,
+                &generic_map,
                 &mut diagnostics,
             ),
         })
         .collect::<Vec<_>>();
-    let output_type = profile_type(
+    let output_type = profile_type_with_generics(
         &function.outputs[0].value_type.text,
         function.outputs[0].value_type.span,
         finite_types,
         record_types,
+        &generic_map,
         &mut diagnostics,
     );
     // Keep pre-0.9 source spellings stable. Qualified nominal types need an
@@ -2301,6 +2434,7 @@ fn elaborate_function(
             declarations,
             namespace_aliases,
             direct_imports,
+            generic_map.clone(),
         );
         builder.elaborate_statements(&function.body.statements, &mut env, &mut diagnostics);
         if let Some(returned) = builder.elaborate_expr(
@@ -2332,6 +2466,7 @@ fn elaborate_function(
     Ok(Function {
         name: function.name.text.clone(),
         home_module: None,
+        generic_params: generic_params.clone(),
         inputs,
         outputs,
         contracts,
@@ -2349,6 +2484,7 @@ fn elaborate_function(
             schema_version: EXECUTABLE_BODY_SCHEMA_VERSION.to_owned(),
             entry: "entry".to_owned(),
             parameters,
+            generic_params: generic_params.clone(),
             cycle_policy: if ast.language_version.text == SOURCE_PROFILE_VERSION_0_4 {
                 BodyCyclePolicy::BoundedIterationOnly
             } else {
@@ -2364,6 +2500,7 @@ fn elaborate_function(
 struct FunctionSignature {
     identity: SemanticId,
     namespace: String,
+    generic_params: Vec<mncs_model::GenericParam>,
     inputs: Vec<BodyType>,
     output: BodyType,
     capabilities: Vec<String>,
@@ -2378,15 +2515,38 @@ impl FunctionSignature {
         record_types: &BTreeMap<String, RecordType>,
         diagnostics: &mut Vec<SourceDiagnostic>,
     ) -> Self {
+        // Generic params for this signature (used to resolve T, N in inputs/outputs)
+        let generic_params = if function.generic_params.is_empty() {
+            Vec::new()
+        } else {
+            let mut pmap = Vec::new();
+            for gp in &function.generic_params {
+                let kind = match gp.constraint.as_ref().map(|c| c.text.as_str()) {
+                    Some("Nat") => mncs_model::GenericParamKind::Nat,
+                    _ => mncs_model::GenericParamKind::Type,
+                };
+                pmap.push(mncs_model::GenericParam {
+                    name: gp.name.text.clone(),
+                    kind,
+                });
+            }
+            pmap
+        };
+        let generic_map: std::collections::BTreeMap<String, mncs_model::GenericParamKind> =
+            generic_params
+                .iter()
+                .map(|p| (p.name.clone(), p.kind))
+                .collect();
         let inputs = function
             .inputs
             .iter()
             .map(|input| {
-                profile_type(
+                profile_type_with_generics(
                     &input.value_type.text,
                     input.value_type.span,
                     finite_types,
                     record_types,
+                    &generic_map,
                     diagnostics,
                 )
             })
@@ -2394,11 +2554,12 @@ impl FunctionSignature {
         let output = function.outputs.first().map_or_else(
             || BodyType::Named("invalid".to_owned()),
             |output| {
-                profile_type(
+                profile_type_with_generics(
                     &output.value_type.text,
                     output.value_type.span,
                     finite_types,
                     record_types,
+                    &generic_map,
                     diagnostics,
                 )
             },
@@ -2422,6 +2583,7 @@ impl FunctionSignature {
         Self {
             identity: function_id(&ast.module.text, &function.name.text),
             namespace: ast.module.text.clone(),
+            generic_params,
             inputs,
             output,
             capabilities,
@@ -2832,6 +2994,7 @@ struct BodyBuilder<'a> {
     declarations: &'a DeclarationSpans,
     namespace_aliases: &'a BTreeMap<String, String>,
     direct_imports: &'a BTreeSet<String>,
+    generic_map: BTreeMap<String, mncs_model::GenericParamKind>,
     resolutions: Vec<NameResolution>,
     in_iteration: bool,
 }
@@ -2848,6 +3011,7 @@ impl<'a> BodyBuilder<'a> {
         declarations: &'a DeclarationSpans,
         namespace_aliases: &'a BTreeMap<String, String>,
         direct_imports: &'a BTreeSet<String>,
+        generic_map: BTreeMap<String, mncs_model::GenericParamKind>,
     ) -> Self {
         let owner = function_id(&namespace, &function);
         Self {
@@ -2871,6 +3035,7 @@ impl<'a> BodyBuilder<'a> {
             declarations,
             namespace_aliases,
             direct_imports,
+            generic_map,
             resolutions: Vec::new(),
             in_iteration: false,
         }
@@ -2983,11 +3148,12 @@ impl<'a> BodyBuilder<'a> {
                 value,
                 span,
             } => {
-                let declared = profile_type(
+                let declared = profile_type_with_generics(
                     &value_type.text,
                     value_type.span,
                     self.finite_types,
                     self.record_types,
+                    &self.generic_map,
                     diagnostics,
                 );
                 let Some(produced) = self.elaborate_expr(value, Some(&declared), env, diagnostics)
@@ -3169,7 +3335,9 @@ impl<'a> BodyBuilder<'a> {
                 let length_id = self.new_value("iteration_domain_len");
                 self.blocks[self.current].operations.push(BodyOperation {
                     id: length_id.clone(),
-                    kind: BodyOperationKind::SequenceLength { bound: *bound },
+                    kind: BodyOperationKind::SequenceLength {
+                        bound: bound.clone(),
+                    },
                     operands: vec![resolved.id.clone()],
                     results: vec![BodyValue {
                         id: length_id.clone(),
@@ -3222,11 +3390,12 @@ impl<'a> BodyBuilder<'a> {
             ));
             return;
         }
-        let carried_type = profile_type(
+        let carried_type = profile_type_with_generics(
             &state_type.text,
             state_type.span,
             self.finite_types,
             self.record_types,
+            &self.generic_map,
             diagnostics,
         );
         let Some(initial_value) =
@@ -3846,6 +4015,7 @@ impl<'a> BodyBuilder<'a> {
             }
             AstExpr::Call {
                 function,
+                generic_args,
                 arguments,
                 span,
             } => {
@@ -3874,7 +4044,213 @@ impl<'a> BodyBuilder<'a> {
                     );
                     self.resolutions.push(resolution);
                 }
-                if arguments.len() != signature.inputs.len() {
+                // ---- Generic argument elaboration (Profile 0.10) ----
+                let elaborated_generic_args: Vec<mncs_model::GenericArg> = {
+                    let callee_params = &signature.generic_params;
+                    if callee_params.is_empty() {
+                        if !generic_args.is_empty() {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE222",
+                                "generic arguments supplied for non-generic function",
+                                function.span,
+                            ));
+                            return None;
+                        }
+                        Vec::new()
+                    } else {
+                        if generic_args.is_empty() {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE220",
+                                format!(
+                                    "generic function '{}' requires {} generic argument(s); inference is not available in this tranche",
+                                    function.text,
+                                    callee_params.len()
+                                ),
+                                function.span,
+                            ));
+                            return None;
+                        }
+                        if generic_args.len() != callee_params.len() {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE221",
+                                format!(
+                                    "generic argument count mismatch for '{}': expected {}, got {}",
+                                    function.text,
+                                    callee_params.len(),
+                                    generic_args.len()
+                                ),
+                                function.span,
+                            ));
+                            return None;
+                        }
+                        let mut args_out = Vec::new();
+                        for (param, arg) in callee_params.iter().zip(generic_args) {
+                            match param.kind {
+                                mncs_model::GenericParamKind::Type => {
+                                    let ty = profile_type_with_generics(
+                                        &arg.text.text,
+                                        arg.text.span,
+                                        self.finite_types,
+                                        self.record_types,
+                                        &self.generic_map,
+                                        diagnostics,
+                                    );
+                                    // Reject Nat value being passed as Type
+                                    if let Ok(val) = arg.text.text.parse::<u32>() {
+                                        // If arg text parses as integer but param expects Type, it's wrong kind
+                                        diagnostics.push(elaboration_diagnostic(
+                                            "MNE222",
+                                            format!(
+                                                "generic type parameter '{}' received value argument '{}'",
+                                                param.name, arg.text.text
+                                            ),
+                                            arg.text.span,
+                                        ));
+                                        return None;
+                                    }
+                                    // If the parsed type is still a generic value param misuse, it will be caught as Named vs GenericParam
+                                    args_out.push(mncs_model::GenericArg::Type { ty });
+                                }
+                                mncs_model::GenericParamKind::Nat => {
+                                    let text = arg.text.text.trim();
+                                    // Try integer literal
+                                    if let Ok(val) = text.parse::<u32>() {
+                                        if val > mncs_model::MAX_SEQUENCE_BOUND {
+                                            diagnostics.push(elaboration_diagnostic(
+                                                "MNE225",
+                                                format!(
+                                                    "sequence bound value {val} exceeds profile ceiling {}",
+                                                    mncs_model::MAX_SEQUENCE_BOUND
+                                                ),
+                                                arg.text.span,
+                                            ));
+                                            return None;
+                                        }
+                                        args_out.push(mncs_model::GenericArg::Value { value: val });
+                                    } else if let Some(kind) = self.generic_map.get(text) {
+                                        if *kind == mncs_model::GenericParamKind::Nat {
+                                            args_out.push(mncs_model::GenericArg::ValueParam {
+                                                name: text.to_owned(),
+                                            });
+                                        } else {
+                                            diagnostics.push(elaboration_diagnostic(
+                                                "MNE222",
+                                                format!(
+                                                    "generic value parameter '{}' received type argument '{}'",
+                                                    param.name, text
+                                                ),
+                                                arg.text.span,
+                                            ));
+                                            return None;
+                                        }
+                                    } else if text.chars().all(|c| c.is_ascii_digit()) {
+                                        diagnostics.push(elaboration_diagnostic(
+                                            "MNE224",
+                                            format!("value argument '{text}' is not a valid Nat literal"),
+                                            arg.text.span,
+                                        ));
+                                        return None;
+                                    } else {
+                                        diagnostics.push(elaboration_diagnostic(
+                                            "MNE224",
+                                            format!(
+                                                "value argument for '{}' must be a Nat literal or Nat parameter, got '{text}'",
+                                                param.name
+                                            ),
+                                            arg.text.span,
+                                        ));
+                                        return None;
+                                    }
+                                }
+                            }
+                        }
+                        args_out
+                    }
+                };
+                // Compute concrete callee signature after substituting generic args (if any)
+                let (concrete_inputs, concrete_output) = if elaborated_generic_args.is_empty() {
+                    (signature.inputs.clone(), signature.output.clone())
+                } else {
+                    let mut type_map = std::collections::BTreeMap::new();
+                    let mut value_map = std::collections::BTreeMap::new();
+                    for (param, arg) in signature
+                        .generic_params
+                        .iter()
+                        .zip(&elaborated_generic_args)
+                    {
+                        match (param.kind, arg) {
+                            (
+                                mncs_model::GenericParamKind::Type,
+                                mncs_model::GenericArg::Type { ty },
+                            ) => {
+                                type_map.insert(param.name.clone(), ty.clone());
+                            }
+                            (
+                                mncs_model::GenericParamKind::Nat,
+                                mncs_model::GenericArg::Value { value },
+                            ) => {
+                                value_map.insert(param.name.clone(), *value);
+                            }
+                            (
+                                mncs_model::GenericParamKind::Nat,
+                                mncs_model::GenericArg::ValueParam { name },
+                            ) => {
+                                // Forwarding: keep as param reference for now, but we need to preserve the reference
+                                // Instead we store a placeholder that will be resolved during specialization.
+                                // For this tranche we treat forwarding as not yet concrete; keep ValueParam.
+                                // The concrete inputs after substitution will still contain Param bound if forwarded.
+                                // That's acceptable for body building because caller’s specialization will later resolve.
+                                // For now we keep value_map entry as lookup to caller’s param value if caller is generic and will be specialized.
+                                // If caller is non-generic, this should not happen because ValueParam would have been rejected as concrete.
+                                // So we allow it and treat as symbolic.
+                                // We encode symbolic as a special marker: we will keep bound as Param(name) via not inserting concrete value, instead we keep mapping from callee Nat param to caller's Nat param name via a separate structure.
+                                // To avoid complexity, for now we handle forwarding by mapping callee Nat param to the caller’s Nat param's current substitution status: if caller’s generic_map contains that name, we treat it as ValueParam.
+                                // So we will not insert into value_map, but we need to know that concrete_inputs substitution should replace callee bound Param(param.name) with caller’s Param via type_map/value_map forwarding.
+                                // Simplify: create a symbolic entry that during substitution will look up caller’s param.
+                                // For now, we insert a placeholder that indicates forwarding: we store the name as value_map entry with a sentinel that will be handled during type substitution.
+                                // Easiest: treat ValueParam as a distinct GenericArg variant that during substitution will be replaced by the caller’s param value if that caller’s param is later substituted.
+                                // So we keep value_map empty for these, but we need to propagate the Param name through type substitution.
+                                // For sequence bound Param handling, type_map/value_map will need to map callee’s Nat param name to caller’s Nat param name.
+                                // We can achieve by storing value_map entry as the caller's param name's current bound? But we need indirection.
+                                // Simplify: Do not substitute now; keep elaborated_generic_args with ValueParam and let specialization resolve later.
+                                // So we skip concrete substitution for these and keep signature types generic; the call's operand type checking will be deferred to specialization.
+                                // For now, we treat forwarding calls as not checking concrete input types strictly.
+                                // So we set a flag to skip strict type checking when forwarding.
+                            }
+                            _ => {
+                                diagnostics.push(elaboration_diagnostic(
+                                    "MNE222",
+                                    "generic argument kind mismatch",
+                                    function.span,
+                                ));
+                                return None;
+                            }
+                        }
+                    }
+                    // If there was any forwarding (ValueParam), we cannot fully concretize inputs now.
+                    let has_forwarding = elaborated_generic_args.iter().any(|a| match a {
+                        mncs_model::GenericArg::ValueParam { .. } => true,
+                        mncs_model::GenericArg::Type { ty } => {
+                            matches!(ty, mncs_model::BodyType::GenericParam { .. })
+                        }
+                        _ => false,
+                    });
+                    if has_forwarding {
+                        // Keep signature generic inputs as is; validation will be performed after specialization when caller is specialized.
+                        (signature.inputs.clone(), signature.output.clone())
+                    } else {
+                        // Fully concrete substitution
+                        let substituted_inputs: Vec<mncs_model::BodyType> = signature
+                            .inputs
+                            .iter()
+                            .map(|ty| substitute_body_type(ty.clone(), &type_map, &value_map))
+                            .collect();
+                        let substituted_output =
+                            substitute_body_type(signature.output.clone(), &type_map, &value_map);
+                        (substituted_inputs, substituted_output)
+                    }
+                };
+                if arguments.len() != concrete_inputs.len() {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE132",
                         "call argument arity does not match the callee signature",
@@ -3883,7 +4259,7 @@ impl<'a> BodyBuilder<'a> {
                     return None;
                 }
                 let mut operands = Vec::new();
-                for (source_argument, parameter_type) in arguments.iter().zip(&signature.inputs) {
+                for (source_argument, parameter_type) in arguments.iter().zip(&concrete_inputs) {
                     let argument = self.elaborate_expr(
                         source_argument,
                         Some(parameter_type),
@@ -3921,7 +4297,7 @@ impl<'a> BodyBuilder<'a> {
                     ));
                     return None;
                 }
-                if expected.is_some_and(|expected| expected != &signature.output) {
+                if expected.is_some_and(|expected| expected != &concrete_output) {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE135",
                         "call result does not have the required expression type",
@@ -3929,6 +4305,20 @@ impl<'a> BodyBuilder<'a> {
                     ));
                 }
                 let id = self.new_value("call");
+                // Compute instantiation identity for concrete substitutions; forwarding keeps symbolic
+                let instantiation = if elaborated_generic_args.iter().any(|a| !a.is_concrete()) {
+                    None
+                } else if elaborated_generic_args.is_empty() {
+                    None
+                } else {
+                    let canonical = elaborated_generic_args
+                        .iter()
+                        .map(|a| a.canonical_string())
+                        .collect::<Vec<_>>()
+                        .join("|");
+                    let hash = mncs_model::sha256_hex(canonical.as_bytes());
+                    Some(mncs_model::instantiation_id(&signature.identity, &hash))
+                };
                 self.blocks[self.current].operations.push(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::Call {
@@ -3936,11 +4326,14 @@ impl<'a> BodyBuilder<'a> {
                         function_name: function.text.clone(),
                         required_capabilities: signature.capabilities.clone(),
                         effects: signature.effects.clone(),
+                        generic_args: elaborated_generic_args.clone(),
+                        instantiation: instantiation.clone(),
+                        specialization: None,
                     },
                     operands,
                     results: vec![BodyValue {
                         id: id.clone(),
-                        ty: signature.output.clone(),
+                        ty: concrete_output.clone(),
                     }],
                     contracts: Vec::new(),
                     assumptions: Vec::new(),
@@ -3948,7 +4341,7 @@ impl<'a> BodyBuilder<'a> {
                     lowering: None,
                     portability: None,
                 });
-                Some(ResolvedBinding::plain(id, signature.output.clone()))
+                Some(ResolvedBinding::plain(id, concrete_output.clone()))
             }
             AstExpr::Match { value, arms, span } => {
                 let subject = self.elaborate_expr(value, None, env, diagnostics)?;
@@ -4466,7 +4859,9 @@ impl<'a> BodyBuilder<'a> {
                             id: id.clone(),
                             kind: match &subject.ty {
                                 BodyType::Sequence { bound, .. } => {
-                                    BodyOperationKind::SequenceLength { bound: *bound }
+                                    BodyOperationKind::SequenceLength {
+                                        bound: bound.clone(),
+                                    }
                                 }
                                 _ => BodyOperationKind::SequenceLength {
                                     bound: mncs_model::SequenceBound::Exact(0),
@@ -4799,14 +5194,14 @@ impl<'a> BodyBuilder<'a> {
                 };
                 let result_type = BodyType::Sequence {
                     element: element_type.clone(),
-                    bound,
+                    bound: bound.clone(),
                 };
                 let id = self.new_value("rep");
                 self.blocks[self.current].operations.push(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::SequenceReplace {
                         element_type: element_type.clone(),
-                        bound,
+                        bound: bound.clone(),
                         evidence: evidence.clone(),
                     },
                     operands: vec![source.id, index_binding.id, element_binding.id],
@@ -4965,7 +5360,7 @@ impl<'a> BodyBuilder<'a> {
                 self.blocks[self.current].operations.push(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::SequenceProject {
-                        bound: *bound,
+                        bound: bound.clone(),
                         evidence,
                     },
                     operands: vec![subject.id, index_value.id],
@@ -5029,7 +5424,7 @@ impl<'a> BodyBuilder<'a> {
                 self.blocks[self.current].operations.push(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::ViewConstruct {
-                        source_bound: *source_bound,
+                        source_bound: source_bound.clone(),
                         view_bound: mncs_model::SequenceBound::UpTo(view_cap),
                     },
                     operands: vec![subject.id, start_value.id, end_value.id],
@@ -5942,6 +6337,147 @@ fn profile_type(
     })
 }
 
+fn profile_type_with_generics(
+    name: &str,
+    span: SourceSpan,
+    finite_types: &BTreeMap<String, FiniteType>,
+    record_types: &BTreeMap<String, RecordType>,
+    generics: &BTreeMap<String, mncs_model::GenericParamKind>,
+    diagnostics: &mut Vec<SourceDiagnostic>,
+) -> BodyType {
+    // Direct type-parameter reference
+    if let Some(kind) = generics.get(name) {
+        return match kind {
+            mncs_model::GenericParamKind::Type => BodyType::GenericParam {
+                name: name.to_owned(),
+            },
+            mncs_model::GenericParamKind::Nat => {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE232",
+                    format!("value parameter '{name}' cannot be used as a type"),
+                    span,
+                ));
+                BodyType::Named(name.to_owned())
+            }
+        };
+    }
+    // Sequence types with possible generic element / bound
+    if name.trim_start().starts_with('[') {
+        if let Some(seq) = profile_sequence_type_with_generics(
+            name,
+            finite_types,
+            record_types,
+            generics,
+            diagnostics,
+            span,
+        ) {
+            return seq;
+        }
+    }
+    // Defer to non-generic resolver (finite/record/scalar/sequence without generics)
+    profile_type(name, span, finite_types, record_types, diagnostics)
+}
+
+fn apply_generics_to_body_type(
+    ty: BodyType,
+    generics: &BTreeMap<String, mncs_model::GenericParamKind>,
+    diagnostics: &mut Vec<SourceDiagnostic>,
+    span: SourceSpan,
+) -> BodyType {
+    match ty {
+        BodyType::Named(name) => {
+            if let Some(kind) = generics.get(&name) {
+                if *kind == mncs_model::GenericParamKind::Type {
+                    BodyType::GenericParam { name }
+                } else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE232",
+                        format!("value parameter '{name}' cannot be used as a type"),
+                        span,
+                    ));
+                    BodyType::Named(name)
+                }
+            } else {
+                BodyType::Named(name)
+            }
+        }
+        BodyType::Sequence { element, bound } => {
+            let new_element = Box::new(apply_generics_to_body_type(
+                *element,
+                generics,
+                diagnostics,
+                span,
+            ));
+            // Bound already may be Param/UpToParam; keep as is (validated above)
+            BodyType::Sequence {
+                element: new_element,
+                bound,
+            }
+        }
+        BodyType::Vector { element, lanes } => {
+            let new_element = Box::new(apply_generics_to_body_type(
+                *element,
+                generics,
+                diagnostics,
+                span,
+            ));
+            BodyType::Vector {
+                element: new_element,
+                lanes,
+            }
+        }
+        other => other,
+    }
+}
+
+fn substitute_body_type(
+    ty: BodyType,
+    type_map: &std::collections::BTreeMap<String, BodyType>,
+    value_map: &std::collections::BTreeMap<String, u32>,
+) -> BodyType {
+    match ty {
+        BodyType::GenericParam { name } => type_map
+            .get(&name)
+            .cloned()
+            .unwrap_or(BodyType::GenericParam { name }),
+        BodyType::Sequence { element, bound } => {
+            let new_element = Box::new(substitute_body_type(*element, type_map, value_map));
+            let new_bound = match bound {
+                mncs_model::SequenceBound::Exact(v) => mncs_model::SequenceBound::Exact(v),
+                mncs_model::SequenceBound::UpTo(v) => mncs_model::SequenceBound::UpTo(v),
+                mncs_model::SequenceBound::Param(n) => {
+                    if let Some(v) = value_map.get(&n) {
+                        mncs_model::SequenceBound::Exact(*v)
+                    } else {
+                        mncs_model::SequenceBound::Param(n)
+                    }
+                }
+                mncs_model::SequenceBound::UpToParam(n) => {
+                    if let Some(v) = value_map.get(&n) {
+                        mncs_model::SequenceBound::UpTo(*v)
+                    } else {
+                        mncs_model::SequenceBound::UpToParam(n)
+                    }
+                }
+            };
+            BodyType::Sequence {
+                element: new_element,
+                bound: new_bound,
+            }
+        }
+        BodyType::Vector { element, lanes } => BodyType::Vector {
+            element: Box::new(substitute_body_type(*element, type_map, value_map)),
+            lanes,
+        },
+        BodyType::Mask { lanes } => BodyType::Mask { lanes },
+        BodyType::Record { identity, name } => BodyType::Record { identity, name },
+        BodyType::Finite { identity, name } => BodyType::Finite { identity, name },
+        BodyType::Integer(i) => BodyType::Integer(i),
+        BodyType::Byte => BodyType::Byte,
+        BodyType::Named(n) => BodyType::Named(n),
+    }
+}
+
 fn canonical_value_type(source: &str, ty: &BodyType) -> String {
     match ty {
         BodyType::Sequence { element, bound } => {
@@ -6021,6 +6557,108 @@ fn profile_sequence_type(
         BodyType::Named(name) if name != "bool" => None,
         _ => Some(BodyType::Sequence { element, bound }),
     }
+}
+
+fn profile_sequence_type_with_generics(
+    name: &str,
+    finite_types: &BTreeMap<String, FiniteType>,
+    record_types: &BTreeMap<String, RecordType>,
+    generics: &BTreeMap<String, mncs_model::GenericParamKind>,
+    diagnostics: &mut Vec<SourceDiagnostic>,
+    span: SourceSpan,
+) -> Option<BodyType> {
+    let inner = name.strip_prefix('[')?.strip_suffix(']')?;
+    let separator = inner.rfind(';')?;
+    let (element_text, bound_text) = (inner[..separator].trim(), inner[separator + 1..].trim());
+    let bound = if let Some(capacity) = bound_text.strip_prefix("up_to") {
+        let cap = capacity.trim();
+        if let Ok(v) = cap.parse::<u32>() {
+            if v > mncs_model::MAX_SEQUENCE_BOUND {
+                return None;
+            }
+            mncs_model::SequenceBound::UpTo(v)
+        } else if generics
+            .get(cap)
+            .is_some_and(|k| *k == mncs_model::GenericParamKind::Nat)
+        {
+            mncs_model::SequenceBound::UpToParam(cap.to_owned())
+        } else if cap.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE224",
+                format!("unknown generic value parameter '{cap}' in view bound"),
+                span,
+            ));
+            return None;
+        } else {
+            return None;
+        }
+    } else if let Ok(v) = bound_text.parse::<u32>() {
+        if v > mncs_model::MAX_SEQUENCE_BOUND {
+            return None;
+        }
+        mncs_model::SequenceBound::Exact(v)
+    } else if generics
+        .get(bound_text)
+        .is_some_and(|k| *k == mncs_model::GenericParamKind::Nat)
+    {
+        mncs_model::SequenceBound::Param(bound_text.to_owned())
+    } else if bound_text.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        diagnostics.push(elaboration_diagnostic(
+            "MNE224",
+            format!("unknown generic value parameter '{bound_text}' in sequence bound"),
+            span,
+        ));
+        return None;
+    } else {
+        return None;
+    };
+    // Resolve element
+    let element = if let Some(kind) = generics.get(element_text) {
+        if *kind == mncs_model::GenericParamKind::Type {
+            BodyType::GenericParam {
+                name: element_text.to_owned(),
+            }
+        } else {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE232",
+                format!("value parameter '{element_text}' cannot be used as sequence element type"),
+                span,
+            ));
+            return None;
+        }
+    } else if let Some(finite) = finite_types.get(element_text) {
+        BodyType::Finite {
+            identity: finite.identity.clone(),
+            name: finite.name.clone(),
+        }
+    } else if let Some(record) = record_types.get(element_text) {
+        BodyType::Record {
+            identity: record.identity.clone(),
+            name: record.name.clone(),
+        }
+    } else if let Some(scalar) = profile_scalar_supported(element_text) {
+        scalar
+    } else if let Some(nested) = profile_sequence_type_with_generics(
+        element_text,
+        finite_types,
+        record_types,
+        generics,
+        diagnostics,
+        span,
+    ) {
+        nested
+    } else {
+        // Try scalar via from_semantic_name for bool etc.
+        let ty = BodyType::from_semantic_name(element_text);
+        match &ty {
+            BodyType::Named(n) if n != "bool" => return None,
+            _ => ty,
+        }
+    };
+    Some(BodyType::Sequence {
+        element: Box::new(element),
+        bound,
+    })
 }
 
 fn profile_scalar_supported(name: &str) -> Option<BodyType> {

@@ -1,0 +1,8 @@
+mncs 0.10;
+module test.negative.recursive;
+fn rec<T>(x: T) -> (result: T) {
+    return rec<[T; 1]>([x]);
+}
+fn demo() -> (result: i64) {
+    return rec<i64>(42);
+}

@@ -1,17 +1,19 @@
-mncs 0.8;
+mncs 0.10;
 
 // mncs.core.sequences — reusable operations over bounded sequences.
 //
 // This module is the standard-library definition of the bounded-data
-// substrate's traversal vocabulary (Source Profile 0.7, RFC 0044). Every
-// operation is total over its declared domain: lengths are fixed by the
-// sequence types themselves, traversal discharges element bounds checks by
-// semantics, and no operation allocates or fails. Element bounds facts are
-// machine knowledge here, not runtime folklore.
+// substrate's traversal vocabulary (Source Profile 0.7, RFC 0044) extended
+// with RFC 0013 explicit polymorphism (Profile 0.10). Every operation is
+// total over its declared domain: lengths are fixed by the sequence types
+// themselves, traversal discharges element bounds checks by semantics, and
+// no operation allocates or fails. Element bounds facts are machine knowledge
+// here, not runtime folklore.
 //
-// Fixed element counts appear in the type signatures because the substrate
-// is deliberately bounded; generalization awaits RFC 0013 polymorphism and
-// must not be simulated with unbounded representations.
+// Sequence generality is now expressed with explicit type/value parameters:
+// `fn contains<N: Nat>(xs: [i64; N], needle: i64) -> bool` is the
+// authoritative primitive; the legacy `contains4` family remains as thin
+// wrappers for compatibility. New code should use the generic bound.
 //
 // Realization envelope (2026-08): reference executors, research bytecode,
 // portable WASM, C11, LLVM IR, and Cranelift realize these operations,
@@ -34,29 +36,87 @@ fn no_found() -> (result: Found) {
     return Found.No;
 }
 
-// Sum of an exact window. Checked accumulation keeps overflow explicit.
-fn sum4(a: i64, b: i64, c: i64, d: i64) -> (result: i64) {
-    let xs: [i64; 4] = [a, b, c, d];
+// Generic bounded-sequence primitives (Profile 0.10, RFC 0013)
+// These are the authoritative N-parameterized algorithms; the legacy `*4`
+// wrappers below delegate to them. New code should use the generic bound.
+
+fn sum<N: Nat>(xs: [i64; N]) -> (result: i64) {
     iterate i over xs carrying acc: i64 = 0 {
         next acc = acc + xs[i];
     }
     return acc;
 }
 
-// Membership test by full deterministic traversal.
-fn contains4(xs: [i64; 4], needle: i64) -> (result: bool) {
+fn contains<N: Nat>(xs: [i64; N], needle: i64) -> (result: bool) {
     iterate i over xs carrying hit: bool = false {
         next hit = hit || xs[i] == needle;
     }
     return hit;
 }
 
-// Count of exact matches; the canonical search-shape fold.
-fn count4(xs: [i64; 4], needle: i64) -> (result: i64) {
+fn count<N: Nat>(xs: [i64; N], needle: i64) -> (result: i64) {
     iterate i over xs carrying hits: i64 = 0 {
         next hits = hits + ((xs[i] == needle) as i64);
     }
     return hits;
+}
+
+fn min<N: Nat>(xs: [i64; N]) -> (result: i64) {
+    iterate i over xs carrying acc: i64 = xs[0] {
+        next acc = select(xs[i] < acc, xs[i], acc);
+    }
+    return acc;
+}
+
+fn max<N: Nat>(xs: [i64; N]) -> (result: i64) {
+    iterate i over xs carrying acc: i64 = xs[0] {
+        next acc = select(xs[i] > acc, xs[i], acc);
+    }
+    return acc;
+}
+
+fn count_true<N: Nat>(xs: [bool; N]) -> (result: i64) {
+    iterate i over xs carrying hits: i64 = 0 {
+        next hits = hits + (xs[i] as i64);
+    }
+    return hits;
+}
+
+fn any_true<N: Nat>(xs: [bool; N]) -> (result: bool) {
+    iterate i over xs carrying hit: bool = false {
+        next hit = hit || xs[i];
+    }
+    return hit;
+}
+
+fn all_true<N: Nat>(xs: [bool; N]) -> (result: bool) {
+    iterate i over xs carrying hit: bool = true {
+        next hit = hit && xs[i];
+    }
+    return hit;
+}
+
+fn count_nonzero<N: Nat>(xs: [i64; N]) -> (result: i64) {
+    iterate i over xs carrying hits: i64 = 0 {
+        next hits = hits + ((xs[i] != 0) as i64);
+    }
+    return hits;
+}
+
+// Sum of an exact window. Checked accumulation keeps overflow explicit.
+fn sum4(a: i64, b: i64, c: i64, d: i64) -> (result: i64) {
+    let xs: [i64; 4] = [a, b, c, d];
+    return sum<4>(xs);
+}
+
+// Membership test by full deterministic traversal.
+fn contains4(xs: [i64; 4], needle: i64) -> (result: bool) {
+    return contains<4>(xs, needle);
+}
+
+// Count of exact matches; the canonical search-shape fold.
+fn count4(xs: [i64; 4], needle: i64) -> (result: i64) {
+    return count<4>(xs, needle);
 }
 
 // First element of a window, as a logical option. The empty case is

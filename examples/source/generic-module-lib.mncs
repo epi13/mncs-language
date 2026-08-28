@@ -1,0 +1,5 @@
+mncs 0.10;
+module test.generic.lib;
+record Point { x: i64, y: i64 }
+fn identity<T>(value: T) -> (result: T) { return value; }
+fn first<T, N: Nat>(xs: [T; N]) -> (result: T) { return xs[0]; }
