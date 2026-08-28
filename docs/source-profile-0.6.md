@@ -106,7 +106,11 @@ disagreement. No semantic workaround was added for any backend.
 `FiniteConstruct.payload_fields`, `ExecutionValue::Finite.payload`,
 `AstMatchArm.bindings/ignore_payload`, and `FiniteVariant.payload` serialize as
 absent when empty, so canonical identities of all Profile ≤ 0.5 programs are
-unchanged. Verified by the full fixture corpus passing without migration.
+unchanged when those programs have no records or imports. Legacy source
+semantics remain unchanged, but canonical semantic artifacts are now schema
+`0.3`: record declarations, linked dependency identities, and imported
+function home namespaces participate when present, so linked or record-bearing
+programs intentionally receive a new canonical fingerprint.
 
 ## Module imports (experimental)
 
@@ -138,8 +142,8 @@ silence.
 - **Elaboration-time linking.** Each imported module is elaborated
   independently against the same resolver; its exported declarations bind into
   the importing module's namespace. There is one semantic program after
-  elaboration, so HIR, SSA, obligations, backends, and execution are unchanged
-  by linking.
+  elaboration, and that exact linked program continues through graph, identity,
+  obligations, HIR, SSA, backend lowering, and reference execution.
 - **Names identify, semantics bind.** The imported name is a discovery route.
   Compatibility is established only by successful elaboration of the resolved
   module (RFC 0014, principle 1).
@@ -148,6 +152,8 @@ silence.
   - duplicate `use` of one module: `MNE170`;
   - import cycles, including self-import: `MNE171`;
   - unresolvable or unparsable dependency: `MNE173`, `MNE172`;
+  - resolver result whose declared module is incompatible with the request:
+    `MNE180`;
   - finite-type name collision: `MNE174`;
   - record-type name collision: `MNE175`;
   - function name collision: `MNE176`.
@@ -156,7 +162,9 @@ silence.
   declaring module: functions carry `home_module`, types keep their declaring
   namespace in their identities. A linked declaration therefore has one
   stable identity in every importing program. `Program.dependencies` records
-  the direct import closure as module identities, sorted.
+  the transitive import closure as module identities, sorted and deduplicated.
+  Canonical graph, obligation, evidence, HIR, SSA, and reference-execution
+  identities use that declaring namespace too.
 - **Authority closure crosses the boundary.** A caller must re-declare every
   capability and matching effect pair of any callee, local or imported;
   undeclared authority across a module boundary fails with `MNE134`. Role
@@ -179,6 +187,13 @@ never touches the filesystem itself. Hosts choose their own layout rules:
   repository's `library/` directory;
 - language-service hosts may resolve against resident workspace documents.
 
+The resolver may use a version-tail alias: `use mncs.core.ordering` may select
+the source declaring `mncs.core.ordering.v1`, but the resolved declaration's
+module identity remains `mncs.core.ordering.v1`. Successful source studies and
+front-end JSON expose `module_resolutions`, including requested and declared
+names, source identity, logical source name, module identity, and the linked
+module fingerprint.
+
 A resolution miss is always a diagnostic (`MNE173`) in the importing module.
 Library roots are a discovery convenience only: compatibility still comes from
 elaborating the resolved module against its declared identity, so a stale
@@ -188,5 +203,6 @@ substitution.
 ## Non-goals for this profile
 
 No qualified call syntax, no selective/re-named imports, no interface
-signatures or requirement/provider binding (RFC 0014 components), no version
-selection. These remain future work; nothing here forecloses them.
+signatures or requirement/provider binding (RFC 0014 components), and no
+version selection. Version-tail aliases are discovery compatibility, not
+provider selection. These remain future work; nothing here forecloses them.

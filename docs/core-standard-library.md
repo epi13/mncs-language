@@ -259,7 +259,7 @@ A repository split should follow a stable semantic/package boundary; it should n
 
 ## Integration with `mncs-language-service`
 
-As library/module resolution becomes real, `mncs-language-service` should index the canonical library through the same authoritative semantic model as workspace source.
+Now that bounded Profile 0.6 library resolution is real, `mncs-language-service` should index the canonical library through the same authoritative semantic model as workspace source.
 
 LSP/MCP/native clients should be able to:
 

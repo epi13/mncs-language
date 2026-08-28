@@ -391,6 +391,7 @@ impl Program {
         let mut semantic_functions = self.functions.iter().collect::<Vec<_>>();
         semantic_functions.sort_by(|left, right| left.name.cmp(&right.name));
         for function in semantic_functions {
+            let namespace = function.identity_namespace(&self.module);
             if let Some(body) = &function.body {
                 let (lowered, regions, body_transformations) = lower_executable_body(
                     self,
@@ -442,7 +443,7 @@ impl Program {
                 .contracts
                 .iter()
                 .map(|contract| {
-                    let identity = contract_id(&self.module, &function.name, &contract.id);
+                    let identity = contract_id(namespace, &function.name, &contract.id);
                     trace_entry(
                         &mut trace,
                         &identity,
@@ -456,12 +457,12 @@ impl Program {
             let assumptions = function
                 .assumptions
                 .iter()
-                .map(|assumption| assumption_id(&self.module, assumption))
+                .map(|assumption| assumption_id(namespace, assumption))
                 .collect::<Vec<_>>();
             let capabilities = function
                 .capabilities
                 .iter()
-                .map(|capability| capability_id(&self.module, &function.name, capability))
+                .map(|capability| capability_id(namespace, &function.name, capability))
                 .collect::<Vec<_>>();
             for assumption in &assumptions {
                 trace_entry(
@@ -502,7 +503,7 @@ impl Program {
                 portability: None,
             });
             for (index, contract) in function.contracts.iter().enumerate() {
-                let contract_identity = contract_id(&self.module, &function.name, &contract.id);
+                let contract_identity = contract_id(namespace, &function.name, &contract.id);
                 let operation_identity = ir_identity("contract-check", &contract_identity, index);
                 let evidence_refs = evidence
                     .evidence
@@ -551,10 +552,9 @@ impl Program {
                 let canonical = serde_json::to_string(&crate::canonical::canonical_effect(effect))
                     .expect("canonical effect");
                 let occurrence = effect_occurrences.entry(canonical.clone()).or_default();
-                let effect_identity =
-                    effect_id(&self.module, &function.name, &canonical, *occurrence);
+                let effect_identity = effect_id(namespace, &function.name, &canonical, *occurrence);
                 let capability_identity =
-                    capability_id(&self.module, &function.name, &effect.capability);
+                    capability_id(namespace, &function.name, &effect.capability);
                 let state_identity = ir_identity("state", &effect_identity, 0);
                 state_regions.push(IrStateRegion {
                     identity: state_identity.clone(),
@@ -697,11 +697,11 @@ fn lower_executable_body(
     obligations: &[ObligationRecord],
     trace: &mut BTreeMap<SemanticId, TraceEntry>,
 ) -> (IrFunction, Vec<IrStateRegion>, Vec<TransformationRecord>) {
-    let home = function.identity_namespace(&program.module).to_owned();
-    let semantic_function = function_id(&home, &function.name);
+    let namespace = function.identity_namespace(&program.module);
+    let semantic_function = function_id(namespace, &function.name);
     let body_identity = SemanticId(format!(
         "{}",
-        crate::identity::body_id(&home, &function.name)
+        crate::identity::body_id(namespace, &function.name)
     ));
     trace_entry(
         trace,
@@ -715,7 +715,7 @@ fn lower_executable_body(
         .parameters
         .iter()
         .map(|parameter| {
-            let identity = parameter_id(&program.module, &function.name, &parameter.id);
+            let identity = parameter_id(namespace, &function.name, &parameter.id);
             let value = IrValue {
                 identity: identity.clone(),
                 semantic_identity: Some(identity),
@@ -750,24 +750,24 @@ fn lower_executable_body(
     let contracts = function
         .contracts
         .iter()
-        .map(|contract| contract_id(&program.module, &function.name, &contract.id))
+        .map(|contract| contract_id(namespace, &function.name, &contract.id))
         .collect::<Vec<_>>();
     let assumptions = function
         .assumptions
         .iter()
-        .map(|assumption| assumption_id(&program.module, assumption))
+        .map(|assumption| assumption_id(namespace, assumption))
         .collect::<Vec<_>>();
     let capabilities = function
         .capabilities
         .iter()
-        .map(|capability| capability_id(&program.module, &function.name, capability))
+        .map(|capability| capability_id(namespace, &function.name, capability))
         .collect::<Vec<_>>();
     let mut blocks = Vec::new();
     let mut transitions = Vec::new();
     let mut regions = Vec::new();
     let mut transformations = Vec::new();
     for block in &body.blocks {
-        let block_identity = body.block_identity(&program.module, &function.name, &block.id);
+        let block_identity = body.block_identity(namespace, &function.name, &block.id);
         trace_entry(
             trace,
             &block_identity,
@@ -777,7 +777,7 @@ fn lower_executable_body(
         );
         for parameter in &block.parameters {
             let identity = crate::identity::value_id(
-                &program.module,
+                namespace,
                 &function.name,
                 &block.id,
                 "parameter",
@@ -802,7 +802,7 @@ fn lower_executable_body(
         }
         let mut operations = Vec::new();
         for operation in &block.operations {
-            let semantic_operation = operation.identity(&program.module, &function.name, &block.id);
+            let semantic_operation = operation.identity(namespace, &function.name, &block.id);
             let ir_operation_identity = ir_identity("body-operation", &semantic_operation, 0);
             trace_entry(
                 trace,
@@ -820,12 +820,8 @@ fn lower_executable_body(
                 .results
                 .iter()
                 .map(|result| {
-                    let identity = operation.result_identity(
-                        &program.module,
-                        &function.name,
-                        &block.id,
-                        &result.id,
-                    );
+                    let identity =
+                        operation.result_identity(namespace, &function.name, &block.id, &result.id);
                     let value = IrValue {
                         identity: identity.clone(),
                         semantic_identity: Some(identity.clone()),
@@ -850,445 +846,444 @@ fn lower_executable_body(
                 .filter(|obligation| obligation.subject == semantic_operation)
                 .map(|obligation| obligation.identity.clone())
                 .collect::<Vec<_>>();
-            let (kind, effects, capability_uses, machine_intent, state_region) =
-                match &operation.kind {
-                    BodyOperationKind::Constant { value, ty } => (
-                        IrOperationKind::Constant {
-                            value: *value,
-                            ty: ir_type(ty),
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::Integer {
-                        operator,
-                        operand_type,
-                        intent,
-                    } => (
-                        IrOperationKind::Integer {
-                            operator: operator.clone(),
-                            operand_type: *operand_type,
-                            intent: *intent,
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        Some(machine_intent_links(program, function, block, operation)),
-                        None,
-                    ),
-                    BodyOperationKind::IntegerCompare {
-                        predicate,
-                        operand_type,
-                    } => (
-                        IrOperationKind::IntegerCompare {
-                            predicate: predicate.clone(),
-                            operand_type: *operand_type,
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        Some(machine_intent_links(program, function, block, operation)),
-                        None,
-                    ),
-                    BodyOperationKind::BooleanOp { operator } => (
-                        IrOperationKind::BooleanOp {
-                            operator: operator.clone(),
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::ByteBitwise { operator } => (
-                        IrOperationKind::ByteBitwise {
-                            operator: operator.clone(),
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::ByteShift { operator } => (
-                        IrOperationKind::ByteShift {
-                            operator: operator.clone(),
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::ByteCompare { predicate } => (
-                        IrOperationKind::ByteCompare {
-                            predicate: predicate.clone(),
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::Select { operand_type } => (
-                        IrOperationKind::Select {
-                            operand_type: operand_type.clone(),
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::SequenceReplace {
-                        element_type,
-                        bound,
-                        evidence,
-                    } => (
-                        IrOperationKind::SequenceReplace {
-                            element_type: element_type.clone(),
-                            bound: *bound,
-                            evidence: evidence.clone(),
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::VectorConstruct {
-                        element_type,
-                        lanes,
-                    } => (
-                        IrOperationKind::VectorConstruct {
-                            element_type: element_type.clone(),
-                            lanes: *lanes,
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::VectorSplat {
-                        element_type,
-                        lanes,
-                    } => (
-                        IrOperationKind::VectorSplat {
-                            element_type: element_type.clone(),
-                            lanes: *lanes,
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::VectorExtract {
-                        element_type,
-                        lanes,
-                        evidence,
-                    } => (
-                        IrOperationKind::VectorExtract {
-                            element_type: element_type.clone(),
-                            lanes: *lanes,
-                            evidence: evidence.clone(),
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::VectorReplace {
-                        element_type,
-                        lanes,
-                        evidence,
-                    } => (
-                        IrOperationKind::VectorReplace {
-                            element_type: element_type.clone(),
-                            lanes: *lanes,
-                            evidence: evidence.clone(),
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::VectorBinary {
-                        operator,
-                        element_type,
-                        lanes,
-                        intent,
-                    } => (
-                        IrOperationKind::VectorBinary {
-                            operator: operator.clone(),
-                            element_type: element_type.clone(),
-                            lanes: *lanes,
-                            intent: *intent,
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::VectorCompare {
-                        predicate,
-                        element_type,
-                        lanes,
-                    } => (
-                        IrOperationKind::VectorCompare {
-                            predicate: predicate.clone(),
-                            element_type: element_type.clone(),
-                            lanes: *lanes,
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::MaskBinary { operator, lanes } => (
-                        IrOperationKind::MaskBinary {
-                            operator: operator.clone(),
-                            lanes: *lanes,
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::MaskNot { lanes } => (
-                        IrOperationKind::MaskNot { lanes: *lanes },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::MaskReduce { operator, lanes } => (
-                        IrOperationKind::MaskReduce {
-                            operator: operator.clone(),
-                            lanes: *lanes,
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::VectorReduce {
-                        operator,
-                        element_type,
-                        lanes,
-                        intent,
-                    } => (
-                        IrOperationKind::VectorReduce {
-                            operator: operator.clone(),
-                            element_type: element_type.clone(),
-                            lanes: *lanes,
-                            intent: *intent,
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::Convert { from, to } => (
-                        IrOperationKind::Convert {
-                            from: from.clone(),
-                            to: to.clone(),
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::SequenceConstruct {
-                        element_type,
-                        length,
-                    } => (
-                        IrOperationKind::SequenceConstruct {
-                            element_type: element_type.clone(),
-                            length: *length,
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::SequenceProject { bound, evidence } => (
-                        IrOperationKind::SequenceProject {
-                            bound: *bound,
-                            evidence: evidence.clone(),
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::SequenceLength { bound } => (
-                        IrOperationKind::SequenceLength { bound: *bound },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::ViewConstruct {
-                        source_bound,
-                        view_bound,
-                    } => (
-                        IrOperationKind::ViewConstruct {
-                            source_bound: *source_bound,
-                            view_bound: *view_bound,
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::FiniteConstruct {
-                        type_identity,
-                        variant_identity,
-                        discriminant,
-                        payload_fields,
-                    } => (
-                        IrOperationKind::FiniteConstruct {
-                            type_identity: type_identity.clone(),
-                            variant_identity: variant_identity.clone(),
-                            discriminant: *discriminant,
-                            payload_fields: payload_fields.clone(),
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::FinitePayloadProject {
-                        type_identity,
-                        variant_identity,
-                        discriminant,
-                        field,
-                    } => (
-                        IrOperationKind::FinitePayloadProject {
-                            type_identity: type_identity.clone(),
-                            variant_identity: variant_identity.clone(),
-                            discriminant: *discriminant,
-                            field: field.clone(),
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::FiniteIsVariant {
-                        type_identity,
-                        variant_identity,
-                        discriminant,
-                    } => (
-                        IrOperationKind::FiniteIsVariant {
-                            type_identity: type_identity.clone(),
-                            variant_identity: variant_identity.clone(),
-                            discriminant: *discriminant,
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::RecordConstruct {
-                        type_identity,
-                        field_names,
-                    } => (
-                        IrOperationKind::RecordConstruct {
-                            type_identity: type_identity.clone(),
-                            field_names: field_names.clone(),
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::RecordProject {
-                        type_identity,
-                        field,
-                    } => (
-                        IrOperationKind::RecordProject {
-                            type_identity: type_identity.clone(),
-                            field: field.clone(),
-                        },
-                        Vec::new(),
-                        Vec::new(),
-                        None,
-                        None,
-                    ),
-                    BodyOperationKind::Call {
-                        function: callee_identity,
-                        function_name,
-                        required_capabilities,
-                        effects,
-                    } => {
-                        let callee = program
-                            .functions
-                            .iter()
-                            .find(|candidate| candidate.name == *function_name)
-                            .expect("validated call target");
-                        (
-                            IrOperationKind::Call {
-                                function: callee_identity.clone(),
-                                required_capabilities: required_capabilities
-                                    .iter()
-                                    .map(|capability| {
-                                        capability_id(&program.module, &function.name, capability)
-                                    })
-                                    .collect(),
-                            },
-                            effects
-                                .iter()
-                                .map(|effect| declared_effect_identity(program, callee, effect))
-                                .collect(),
-                            required_capabilities
+            let (kind, effects, capability_uses, machine_intent, state_region) = match &operation
+                .kind
+            {
+                BodyOperationKind::Constant { value, ty } => (
+                    IrOperationKind::Constant {
+                        value: *value,
+                        ty: ir_type(ty),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::Integer {
+                    operator,
+                    operand_type,
+                    intent,
+                } => (
+                    IrOperationKind::Integer {
+                        operator: operator.clone(),
+                        operand_type: *operand_type,
+                        intent: *intent,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    Some(machine_intent_links(program, function, block, operation)),
+                    None,
+                ),
+                BodyOperationKind::IntegerCompare {
+                    predicate,
+                    operand_type,
+                } => (
+                    IrOperationKind::IntegerCompare {
+                        predicate: predicate.clone(),
+                        operand_type: *operand_type,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    Some(machine_intent_links(program, function, block, operation)),
+                    None,
+                ),
+                BodyOperationKind::BooleanOp { operator } => (
+                    IrOperationKind::BooleanOp {
+                        operator: operator.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::ByteBitwise { operator } => (
+                    IrOperationKind::ByteBitwise {
+                        operator: operator.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::ByteShift { operator } => (
+                    IrOperationKind::ByteShift {
+                        operator: operator.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::ByteCompare { predicate } => (
+                    IrOperationKind::ByteCompare {
+                        predicate: predicate.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::Select { operand_type } => (
+                    IrOperationKind::Select {
+                        operand_type: operand_type.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::SequenceReplace {
+                    element_type,
+                    bound,
+                    evidence,
+                } => (
+                    IrOperationKind::SequenceReplace {
+                        element_type: element_type.clone(),
+                        bound: *bound,
+                        evidence: evidence.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::VectorConstruct {
+                    element_type,
+                    lanes,
+                } => (
+                    IrOperationKind::VectorConstruct {
+                        element_type: element_type.clone(),
+                        lanes: *lanes,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::VectorSplat {
+                    element_type,
+                    lanes,
+                } => (
+                    IrOperationKind::VectorSplat {
+                        element_type: element_type.clone(),
+                        lanes: *lanes,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::VectorExtract {
+                    element_type,
+                    lanes,
+                    evidence,
+                } => (
+                    IrOperationKind::VectorExtract {
+                        element_type: element_type.clone(),
+                        lanes: *lanes,
+                        evidence: evidence.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::VectorReplace {
+                    element_type,
+                    lanes,
+                    evidence,
+                } => (
+                    IrOperationKind::VectorReplace {
+                        element_type: element_type.clone(),
+                        lanes: *lanes,
+                        evidence: evidence.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::VectorBinary {
+                    operator,
+                    element_type,
+                    lanes,
+                    intent,
+                } => (
+                    IrOperationKind::VectorBinary {
+                        operator: operator.clone(),
+                        element_type: element_type.clone(),
+                        lanes: *lanes,
+                        intent: *intent,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::VectorCompare {
+                    predicate,
+                    element_type,
+                    lanes,
+                } => (
+                    IrOperationKind::VectorCompare {
+                        predicate: predicate.clone(),
+                        element_type: element_type.clone(),
+                        lanes: *lanes,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::MaskBinary { operator, lanes } => (
+                    IrOperationKind::MaskBinary {
+                        operator: operator.clone(),
+                        lanes: *lanes,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::MaskNot { lanes } => (
+                    IrOperationKind::MaskNot { lanes: *lanes },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::MaskReduce { operator, lanes } => (
+                    IrOperationKind::MaskReduce {
+                        operator: operator.clone(),
+                        lanes: *lanes,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::VectorReduce {
+                    operator,
+                    element_type,
+                    lanes,
+                    intent,
+                } => (
+                    IrOperationKind::VectorReduce {
+                        operator: operator.clone(),
+                        element_type: element_type.clone(),
+                        lanes: *lanes,
+                        intent: *intent,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::Convert { from, to } => (
+                    IrOperationKind::Convert {
+                        from: from.clone(),
+                        to: to.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::SequenceConstruct {
+                    element_type,
+                    length,
+                } => (
+                    IrOperationKind::SequenceConstruct {
+                        element_type: element_type.clone(),
+                        length: *length,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::SequenceProject { bound, evidence } => (
+                    IrOperationKind::SequenceProject {
+                        bound: *bound,
+                        evidence: evidence.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::SequenceLength { bound } => (
+                    IrOperationKind::SequenceLength { bound: *bound },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::ViewConstruct {
+                    source_bound,
+                    view_bound,
+                } => (
+                    IrOperationKind::ViewConstruct {
+                        source_bound: *source_bound,
+                        view_bound: *view_bound,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::FiniteConstruct {
+                    type_identity,
+                    variant_identity,
+                    discriminant,
+                    payload_fields,
+                } => (
+                    IrOperationKind::FiniteConstruct {
+                        type_identity: type_identity.clone(),
+                        variant_identity: variant_identity.clone(),
+                        discriminant: *discriminant,
+                        payload_fields: payload_fields.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::FinitePayloadProject {
+                    type_identity,
+                    variant_identity,
+                    discriminant,
+                    field,
+                } => (
+                    IrOperationKind::FinitePayloadProject {
+                        type_identity: type_identity.clone(),
+                        variant_identity: variant_identity.clone(),
+                        discriminant: *discriminant,
+                        field: field.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::FiniteIsVariant {
+                    type_identity,
+                    variant_identity,
+                    discriminant,
+                } => (
+                    IrOperationKind::FiniteIsVariant {
+                        type_identity: type_identity.clone(),
+                        variant_identity: variant_identity.clone(),
+                        discriminant: *discriminant,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::RecordConstruct {
+                    type_identity,
+                    field_names,
+                } => (
+                    IrOperationKind::RecordConstruct {
+                        type_identity: type_identity.clone(),
+                        field_names: field_names.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::RecordProject {
+                    type_identity,
+                    field,
+                } => (
+                    IrOperationKind::RecordProject {
+                        type_identity: type_identity.clone(),
+                        field: field.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::Call {
+                    function: callee_identity,
+                    function_name,
+                    required_capabilities,
+                    effects,
+                } => {
+                    let callee = program
+                        .functions
+                        .iter()
+                        .find(|candidate| candidate.name == *function_name)
+                        .expect("validated call target");
+                    (
+                        IrOperationKind::Call {
+                            function: callee_identity.clone(),
+                            required_capabilities: required_capabilities
                                 .iter()
                                 .map(|capability| {
-                                    let identity =
-                                        capability_id(&program.module, &function.name, capability);
-                                    CapabilityUse {
-                                        capability: identity.clone(),
-                                        semantic_declaration: Some(identity),
-                                    }
+                                    capability_id(namespace, &function.name, capability)
                                 })
                                 .collect(),
-                            None,
-                            None,
-                        )
-                    }
-                    BodyOperationKind::Effect { effect, .. } => {
-                        let effect_identity = declared_effect_identity(program, function, effect);
-                        let capability =
-                            capability_id(&program.module, &function.name, &effect.capability);
-                        let state_identity = ir_identity("state", &effect_identity, 0);
-                        regions.push(IrStateRegion {
-                            identity: state_identity.clone(),
-                            semantic_identity: Some(effect_identity.clone()),
-                            name: effect.target.clone(),
-                            kind: state_region_kind(&effect.kind),
-                            capability: Some(capability.clone()),
-                        });
-                        (
-                            IrOperationKind::Effect,
-                            vec![effect_identity],
-                            vec![CapabilityUse {
-                                capability: capability.clone(),
-                                semantic_declaration: Some(capability),
-                            }],
-                            None,
-                            Some(state_identity),
-                        )
-                    }
-                    BodyOperationKind::RuntimeCheck {
-                        obligation,
-                        fact,
-                        failure,
-                    } => (
-                        IrOperationKind::RuntimeCheck {
-                            obligation: obligation.clone(),
-                            fact: fact.identity.clone(),
-                            failure: failure.clone(),
                         },
-                        Vec::new(),
-                        Vec::new(),
+                        effects
+                            .iter()
+                            .map(|effect| declared_effect_identity(program, callee, effect))
+                            .collect(),
+                        required_capabilities
+                            .iter()
+                            .map(|capability| {
+                                let identity = capability_id(namespace, &function.name, capability);
+                                CapabilityUse {
+                                    capability: identity.clone(),
+                                    semantic_declaration: Some(identity),
+                                }
+                            })
+                            .collect(),
                         None,
                         None,
-                    ),
-                };
+                    )
+                }
+                BodyOperationKind::Effect { effect, .. } => {
+                    let effect_identity = declared_effect_identity(program, function, effect);
+                    let capability = capability_id(namespace, &function.name, &effect.capability);
+                    let state_identity = ir_identity("state", &effect_identity, 0);
+                    regions.push(IrStateRegion {
+                        identity: state_identity.clone(),
+                        semantic_identity: Some(effect_identity.clone()),
+                        name: effect.target.clone(),
+                        kind: state_region_kind(&effect.kind),
+                        capability: Some(capability.clone()),
+                    });
+                    (
+                        IrOperationKind::Effect,
+                        vec![effect_identity],
+                        vec![CapabilityUse {
+                            capability: capability.clone(),
+                            semantic_declaration: Some(capability),
+                        }],
+                        None,
+                        Some(state_identity),
+                    )
+                }
+                BodyOperationKind::RuntimeCheck {
+                    obligation,
+                    fact,
+                    failure,
+                } => (
+                    IrOperationKind::RuntimeCheck {
+                        obligation: obligation.clone(),
+                        fact: fact.identity.clone(),
+                        failure: failure.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+            };
             let operation = IrOperation {
                 identity: ir_operation_identity,
                 semantic_identity: Some(semantic_operation.clone()),
@@ -1304,12 +1299,12 @@ fn lower_executable_body(
                 contracts: operation
                     .contracts
                     .iter()
-                    .map(|contract| contract_id(&program.module, &function.name, contract))
+                    .map(|contract| contract_id(namespace, &function.name, contract))
                     .collect(),
                 assumptions: operation
                     .assumptions
                     .iter()
-                    .map(|assumption| assumption_id(&program.module, assumption))
+                    .map(|assumption| assumption_id(namespace, assumption))
                     .collect(),
                 evidence: operation_evidence(evidence, program, function, operation),
                 machine_intent,
@@ -1382,7 +1377,7 @@ fn lower_executable_body(
                 from: block_ir_identity.clone(),
                 to: ir_identity(
                     "body-block",
-                    &body.block_identity(&program.module, &function.name, target),
+                    &body.block_identity(namespace, &function.name, target),
                     0,
                 ),
                 path: PathKind::Normal,
@@ -1402,7 +1397,7 @@ fn lower_executable_body(
                         from: block_ir_identity.clone(),
                         to: ir_identity(
                             "body-block",
-                            &body.block_identity(&program.module, &function.name, target),
+                            &body.block_identity(namespace, &function.name, target),
                             0,
                         ),
                         path: PathKind::Normal,
@@ -1450,12 +1445,11 @@ fn lower_executable_body(
         .bounded_iterations
         .iter()
         .map(|iteration| {
-            let identity =
-                crate::identity::iteration_id(&program.module, &function.name, &iteration.id);
+            let identity = crate::identity::iteration_id(namespace, &function.name, &iteration.id);
             let block_identity = |block: &str| {
                 ir_identity(
                     "body-block",
-                    &body.block_identity(&program.module, &function.name, block),
+                    &body.block_identity(namespace, &function.name, block),
                     0,
                 )
             };
@@ -1489,7 +1483,7 @@ fn lower_executable_body(
                 required_capabilities: iteration
                     .required_capabilities
                     .iter()
-                    .map(|capability| capability_id(&program.module, &function.name, capability))
+                    .map(|capability| capability_id(namespace, &function.name, capability))
                     .collect(),
                 completion_modes: iteration.completion_modes.clone(),
                 obligations,
@@ -1635,7 +1629,12 @@ fn declared_effect_identity(
         .iter()
         .position(|declared| declared == effect)
         .unwrap_or(0);
-    effect_id(&program.module, &function.name, &canonical, occurrence)
+    effect_id(
+        function.identity_namespace(&program.module),
+        &function.name,
+        &canonical,
+        occurrence,
+    )
 }
 
 fn operation_evidence(
@@ -1647,7 +1646,13 @@ fn operation_evidence(
     let contracts = operation
         .contracts
         .iter()
-        .map(|contract| contract_id(&program.module, &function.name, contract))
+        .map(|contract| {
+            contract_id(
+                function.identity_namespace(&program.module),
+                &function.name,
+                contract,
+            )
+        })
         .collect::<BTreeSet<_>>();
     evidence
         .evidence
@@ -1663,12 +1668,11 @@ fn machine_intent_links(
     block: &crate::BodyBlock,
     operation: &BodyOperation,
 ) -> MachineIntentLinks {
-    let operation_identity = operation.identity(&program.module, &function.name, &block.id);
+    let namespace = function.identity_namespace(&program.module);
+    let operation_identity = operation.identity(namespace, &function.name, &block.id);
     let machine_identity = operation
-        .machine_intent_identity(&program.module, &function.name, &block.id)
-        .unwrap_or_else(|| {
-            machine_intent_id(&program.module, &function.name, &block.id, &operation.id)
-        });
+        .machine_intent_identity(namespace, &function.name, &block.id)
+        .unwrap_or_else(|| machine_intent_id(namespace, &function.name, &block.id, &operation.id));
     let spec = operation.machine_intent.as_ref();
     MachineIntentLinks {
         operation_identity,

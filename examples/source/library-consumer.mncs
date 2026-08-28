@@ -1,0 +1,11 @@
+mncs 0.6;
+
+// External-consumer execution witness: the implementation of clamp_i64 comes
+// from mncs.core.ordering.v1 and is called through this local API.
+module examples.library_consumer;
+
+use mncs.core.ordering.v1;
+
+fn clamp_consumer(value: i64, lo: i64, hi: i64) -> (result: i64) {
+    return clamp_i64(value, lo, hi);
+}

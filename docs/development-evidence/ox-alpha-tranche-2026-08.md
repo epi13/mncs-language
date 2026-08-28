@@ -72,7 +72,7 @@ structured CGx30x capability diagnostic; none silently drops semantics.
 
 `examples/consumers/ravel-core-snapshot.mncs` freezes RAVEL's shipped
 `ravel.core.v1`. It canonicalizes to fingerprint
-`93813943182726e085bb361bf6de48a238dcca73b407e100d6b1da085277ed2a`,
+`4bfaff838654b6a4264f6145900c9684b106e1ce6cc64ce297c53bb4a04a5370`,
 identical to the upstream file `RAVEL/mncs/workspace/ravel_core.mncs`
 (verified against the sibling checkout via `RAVEL_UPSTREAM_CORE`). The test
 `ravel_snapshot_agrees_with_core_status_lattice_on_bytecode` binds the

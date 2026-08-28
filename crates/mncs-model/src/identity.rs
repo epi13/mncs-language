@@ -117,14 +117,15 @@ impl Program {
             });
         }
         for function in &self.functions {
-            let function_identity = function_id(&self.module, &function.name);
+            let namespace = function.identity_namespace(&self.module);
+            let function_identity = function_id(namespace, &function.name);
             objects.push(IdentityRecord {
                 identity: function_identity.clone(),
                 kind: IdentityKind::Function,
                 fingerprint: fingerprint_json(&canonical_function(function).to_string()),
             });
             if let Some(body) = &function.body {
-                let body_identity = body_id(&self.module, &function.name);
+                let body_identity = body_id(namespace, &function.name);
                 objects.push(IdentityRecord {
                     identity: body_identity,
                     kind: IdentityKind::Body,
@@ -133,8 +134,7 @@ impl Program {
                     ),
                 });
                 for iteration in &body.bounded_iterations {
-                    let iteration_identity =
-                        iteration_id(&self.module, &function.name, &iteration.id);
+                    let iteration_identity = iteration_id(namespace, &function.name, &iteration.id);
                     objects.push(IdentityRecord {
                         identity: iteration_identity.clone(),
                         kind: IdentityKind::Iteration,
@@ -165,7 +165,7 @@ impl Program {
                 }
                 for parameter in &body.parameters {
                     objects.push(IdentityRecord {
-                        identity: parameter_id(&self.module, &function.name, &parameter.id),
+                        identity: parameter_id(namespace, &function.name, &parameter.id),
                         kind: IdentityKind::Value,
                         fingerprint: fingerprint_json(
                             &serde_json::to_string(parameter).expect("body parameter"),
@@ -173,7 +173,7 @@ impl Program {
                     });
                 }
                 for block in &body.blocks {
-                    let block_identity = block_id(&self.module, &function.name, &block.id);
+                    let block_identity = block_id(namespace, &function.name, &block.id);
                     objects.push(IdentityRecord {
                         identity: block_identity,
                         kind: IdentityKind::Block,
@@ -184,7 +184,7 @@ impl Program {
                     for parameter in &block.parameters {
                         objects.push(IdentityRecord {
                             identity: value_id(
-                                &self.module,
+                                namespace,
                                 &function.name,
                                 &block.id,
                                 "parameter",
@@ -198,7 +198,7 @@ impl Program {
                     }
                     for operation in &block.operations {
                         let operation_identity =
-                            operation_id(&self.module, &function.name, &block.id, &operation.id);
+                            operation_id(namespace, &function.name, &block.id, &operation.id);
                         objects.push(IdentityRecord {
                             identity: operation_identity.clone(),
                             kind: IdentityKind::Operation,
@@ -209,7 +209,7 @@ impl Program {
                         for result in &operation.results {
                             objects.push(IdentityRecord {
                                 identity: value_id(
-                                    &self.module,
+                                    namespace,
                                     &function.name,
                                     &block.id,
                                     &operation.id,
@@ -342,7 +342,7 @@ impl Program {
                         if operation.machine_intent.is_some() {
                             objects.push(IdentityRecord {
                                 identity: machine_intent_id(
-                                    &self.module,
+                                    namespace,
                                     &function.name,
                                     &block.id,
                                     &operation.id,
@@ -391,7 +391,7 @@ impl Program {
                         ) {
                             objects.push(IdentityRecord {
                                 identity: runtime_check_id(
-                                    &self.module,
+                                    namespace,
                                     &function.name,
                                     &block.id,
                                     &operation.id,
@@ -407,14 +407,14 @@ impl Program {
             }
             for contract in &function.contracts {
                 objects.push(IdentityRecord {
-                    identity: contract_id(&self.module, &function.name, &contract.id),
+                    identity: contract_id(namespace, &function.name, &contract.id),
                     kind: IdentityKind::Contract,
                     fingerprint: fingerprint_json(&canonical_contract(contract).to_string()),
                 });
             }
             for capability in &function.capabilities {
                 objects.push(IdentityRecord {
-                    identity: capability_id(&self.module, &function.name, capability),
+                    identity: capability_id(namespace, &function.name, capability),
                     kind: IdentityKind::Capability,
                     fingerprint: fingerprint_json(capability),
                 });
@@ -425,7 +425,7 @@ impl Program {
                     canonical_json_value(&canonical_effect(effect)).expect("canonical effect");
                 let occurrence = effect_occurrences.entry(key.clone()).or_default();
                 objects.push(IdentityRecord {
-                    identity: effect_id(&self.module, &function.name, &key, *occurrence),
+                    identity: effect_id(namespace, &function.name, &key, *occurrence),
                     kind: IdentityKind::Effect,
                     fingerprint: fingerprint_json(&key),
                 });
@@ -437,7 +437,7 @@ impl Program {
                     .expect("canonical evidence");
                 let occurrence = evidence_occurrences.entry(key.clone()).or_default();
                 objects.push(IdentityRecord {
-                    identity: evidence_id(&self.module, &function.name, &key, *occurrence),
+                    identity: evidence_id(namespace, &function.name, &key, *occurrence),
                     kind: IdentityKind::Evidence,
                     fingerprint: fingerprint_json(&key),
                 });

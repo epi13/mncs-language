@@ -151,13 +151,14 @@ fn record_for_claim(
     freshness: EvidenceFreshness,
 ) -> EvidenceRecord {
     let canonical = serde_json::to_string(&canonical_evidence(claim)).expect("canonical evidence");
-    let identity = evidence_id(&program.module, &function.name, &canonical, occurrence);
-    let subject = function_id(&program.module, &function.name);
-    let property = contract_id(&program.module, &function.name, &claim.property);
+    let namespace = function.identity_namespace(&program.module);
+    let identity = evidence_id(namespace, &function.name, &canonical, occurrence);
+    let subject = function_id(namespace, &function.name);
+    let property = contract_id(namespace, &function.name, &claim.property);
     let assumptions = function
         .assumptions
         .iter()
-        .map(|assumption| assumption_id(&program.module, assumption))
+        .map(|assumption| assumption_id(namespace, assumption))
         .collect::<Vec<_>>();
     let mut dependencies = vec![subject.clone(), property.clone()];
     dependencies.extend(assumptions.iter().cloned());

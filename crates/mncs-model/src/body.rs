@@ -681,7 +681,10 @@ impl FunctionBody {
                 "body block identities must be unique",
             ));
         }
-        let cfg = crate::Cfg::from_body(self, self.identity(&program.module, &function.name));
+        let cfg = crate::Cfg::from_body(
+            self,
+            self.identity(function.identity_namespace(&program.module), &function.name),
+        );
         for block in &cfg.unreachable {
             errors.push(body_diagnostic(
                 "MNB038",

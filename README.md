@@ -214,7 +214,10 @@ fn decide(first: Verdict) -> (result: Verdict) {
 Each dependency elaborates independently against a host-provided resolver,
 exports bind under collision rules, identities stay anchored to their
 declaring module (`Function.home_module`, `Program.dependencies`), and
-authority closure applies across module boundaries. See
+authority closure applies across module boundaries. The `source-study` command
+also reports deterministic module-resolution provenance, and
+`examples/source/library-consumer.mncs` is a runnable external-consumer
+witness. See
 `docs/source-profile-0.6.md`. MNEL (`epi13/Machine-Native-Experimental-Learning`)
 is the active proving ground for this profile: its MNCS-native
 reconstruction spans eleven linked modules, and its conversion record

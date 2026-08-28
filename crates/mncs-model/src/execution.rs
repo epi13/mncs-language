@@ -294,7 +294,10 @@ impl ExecutionResult {
             target: request.target.clone(),
             program_identity,
             program_fingerprint: program.content_fingerprint().ok(),
-            function_identity: Some(function_id(&program.module, &function.name)),
+            function_identity: Some(function_id(
+                function.identity_namespace(&program.module),
+                &function.name,
+            )),
             returned: Vec::new(),
             steps: 0,
             failure: None,
@@ -366,6 +369,7 @@ fn execute_inner(
             "execution target function has no executable body",
         );
     };
+    let namespace = function.identity_namespace(&program.module);
     if let Err(reason) = validate_arguments(program, body, request) {
         return ExecutionResult::invalid(request, reason);
     }
@@ -407,12 +411,12 @@ fn execute_inner(
             if !consume_step(&mut result, request.step_budget) {
                 result.fail(
                     ExecutionStatus::BudgetExhausted,
-                    Some(operation.identity(&program.module, &function.name, &block.id)),
+                    Some(operation.identity(namespace, &function.name, &block.id)),
                     "execution step budget exhausted".to_owned(),
                 );
                 return result;
             }
-            let identity = operation.identity(&program.module, &function.name, &block.id);
+            let identity = operation.identity(namespace, &function.name, &block.id);
             record_trace(
                 &mut result,
                 program,
@@ -1541,7 +1545,11 @@ fn execute_operation(
                 },
             );
         }
-        BodyOperationKind::Call { function_name, .. } => {
+        BodyOperationKind::Call {
+            function,
+            function_name,
+            ..
+        } => {
             let Some(arguments) = operation
                 .operands
                 .iter()
@@ -1567,7 +1575,17 @@ fn execute_operation(
             let nested_request = ExecutionRequest {
                 schema_version: request.schema_version.clone(),
                 target: ExecutionTarget {
-                    module: request.target.module.clone(),
+                    module: program
+                        .functions
+                        .iter()
+                        .find(|candidate| {
+                            function_id(
+                                candidate.identity_namespace(&program.module),
+                                &candidate.name,
+                            ) == *function
+                        })
+                        .map(|candidate| candidate.identity_namespace(&program.module).to_owned())
+                        .unwrap_or_else(|| request.target.module.clone()),
                     function: function_name.clone(),
                 },
                 arguments,
@@ -2377,9 +2395,18 @@ fn record_trace(
     }
     result.trace.push(ExecutionTraceEntry {
         step: result.steps,
-        block: body.block_identity(&program.module, &function.name, &block.id),
-        operation: operation
-            .map(|operation| operation.identity(&program.module, &function.name, &block.id)),
+        block: body.block_identity(
+            function.identity_namespace(&program.module),
+            &function.name,
+            &block.id,
+        ),
+        operation: operation.map(|operation| {
+            operation.identity(
+                function.identity_namespace(&program.module),
+                &function.name,
+                &block.id,
+            )
+        }),
         event: event.to_owned(),
     });
 }
@@ -2471,7 +2498,19 @@ fn subject(program: &Program, target: &Option<ExecutionTarget>) -> ExecutionSubj
         .as_ref()
         .map(|target| (target.module.clone(), target.function.clone()))
         .unwrap_or_else(|| (program.module.clone(), String::new()));
-    let function_identity = (!function.is_empty()).then(|| function_id(&program.module, &function));
+    let function_identity = (!function.is_empty()).then(|| {
+        program
+            .functions
+            .iter()
+            .find(|candidate| candidate.name == function)
+            .map(|candidate| {
+                function_id(
+                    candidate.identity_namespace(&program.module),
+                    &candidate.name,
+                )
+            })
+            .unwrap_or_else(|| function_id(&program.module, &function))
+    });
     let program_identity = program
         .semantic_identities()
         .objects

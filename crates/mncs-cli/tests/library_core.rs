@@ -160,7 +160,7 @@ fn ravel_snapshot_is_canonically_identical_to_upstream() {
         let value: Value = serde_json::from_slice(&output.stdout).expect("canonical JSON");
         assert_eq!(
             value["fingerprint"],
-            "93813943182726e085bb361bf6de48a238dcca73b407e100d6b1da085277ed2a",
+            "4bfaff838654b6a4264f6145900c9684b106e1ce6cc64ce297c53bb4a04a5370",
             "{path}"
         );
     }

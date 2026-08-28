@@ -19,7 +19,7 @@ fn semantic_commands_emit_deterministic_machine_json() {
         .expect("run canonicalize");
     assert!(canonical.status.success());
     let canonical_json: Value = serde_json::from_slice(&canonical.stdout).expect("canonical JSON");
-    assert_eq!(canonical_json["schema_version"], "0.2");
+    assert_eq!(canonical_json["schema_version"], "0.3");
     assert_eq!(canonical_json["fingerprint"].as_str().unwrap().len(), 64);
 
     let graph = binary()
