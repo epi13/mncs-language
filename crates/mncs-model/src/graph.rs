@@ -178,8 +178,8 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
     }
 
     for function in &program.functions {
-        let function_identity =
-            function_id(function.identity_namespace(&program.module), &function.name);
+        let namespace = function.identity_namespace(&program.module);
+        let function_identity = function_id(namespace, &function.name);
         edges.push(GraphEdge {
             from: program_identity.clone(),
             to: function_identity.clone(),
@@ -188,14 +188,14 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
         for contract in &function.contracts {
             edges.push(GraphEdge {
                 from: function_identity.clone(),
-                to: contract_id(&program.module, &function.name, &contract.id),
+                to: contract_id(namespace, &function.name, &contract.id),
                 kind: EdgeKind::OwnsContract,
             });
         }
         for capability in &function.capabilities {
             edges.push(GraphEdge {
                 from: function_identity.clone(),
-                to: capability_id(&program.module, &function.name, capability),
+                to: capability_id(namespace, &function.name, capability),
                 kind: EdgeKind::DeclaresCapability,
             });
         }
@@ -204,7 +204,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
             let key = serde_json::to_string(&crate::canonical::canonical_effect(effect))
                 .expect("canonical effect");
             let occurrence = effect_occurrences.entry(key.clone()).or_default();
-            let effect_identity = effect_id(&program.module, &function.name, &key, *occurrence);
+            let effect_identity = effect_id(namespace, &function.name, &key, *occurrence);
             edges.push(GraphEdge {
                 from: function_identity.clone(),
                 to: effect_identity.clone(),
@@ -212,13 +212,13 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
             });
             edges.push(GraphEdge {
                 from: effect_identity,
-                to: capability_id(&program.module, &function.name, &effect.capability),
+                to: capability_id(namespace, &function.name, &effect.capability),
                 kind: EdgeKind::RequiresCapability,
             });
             *occurrence += 1;
         }
         for assumption in &function.assumptions {
-            let assumption_identity = assumption_id(&program.module, assumption);
+            let assumption_identity = assumption_id(namespace, assumption);
             edges.push(GraphEdge {
                 from: function_identity.clone(),
                 to: assumption_identity.clone(),
@@ -229,7 +229,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                     .expect("canonical evidence");
                 let occurrence = evidence_occurrence(function, evidence);
                 edges.push(GraphEdge {
-                    from: evidence_id(&program.module, &function.name, &key, occurrence),
+                    from: evidence_id(namespace, &function.name, &key, occurrence),
                     to: assumption_identity.clone(),
                     kind: EdgeKind::DependsOn,
                 });
@@ -240,7 +240,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
             let key = serde_json::to_string(&crate::canonical::canonical_evidence(evidence))
                 .expect("canonical evidence");
             let occurrence = evidence_occurrences.entry(key.clone()).or_default();
-            let evidence_identity = evidence_id(&program.module, &function.name, &key, *occurrence);
+            let evidence_identity = evidence_id(namespace, &function.name, &key, *occurrence);
             edges.push(GraphEdge {
                 from: evidence_identity.clone(),
                 to: function_identity.clone(),
@@ -248,13 +248,13 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
             });
             edges.push(GraphEdge {
                 from: evidence_identity,
-                to: contract_id(&program.module, &function.name, &evidence.property),
+                to: contract_id(namespace, &function.name, &evidence.property),
                 kind: EdgeKind::SupportsProperty,
             });
             *occurrence += 1;
         }
         if let Some(body) = &function.body {
-            let body_identity = crate::identity::body_id(&program.module, &function.name);
+            let body_identity = crate::identity::body_id(namespace, &function.name);
             edges.push(GraphEdge {
                 from: function_identity.clone(),
                 to: body_identity.clone(),
@@ -263,7 +263,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
             let mut values = BTreeMap::new();
             for parameter in &body.parameters {
                 let identity =
-                    crate::identity::parameter_id(&program.module, &function.name, &parameter.id);
+                    crate::identity::parameter_id(namespace, &function.name, &parameter.id);
                 values.insert(parameter.id.clone(), identity.clone());
                 edges.push(GraphEdge {
                     from: body_identity.clone(),
@@ -273,7 +273,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
             }
             for block in &body.blocks {
                 let block_identity =
-                    crate::identity::block_id(&program.module, &function.name, &block.id);
+                    crate::identity::block_id(namespace, &function.name, &block.id);
                 edges.push(GraphEdge {
                     from: body_identity.clone(),
                     to: block_identity.clone(),
@@ -281,7 +281,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                 });
                 for parameter in &block.parameters {
                     let identity = crate::identity::value_id(
-                        &program.module,
+                        namespace,
                         &function.name,
                         &block.id,
                         "parameter",
@@ -296,7 +296,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                 }
                 for operation in &block.operations {
                     let operation_identity =
-                        operation.identity(&program.module, &function.name, &block.id);
+                        operation.identity(namespace, &function.name, &block.id);
                     edges.push(GraphEdge {
                         from: block_identity.clone(),
                         to: operation_identity.clone(),
@@ -313,7 +313,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                     }
                     for result in &operation.results {
                         let value = operation.result_identity(
-                            &program.module,
+                            namespace,
                             &function.name,
                             &block.id,
                             &result.id,
@@ -330,7 +330,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                             serde_json::to_string(&crate::canonical::canonical_effect(effect))
                                 .expect("body effect");
                         let effect_identity = effect_id(
-                            &program.module,
+                            namespace,
                             &function.name,
                             &canonical,
                             function
@@ -346,7 +346,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                         });
                         edges.push(GraphEdge {
                             from: operation_identity.clone(),
-                            to: capability_id(&program.module, &function.name, &effect.capability),
+                            to: capability_id(namespace, &function.name, &effect.capability),
                             kind: EdgeKind::UsesCapability,
                         });
                     }
@@ -379,7 +379,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                             for capability in required_capabilities {
                                 edges.push(GraphEdge {
                                     from: operation_identity.clone(),
-                                    to: capability_id(&program.module, &function.name, capability),
+                                    to: capability_id(namespace, &function.name, capability),
                                     kind: EdgeKind::UsesCapability,
                                 });
                             }
@@ -399,7 +399,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                                     edges.push(GraphEdge {
                                         from: operation_identity.clone(),
                                         to: effect_id(
-                                            &program.module,
+                                            callee_function.identity_namespace(&program.module),
                                             &callee_function.name,
                                             &canonical,
                                             callee_function
@@ -418,7 +418,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                     for contract in &operation.contracts {
                         edges.push(GraphEdge {
                             from: operation_identity.clone(),
-                            to: contract_id(&program.module, &function.name, contract),
+                            to: contract_id(namespace, &function.name, contract),
                             kind: EdgeKind::ReferencesContract,
                         });
                     }
@@ -567,7 +567,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                     } => {
                         edges.push(GraphEdge {
                             from: block_identity.clone(),
-                            to: crate::identity::block_id(&program.module, &function.name, target),
+                            to: crate::identity::block_id(namespace, &function.name, target),
                             kind: EdgeKind::TransitionsTo,
                         });
                         for argument in arguments {
@@ -590,11 +590,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                         for target in [then_target, else_target] {
                             edges.push(GraphEdge {
                                 from: block_identity.clone(),
-                                to: crate::identity::block_id(
-                                    &program.module,
-                                    &function.name,
-                                    target,
-                                ),
+                                to: crate::identity::block_id(namespace, &function.name, target),
                                 kind: EdgeKind::TransitionsTo,
                             });
                         }
@@ -614,7 +610,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
             }
             for iteration in &body.bounded_iterations {
                 let iteration_identity =
-                    crate::identity::iteration_id(&program.module, &function.name, &iteration.id);
+                    crate::identity::iteration_id(namespace, &function.name, &iteration.id);
                 edges.push(GraphEdge {
                     from: body_identity.clone(),
                     to: iteration_identity.clone(),
@@ -633,7 +629,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                 for block in region_blocks {
                     edges.push(GraphEdge {
                         from: iteration_identity.clone(),
-                        to: crate::identity::block_id(&program.module, &function.name, &block),
+                        to: crate::identity::block_id(namespace, &function.name, &block),
                         kind: EdgeKind::IterationContainsBlock,
                     });
                 }
@@ -660,7 +656,7 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                 for capability in &iteration.required_capabilities {
                     edges.push(GraphEdge {
                         from: iteration_identity.clone(),
-                        to: capability_id(&program.module, &function.name, capability),
+                        to: capability_id(namespace, &function.name, capability),
                         kind: EdgeKind::UsesCapability,
                     });
                 }

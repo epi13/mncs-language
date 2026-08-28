@@ -59,13 +59,14 @@ realizations; native SIMD selection remains a later target-specific step.
 | `std/simd.mncs` | `mncs.std.simd.v1` (Profile 0.8) | explicit-intent affine/ReLU/reduction kernel |
 | `std/ansi.mncs` | `mncs.std.ansi.v1` | bounded ANSI/VT parsing into generic Character, Arrow, Focus, Paste, Mouse, Resize, and Unknown events |
 
-## Current constraint: one module per file
+## Current module boundary
 
-Source Profiles 0.1–0.5 have **no import/linking form**. Every MNCS module is a
-single self-contained file (this is also how RAVEL's reconstruction modules are
-shipped). Library files therefore declare one module each, listed above.
-`core/result.mncs` additionally requires the Profile 0.6 payload-sum surface;
-see `docs/source-profile-0.6.md`.
+Each library file declares one module, listed above. Source Profile 0.6 now
+supports elaboration-time linking through a host-provided `ModuleResolver`:
+imports are resolved transitively, dependency identity is preserved, and the
+linked program is lowered and executable as one authority-checked semantic
+closure. `core/result.mncs` additionally requires the Profile 0.6 payload-sum
+surface; see `docs/source-profile-0.6.md`.
 
 ## Contracts and honesty properties
 
@@ -92,23 +93,27 @@ see `docs/source-profile-0.6.md`.
 
 | Module | research bytecode | portable WASM | LLVM / C11 / Cranelift |
 | --- | --- | --- | --- |
-| status | PASS (30 cases) | refuses record parameter `StatusPair` (CGN302) | not exercised (scalar-envelope refusals expected) |
+| status | PASS (30 cases) | PASS (30 cases) | not exercised (scalar-envelope refusals expected) |
 | logic | PASS (18 cases) | PASS (18 cases) | not exercised |
 | ordering | PASS (36 cases) | PASS (36 cases) | not exercised |
 | partition | 2-case corpus returned; exact-cost status remains `UNKNOWN` | not exercised | not exercised |
 | ansi consumer probe | 7-case corpus returned; exact-cost status remains `UNKNOWN` | not exercised | not exercised |
 
-WASM's refusal of the record parameter is an intentional realization envelope,
-not semantic disagreement; see `docs/development-evidence/ox-alpha-tranche-2026-08.md`.
+The linked `status` consumer now executes on both reference bytecode and
+portable WASM. Backend rows still describe observed envelopes, not a promise
+that every library module is supported by every realization.
 
 ## Consumer binding
 
-Until RFC 0014 module linking lands, consumers bind by **identity-bound
-differential agreement**: `examples/consumers/ravel-core-snapshot.mncs` freezes
-RAVEL's shipped `ravel.core.v1` (canonically identical to upstream), and
-`crates/mncs-cli/tests/library_core.rs` asserts case-by-case agreement of its
-`dominate` with the library join over the full 3×3 domain. Symbol-level import
-and consumption is recorded as blocked on imports in that evidence file.
+Consumers bind through elaboration-time linking with a host resolver. The
+minimal external-consumer witness is
+`examples/source/library-consumer.mncs`, with its bounded execution corpus in
+`examples/execution/library-consumer-corpus.json`; the CLI test runs it through
+both reference bytecode and portable WASM and checks resolver provenance.
+`examples/consumers/ravel-core-snapshot.mncs` remains useful as an
+identity-bound differential witness for RAVEL's shipped `ravel.core.v1`, and
+`crates/mncs-cli/tests/library_core.rs` retains its case-by-case agreement
+checks.
 
 ## Corpora
 

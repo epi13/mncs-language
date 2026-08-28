@@ -1,7 +1,8 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mncs_model::{
-    finite_type_id, finite_variant_id, function_id, record_type_id, ArithmeticIntent,
+    finite_type_id, finite_variant_id, function_id, module_id, record_type_id, ArithmeticIntent,
     ArtifactRepresentation, BodyBlock, BodyBoundedIteration, BodyCyclePolicy, BodyOperation,
     BodyOperationKind, BodyParameter, BodyTerminator, BodyType, BodyValue,
     BoundedIterationCompletion, CompilationStatus, CompilationStudyRequest, CompilationStudyResult,
@@ -39,8 +40,22 @@ pub struct SourceFrontEndResult {
     /// are recorded best-effort, so a partially valid document still exposes
     /// the occurrences that elaboration resolved successfully.
     pub name_resolutions: NameResolutionIndex,
+    /// Exact source and semantic identities consumed by `use` elaboration.
+    /// This is provenance, not a second resolver: the compiler's linked
+    /// program remains authoritative for binding and execution.
+    pub module_resolutions: Vec<ModuleResolution>,
     pub artifacts: Vec<CompilerArtifactRef>,
     pub diagnostics: Vec<SourceDiagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ModuleResolution {
+    pub requested_module: String,
+    pub declared_module: String,
+    pub module_identity: SemanticId,
+    pub source_identity: String,
+    pub source_logical_name: String,
+    pub semantic_fingerprint: Option<String>,
 }
 
 impl SourceFrontEndResult {
@@ -109,6 +124,7 @@ impl ReferenceCompiler {
         let mut semantic_graph = None;
         let mut identities = None;
         let mut name_resolutions = NameResolutionIndex::default();
+        let mut module_resolutions = Vec::new();
         if let Some(tree) = &ast {
             artifacts.push(CompilerArtifactRef::new(
                 ArtifactRepresentation::AbstractSyntaxTree,
@@ -122,8 +138,9 @@ impl ReferenceCompiler {
                     tree.span,
                 ));
             } else {
-                match elaborate_program_with_resolver(tree, resolver) {
-                    (Ok(elaborated), resolutions) => {
+                match elaborate_program_with_resolver_and_modules(tree, resolver) {
+                    (Ok(elaborated), resolutions, resolved_modules) => {
+                        module_resolutions = resolved_modules;
                         let report = elaborated.validate();
                         let canonical = elaborated
                             .canonical_form()
@@ -168,7 +185,8 @@ impl ReferenceCompiler {
                         program = Some(elaborated);
                         name_resolutions = NameResolutionIndex::new(resolutions);
                     }
-                    (Err(mut errors), resolutions) => {
+                    (Err(mut errors), resolutions, resolved_modules) => {
+                        module_resolutions = resolved_modules;
                         name_resolutions = NameResolutionIndex::new(resolutions);
                         diagnostics.append(&mut errors)
                     }
@@ -185,6 +203,7 @@ impl ReferenceCompiler {
             identities,
             validation,
             name_resolutions,
+            module_resolutions,
             artifacts,
             diagnostics,
         }
@@ -403,27 +422,95 @@ pub fn elaborate_program_with_resolver(
     ast: &AbstractSyntaxTree,
     resolver: &dyn ModuleResolver,
 ) -> (Result<Program, Vec<SourceDiagnostic>>, Vec<NameResolution>) {
+    let (result, resolutions, _) = elaborate_program_with_resolver_and_modules(ast, resolver);
+    (result, resolutions)
+}
+
+/// Elaborates `ast` together with its transitive imports and records the exact
+/// source and semantic identity selected for every resolved module. The
+/// provenance is deliberately returned separately from the program so callers
+/// can audit resolution without re-implementing linker behavior.
+pub fn elaborate_program_with_resolver_and_modules(
+    ast: &AbstractSyntaxTree,
+    resolver: &dyn ModuleResolver,
+) -> (
+    Result<Program, Vec<SourceDiagnostic>>,
+    Vec<NameResolution>,
+    Vec<ModuleResolution>,
+) {
+    let recording_resolver = RecordingResolver {
+        inner: resolver,
+        sources: RefCell::new(BTreeMap::new()),
+    };
     let mut diagnostics = Vec::new();
     let mut resolutions = Vec::new();
     let mut elaborated = BTreeMap::new();
     let mut declaration_spans = BTreeMap::new();
     let mut visiting = BTreeSet::new();
-    if let Err(mut errors) = elaborate_import_closure(
+    let result = if let Err(mut errors) = elaborate_import_closure(
         ast,
-        resolver,
+        &recording_resolver,
         &mut elaborated,
         &mut declaration_spans,
         &mut visiting,
     ) {
         diagnostics.append(&mut errors);
-        return (Err(diagnostics), resolutions);
-    }
-    match link_module_with_closure(ast, &elaborated, &declaration_spans, &mut resolutions) {
-        Ok(program) => (Ok(program), resolutions),
-        Err(mut errors) => {
-            diagnostics.append(&mut errors);
-            (Err(diagnostics), resolutions)
+        Err(diagnostics)
+    } else {
+        match link_module_with_closure(ast, &elaborated, &declaration_spans, &mut resolutions) {
+            Ok(program) => Ok(program),
+            Err(mut errors) => {
+                diagnostics.append(&mut errors);
+                Err(diagnostics)
+            }
         }
+    };
+    let sources = recording_resolver.sources.into_inner();
+    let module_resolutions = elaborated
+        .into_iter()
+        .filter_map(|(requested_module, program)| {
+            let source = sources.get(&requested_module)?;
+            Some(ModuleResolution {
+                requested_module,
+                declared_module: program.module.clone(),
+                module_identity: module_id(&program.module),
+                source_identity: source.identity.clone(),
+                source_logical_name: source.logical_name.clone(),
+                semantic_fingerprint: program.content_fingerprint().ok(),
+            })
+        })
+        .collect();
+    (result, resolutions, module_resolutions)
+}
+
+fn module_names_compatible(requested: &str, declared: &str) -> bool {
+    if requested == declared {
+        return true;
+    }
+    strip_version_tail(requested) == Some(declared)
+        || strip_version_tail(declared) == Some(requested)
+}
+
+fn strip_version_tail(name: &str) -> Option<&str> {
+    let (head, tail) = name.rsplit_once('.')?;
+    let version = tail.strip_prefix('v')?;
+    (!version.is_empty() && version.chars().all(|character| character.is_ascii_digit()))
+        .then_some(head)
+}
+
+struct RecordingResolver<'a> {
+    inner: &'a dyn ModuleResolver,
+    sources: RefCell<BTreeMap<String, SourceEnvelope>>,
+}
+
+impl ModuleResolver for RecordingResolver<'_> {
+    fn resolve(&self, module: &str) -> Option<SourceEnvelope> {
+        let source = self.inner.resolve(module)?;
+        self.sources
+            .borrow_mut()
+            .entry(module.to_owned())
+            .or_insert_with(|| source.clone());
+        Some(source)
     }
 }
 
@@ -506,6 +593,16 @@ fn elaborate_import_closure(
                 use_decl.module.span,
             )]);
         };
+        if !module_names_compatible(&dependency_name, &dependency_ast.module.text) {
+            return Err(vec![elaboration_diagnostic(
+                "MNE180",
+                format!(
+                    "resolver returned incompatible module '{}' for requested module '{}'",
+                    dependency_ast.module.text, dependency_name
+                ),
+                use_decl.module.span,
+            )]);
+        }
         elaborate_import_closure(
             &dependency_ast,
             resolver,

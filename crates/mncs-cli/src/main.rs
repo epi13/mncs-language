@@ -11,18 +11,20 @@ use mncs_codegen::{
     selected_ssa_ref, target_for_backend, target_is_portable_wasm,
 };
 use mncs_compiler::{
-    native_node_profile, reference_compiler_architecture, ModuleResolver, ReferenceCompiler,
+    native_node_profile, reference_compiler_architecture, ModuleResolution, ModuleResolver,
+    ReferenceCompiler,
 };
 use mncs_model::{
     compare_body_and_ssa, compare_execution, execute_ssa, execute_with_policy,
     ArtifactRepresentation, CandidateEvaluation, CausalSlice, ComparisonStatus, CompilationResult,
-    CompilationStatus, CompilationStudyRequest, Confidence, DeterministicVerifier,
-    DiagnosticCategory, DiagnosticObligation, EvidenceFreshness, EvidenceManifest, EvidenceState,
-    ExecutionComparison, ExecutionCorpus, ExecutionProperty, ExecutionRequest, ExecutionStatus,
-    ExecutionValue, FunctionBody, LanguageExperimentCaseObservation, LanguageExperimentComparison,
-    LanguageExperimentDefinition, LanguageExperimentPropertyObservation, LanguageExperimentResult,
-    LoweringExecutionComparison, LoweringExecutionStatus, ObligationStatus, Program,
-    RealizationRequest, SemanticDiff, SemanticId, TargetContractRef, ValidatorRequirement,
+    CompilationStatus, CompilationStudyRequest, CompilationStudyResult, Confidence,
+    DeterministicVerifier, DiagnosticCategory, DiagnosticObligation, EvidenceFreshness,
+    EvidenceManifest, EvidenceState, ExecutionComparison, ExecutionCorpus, ExecutionProperty,
+    ExecutionRequest, ExecutionStatus, ExecutionValue, FunctionBody,
+    LanguageExperimentCaseObservation, LanguageExperimentComparison, LanguageExperimentDefinition,
+    LanguageExperimentPropertyObservation, LanguageExperimentResult, LoweringExecutionComparison,
+    LoweringExecutionStatus, ObligationStatus, Program, RealizationRequest, SemanticDiff,
+    SemanticId, TargetContractRef, ValidatorRequirement,
 };
 use mncs_syntax::{
     analyze, SourceArtifactKind, SourceEnvelope, SourceMetrics, SourceOrigin, SourceOriginKind,
@@ -327,6 +329,13 @@ struct BodyFunctionReport {
     body: FunctionBody,
 }
 
+#[derive(Debug, Serialize)]
+struct SourceStudyCommandReport {
+    #[serde(flatten)]
+    study: CompilationStudyResult,
+    module_resolutions: Vec<ModuleResolution>,
+}
+
 fn body(path: &str) -> ExitCode {
     let program = match read_valid_program(path) {
         Ok(program) => program,
@@ -335,14 +344,12 @@ fn body(path: &str) -> ExitCode {
     let mut functions = Vec::new();
     for function in &program.functions {
         if let Some(body) = &function.body {
+            let namespace = function.identity_namespace(&program.module);
             functions.push(BodyFunctionReport {
                 name: function.name.clone(),
-                identity: body.identity(&program.module, &function.name),
+                identity: body.identity(namespace, &function.name),
                 fingerprint: body.fingerprint().expect("canonical body"),
-                cfg: mncs_model::Cfg::from_body(
-                    body,
-                    body.identity(&program.module, &function.name),
-                ),
+                cfg: mncs_model::Cfg::from_body(body, body.identity(namespace, &function.name)),
                 body: body.clone(),
             });
         }
@@ -718,16 +725,20 @@ where
         native_node_profile(node_identity.as_str()),
         &resolver,
     );
+    let front_end = output.front_end;
     match output.study {
         Some(study) => {
-            if print_json(&study) {
+            if print_json(&SourceStudyCommandReport {
+                study,
+                module_resolutions: front_end.module_resolutions,
+            }) {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(2)
             }
         }
         None => {
-            if print_json(&output.front_end) {
+            if print_json(&front_end) {
                 ExitCode::FAILURE
             } else {
                 ExitCode::from(2)

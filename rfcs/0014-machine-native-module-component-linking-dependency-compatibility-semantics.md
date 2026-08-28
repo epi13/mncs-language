@@ -90,6 +90,30 @@ These principles continue the recurring MNCS distinction between semantic requir
 
 ## Motivation
 
+### Profile 0.6 implementation slice
+
+The first bounded implementation slice is now exercised in the reference
+compiler. A host-provided `ModuleResolver` performs deterministic,
+acyclic, transitive elaboration-time linking. Missing modules, duplicate
+module identities, import collisions, and resolver payloads whose declared
+module is incompatible with the requested name fail closed with diagnostics;
+an optional final `.vN` version tail is accepted only as a discovery alias,
+not as version selection.
+
+The linked `Program` records sorted, deduplicated dependency identities.
+Imported functions retain their declaring namespace through semantic identity,
+graph, obligations, HIR, SSA, evidence, and the body/SSA reference executors.
+The CLI's source-study report exposes requested name, declared name, module
+identity, source identity, source logical name, and semantic fingerprint for
+each resolved module. `examples/source/library-consumer.mncs` is the bounded
+external-consumer witness, and `crates/mncs-compiler/tests/module_imports.rs`
+and `crates/mncs-cli/tests/library_resolution.rs` provide the focused checks.
+
+This slice intentionally does not claim qualified calls, selective or renamed
+imports, provider contracts, semantic requirement satisfaction, package
+selection, version-range resolution, or dynamic bindings. Those remain RFC
+0014 work beyond the Profile 0.6 discovery/linking boundary.
+
 Conventional module, package, and linker systems answer several different questions using overlapping mechanisms:
 
 ```text

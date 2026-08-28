@@ -647,7 +647,7 @@ fn lower_body(
         .parameters
         .iter()
         .map(|parameter| {
-            let identity = parameter_id(&program.module, &function.name, &parameter.id);
+            let identity = parameter_id(&home, &function.name, &parameter.id);
             value_ids.insert(parameter.id.clone(), identity.clone());
             SsaValue {
                 identity: identity.clone(),
@@ -675,14 +675,14 @@ fn lower_body(
     let mut trace = Vec::new();
     let mut transformations = Vec::new();
     for body_block in &body.blocks {
-        let semantic_block = body.block_identity(&program.module, &function.name, &body_block.id);
+        let semantic_block = body.block_identity(&home, &function.name, &body_block.id);
         let block_identity = ssa_identity("block", &semantic_block, 0);
         let parameters = body_block
             .parameters
             .iter()
             .map(|parameter| {
                 let identity = crate::identity::value_id(
-                    &program.module,
+                    &home,
                     &function.name,
                     &body_block.id,
                     "parameter",
@@ -700,8 +700,7 @@ fn lower_body(
             .collect::<Vec<_>>();
         let mut instructions = Vec::new();
         for body_operation in &body_block.operations {
-            let operation_identity =
-                body_operation.identity(&program.module, &function.name, &body_block.id);
+            let operation_identity = body_operation.identity(&home, &function.name, &body_block.id);
             let instruction_identity = ssa_identity("instruction", &operation_identity, 0);
             let hir_operation = hir_function
                 .blocks
@@ -720,7 +719,7 @@ fn lower_body(
                 .iter()
                 .map(|result| {
                     let identity = body_operation.result_identity(
-                        &program.module,
+                        &home,
                         &function.name,
                         &body_block.id,
                         &result.id,
@@ -825,7 +824,7 @@ fn lower_body(
         let terminator = lower_terminator(&body_block.terminator, &value_ids, |target| {
             ssa_identity(
                 "block",
-                &body.block_identity(&program.module, &function.name, target),
+                &body.block_identity(&home, &function.name, target),
                 0,
             )
         });
@@ -862,12 +861,11 @@ fn lower_body(
         .bounded_iterations
         .iter()
         .map(|iteration| {
-            let identity =
-                crate::identity::iteration_id(&program.module, &function.name, &iteration.id);
+            let identity = crate::identity::iteration_id(&home, &function.name, &iteration.id);
             let block_identity = |block: &str| {
                 ssa_identity(
                     "block",
-                    &body.block_identity(&program.module, &function.name, block),
+                    &body.block_identity(&home, &function.name, block),
                     0,
                 )
             };

@@ -10,7 +10,7 @@ use crate::{
     EvidenceStatus, FailureMode, Function, Program, Value,
 };
 
-pub const CANONICAL_SCHEMA_VERSION: &str = "0.2";
+pub const CANONICAL_SCHEMA_VERSION: &str = "0.3";
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CanonicalForm {
@@ -81,12 +81,28 @@ fn canonical_program(program: &Program) -> JsonValue {
             JsonValue::String(program.schema_version.clone()),
         ),
     ];
+    // A linked program is semantically scoped by the exact module identities
+    // it consumed. Keep the established self-contained fingerprints stable,
+    // but make dependency closure part of linked-program identity so stale or
+    // substituted libraries cannot hide behind an unchanged root namespace.
+    if !program.dependencies.is_empty() {
+        fields.push((
+            "dependencies",
+            JsonValue::Array(sorted_semantic_ids(&program.dependencies)),
+        ));
+    }
     // Preserve the established canonical fingerprints for pre-0.3 programs.
     // A finite declaration is material only when one is present.
     if !program.finite_types.is_empty() {
         fields.push((
             "finite_types",
             JsonValue::Array(sorted_finite_types(&program.finite_types)),
+        ));
+    }
+    if !program.record_types.is_empty() {
+        fields.push((
+            "record_types",
+            JsonValue::Array(sorted_record_types(&program.record_types)),
         ));
     }
     object(fields)
@@ -99,6 +115,22 @@ fn sorted_finite_types(types: &[crate::FiniteType]) -> Vec<JsonValue> {
         .into_iter()
         .map(|finite_type| serde_json::to_value(finite_type).expect("finite type is serializable"))
         .collect()
+}
+
+fn sorted_record_types(types: &[crate::RecordType]) -> Vec<JsonValue> {
+    let mut types = types.to_vec();
+    types.sort_by(|left, right| left.identity.cmp(&right.identity));
+    types
+        .into_iter()
+        .map(|record_type| serde_json::to_value(record_type).expect("record type is serializable"))
+        .collect()
+}
+
+fn sorted_semantic_ids(ids: &[crate::SemanticId]) -> Vec<JsonValue> {
+    let mut ids = ids.iter().map(|id| id.0.clone()).collect::<Vec<_>>();
+    ids.sort();
+    ids.dedup();
+    ids.into_iter().map(JsonValue::String).collect()
 }
 
 pub(crate) fn canonical_function(function: &Function) -> JsonValue {
@@ -137,6 +169,16 @@ pub(crate) fn canonical_function(function: &Function) -> JsonValue {
                 "body".to_owned(),
                 serde_json::from_str(&body.canonical_json().expect("canonical body"))
                     .expect("canonical body JSON"),
+            );
+        }
+    }
+    // Local declarations omit this compatibility field; imported functions
+    // retain their declaring namespace in canonical semantic material.
+    if let Some(home_module) = &function.home_module {
+        if let JsonValue::Object(fields) = &mut result {
+            fields.insert(
+                "home_module".to_owned(),
+                JsonValue::String(home_module.clone()),
             );
         }
     }
@@ -380,7 +422,7 @@ mod tests {
     #[test]
     fn canonical_form_is_compact_and_hashed_deterministically() {
         let form = program().canonical_form().expect("canonical form");
-        assert_eq!(form.schema_version, "0.2");
+        assert_eq!(form.schema_version, "0.3");
         assert_eq!(form.json, program().canonical_json().unwrap());
         assert_eq!(form.fingerprint.len(), 64);
         assert!(form.json.starts_with('{'));

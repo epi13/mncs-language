@@ -387,9 +387,19 @@ pub fn compare_body_and_ssa(
         .cases
         .first()
         .map(|case_| case_.request.target.clone());
-    let function_identity = target
-        .as_ref()
-        .map(|target| function_id(&target.module, &target.function));
+    let function_identity = target.as_ref().map(|target| {
+        program
+            .functions
+            .iter()
+            .find(|candidate| candidate.name == target.function)
+            .map(|candidate| {
+                function_id(
+                    candidate.identity_namespace(&program.module),
+                    &candidate.name,
+                )
+            })
+            .unwrap_or_else(|| function_id(&target.module, &target.function))
+    });
     let mut mismatches = Vec::new();
     let mut matching_cases = 0;
     let mut mismatching_cases = 0;
@@ -1573,7 +1583,7 @@ fn execute_instruction(
             let nested_request = crate::ExecutionRequest {
                 schema_version: request.schema_version.clone(),
                 target: crate::ExecutionTarget {
-                    module: request.target.module.clone(),
+                    module: callee.identity_namespace(&program.module).to_owned(),
                     function: callee.name.clone(),
                 },
                 arguments,
@@ -1667,8 +1677,12 @@ fn declared_effect(
         .find_map(|(occurrence, effect)| {
             let canonical =
                 serde_json::to_string(&crate::canonical::canonical_effect(effect)).ok()?;
-            let candidate =
-                crate::identity::effect_id(&program.module, function_name, &canonical, occurrence);
+            let candidate = crate::identity::effect_id(
+                function.identity_namespace(&program.module),
+                function_name,
+                &canonical,
+                occurrence,
+            );
             (candidate == *identity).then(|| effect.clone())
         })
 }
@@ -2183,7 +2197,19 @@ fn execution_subject(
         function: function.clone(),
         program_identity: Some(program_id(&program.module)),
         program_fingerprint: program.content_fingerprint().ok(),
-        function_identity: (!function.is_empty()).then(|| function_id(&program.module, &function)),
+        function_identity: (!function.is_empty()).then(|| {
+            program
+                .functions
+                .iter()
+                .find(|candidate| candidate.name == function)
+                .map(|candidate| {
+                    function_id(
+                        candidate.identity_namespace(&program.module),
+                        &candidate.name,
+                    )
+                })
+                .unwrap_or_else(|| function_id(&program.module, &function))
+        }),
     }
 }
 

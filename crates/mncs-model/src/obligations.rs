@@ -38,18 +38,17 @@ impl Program {
     pub fn generate_obligations(&self) -> ObligationGeneration {
         let mut obligations = Vec::new();
         for function in &self.functions {
-            let function_identity =
-                function_id(function.identity_namespace(&self.module), &function.name);
+            let namespace = function.identity_namespace(&self.module);
+            let function_identity = function_id(namespace, &function.name);
             let declared: BTreeSet<_> = function.capabilities.iter().cloned().collect();
             let mut occurrences = BTreeMap::<String, usize>::new();
             for effect in &function.effects {
                 let canonical = serde_json::to_string(&crate::canonical::canonical_effect(effect))
                     .expect("canonical effect");
                 let occurrence = occurrences.entry(canonical.clone()).or_default();
-                let effect_identity =
-                    effect_id(&self.module, &function.name, &canonical, *occurrence);
+                let effect_identity = effect_id(namespace, &function.name, &canonical, *occurrence);
                 let capability_identity =
-                    capability_id(&self.module, &function.name, &effect.capability);
+                    capability_id(namespace, &function.name, &effect.capability);
                 let requirement = requirement_id("effect-authorized", &effect_identity);
                 let identity = effect_obligation_identity(&effect_identity);
                 let status =
@@ -68,7 +67,7 @@ impl Program {
                     assumptions: function
                         .assumptions
                         .iter()
-                        .map(|assumption| assumption_id(&self.module, assumption))
+                        .map(|assumption| assumption_id(namespace, assumption))
                         .collect(),
                     dependencies: vec![
                         function_identity.clone(),
@@ -81,7 +80,7 @@ impl Program {
                 *occurrence += 1;
             }
             for contract in &function.contracts {
-                let property = contract_id(&self.module, &function.name, &contract.id);
+                let property = contract_id(namespace, &function.name, &contract.id);
                 let evidence_present = function
                     .evidence
                     .iter()
@@ -100,7 +99,7 @@ impl Program {
                     assumptions: function
                         .assumptions
                         .iter()
-                        .map(|assumption| assumption_id(&self.module, assumption))
+                        .map(|assumption| assumption_id(namespace, assumption))
                         .collect(),
                     dependencies: vec![function_identity.clone(), property],
                     freshness: EvidenceFreshness::Current,
@@ -110,17 +109,20 @@ impl Program {
             if let Some(body) = &function.body {
                 for iteration in &body.bounded_iterations {
                     let subject =
-                        crate::identity::iteration_id(&self.module, &function.name, &iteration.id);
+                        crate::identity::iteration_id(namespace, &function.name, &iteration.id);
                     let mut dependencies = vec![function_identity.clone(), subject.clone()];
                     dependencies.extend(iteration.callees.iter().cloned());
                     dependencies.extend(
-                        iteration.required_capabilities.iter().map(|capability| {
-                            capability_id(&self.module, &function.name, capability)
+                        iteration
+                            .required_capabilities
+                            .iter()
+                            .map(|capability| capability_id(namespace, &function.name, capability)),
+                    );
+                    dependencies.extend(
+                        iteration.body_blocks.iter().map(|block| {
+                            crate::identity::block_id(namespace, &function.name, block)
                         }),
                     );
-                    dependencies.extend(iteration.body_blocks.iter().map(|block| {
-                        crate::identity::block_id(&self.module, &function.name, block)
-                    }));
                     dependencies.sort();
                     dependencies.dedup();
                     for (kind, status, method, fallback) in [
@@ -181,7 +183,7 @@ impl Program {
                 }
                 for block in &body.blocks {
                     for operation in &block.operations {
-                        let subject = operation.identity(&self.module, &function.name, &block.id);
+                        let subject = operation.identity(namespace, &function.name, &block.id);
                         match &operation.kind {
                             BodyOperationKind::RecordConstruct { .. }
                             | BodyOperationKind::RecordProject { .. }
@@ -342,7 +344,7 @@ impl Program {
                                         .assumptions
                                         .iter()
                                         .map(|assumption| {
-                                            assumption_id(&self.module, assumption)
+                                            assumption_id(namespace, assumption)
                                         })
                                         .collect(),
                                     dependencies: vec![function_identity.clone(), subject],
@@ -359,7 +361,7 @@ impl Program {
                             }
                             BodyOperationKind::Effect { effect, .. } => {
                                 let effect_identity = effect_id(
-                                    &self.module,
+                                    namespace,
                                     &function.name,
                                     &serde_json::to_string(&crate::canonical::canonical_effect(
                                         effect,
@@ -427,7 +429,7 @@ impl Program {
                                 ];
                                 dependencies.extend(required_capabilities.iter().map(
                                     |capability| {
-                                        capability_id(&self.module, &function.name, capability)
+                                        capability_id(namespace, &function.name, capability)
                                     },
                                 ));
                                 obligations.push(ObligationRecord {
@@ -464,7 +466,7 @@ impl Program {
                                         &requirement.identity,
                                     ),
                                     subject: operation.identity(
-                                        &self.module,
+                                        namespace,
                                         &function.name,
                                         &block.id,
                                     ),
@@ -473,7 +475,7 @@ impl Program {
                                     method: "body-machine-intent".to_owned(),
                                     assumptions: Vec::new(),
                                     dependencies: vec![
-                                        operation.identity(&self.module, &function.name, &block.id),
+                                        operation.identity(namespace, &function.name, &block.id),
                                         requirement.identity.clone(),
                                     ],
                                     freshness: EvidenceFreshness::Unknown,

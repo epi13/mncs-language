@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use mncs_compiler::{
-    elaborate_program_with_resolver, ModuleResolver, NullResolver, ReferenceCompiler,
-    ResolvedNameKind,
+    elaborate_program_with_resolver, elaborate_program_with_resolver_and_modules, ModuleResolver,
+    NullResolver, ReferenceCompiler, ResolvedNameKind,
 };
 use mncs_syntax::{parse, SourceArtifactKind, SourceEnvelope};
 
@@ -237,6 +237,109 @@ fn imported_name_resolutions_retain_the_declaring_source_span() {
     assert_eq!(resolution.kind, ResolvedNameKind::Function);
     assert_eq!(resolution.declaration, declaration);
     assert_eq!(resolution.occurrence.start, demote_offset);
+}
+
+#[test]
+fn imported_execution_and_lowering_keep_the_declaring_namespace() {
+    let resolver = MapResolver::default().with(
+        "lib.evidence",
+        "mncs 0.6;\nmodule lib.evidence;\nfn demote(value: i64) -> (result: i64) { return value; }\n",
+    );
+    let source = "mncs 0.6;\nmodule app.study;\nuse lib.evidence;\nfn soften(value: i64) -> (result: i64) { return demote(value); }\n";
+    let root = resolver.envelope("root", source.to_owned());
+    let front_end = ReferenceCompiler::default().front_end_with_resolver(root, &resolver);
+    assert!(front_end.is_valid(), "{:#?}", front_end.diagnostics);
+    assert_eq!(front_end.module_resolutions.len(), 1);
+    let resolution = &front_end.module_resolutions[0];
+    assert_eq!(resolution.requested_module, "lib.evidence");
+    assert_eq!(resolution.declared_module, "lib.evidence");
+    assert_eq!(
+        resolution.module_identity,
+        mncs_model::module_id("lib.evidence")
+    );
+    assert_eq!(resolution.source_logical_name, "lib.evidence");
+    assert!(resolution.semantic_fingerprint.is_some());
+
+    let program = front_end.program.expect("linked program");
+    let expected = mncs_model::function_id("lib.evidence", "demote");
+    let imported = program
+        .functions
+        .iter()
+        .find(|function| function.name == "demote")
+        .expect("imported function");
+    assert_eq!(imported.home_module.as_deref(), Some("lib.evidence"));
+    assert!(program.semantic_identities().record(&expected).is_some());
+    assert!(program
+        .semantic_graph()
+        .expect("semantic graph")
+        .nodes
+        .iter()
+        .any(|node| node.identity == expected));
+    assert!(program
+        .lower_to_ir()
+        .expect("HIR")
+        .functions
+        .iter()
+        .any(|function| function.semantic_identity == expected));
+    assert!(program
+        .lower_to_ssa()
+        .expect("SSA")
+        .functions
+        .iter()
+        .any(|function| function.semantic_identity == expected));
+
+    let request = mncs_model::ExecutionRequest {
+        schema_version: mncs_model::EXECUTION_REQUEST_SCHEMA_VERSION.to_owned(),
+        target: mncs_model::ExecutionTarget {
+            module: "app.study".to_owned(),
+            function: "soften".to_owned(),
+        },
+        arguments: vec![mncs_model::ExecutionValue::Integer {
+            value: 7,
+            ty: mncs_model::IntegerType {
+                bits: 64,
+                signed: true,
+            },
+        }],
+        step_budget: 64,
+        policy: mncs_model::ExecutionPolicy::default(),
+    };
+    let body = mncs_model::execute_with_policy(&program, &request);
+    assert_eq!(body.status, mncs_model::ExecutionStatus::Returned);
+    assert_eq!(body.returned[0], request.arguments[0]);
+    assert_eq!(
+        body.function_identity,
+        Some(mncs_model::function_id("app.study", "soften"))
+    );
+    assert!(body
+        .trace
+        .iter()
+        .any(|entry| entry.block.0.contains(":block:lib.evidence::demote")));
+    let ssa = mncs_model::execute_ssa(&program, &request);
+    assert_eq!(ssa.status, mncs_model::ExecutionStatus::Returned);
+    assert_eq!(ssa.returned, body.returned);
+    assert_eq!(
+        ssa.semantic_function_identity,
+        Some(mncs_model::function_id("app.study", "soften"))
+    );
+}
+
+#[test]
+fn resolver_declared_module_mismatch_fails_closed() {
+    let resolver = MapResolver::default().with(
+        "lib.requested",
+        "mncs 0.6;\nmodule lib.actual;\nfn value(input: i64) -> (result: i64) { return input; }\n",
+    );
+    let envelope = resolver.envelope(
+        "root",
+        "mncs 0.6;\nmodule app.root;\nuse lib.requested;\nfn f(input: i64) -> (result: i64) { return value(input); }\n"
+            .to_owned(),
+    );
+    let ast = parse(&envelope).ast.expect("root parses");
+    let (result, _, resolutions) = elaborate_program_with_resolver_and_modules(&ast, &resolver);
+    let errors = result.expect_err("mismatched declaration must be rejected");
+    assert!(errors.iter().any(|diagnostic| diagnostic.code == "MNE180"));
+    assert!(resolutions.is_empty());
 }
 
 #[test]
