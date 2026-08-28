@@ -1455,7 +1455,7 @@ fn ir_type_of(ty: &mncs_model::BodyType) -> IrType {
 pub fn slot_width_of(ty: ScalarTy) -> SlotWidth {
     match ty {
         ScalarTy::Int(integer) if integer.bits == 64 => SlotWidth::W64,
-        ScalarTy::Cell | ScalarTy::View => SlotWidth::W64,
+        ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => SlotWidth::W64,
         _ => SlotWidth::W32,
     }
 }

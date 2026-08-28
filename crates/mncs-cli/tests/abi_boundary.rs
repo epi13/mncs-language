@@ -122,6 +122,24 @@ fn run_module_corpus(source: &str, corpus: &str, expected_len: usize) {
 }
 
 #[test]
+fn nested_composite_sequences_agree_per_backend() {
+    run_module_corpus(
+        &example("source/abi-nested-composites.mncs"),
+        &example("execution/abi-nested-composites-corpus.json"),
+        8,
+    );
+}
+
+#[test]
+fn boolean_sequences_agree_per_backend() {
+    run_module_corpus(
+        &example("source/abi-bool-sequences.mncs"),
+        &example("execution/abi-bool-sequences-corpus.json"),
+        3,
+    );
+}
+
+#[test]
 fn unsigned_sequence_and_view_cells_agree_per_backend() {
     run_module_corpus(
         &library("core/sequences.mncs"),
@@ -158,6 +176,23 @@ fn unsigned_record_fields_agree_per_backend() {
 }
 
 #[test]
+fn wrong_expected_nested_record_value_is_rejected() {
+    let (code, result, stderr) = run_experiment(
+        &example("source/abi-nested-composites.mncs"),
+        "mncs-research-bytecode",
+        &example("execution/abi-nested-composites-mutant-corpus.json"),
+    );
+    assert_eq!(code, Some(1), "mutant must fail the experiment; {stderr}");
+    assert_eq!(result["status"], "FAIL", "{result:#}");
+    let case = &result["cases"][0];
+    assert_eq!(case["status"], "returned");
+    assert_eq!(
+        case["expectation_met"], false,
+        "wrong nested-record logical value must not count as met"
+    );
+}
+
+#[test]
 fn wrong_expected_u64_value_is_rejected() {
     let (code, result, stderr) = run_experiment(
         &library("core/sequences.mncs"),
@@ -179,7 +214,7 @@ fn sequence_extra_helpers_agree_per_backend() {
     run_module_corpus(
         &library("core/sequences.mncs"),
         &example("execution/library-core-sequences-extra-corpus.json"),
-        7,
+        10,
     );
 }
 
@@ -188,7 +223,7 @@ fn geometry_alignment_and_relation_helpers_agree_per_backend() {
     run_module_corpus(
         &library("core/geometry.mncs"),
         &example("execution/library-core-geometry-extra-corpus.json"),
-        8,
+        11,
     );
 }
 

@@ -1,0 +1,20 @@
+mncs 0.8;
+
+// Boolean sequence elements are logical `[bool; N]` values, distinct
+// from `mask<N>` lane predicates.
+module examples.abi.bool_sequences;
+
+fn identity4(xs: [bool; 4]) -> (result: [bool; 4]) {
+    return xs;
+}
+
+fn count_true4(xs: [bool; 4]) -> (result: i64) {
+    iterate i over xs carrying hits: i64 = 0 {
+        next hits = hits + (xs[i] as i64);
+    }
+    return hits;
+}
+
+fn first_bool(xs: [bool; 4]) -> (result: bool) {
+    return xs[0];
+}

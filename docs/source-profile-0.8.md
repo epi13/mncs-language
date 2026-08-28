@@ -18,6 +18,9 @@ spellings are `vec<T, N>` and `mask<N>`. The initial executable vector envelope
 accepts integer lanes. A vector is distinct from `[T; N]`: the latter is a
 bounded logical sequence; the former carries lane and predication semantics.
 No implicit sequence/vector reinterpretation exists in this profile.
+`[bool; N]` is a Profile 0.7 boolean sequence, not `mask<N>`. The two
+share neither identity, ABI, nor storage: sequences of masks remain
+refused.
 
 ## Operations
 

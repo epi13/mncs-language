@@ -17,7 +17,9 @@ mncs 0.8;
 // portable WASM, C11, LLVM IR, and Cranelift realize these operations,
 // including sequence-typed and view-typed language-level signatures, through
 // canonical cells (exact sequences) and packed view descriptors. Nested
-// composite sequence elements remain a later cell-of-cells step.
+// composite sequence elements (`[Record; N]`, `[[T; N]; M]`, records that
+// store sequences) and logical `[bool; N]` windows are part of that
+// envelope. Masks remain lane predicates, not boolean sequences.
 module mncs.core.sequences.v1;
 
 enum Found { Yes { value: i64 }, No }
@@ -193,14 +195,34 @@ fn contains_byte4(xs: [byte; 4], needle: byte) -> (result: bool) {
     return hit;
 }
 
-// Boolean windows are not a sequence element type in the current
-// envelope. Count nonzero i64 slots instead of pretending `[bool; N]`
-// exists as a process-boundary value.
 fn count_nonzero4(xs: [i64; 4]) -> (result: i64) {
     iterate i over xs carrying hits: i64 = 0 {
         next hits = hits + ((xs[i] != 0) as i64);
     }
     return hits;
+}
+
+// Boolean windows are logical `[bool; N]` sequences, not masks. Masks
+// remain lane predicates; these helpers traverse boolean elements.
+fn count_true4(xs: [bool; 4]) -> (result: i64) {
+    iterate i over xs carrying hits: i64 = 0 {
+        next hits = hits + (xs[i] as i64);
+    }
+    return hits;
+}
+
+fn any_true4(xs: [bool; 4]) -> (result: bool) {
+    iterate i over xs carrying hit: bool = false {
+        next hit = hit || xs[i];
+    }
+    return hit;
+}
+
+fn all_true4(xs: [bool; 4]) -> (result: bool) {
+    iterate i over xs carrying hit: bool = true {
+        next hit = hit && xs[i];
+    }
+    return hit;
 }
 
 fn reverse4(xs: [i64; 4]) -> (result: [i64; 4]) {

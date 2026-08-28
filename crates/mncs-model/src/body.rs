@@ -212,6 +212,53 @@ impl BodyType {
         }
     }
 
+    /// Resolve a semantic type spelling against a program's declared
+    /// records, finites, and nested bounded-sequence structure.
+    ///
+    /// `[Point; N]` becomes a sequence whose element is the declared
+    /// `Point` record, not a leftover `Named("Point")` spelling. ABI
+    /// classification without a program still uses [`Self::from_semantic_name`].
+    pub fn from_program(program: &Program, name: &str) -> Self {
+        if let Some(finite_type) = program
+            .finite_types
+            .iter()
+            .find(|finite_type| finite_type.identity.0 == name)
+        {
+            return Self::Finite {
+                identity: finite_type.identity.clone(),
+                name: finite_type.name.clone(),
+            };
+        }
+        if let Some(record_type) = program
+            .record_types
+            .iter()
+            .find(|record_type| record_type.identity.0 == name)
+        {
+            return Self::Record {
+                identity: record_type.identity.clone(),
+                name: record_type.name.clone(),
+            };
+        }
+        if let Some(sequence) = semantic_sequence_type(program, name) {
+            return sequence;
+        }
+        if let Some(record_type) = program.record_types.iter().find(|item| item.name == name) {
+            return Self::Record {
+                identity: record_type.identity.clone(),
+                name: record_type.name.clone(),
+            };
+        }
+        program
+            .finite_types
+            .iter()
+            .find(|finite_type| finite_type.name == name)
+            .map(|finite_type| Self::Finite {
+                identity: finite_type.identity.clone(),
+                name: finite_type.name.clone(),
+            })
+            .unwrap_or_else(|| Self::from_semantic_name(name))
+    }
+
     /// Parse a canonical bounded-sequence spelling `[E; N]` or
     /// `[E; up_to M]`. Only canonical spellings parse; anything else stays
     /// an ordinary named type so downstream diagnostics stay truthful.
@@ -232,13 +279,13 @@ impl BodyType {
             }
             SequenceBound::Exact(length)
         };
-        let element = Box::new(Self::from_semantic_name(element_text));
-        match &*element {
-            // Element types must be fully resolved; unresolved named types
-            // cannot appear inside a canonical sequence spelling.
-            Self::Named(_) => None,
-            _ => Some(Self::Sequence { element, bound }),
+        if element_text.is_empty() {
+            return None;
         }
+        let element = Box::new(Self::from_semantic_name(element_text));
+        // Nominal elements (`bool`, declared records/finites) stay Named
+        // until a program resolves them. The spelling is still a sequence.
+        Some(Self::Sequence { element, bound })
     }
 
     fn parse_vector_name(name: &str) -> Option<Self> {
@@ -922,9 +969,11 @@ fn validate_bounded_iterations(
                     bits: 64,
                     signed: false,
                 });
-                if **element_type == expected_counter
-                    || matches!(**element_type, BodyType::Named(_))
-                {
+                let unresolved_named = matches!(
+                    element_type.as_ref(),
+                    BodyType::Named(name) if name != "bool"
+                );
+                if **element_type == expected_counter || unresolved_named {
                     errors.push(body_diagnostic(
                         "MNB101",
                         format!("{path}.domain"),
@@ -2587,44 +2636,7 @@ fn validate_return_types(
 }
 
 fn semantic_body_type(program: &Program, name: &str) -> BodyType {
-    if let Some(finite_type) = program
-        .finite_types
-        .iter()
-        .find(|finite_type| finite_type.identity.0 == name)
-    {
-        return BodyType::Finite {
-            identity: finite_type.identity.clone(),
-            name: finite_type.name.clone(),
-        };
-    }
-    if let Some(record_type) = program
-        .record_types
-        .iter()
-        .find(|record_type| record_type.identity.0 == name)
-    {
-        return BodyType::Record {
-            identity: record_type.identity.clone(),
-            name: record_type.name.clone(),
-        };
-    }
-    if let Some(sequence) = semantic_sequence_type(program, name) {
-        return sequence;
-    }
-    if let Some(record_type) = program.record_types.iter().find(|item| item.name == name) {
-        return BodyType::Record {
-            identity: record_type.identity.clone(),
-            name: record_type.name.clone(),
-        };
-    }
-    program
-        .finite_types
-        .iter()
-        .find(|finite_type| finite_type.name == name)
-        .map(|finite_type| BodyType::Finite {
-            identity: finite_type.identity.clone(),
-            name: finite_type.name.clone(),
-        })
-        .unwrap_or_else(|| BodyType::from_semantic_name(name))
+    BodyType::from_program(program, name)
 }
 
 /// Resolve a canonical bounded-sequence spelling `[E; N]` / `[E; up_to M]`
@@ -2643,8 +2655,7 @@ fn semantic_sequence_type(program: &Program, name: &str) -> Option<BodyType> {
     }
     let element = Box::new(semantic_body_type(program, element_text));
     match &*element {
-        // Unresolvable element spellings cannot form a canonical sequence.
-        BodyType::Named(_) => None,
+        BodyType::Named(name) if name != "bool" => None,
         _ => Some(BodyType::Sequence { element, bound }),
     }
 }
@@ -2716,7 +2727,7 @@ fn body_diagnostic(code: &str, path: String, message: impl Into<String>) -> Diag
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::{FailureMode, Value, SUPPORTED_SCHEMA_VERSION};
+    use crate::{FailureMode, RecordField, RecordType, Value, SUPPORTED_SCHEMA_VERSION};
 
     pub(crate) fn executable_program() -> Program {
         let mut program = crate::validation::tests::valid_program();
@@ -3086,5 +3097,75 @@ pub(crate) mod tests {
         let report = program.validate();
         assert!(!report.valid);
         assert!(report.errors.iter().any(|error| error.code == "MNB038"));
+    }
+
+    #[test]
+    fn sequence_spellings_keep_bool_and_nominal_elements() {
+        assert_eq!(
+            BodyType::from_semantic_name("[bool; 4]"),
+            BodyType::Sequence {
+                element: Box::new(BodyType::Named("bool".to_owned())),
+                bound: SequenceBound::Exact(4),
+            }
+        );
+        assert_eq!(
+            BodyType::from_semantic_name("[Point; up_to 4]"),
+            BodyType::Sequence {
+                element: Box::new(BodyType::Named("Point".to_owned())),
+                bound: SequenceBound::UpTo(4),
+            }
+        );
+        assert_eq!(
+            BodyType::from_semantic_name("[[i64; 2]; 3]"),
+            BodyType::Sequence {
+                element: Box::new(BodyType::Sequence {
+                    element: Box::new(BodyType::Integer(IntegerType {
+                        bits: 64,
+                        signed: true,
+                    })),
+                    bound: SequenceBound::Exact(2),
+                }),
+                bound: SequenceBound::Exact(3),
+            }
+        );
+    }
+
+    #[test]
+    fn from_program_resolves_nested_record_sequence_elements() {
+        let mut program = executable_program();
+        let point_id =
+            SemanticId("mncs:0.2:record-type:m::Point::column%3Ai64%3Brow%3Ai64%3B".to_owned());
+        program.record_types.push(RecordType {
+            identity: point_id.clone(),
+            name: "Point".to_owned(),
+            fields: vec![
+                RecordField {
+                    name: "column".to_owned(),
+                    field_type: "i64".to_owned(),
+                },
+                RecordField {
+                    name: "row".to_owned(),
+                    field_type: "i64".to_owned(),
+                },
+            ],
+        });
+        let resolved = BodyType::from_program(&program, "[Point; 4]");
+        assert_eq!(
+            resolved,
+            BodyType::Sequence {
+                element: Box::new(BodyType::Record {
+                    identity: point_id,
+                    name: "Point".to_owned(),
+                }),
+                bound: SequenceBound::Exact(4),
+            }
+        );
+        assert_eq!(
+            BodyType::from_program(&program, "[bool; 2]"),
+            BodyType::Sequence {
+                element: Box::new(BodyType::Named("bool".to_owned())),
+                bound: SequenceBound::Exact(2),
+            }
+        );
     }
 }

@@ -77,8 +77,9 @@ Cranelift:
 
 ## Honest remaining limitations
 
-- Nested composite sequence elements are still unsupported
-  (`nested_composite_sequence_elements`).
+- Nested composite sequence elements and logical `[bool; N]` windows
+  were later realized; see
+  `docs/development-evidence/nested-composite-sequences-2026-08.md`.
 - Native SIMD / WASM SIMD is not selected; vector realization remains
   conservative scalar lanes (WASM packed lane widths, native 8-byte slots).
 - RISC-V / eBPF / PTX remain artifact-only; eBPF still refuses >5-register
@@ -88,5 +89,5 @@ Cranelift:
   cast to `uint64_t`/`uint32_t` so `vec_gt` over `u64` does not treat
   `2^63` as negative. LLVM/Cranelift/WASM already used unsigned
   predicates from the declared integer type.
-- `[bool; N]` is not a sequence element type in the current envelope;
-  boolean windows remain `mask<N>` or integer 0/1 slots.
+- Sequences of masks or vectors remain refused; `[bool; N]` is not
+  `mask<N>`.

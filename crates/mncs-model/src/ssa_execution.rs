@@ -1905,40 +1905,22 @@ fn constant_value(value: i128, ty: &IrType) -> Option<ExecutionValue> {
     }
 }
 
-/// Resolves an SSA input type against the module's declarations.  Scalar and
-/// finite types arrive fully identified; record types keep only their name in
-/// SSA type positions, so they are resolved through the module's declared
-/// logical records before any argument is admitted.
+/// Resolves an SSA input type against the module's declarations. Sequences
+/// of records keep only their spelling (`[Point; 4]`) in SSA type positions,
+/// so nested composite elements are resolved through the program before any
+/// argument is admitted.
 fn ssa_input_type(program: &Program, ty: &IrType) -> Option<BodyType> {
-    if let IrType::Named(name) = ty {
-        if let Some(finite) = program
-            .finite_types
-            .iter()
-            .find(|item| item.identity.0 == *name)
-        {
-            return Some(BodyType::Finite {
-                identity: finite.identity.clone(),
-                name: finite.name.clone(),
-            });
-        }
-        if let Some(record) = program
-            .record_types
-            .iter()
-            .find(|item| item.identity.0 == *name)
-        {
-            return Some(BodyType::Record {
-                identity: record.identity.clone(),
-                name: record.name.clone(),
-            });
-        }
-        if let Some(record) = program.record_types.iter().find(|item| &item.name == name) {
-            return Some(BodyType::Record {
-                identity: record.identity.clone(),
-                name: record.name.clone(),
-            });
-        }
-    }
-    body_type(ty)
+    Some(match ty {
+        IrType::Named(name) => BodyType::from_program(program, name),
+        IrType::Finite { identity, name } => BodyType::Finite {
+            identity: identity.clone(),
+            name: name.clone(),
+        },
+        IrType::Record { identity, name } => BodyType::Record {
+            identity: identity.clone(),
+            name: name.clone(),
+        },
+    })
 }
 
 fn body_type(ty: &IrType) -> Option<BodyType> {
@@ -1970,6 +1952,9 @@ fn value_matches_type(value: &ExecutionValue, ty: &BodyType) -> bool {
         (ExecutionValue::Record { type_identity, .. }, BodyType::Record { identity, .. }) => {
             type_identity == identity
         }
+        // Sequence spellings reconstructed without a program leave record
+        // elements as Named; admit them when the value's record name matches.
+        (ExecutionValue::Record { name, .. }, BodyType::Named(named)) if name == named => true,
         (ExecutionValue::Byte { value }, BodyType::Byte) => (0..=255).contains(value),
         (
             ExecutionValue::Sequence { values },
@@ -2040,6 +2025,9 @@ fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionVal
         (ExecutionValue::Record { type_identity, .. }, BodyType::Record { identity, .. })
             if type_identity == identity =>
         {
+            Some(value.clone())
+        }
+        (ExecutionValue::Record { name, .. }, BodyType::Named(named)) if name == named => {
             Some(value.clone())
         }
         (ExecutionValue::Byte { value }, BodyType::Byte) if (0..=255).contains(value) => {

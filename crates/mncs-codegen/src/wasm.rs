@@ -1288,6 +1288,21 @@ fn write_slot(
         (ExecutionValue::Mask { lanes }, MarshalTy::Mask { .. }) => {
             runtime.store(address, 8, crate::composite::pack_mask(lanes))
         }
+        (ExecutionValue::Sequence { values }, MarshalTy::View { element, capacity }) => {
+            if values.len() > *capacity as usize {
+                return Err(trap(
+                    ExecutionStatus::InvalidRequest,
+                    "view field exceeds its declared capacity",
+                ));
+            }
+            let packed = if values.is_empty() {
+                0
+            } else {
+                let cell = write_sequence_cell(runtime, values, element)?;
+                (cell as u32 as u64) | ((values.len() as u64) << 32)
+            };
+            runtime.store(address, 8, packed)
+        }
         _ => Err(trap(
             ExecutionStatus::InvalidRequest,
             "composite field does not match its declared logical type",

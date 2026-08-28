@@ -139,17 +139,23 @@ own totality obligation.
 
 Sequence-typed and view-typed function parameters/results now cross the
 process boundary through the canonical cell / packed-descriptor contract
-used by records. Nested composite sequence elements remain an explicit
-later step (`nested_composite_sequence_elements` is still unsupported).
-eBPF additionally refuses signatures beyond its five-register calling
-convention (`CGX410`). Backend refusal remains an evidence-backed
-envelope, not semantic disagreement.
+used by records. Nested composite sequence elements (`[Record; N]`,
+`[[T; N]; M]`, records that store sequences) and logical `[bool; N]`
+windows are realized on the five executable backends
+(`nested_composite_sequence_elements`, `boolean_sequence_elements`).
+`[bool; N]` is distinct from `mask<N>`: the former is a sequence of
+boolean values, the latter a packed lane predicate. Sequences of masks
+or vectors remain refused. eBPF additionally refuses signatures beyond
+its five-register calling convention (`CGX410`). Backend refusal remains
+an evidence-backed envelope, not semantic disagreement.
 
 Differential agreement corpora:
 `examples/execution/profile07-bounded-data-corpus.json`,
 `examples/execution/profile07-serialization-corpus.json`,
 `examples/execution/library-core-sequences-corpus.json`,
-`examples/execution/library-std-encoding-corpus.json`.
+`examples/execution/library-std-encoding-corpus.json`,
+`examples/execution/abi-nested-composites-corpus.json`,
+`examples/execution/abi-bool-sequences-corpus.json`.
 
 ## Identity compatibility
 

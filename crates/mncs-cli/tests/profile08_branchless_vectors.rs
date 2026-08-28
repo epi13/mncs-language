@@ -82,6 +82,7 @@ fn profile08_negative_fixtures_fail_closed() {
         ("invalid-lane-out-of-range.mncs", "MNE207"),
         ("invalid-vector-lane-mismatch.mncs", "MNE210"),
         ("invalid-mask-lane-mismatch.mncs", "MNE214"),
+        ("invalid-mask-sequence-element.mncs", "MNE105"),
     ];
     for (fixture, expected_code) in cases {
         let path = example(&format!("source/profile08/{fixture}"));

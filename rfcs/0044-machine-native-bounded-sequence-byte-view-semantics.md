@@ -108,8 +108,11 @@ capability-envelope facts, not silent approximations.
 **Subsequent realization (2026-08):** exact sequences, views, vectors, and
 masks now cross the process boundary through canonical cells and packed
 descriptors on portable WASM, C11, LLVM IR, and Cranelift. Nested composite
-sequence elements remain unsupported. See
-`docs/development-evidence/sequence-view-boundary-abi-2026-08.md`.
+sequence elements (`[Record; N]`, `[[T; N]; M]`, records that store
+sequences) and logical `[bool; N]` windows followed in the same cell-of-cells
+model. Sequences of masks or vectors remain refused. See
+`docs/development-evidence/sequence-view-boundary-abi-2026-08.md` and
+`docs/development-evidence/nested-composite-sequences-2026-08.md`.
 
 ## Non-goals
 

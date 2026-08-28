@@ -113,6 +113,366 @@
       },
       "expected_status": "returned",
       "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "first-point4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.geometry.v1", "function": "first_point4" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              {
+                "record": {
+                  "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Point::column%3Ai64%3Brow%3Ai64%3B",
+                  "name": "Point",
+                  "fields": [
+                    ["column", { "integer": { "value": 5, "type": { "bits": 64, "signed": true } } }],
+                    ["row", { "integer": { "value": 6, "type": { "bits": 64, "signed": true } } }]
+                  ]
+                }
+              },
+              {
+                "record": {
+                  "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Point::column%3Ai64%3Brow%3Ai64%3B",
+                  "name": "Point",
+                  "fields": [
+                    ["column", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }],
+                    ["row", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }]
+                  ]
+                }
+              },
+              {
+                "record": {
+                  "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Point::column%3Ai64%3Brow%3Ai64%3B",
+                  "name": "Point",
+                  "fields": [
+                    ["column", { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }],
+                    ["row", { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }]
+                  ]
+                }
+              },
+              {
+                "record": {
+                  "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Point::column%3Ai64%3Brow%3Ai64%3B",
+                  "name": "Point",
+                  "fields": [
+                    ["column", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }],
+                    ["row", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }]
+                  ]
+                }
+              }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Point::column%3Ai64%3Brow%3Ai64%3B",
+          "name": "Point",
+          "fields": [
+            ["column", { "integer": { "value": 5, "type": { "bits": 64, "signed": true } } }],
+            ["row", { "integer": { "value": 6, "type": { "bits": 64, "signed": true } } }]
+          ]
+        }
+      }]
+    },
+    {
+      "id": "contains-any4-hit",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.geometry.v1", "function": "contains_any4" },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                {
+                  "record": {
+                    "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Rect::origin%3APoint%3Bsize%3ASize%3B",
+                    "name": "Rect",
+                    "fields": [
+                      ["origin", {
+                        "record": {
+                          "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Point::column%3Ai64%3Brow%3Ai64%3B",
+                          "name": "Point",
+                          "fields": [
+                            ["column", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }],
+                            ["row", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }]
+                          ]
+                        }
+                      }],
+                      ["size", {
+                        "record": {
+                          "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Size::columns%3Ai64%3Brows%3Ai64%3B",
+                          "name": "Size",
+                          "fields": [
+                            ["columns", { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }],
+                            ["rows", { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }]
+                          ]
+                        }
+                      }]
+                    ]
+                  }
+                },
+                {
+                  "record": {
+                    "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Rect::origin%3APoint%3Bsize%3ASize%3B",
+                    "name": "Rect",
+                    "fields": [
+                      ["origin", {
+                        "record": {
+                          "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Point::column%3Ai64%3Brow%3Ai64%3B",
+                          "name": "Point",
+                          "fields": [
+                            ["column", { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } }],
+                            ["row", { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } }]
+                          ]
+                        }
+                      }],
+                      ["size", {
+                        "record": {
+                          "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Size::columns%3Ai64%3Brows%3Ai64%3B",
+                          "name": "Size",
+                          "fields": [
+                            ["columns", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }],
+                            ["rows", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }]
+                          ]
+                        }
+                      }]
+                    ]
+                  }
+                },
+                {
+                  "record": {
+                    "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Rect::origin%3APoint%3Bsize%3ASize%3B",
+                    "name": "Rect",
+                    "fields": [
+                      ["origin", {
+                        "record": {
+                          "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Point::column%3Ai64%3Brow%3Ai64%3B",
+                          "name": "Point",
+                          "fields": [
+                            ["column", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }],
+                            ["row", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }]
+                          ]
+                        }
+                      }],
+                      ["size", {
+                        "record": {
+                          "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Size::columns%3Ai64%3Brows%3Ai64%3B",
+                          "name": "Size",
+                          "fields": [
+                            ["columns", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }],
+                            ["rows", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }]
+                          ]
+                        }
+                      }]
+                    ]
+                  }
+                },
+                {
+                  "record": {
+                    "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Rect::origin%3APoint%3Bsize%3ASize%3B",
+                    "name": "Rect",
+                    "fields": [
+                      ["origin", {
+                        "record": {
+                          "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Point::column%3Ai64%3Brow%3Ai64%3B",
+                          "name": "Point",
+                          "fields": [
+                            ["column", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }],
+                            ["row", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }]
+                          ]
+                        }
+                      }],
+                      ["size", {
+                        "record": {
+                          "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Size::columns%3Ai64%3Brows%3Ai64%3B",
+                          "name": "Size",
+                          "fields": [
+                            ["columns", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }],
+                            ["rows", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }]
+                          ]
+                        }
+                      }]
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "record": {
+              "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Point::column%3Ai64%3Brow%3Ai64%3B",
+              "name": "Point",
+              "fields": [
+                ["column", { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }],
+                ["row", { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }]
+              ]
+            }
+          }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "union4-quadrants",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.geometry.v1", "function": "union4" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              {
+                "record": {
+                  "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Rect::origin%3APoint%3Bsize%3ASize%3B",
+                  "name": "Rect",
+                  "fields": [
+                    ["origin", {
+                      "record": {
+                        "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Point::column%3Ai64%3Brow%3Ai64%3B",
+                        "name": "Point",
+                        "fields": [
+                          ["column", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }],
+                          ["row", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }]
+                        ]
+                      }
+                    }],
+                    ["size", {
+                      "record": {
+                        "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Size::columns%3Ai64%3Brows%3Ai64%3B",
+                        "name": "Size",
+                        "fields": [
+                          ["columns", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }],
+                          ["rows", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }]
+                        ]
+                      }
+                    }]
+                  ]
+                }
+              },
+              {
+                "record": {
+                  "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Rect::origin%3APoint%3Bsize%3ASize%3B",
+                  "name": "Rect",
+                  "fields": [
+                    ["origin", {
+                      "record": {
+                        "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Point::column%3Ai64%3Brow%3Ai64%3B",
+                        "name": "Point",
+                        "fields": [
+                          ["column", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }],
+                          ["row", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }]
+                        ]
+                      }
+                    }],
+                    ["size", {
+                      "record": {
+                        "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Size::columns%3Ai64%3Brows%3Ai64%3B",
+                        "name": "Size",
+                        "fields": [
+                          ["columns", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }],
+                          ["rows", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }]
+                        ]
+                      }
+                    }]
+                  ]
+                }
+              },
+              {
+                "record": {
+                  "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Rect::origin%3APoint%3Bsize%3ASize%3B",
+                  "name": "Rect",
+                  "fields": [
+                    ["origin", {
+                      "record": {
+                        "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Point::column%3Ai64%3Brow%3Ai64%3B",
+                        "name": "Point",
+                        "fields": [
+                          ["column", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }],
+                          ["row", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }]
+                        ]
+                      }
+                    }],
+                    ["size", {
+                      "record": {
+                        "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Size::columns%3Ai64%3Brows%3Ai64%3B",
+                        "name": "Size",
+                        "fields": [
+                          ["columns", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }],
+                          ["rows", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }]
+                        ]
+                      }
+                    }]
+                  ]
+                }
+              },
+              {
+                "record": {
+                  "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Rect::origin%3APoint%3Bsize%3ASize%3B",
+                  "name": "Rect",
+                  "fields": [
+                    ["origin", {
+                      "record": {
+                        "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Point::column%3Ai64%3Brow%3Ai64%3B",
+                        "name": "Point",
+                        "fields": [
+                          ["column", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }],
+                          ["row", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }]
+                        ]
+                      }
+                    }],
+                    ["size", {
+                      "record": {
+                        "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Size::columns%3Ai64%3Brows%3Ai64%3B",
+                        "name": "Size",
+                        "fields": [
+                          ["columns", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }],
+                          ["rows", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }]
+                        ]
+                      }
+                    }]
+                  ]
+                }
+              }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Rect::origin%3APoint%3Bsize%3ASize%3B",
+          "name": "Rect",
+          "fields": [
+            ["origin", {
+              "record": {
+                "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Point::column%3Ai64%3Brow%3Ai64%3B",
+                "name": "Point",
+                "fields": [
+                  ["column", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }],
+                  ["row", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }]
+                ]
+              }
+            }],
+            ["size", {
+              "record": {
+                "type_identity": "mncs:0.2:record-type:mncs.core.geometry.v1::Size::columns%3Ai64%3Brows%3Ai64%3B",
+                "name": "Size",
+                "fields": [
+                  ["columns", { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }],
+                  ["rows", { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }]
+                ]
+              }
+            }]
+          ]
+        }
+      }]
     }
   ],
   "properties": []

@@ -1,0 +1,9 @@
+mncs 0.8;
+
+// `[mask<N>; K]` is not a boolean sequence. Masks are lane predicates;
+// boolean windows are `[bool; K]`. This spelling is refused, not coerced.
+module examples.profile08.invalid_mask_sequence_element;
+
+fn first(xs: [mask<4>; 2]) -> (result: mask<4>) {
+    return xs[0];
+}

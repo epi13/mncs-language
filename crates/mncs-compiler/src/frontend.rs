@@ -6005,7 +6005,7 @@ fn profile_sequence_type(
         None => profile_sequence_type(element_text, finite_types, record_types)?,
     });
     match &*element {
-        BodyType::Named(_) => None,
+        BodyType::Named(name) if name != "bool" => None,
         _ => Some(BodyType::Sequence { element, bound }),
     }
 }

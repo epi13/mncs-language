@@ -60,7 +60,8 @@ serialization differential corpora and over sequence-/view-/vector-typed
 library exports (layered body/SSA/backend validation PASS). Overall
 experiment status stays UNKNOWN where runtime-checked view ranges and
 dynamic indexes retain unresolved obligations — by design. Nested composite
-sequence elements remain unsupported.
+sequence elements and logical `[bool; N]` windows are now realized on the
+five executable backends; sequences of masks or vectors remain refused.
 
 WASM is one realization. Generic orchestration is adapter-neutral.
 
@@ -89,11 +90,12 @@ Language-owned experiment and compiler-study records emit producer-native Family
    The bounded stdlib consumer is covered by research-bytecode execution.
    Sequence-, view-, vector-, and mask-typed language-level signatures now
    cross the process boundary on all five executable backends through
-   canonical cells and packed descriptors; nested composite sequence elements
-   remain unsupported. The next language tranche should settle explicit generic
-   type parameters only after type identity, instantiation, recursion, and
-   backend obligations have a complete design; this run does not fake generic
-   support.
+   canonical cells and packed descriptors, including nested composite
+   sequence elements and logical `[bool; N]` windows. The next language
+   tranche should settle explicit generic type parameters only after type
+   identity, instantiation, recursion, and backend obligations have a
+   complete design; this run does not fake generic support. Native SIMD
+   selection and executable RISC-V/eBPF/PTX remain later work.
 
 1. ~~Logical product/record values as Source Profile 0.5~~ — **implemented (experimental)** as of
    2026-08-23: nominal records with canonical field identity, construction, functional update,

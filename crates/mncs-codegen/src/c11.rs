@@ -88,6 +88,8 @@ pub fn c11_capabilities() -> BackendCapabilityManifest {
             "bounded_sequences_internal",
             "bounded_views_internal",
             "sequence_or_view_boundary_crossing",
+            "nested_composite_sequence_elements",
+            "boolean_sequence_elements",
             "vector_or_mask_boundary_crossing",
             "semantic_branchless_select",
             "semantic_integer_vectors",
@@ -103,7 +105,7 @@ pub fn c11_capabilities() -> BackendCapabilityManifest {
             "effects",
             "widening_integer",
             "undefined_behavior",
-            "nested_composite_sequence_elements",
+            "unbounded_sequences",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -315,7 +317,7 @@ fn emit_module(module: &ScalarModule) -> String {
         out.push_str(
             "/* Canonical composite cell arena (MNCS cell layout v0.1). Defined\n   whenever the call-file driver may copy an arena image, including\n   mask-only modules that never allocate cells. */\n#define MNCS_ARENA_BYTES (4u * 1024u * 1024u)\nunsigned char mncs_arena[MNCS_ARENA_BYTES];\nuint64_t mncs_bump = 0;\n",
         );
-        if module_uses_cells(module) {
+        if crate::support::scalar_module_uses_cells(module) {
             out.push_str(
                 "uint64_t mncs_cell_alloc(uint64_t bytes) {\n  uint64_t base = (mncs_bump + 7u) & ~(uint64_t)7u;\n  mncs_bump = base + bytes;\n  return base;\n}\nvoid mncs_slot_store32(unsigned char *a, uint64_t at, uint32_t v) {\n  memcpy(a + at, &v, sizeof v);\n}\nvoid mncs_slot_store64(unsigned char *a, uint64_t at, uint64_t v) {\n  memcpy(a + at, &v, sizeof v);\n}\nuint32_t mncs_slot_load32(const unsigned char *a, uint64_t at) {\n  uint32_t v;\n  memcpy(&v, a + at, sizeof v);\n  return v;\n}\nuint64_t mncs_slot_load64(const unsigned char *a, uint64_t at) {\n  uint64_t v;\n  memcpy(&v, a + at, sizeof v);\n  return v;\n}\n",
             );
@@ -331,32 +333,6 @@ fn emit_module(module: &ScalarModule) -> String {
         out.push('\n');
     }
     out
-}
-
-/// Whether any lowered function manipulates canonical cells.
-fn module_uses_cells(module: &ScalarModule) -> bool {
-    module.functions.iter().any(|function| {
-        function.params.iter().any(|param| param.ty.is_cell())
-            || function.result.ty.is_cell()
-            || function.blocks.iter().any(|block| {
-                block.insts.iter().any(|inst| match inst {
-                    ScalarInst::CellAlloc { .. }
-                    | ScalarInst::CellStoreDiscriminant { .. }
-                    | ScalarInst::CellStore { .. }
-                    | ScalarInst::CellLoad { .. } => true,
-                    ScalarInst::Sequence(nested) => nested.iter().any(|nested| {
-                        matches!(
-                            nested,
-                            ScalarInst::CellAlloc { .. }
-                                | ScalarInst::CellStoreDiscriminant { .. }
-                                | ScalarInst::CellStore { .. }
-                                | ScalarInst::CellLoad { .. }
-                        )
-                    }),
-                    _ => false,
-                })
-            })
-    })
 }
 
 fn emit_prototype(out: &mut String, function: &ScalarFunction) {

@@ -587,30 +587,28 @@ pub(crate) fn scalar_module_needs_arena_symbols(module: &crate::scalar::ScalarMo
         })
 }
 
+fn scalar_inst_uses_cells(inst: &crate::scalar::ScalarInst) -> bool {
+    use crate::scalar::ScalarInst;
+    match inst {
+        ScalarInst::CellAlloc { .. }
+        | ScalarInst::CellStoreDiscriminant { .. }
+        | ScalarInst::CellStore { .. }
+        | ScalarInst::CellLoad { .. }
+        | ScalarInst::SequenceReplace { .. } => true,
+        ScalarInst::Sequence(nested) => nested.iter().any(scalar_inst_uses_cells),
+        _ => false,
+    }
+}
+
 /// Whether any lowered function in the module manipulates canonical cells.
 pub(crate) fn scalar_module_uses_cells(module: &crate::scalar::ScalarModule) -> bool {
-    use crate::scalar::ScalarInst;
     module.functions.iter().any(|function| {
         function.params.iter().any(|param| param.ty.is_cell())
             || function.result.ty.is_cell()
-            || function.blocks.iter().any(|block| {
-                block.insts.iter().any(|inst| match inst {
-                    ScalarInst::CellAlloc { .. }
-                    | ScalarInst::CellStoreDiscriminant { .. }
-                    | ScalarInst::CellStore { .. }
-                    | ScalarInst::CellLoad { .. } => true,
-                    ScalarInst::Sequence(nested) => nested.iter().any(|nested| {
-                        matches!(
-                            nested,
-                            ScalarInst::CellAlloc { .. }
-                                | ScalarInst::CellStoreDiscriminant { .. }
-                                | ScalarInst::CellStore { .. }
-                                | ScalarInst::CellLoad { .. }
-                        )
-                    }),
-                    _ => false,
-                })
-            })
+            || function
+                .blocks
+                .iter()
+                .any(|block| block.insts.iter().any(scalar_inst_uses_cells))
     })
 }
 
