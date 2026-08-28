@@ -47,18 +47,20 @@ Executable stages: source envelope → CST/AST → semantic program → HIR → 
 
 | Realization | Exists | Local execute | External tools | Status (2026-08) |
 | --- | --- | --- | --- | --- |
-| portable WASM MVP | yes | embedded interpreter | no | records, payload sums, bytes, fixed sequences/views (internal), traversal realized; sequence-typed boundary crossings fail closed |
-| research bytecode | yes | SSA interpreter | no | full language envelope including sequence-typed language-level signatures |
-| LLVM IR | yes | external clang | clang/llc | records, payload sums, bytes, internal sequences/views realized through canonical cells + packed view descriptors |
-| C11 | yes | external clang/gcc | clang/gcc | same composite/sequence envelope as LLVM; process-boundary marshal still refuses composites |
-| Cranelift CLIF/JIT/AOT | yes | host JIT for the scalar envelope | host ISA and executable-memory policy | composite cells via libcalls; guarded division into structured failure; saturating/widening per declared promises |
+| portable WASM MVP | yes | embedded interpreter | no | records, payload sums, bytes, sequences/views including language-level signatures, traversal, wrapping vectors/masks realized |
+| research bytecode | yes | SSA interpreter | no | full language envelope including sequence-, view-, vector-, and mask-typed language-level signatures |
+| LLVM IR | yes | external clang | clang/llc | records, payload sums, bytes, sequences/views/vectors/masks including language-level signatures through canonical cells + packed descriptors |
+| C11 | yes | external clang/gcc | clang/gcc | same composite/sequence/view/vector/mask envelope as LLVM, including process-boundary marshal |
+| Cranelift CLIF/JIT/AOT | yes | host JIT for the scalar envelope | host ISA and executable-memory policy | composite cells via libcalls, including sequence/view/vector/mask signatures; guarded division into structured failure; saturating/widening per declared promises |
 | RISC-V 32 / eBPF / PTX | yes | artifact generation only | llc (+ target tools) | RV32IM ELF and PTX modules produced + structurally validated; execution honestly unavailable on hosts without emulators/GPUs; eBPF refuses >5-register signatures precisely (`CGX410`) |
 | SPIR-V, extra VMs | no | n/a | n/a | planned |
 
 All five executable backends agree over the Profile 0.7 bounded-data and
-serialization differential corpora (layered body/SSA/backend validation
-PASS); overall experiment status stays UNKNOWN where runtime-checked view
-ranges and dynamic indexes retain unresolved obligations — by design.
+serialization differential corpora and over sequence-/view-/vector-typed
+library exports (layered body/SSA/backend validation PASS). Overall
+experiment status stays UNKNOWN where runtime-checked view ranges and
+dynamic indexes retain unresolved obligations — by design. Nested composite
+sequence elements remain unsupported.
 
 WASM is one realization. Generic orchestration is adapter-neutral.
 
@@ -84,10 +86,14 @@ Language-owned experiment and compiler-study records emit producer-native Family
    binding. Qualified and aliased imports preserve declaring-module identities;
    `source-study` emits inspectable namespaces, scopes, bindings, references,
    provenance, and navigation spans; duplicate unqualified exports fail closed.
-   The bounded stdlib consumer is covered by research-bytecode execution. The
-   next language tranche should settle explicit generic type parameters only
-   after type identity, instantiation, recursion, and backend obligations have
-   a complete design; this tranche intentionally does not fake generic support.
+   The bounded stdlib consumer is covered by research-bytecode execution.
+   Sequence-, view-, vector-, and mask-typed language-level signatures now
+   cross the process boundary on all five executable backends through
+   canonical cells and packed descriptors; nested composite sequence elements
+   remain unsupported. The next language tranche should settle explicit generic
+   type parameters only after type identity, instantiation, recursion, and
+   backend obligations have a complete design; this run does not fake generic
+   support.
 
 1. ~~Logical product/record values as Source Profile 0.5~~ — **implemented (experimental)** as of
    2026-08-23: nominal records with canonical field identity, construction, functional update,

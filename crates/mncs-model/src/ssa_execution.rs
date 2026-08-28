@@ -1995,6 +1995,13 @@ fn value_matches_type(value: &ExecutionValue, ty: &BodyType) -> bool {
                     .iter()
                     .all(|element_value| value_matches_type(element_value, element))
         }
+        (ExecutionValue::Vector { values }, BodyType::Vector { element, lanes }) => {
+            values.len() == *lanes as usize
+                && values.iter().all(|lane| value_matches_type(lane, element))
+        }
+        (ExecutionValue::Mask { lanes: bits }, BodyType::Mask { lanes }) => {
+            bits.len() == *lanes as usize
+        }
         _ => false,
     }
 }
@@ -2063,6 +2070,22 @@ fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionVal
                 normalized.push(normalize_value(value, element)?);
             }
             Some(ExecutionValue::Sequence { values: normalized })
+        }
+        (ExecutionValue::Vector { values }, BodyType::Vector { element, lanes })
+            if values.len() == *lanes as usize =>
+        {
+            let mut normalized = Vec::with_capacity(values.len());
+            for value in values {
+                normalized.push(normalize_value(value, element)?);
+            }
+            Some(ExecutionValue::Vector { values: normalized })
+        }
+        (ExecutionValue::Mask { lanes: bits }, BodyType::Mask { lanes })
+            if bits.len() == *lanes as usize =>
+        {
+            Some(ExecutionValue::Mask {
+                lanes: bits.clone(),
+            })
         }
         _ => None,
     }

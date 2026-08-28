@@ -99,11 +99,17 @@ diagnostics. Existing profiles 0.1–0.6 are unchanged bit-for-bit.
 | Cranelift | realizes | internal cells | packed descriptor, internal | realizes | realizes |
 | RISC-V / eBPF / PTX artifacts | via shared LLVM lowering; artifact production only | | | | |
 
-Sequence- or view-typed function parameters/results refuse with coded
-diagnostics on the four scalar backends this tranche (the process-boundary
-marshal contract does not yet carry them); research bytecode accepts them at
-language-level signatures. These refusals are recorded capability-envelope
-facts, not silent approximations.
+Sequence- or view-typed function parameters/results refused with coded
+diagnostics on the four scalar backends in the original 0.7 landing
+(the process-boundary marshal contract did not yet carry them); research
+bytecode accepted them at language-level signatures. Those refusals were
+capability-envelope facts, not silent approximations.
+
+**Subsequent realization (2026-08):** exact sequences, views, vectors, and
+masks now cross the process boundary through canonical cells and packed
+descriptors on portable WASM, C11, LLVM IR, and Cranelift. Nested composite
+sequence elements remain unsupported. See
+`docs/development-evidence/sequence-view-boundary-abi-2026-08.md`.
 
 ## Non-goals
 

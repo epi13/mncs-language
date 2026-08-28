@@ -1,0 +1,88 @@
+{
+  "schema_version": "0.1",
+  "name": "library-std-encoding",
+  "cases": [
+    {
+      "id": "encode-u32-1024",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.std.encoding.v1", "function": "encode_u32" },
+        "arguments": [
+          { "integer": { "value": 1024, "type": { "bits": 32, "signed": false } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [
+        {
+          "sequence": {
+            "values": [
+              { "byte": { "value": 0 } },
+              { "byte": { "value": 0 } },
+              { "byte": { "value": 4 } },
+              { "byte": { "value": 0 } }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decode-u32-1024",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.std.encoding.v1", "function": "decode_u32" },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                { "byte": { "value": 0 } },
+                { "byte": { "value": 0 } },
+                { "byte": { "value": 4 } },
+                { "byte": { "value": 0 } }
+              ]
+            }
+          }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [
+        { "integer": { "value": 1024, "type": { "bits": 32, "signed": false } } }
+      ]
+    },
+    {
+      "id": "u32-roundtrip-0x01020304",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.std.encoding.v1", "function": "u32_roundtrip" },
+        "arguments": [
+          { "integer": { "value": 16909060, "type": { "bits": 32, "signed": false } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "encode-u32-zero",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.std.encoding.v1", "function": "encode_u32" },
+        "arguments": [
+          { "integer": { "value": 0, "type": { "bits": 32, "signed": false } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [
+        {
+          "sequence": {
+            "values": [
+              { "byte": { "value": 0 } },
+              { "byte": { "value": 0 } },
+              { "byte": { "value": 0 } },
+              { "byte": { "value": 0 } }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "properties": []
+}

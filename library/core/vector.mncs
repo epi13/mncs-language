@@ -30,3 +30,15 @@ fn replace2(value: i32) -> (result: i32) {
     let updated: vec<i32, 4> = replace_lane(base, 2, value);
     return extract_lane(updated, 2);
 }
+
+// Vector-typed boundary: the ABI value is a canonical cell, not four
+// scalar parameters. These exist so consumers can pass logical vectors
+// across module and process boundaries without scalar wrappers.
+fn reduce_vec4(values: vec<i32, 4>) -> (result: i32) {
+    return reduce_sum_wrap(values);
+}
+
+fn doubled4(a: i32, b: i32, c: i32, d: i32) -> (result: vec<i32, 4>) {
+    let values: vec<i32, 4> = vector(a, b, c, d);
+    return vec_add_wrap(values, values);
+}

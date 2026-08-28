@@ -5,9 +5,10 @@ use std::fmt::Write;
 
 use mncs_model::{
     ArtifactRepresentation, BackendArtifact, BackendFunctionValueContract, BackendIdentity,
-    BackendResult, BackendValueContract, CompilerArtifactRef, CompilerDiagnostic,
+    BackendResult, BackendValueContract, BodyType, CompilerArtifactRef, CompilerDiagnostic,
     CompilerDiagnosticKind, ExecutionFailure, ExecutionRequest, ExecutionStatus, ExecutionValue,
-    IntegerType, Program, SsaModule, TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION,
+    IntegerType, Program, SequenceBound, SsaModule, TransformationStatus,
+    BACKEND_ARTIFACT_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 
@@ -147,68 +148,96 @@ pub(crate) fn composite_value_contracts(
     composites
 }
 
+/// Classify one declared semantic type into the language-owned backend
+/// value contract used at process and interpreter boundaries.
+pub(crate) fn value_contract_for(program: &Program, name: &str) -> BackendValueContract {
+    if let Some(record_type) = program
+        .record_types
+        .iter()
+        .find(|record| record.name == name)
+    {
+        return BackendValueContract::Record {
+            type_identity: record_type.identity.clone(),
+            name: record_type.name.clone(),
+            fields: record_type
+                .fields
+                .iter()
+                .map(|field| (field.name.clone(), field.field_type.clone()))
+                .collect(),
+        };
+    }
+    if let Some(finite_type) = program
+        .finite_types
+        .iter()
+        .find(|finite_type| finite_type.name == name)
+    {
+        // A type is boxed when ANY variant carries a payload;
+        // every variant then gets a layout entry (maybe empty).
+        let payloads = finite_type
+            .variants
+            .iter()
+            .filter(|_| {
+                finite_type
+                    .variants
+                    .iter()
+                    .any(|variant| !variant.payload.is_empty())
+            })
+            .map(|variant| {
+                (
+                    variant.discriminant,
+                    variant
+                        .payload
+                        .iter()
+                        .map(|field| (field.name.clone(), field.field_type.clone()))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        return BackendValueContract::Finite {
+            type_identity: finite_type.identity.clone(),
+            variants: finite_type
+                .variants
+                .iter()
+                .map(|variant| (variant.discriminant, variant.identity.clone()))
+                .collect(),
+            payloads,
+        };
+    }
+    match BodyType::from_semantic_name(name) {
+        BodyType::Sequence {
+            element,
+            bound: SequenceBound::Exact(length),
+        } => BackendValueContract::Sequence {
+            semantic_type: name.to_owned(),
+            element: element.semantic_name(),
+            length,
+        },
+        BodyType::Sequence {
+            element,
+            bound: SequenceBound::UpTo(capacity),
+        } => BackendValueContract::View {
+            semantic_type: name.to_owned(),
+            element: element.semantic_name(),
+            capacity,
+        },
+        BodyType::Vector { element, lanes } => BackendValueContract::Vector {
+            semantic_type: name.to_owned(),
+            element: element.semantic_name(),
+            lanes,
+        },
+        BodyType::Mask { lanes } => BackendValueContract::Mask {
+            semantic_type: name.to_owned(),
+            lanes,
+        },
+        _ => BackendValueContract::Scalar {
+            semantic_type: name.to_owned(),
+        },
+    }
+}
+
 pub(crate) fn function_value_contracts(
     program: &Program,
 ) -> BTreeMap<String, BackendFunctionValueContract> {
-    let value_contract = |name: &str| {
-        if let Some(record_type) = program
-            .record_types
-            .iter()
-            .find(|record| record.name == name)
-        {
-            return BackendValueContract::Record {
-                type_identity: record_type.identity.clone(),
-                name: record_type.name.clone(),
-                fields: record_type
-                    .fields
-                    .iter()
-                    .map(|field| (field.name.clone(), field.field_type.clone()))
-                    .collect(),
-            };
-        }
-        program
-            .finite_types
-            .iter()
-            .find(|finite_type| finite_type.name == name)
-            .map_or_else(
-                || BackendValueContract::Scalar {
-                    semantic_type: name.to_owned(),
-                },
-                |finite_type| {
-                    // A type is boxed when ANY variant carries a payload;
-                    // every variant then gets a layout entry (maybe empty).
-                    let payloads = finite_type
-                        .variants
-                        .iter()
-                        .filter(|_| {
-                            finite_type
-                                .variants
-                                .iter()
-                                .any(|variant| !variant.payload.is_empty())
-                        })
-                        .map(|variant| {
-                            (
-                                variant.discriminant,
-                                variant
-                                    .payload
-                                    .iter()
-                                    .map(|field| (field.name.clone(), field.field_type.clone()))
-                                    .collect::<Vec<_>>(),
-                            )
-                        })
-                        .collect();
-                    BackendValueContract::Finite {
-                        type_identity: finite_type.identity.clone(),
-                        variants: finite_type
-                            .variants
-                            .iter()
-                            .map(|variant| (variant.discriminant, variant.identity.clone()))
-                            .collect(),
-                        payloads,
-                    }
-                },
-            )
-    };
     program
         .functions
         .iter()
@@ -219,12 +248,12 @@ pub(crate) fn function_value_contracts(
                     inputs: function
                         .inputs
                         .iter()
-                        .map(|value| value_contract(&value.value_type))
+                        .map(|value| value_contract_for(program, &value.value_type))
                         .collect(),
                     outputs: function
                         .outputs
                         .iter()
-                        .map(|value| value_contract(&value.value_type))
+                        .map(|value| value_contract_for(program, &value.value_type))
                         .collect(),
                 },
             )
@@ -287,30 +316,31 @@ pub(crate) fn argument_bits(value: &ExecutionValue) -> i128 {
         ExecutionValue::Finite { discriminant, .. } => i128::from(*discriminant),
         // Bytes marshal through their unsigned 8-bit domain.
         ExecutionValue::Byte { value } => *value,
-        // Composite values never cross a scalar process-argument boundary;
-        // callers must reject them before marshalling.
+        // Collection and record values cross through the canonical call
+        // file, never as a scalar argv word. Reaching this arm is a
+        // driver-selection bug, not a representation choice.
         ExecutionValue::Sequence { .. }
         | ExecutionValue::Vector { .. }
         | ExecutionValue::Mask { .. } => {
-            panic!("collection value cannot marshal to a native argument")
+            panic!("collection value cannot marshal to a native argv word")
         }
         ExecutionValue::Record { name, .. } => {
-            panic!("record value {name} cannot marshal to a native argument")
+            panic!("record value {name} cannot marshal to a native argv word")
         }
     }
 }
 
 pub(crate) fn argument_argv(value: &ExecutionValue) -> Result<String, String> {
     match value {
-        ExecutionValue::Sequence { .. } => {
-            Err("sequence value cannot cross the native process argument boundary".to_owned())
-        }
-        ExecutionValue::Vector { .. } | ExecutionValue::Mask { .. } => {
-            Err("vector or mask value cannot cross the native process argument boundary".to_owned())
-        }
-        ExecutionValue::Record { name, .. } => Err(format!(
-            "record value {name} cannot cross the native process argument boundary"
-        )),
+        ExecutionValue::Sequence { .. }
+        | ExecutionValue::Vector { .. }
+        | ExecutionValue::Mask { .. }
+        | ExecutionValue::Record { .. } => Err(
+            "composite or collection value requires the canonical call-file boundary".to_owned(),
+        ),
+        ExecutionValue::Finite { payload, .. } if !payload.is_empty() => Err(
+            "composite or collection value requires the canonical call-file boundary".to_owned(),
+        ),
         other => Ok(argument_bits(other).to_string()),
     }
 }
@@ -352,15 +382,27 @@ pub(crate) fn backend_output_value_from_i128(
     .map_err(crate::native::NativeError::InvalidOutput)
 }
 
-/// Whether one value contract crosses the boundary as a canonical cell.
+/// Whether one value contract crosses the boundary as a canonical cell
+/// offset. Views and masks are packed 64-bit words, not cell roots.
 pub(crate) fn contract_is_cell(contract: &BackendValueContract) -> bool {
     match contract {
-        BackendValueContract::Record { .. } => true,
+        BackendValueContract::Record { .. }
+        | BackendValueContract::Sequence { .. }
+        | BackendValueContract::Vector { .. } => true,
         BackendValueContract::Finite { payloads, .. } => {
             crate::composite::finite_payloads_declare_payloads(payloads)
         }
-        BackendValueContract::Scalar { .. } => false,
+        BackendValueContract::Scalar { .. }
+        | BackendValueContract::View { .. }
+        | BackendValueContract::Mask { .. } => false,
     }
+}
+
+/// Whether executing this contract requires the canonical arena image.
+/// Views store their elements in the arena even though the ABI word is a
+/// packed descriptor, not a cell root.
+pub(crate) fn contract_needs_arena(contract: &BackendValueContract) -> bool {
+    contract_is_cell(contract) || matches!(contract, BackendValueContract::View { .. })
 }
 
 /// Build the canonical call file for one execution request. Returns `None`
@@ -372,11 +414,13 @@ pub(crate) fn build_call_file(
     composite_contracts: &BTreeMap<String, BackendValueContract>,
 ) -> Result<Option<Vec<u8>>, String> {
     let needs_cells = arguments.iter().any(|value| match value {
-        ExecutionValue::Record { .. } => true,
+        ExecutionValue::Record { .. }
+        | ExecutionValue::Sequence { .. }
+        | ExecutionValue::Vector { .. } => true,
         ExecutionValue::Finite { payload, .. } => !payload.is_empty(),
         _ => false,
-    }) || input_contracts.iter().any(contract_is_cell)
-        || output_contract.is_some_and(contract_is_cell);
+    }) || input_contracts.iter().any(contract_needs_arena)
+        || output_contract.is_some_and(contract_needs_arena);
     if !needs_cells {
         // Pure scalar calls keep the historical argv-only protocol.
         return Ok(None);
@@ -385,13 +429,7 @@ pub(crate) fn build_call_file(
     let mut entries: Vec<(u64, u64)> = Vec::new();
     for (index, value) in arguments.iter().enumerate() {
         let contract = input_contracts.get(index);
-        let boundary = match contract {
-            Some(BackendValueContract::Record { .. }) => writer.encode_argument(value)?,
-            Some(BackendValueContract::Finite { payloads, .. }) if !payloads.is_empty() => {
-                writer.encode_argument(value)?
-            }
-            _ => writer.encode_argument(value)?,
-        };
+        let boundary = writer.encode_argument_with_contract(value, contract)?;
         match boundary {
             crate::composite::BoundaryValue::Bits(bits) => {
                 entries.push((0, bits));
@@ -426,28 +464,32 @@ pub(crate) fn decode_native_observation(
     if status != ExecutionStatus::Returned {
         return Ok(Vec::new());
     }
-    let composite_output = output_contract.is_some_and(contract_is_cell);
-    match (composite_output, arena_hex, output_contract) {
+    let needs_arena = output_contract.is_some_and(contract_needs_arena);
+    match (needs_arena, arena_hex, output_contract) {
         (true, Some(hex), Some(contract)) => {
             let image = hex_decode_bytes(hex)?;
             let reader = crate::composite::ArenaReader::new(&image, composite_contracts);
-            Ok(vec![reader.decode(value as u64, contract)?])
+            Ok(vec![reader.decode_boundary(value as u64, contract)?])
         }
-        (true, _, _) => {
-            Err("composite result was returned without a decodable arena image".to_owned())
-        }
-        (false, ..) => match output_contract {
-            Some(contract) => backend_output_value_from_i128(contract, value)
+        (true, _, _) => Err(
+            "collection or composite result was returned without a decodable arena image"
+                .to_owned(),
+        ),
+        (false, _, Some(contract)) => match contract {
+            BackendValueContract::Mask { lanes, .. } => {
+                Ok(vec![crate::composite::unpack_mask(value as u64, *lanes)])
+            }
+            _ => backend_output_value_from_i128(contract, value)
                 .map(|decoded| vec![decoded])
                 .map_err(|error| error.reason()),
-            None => Ok(vec![ExecutionValue::Integer {
-                value,
-                ty: IntegerType {
-                    bits: 64,
-                    signed: true,
-                },
-            }]),
         },
+        (false, _, None) => Ok(vec![ExecutionValue::Integer {
+            value,
+            ty: IntegerType {
+                bits: 64,
+                signed: true,
+            },
+        }]),
     }
 }
 
@@ -556,19 +598,21 @@ pub(crate) fn process_driver(
     inputs: &[mncs_model::BackendValueContract],
     output: Option<&mncs_model::BackendValueContract>,
 ) -> String {
-    let uses_cells = inputs.iter().any(is_cell_contract) || output.is_some_and(is_cell_contract);
+    let uses_cells =
+        inputs.iter().any(contract_needs_arena) || output.is_some_and(contract_needs_arena);
     if !uses_cells {
         return process_driver_scalar_only(function, inputs);
     }
     process_driver_full(function, inputs)
 }
 
-fn is_cell_contract(contract: &mncs_model::BackendValueContract) -> bool {
-    match contract {
-        mncs_model::BackendValueContract::Record { .. } => true,
-        mncs_model::BackendValueContract::Finite { payloads, .. } => !payloads.is_empty(),
-        mncs_model::BackendValueContract::Scalar { .. } => false,
-    }
+fn uses_uint64_abi(contract: &mncs_model::BackendValueContract) -> bool {
+    contract_is_cell(contract)
+        || matches!(
+            contract,
+            mncs_model::BackendValueContract::View { .. }
+                | mncs_model::BackendValueContract::Mask { .. }
+        )
 }
 
 /// Historical argv-only driver for pure scalar exports.
@@ -648,15 +692,6 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
     // mismatch would be C undefined behavior at every call boundary).
     // Composite parameters receive canonical cell offsets through the
     // MNCS call file; their C type is the offset word.
-    fn is_cell(contract: &mncs_model::BackendValueContract) -> bool {
-        match contract {
-            mncs_model::BackendValueContract::Record { .. } => true,
-            mncs_model::BackendValueContract::Finite { payloads, .. } => {
-                crate::composite::finite_payloads_declare_payloads(payloads)
-            }
-            mncs_model::BackendValueContract::Scalar { .. } => false,
-        }
-    }
     fn scalar_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
         match contract {
             mncs_model::BackendValueContract::Scalar { semantic_type } => {
@@ -674,7 +709,7 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
         }
     }
     fn arg_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
-        if is_cell(contract) {
+        if uses_uint64_abi(contract) {
             "uint64_t"
         } else {
             scalar_c_type(contract)

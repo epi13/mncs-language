@@ -8,10 +8,9 @@ mncs 0.7;
 // sequence domain discharges element bounds checks by semantics, so no
 // unresolved index obligations remain for `xs[i]` accesses below.
 //
-// Sequence-typed parameters/results stay outside the scalar backends'
-// process-boundary marshal contract this tranche, so every entry point
-// takes scalar or byte values and materializes its bounded collections
-// internally; the research-bytecode envelope accepts sequence arguments.
+// Scalar-entry wrappers remain valid. Sequence-typed language-level
+// signatures now also cross the process boundary through canonical cells;
+// see `library/core/sequences.mncs` and `library/std/encoding.mncs`.
 
 module examples.profile07_bounded_data;
 

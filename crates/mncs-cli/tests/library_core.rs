@@ -33,6 +33,26 @@ fn run_experiment(source: &str, backend: &str, corpus: &str) -> (Option<i32>, Va
     (output.status.code(), value, stderr)
 }
 
+const EXECUTABLE_BACKENDS: [&str; 5] = [
+    "mncs-research-bytecode",
+    "mncs-portable-wasm-mvp",
+    "mncs-c11",
+    "mncs-llvm-ir",
+    "mncs-cranelift",
+];
+
+fn cases_met(result: &Value) -> usize {
+    result["cases"]
+        .as_array()
+        .map(|cases| {
+            cases
+                .iter()
+                .filter(|case_| case_["expectation_met"] == true || case_["status_met"] == true)
+                .count()
+        })
+        .unwrap_or(0)
+}
+
 /// Every core module must pass its bounded corpus on the research bytecode
 /// realization end to end.
 #[test]
@@ -203,4 +223,59 @@ fn core_result_module_executes_payload_sums_on_bytecode() {
     assert!(cases
         .iter()
         .all(|case_| case_["status"] == "returned" && case_["expectation_met"] == true));
+}
+
+/// Sequence-typed and view-typed library signatures execute as language-level
+/// exports on every executable backend. This is the process-boundary ABI,
+/// not the older scalar-wrapper workaround.
+#[test]
+fn sequence_typed_library_exports_agree_per_backend() {
+    let source = library("core/sequences.mncs");
+    let corpus = example("execution/library-core-sequences-corpus.json");
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_experiment(&source, backend, &corpus);
+        let met = cases_met(&result);
+        if met != 9 {
+            panic!(
+                "{backend}: expected 9 met sequence ABI cases, got {met} (exit {code:?}); stderr={stderr}; cases={:#?}",
+                result["cases"]
+            );
+        }
+    }
+}
+
+/// Canonical encoding entry points return and accept `[byte; N]` across
+/// every executable backend.
+#[test]
+fn encoding_sequence_results_agree_per_backend() {
+    let source = library("std/encoding.mncs");
+    let corpus = example("execution/library-std-encoding-corpus.json");
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_experiment(&source, backend, &corpus);
+        let met = cases_met(&result);
+        if met != 4 {
+            panic!(
+                "{backend}: expected 4 met encoding ABI cases, got {met} (exit {code:?}); stderr={stderr}; cases={:#?}",
+                result["cases"]
+            );
+        }
+    }
+}
+
+/// Vector-typed library signatures cross as canonical cells, including a
+/// vector result reconstructed from the arena image.
+#[test]
+fn vector_typed_library_exports_agree_per_backend() {
+    let source = library("core/vector.mncs");
+    let corpus = example("execution/library-core-vector-corpus.json");
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_experiment(&source, backend, &corpus);
+        let met = cases_met(&result);
+        if met != 2 {
+            panic!(
+                "{backend}: expected 2 met vector ABI cases, got {met} (exit {code:?}); stderr={stderr}; cases={:#?}",
+                result["cases"]
+            );
+        }
+    }
 }

@@ -1735,6 +1735,15 @@ fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) 
             },
             BodyType::Record { identity, .. },
         ) => type_identity == identity && record_fields_match(program, type_identity, fields),
+        (ExecutionValue::Vector { values }, BodyType::Vector { element, lanes }) => {
+            values.len() == *lanes as usize
+                && values
+                    .iter()
+                    .all(|lane| value_matches_type(program, lane, element))
+        }
+        (ExecutionValue::Mask { lanes: bits }, BodyType::Mask { lanes }) => {
+            bits.len() == *lanes as usize
+        }
         _ => false,
     }
 }
@@ -1953,6 +1962,22 @@ fn normalize_value(
                 bound: SequenceBound::UpTo(capacity),
             },
         ) if values.len() <= *capacity as usize => normalize_sequence(program, values, element),
+        (ExecutionValue::Vector { values }, BodyType::Vector { element, lanes })
+            if values.len() == *lanes as usize =>
+        {
+            let mut normalized = Vec::with_capacity(values.len());
+            for value in values {
+                normalized.push(normalize_value(program, value, element)?);
+            }
+            Some(ExecutionValue::Vector { values: normalized })
+        }
+        (ExecutionValue::Mask { lanes: bits }, BodyType::Mask { lanes })
+            if bits.len() == *lanes as usize =>
+        {
+            Some(ExecutionValue::Mask {
+                lanes: bits.clone(),
+            })
+        }
         _ => None,
     }
 }

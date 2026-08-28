@@ -1049,6 +1049,37 @@ pub enum BackendValueContract {
         /// Canonical (name-sorted) fields: field name -> semantic type name.
         fields: Vec<(String, String)>,
     },
+    /// Exact-length bounded sequence (`[E; N]`). The ABI value is a
+    /// canonical cell root; element count is a type fact, not a runtime
+    /// observation. Additive over the Scalar/Finite/Record vocabulary:
+    /// earlier artifacts without this variant remain valid.
+    Sequence {
+        semantic_type: String,
+        element: String,
+        length: u32,
+    },
+    /// Bounded view (`[E; up_to M]`). The ABI value is a packed 64-bit
+    /// descriptor `(offset as u32) | (length << 32)`; element storage lives
+    /// in the same canonical arena as records and exact sequences.
+    View {
+        semantic_type: String,
+        element: String,
+        capacity: u32,
+    },
+    /// Logical integer vector (`vec<T, N>`). The ABI value is a cell root;
+    /// lane count is a type fact. Native scalar backends store one 8-byte
+    /// slot per lane; portable WASM stores packed lane widths.
+    Vector {
+        semantic_type: String,
+        element: String,
+        lanes: u32,
+    },
+    /// Logical mask (`mask<N>`). The ABI value is packed predicate bits in
+    /// a 64-bit word, lane 0 in the least-significant bit. No arena cell.
+    Mask {
+        semantic_type: String,
+        lanes: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -94,6 +94,8 @@ pub fn cranelift_capabilities() -> BackendCapabilityManifest {
             "integer_shifts",
             "bounded_sequences_internal",
             "bounded_views_internal",
+            "sequence_or_view_boundary_crossing",
+            "vector_or_mask_boundary_crossing",
             "semantic_branchless_select",
             "semantic_integer_vectors",
             "semantic_masks",
@@ -106,7 +108,7 @@ pub fn cranelift_capabilities() -> BackendCapabilityManifest {
         [
             "memory",
             "effects",
-            "sequence_or_view_boundary_crossing",
+            "nested_composite_sequence_elements",
             "widening_integer",
             "non_host_isa_jit",
         ]
@@ -2481,12 +2483,16 @@ fn jit_boundary_arguments(
     let uses_cells = crate::support::scalar_module_uses_cells(&lowered);
     let needs_cells = uses_cells
         || request.arguments.iter().any(|value| match value {
-            mncs_model::ExecutionValue::Record { .. } => true,
+            mncs_model::ExecutionValue::Record { .. }
+            | mncs_model::ExecutionValue::Sequence { .. }
+            | mncs_model::ExecutionValue::Vector { .. } => true,
             mncs_model::ExecutionValue::Finite { payload, .. } => !payload.is_empty(),
             _ => false,
         })
-        || input_contracts.iter().any(crate::support::contract_is_cell)
-        || output_contract.is_some_and(crate::support::contract_is_cell);
+        || input_contracts
+            .iter()
+            .any(crate::support::contract_needs_arena)
+        || output_contract.is_some_and(crate::support::contract_needs_arena);
     if !needs_cells {
         // Historical scalar protocol: decimal argv strings.
         let raw_args = argv_from_request(request)?
@@ -2497,8 +2503,8 @@ fn jit_boundary_arguments(
     }
     let mut writer = crate::composite::ArenaWriter::new(composite_contracts.clone());
     let mut raw_args = Vec::new();
-    for value in &request.arguments {
-        match writer.encode_argument(value)? {
+    for (index, value) in request.arguments.iter().enumerate() {
+        match writer.encode_argument_with_contract(value, input_contracts.get(index))? {
             crate::composite::BoundaryValue::Bits(bits) => raw_args.push(bits as i64),
             crate::composite::BoundaryValue::Cell(root) => raw_args.push(root as i64),
         }

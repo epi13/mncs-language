@@ -1035,6 +1035,26 @@ pub enum MarshalTy {
     BoxedFinite(Box<BoxedFiniteTy>),
     /// Record value carried as a pointer to canonical field cells.
     Record(Box<RecordTy>),
+    /// Exact-length sequence: i32 cell pointer, 8-byte slots.
+    Sequence {
+        element: Box<MarshalTy>,
+        length: u32,
+    },
+    /// Bounded view: packed i64 descriptor, elements in an exact cell.
+    View {
+        element: Box<MarshalTy>,
+        capacity: u32,
+    },
+    /// Integer vector. Portable WASM stores packed lane widths; the
+    /// ABI value is an i32 cell pointer.
+    Vector {
+        element: IntegerType,
+        lanes: u32,
+    },
+    /// Packed predicate bits in an i64 word.
+    Mask {
+        lanes: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1058,7 +1078,10 @@ pub struct RecordTy {
 
 impl MarshalTy {
     fn is_boxed(&self) -> bool {
-        matches!(self, Self::BoxedFinite(_) | Self::Record(_))
+        matches!(
+            self,
+            Self::BoxedFinite(_) | Self::Record(_) | Self::Sequence { .. } | Self::Vector { .. }
+        )
     }
 }
 
@@ -1140,11 +1163,89 @@ fn write_marshal(
             }
             Ok(address)
         }
+        (ExecutionValue::Sequence { values }, MarshalTy::Sequence { element, length }) => {
+            if values.len() != *length as usize {
+                return Err(trap(
+                    ExecutionStatus::InvalidRequest,
+                    "sequence argument does not match its declared length",
+                ));
+            }
+            write_sequence_cell(runtime, values, element)
+        }
+        (ExecutionValue::Sequence { values }, MarshalTy::View { element, capacity }) => {
+            if values.len() > *capacity as usize {
+                return Err(trap(
+                    ExecutionStatus::InvalidRequest,
+                    "view argument exceeds its declared capacity",
+                ));
+            }
+            if values.is_empty() {
+                return Ok(0);
+            }
+            let address = write_sequence_cell(runtime, values, element)?;
+            let packed = (address as u32 as u64) | ((values.len() as u64) << 32);
+            Ok(packed as i64)
+        }
+        (ExecutionValue::Vector { values }, MarshalTy::Vector { element, lanes }) => {
+            if values.len() != *lanes as usize {
+                return Err(trap(
+                    ExecutionStatus::InvalidRequest,
+                    "vector argument does not match its declared lane count",
+                ));
+            }
+            write_vector_cell(runtime, values, *element, *lanes)
+        }
+        (ExecutionValue::Mask { lanes: bits }, MarshalTy::Mask { lanes }) => {
+            if bits.len() != *lanes as usize {
+                return Err(trap(
+                    ExecutionStatus::InvalidRequest,
+                    "mask argument does not match its declared lane count",
+                ));
+            }
+            Ok(crate::composite::pack_mask(bits) as i64)
+        }
         _ => Err(trap(
             ExecutionStatus::InvalidRequest,
             "argument does not match the exported logical type",
         )),
     }
+}
+
+fn write_sequence_cell(
+    runtime: &mut Runtime,
+    values: &[ExecutionValue],
+    element: &MarshalTy,
+) -> Result<i64, WasmTrap> {
+    let address = runtime.allocate((values.len() as u32) * 8)?;
+    for (index, value) in values.iter().enumerate() {
+        let slot = address + (index * 8) as i64;
+        write_slot(runtime, value, element, slot)?;
+    }
+    Ok(address)
+}
+
+fn write_vector_cell(
+    runtime: &mut Runtime,
+    values: &[ExecutionValue],
+    element: IntegerType,
+    lanes: u32,
+) -> Result<i64, WasmTrap> {
+    let lane_bytes: u32 = if element.bits == 64 { 8 } else { 4 };
+    let address = runtime.allocate(lanes * lane_bytes)?;
+    let width = lane_bytes as usize;
+    for (index, value) in values.iter().enumerate() {
+        let bits = match value {
+            ExecutionValue::Integer { value, .. } => *value as u64,
+            _ => {
+                return Err(trap(
+                    ExecutionStatus::InvalidRequest,
+                    "vector lane is not an integer",
+                ))
+            }
+        };
+        runtime.store(address + i64::from(index as u32 * lane_bytes), width, bits)?;
+    }
+    Ok(address)
 }
 
 fn write_slot(
@@ -1156,7 +1257,10 @@ fn write_slot(
     if ty.is_boxed()
         && matches!(
             value,
-            ExecutionValue::Record { .. } | ExecutionValue::Finite { .. }
+            ExecutionValue::Record { .. }
+                | ExecutionValue::Finite { .. }
+                | ExecutionValue::Sequence { .. }
+                | ExecutionValue::Vector { .. }
         )
     {
         let pointer = write_marshal(runtime, value, ty)?;
@@ -1176,6 +1280,14 @@ fn write_slot(
         (ExecutionValue::Finite { discriminant, .. }, MarshalTy::BareFinite { .. }) => {
             runtime.store(address, 4, u64::from(*discriminant))
         }
+        (ExecutionValue::Byte { value }, MarshalTy::Int(integer))
+            if integer.bits == 8 && !integer.signed =>
+        {
+            runtime.store(address, 4, *value as u64)
+        }
+        (ExecutionValue::Mask { lanes }, MarshalTy::Mask { .. }) => {
+            runtime.store(address, 8, crate::composite::pack_mask(lanes))
+        }
         _ => Err(trap(
             ExecutionStatus::InvalidRequest,
             "composite field does not match its declared logical type",
@@ -1189,11 +1301,19 @@ fn read_slot(runtime: &Runtime, ty: &MarshalTy, address: i64) -> Result<Executio
             value: runtime.load(address, 4)? == 1,
         }),
         MarshalTy::Int(integer) => {
-            let raw = runtime.load(address, if integer.bits == 64 { 8 } else { 4 })?;
+            let width = if integer.bits == 64 { 8 } else { 4 };
+            let raw = runtime.load(address, width)?;
+            if integer.bits == 8 && !integer.signed {
+                return Ok(ExecutionValue::Byte {
+                    value: i128::from(raw as u8),
+                });
+            }
             let value = if integer.bits == 64 {
-                raw as i128
-            } else {
+                raw as i64 as i128
+            } else if integer.signed {
                 i128::from(raw as u32 as i32)
+            } else {
+                i128::from(raw as u32)
             };
             Ok(ExecutionValue::Integer {
                 value,
@@ -1220,6 +1340,18 @@ fn read_slot(runtime: &Runtime, ty: &MarshalTy, address: i64) -> Result<Executio
             let pointer = runtime.load(address, 4)? as u32 as i64;
             read_marshal(runtime, ty, pointer)
         }
+        MarshalTy::Sequence { .. } | MarshalTy::Vector { .. } => {
+            let pointer = runtime.load(address, 4)? as u32 as i64;
+            read_marshal(runtime, ty, pointer)
+        }
+        MarshalTy::View { .. } => {
+            let descriptor = runtime.load(address, 8)? as i64;
+            read_marshal(runtime, ty, descriptor)
+        }
+        MarshalTy::Mask { lanes } => Ok(crate::composite::unpack_mask(
+            runtime.load(address, 8)?,
+            *lanes,
+        )),
     }
 }
 
@@ -1261,8 +1393,61 @@ fn read_marshal(
                 fields: values,
             })
         }
+        MarshalTy::Sequence { element, length } => {
+            read_sequence_cell(runtime, address, element, *length)
+        }
+        MarshalTy::View { element, capacity } => {
+            let (offset, length) = crate::composite::unpack_view(address as u64);
+            if length > *capacity {
+                return Err(trap(
+                    ExecutionStatus::RuntimeFailure,
+                    "backend returned a view longer than its declared capacity",
+                ));
+            }
+            read_sequence_cell(runtime, offset as i64, element, length)
+        }
+        MarshalTy::Vector { element, lanes } => {
+            read_vector_cell(runtime, address, *element, *lanes)
+        }
+        MarshalTy::Mask { lanes } => Ok(crate::composite::unpack_mask(address as u64, *lanes)),
         other => read_slot(runtime, other, address),
     }
+}
+
+fn read_sequence_cell(
+    runtime: &Runtime,
+    address: i64,
+    element: &MarshalTy,
+    length: u32,
+) -> Result<ExecutionValue, WasmTrap> {
+    let mut values = Vec::with_capacity(length as usize);
+    for index in 0..length {
+        let slot = address + i64::from(index) * 8;
+        values.push(read_slot(runtime, element, slot)?);
+    }
+    Ok(ExecutionValue::Sequence { values })
+}
+
+fn read_vector_cell(
+    runtime: &Runtime,
+    address: i64,
+    element: IntegerType,
+    lanes: u32,
+) -> Result<ExecutionValue, WasmTrap> {
+    let lane_bytes: i64 = if element.bits == 64 { 8 } else { 4 };
+    let mut values = Vec::with_capacity(lanes as usize);
+    for index in 0..lanes {
+        let raw = runtime.load(address + i64::from(index) * lane_bytes, lane_bytes as usize)?;
+        let value = if element.bits == 64 {
+            raw as i64 as i128
+        } else if element.signed {
+            i128::from(raw as u32 as i32)
+        } else {
+            i128::from(raw as u32)
+        };
+        values.push(ExecutionValue::Integer { value, ty: element });
+    }
+    Ok(ExecutionValue::Vector { values })
 }
 
 /// Execute an export with logical composite marshaling. Composite arguments
@@ -1334,6 +1519,10 @@ pub fn execute_function_typed(
                 }
             }
             MarshalTy::BoxedFinite(_) | MarshalTy::Record(_) => read_marshal(&runtime, ty, *raw)?,
+            MarshalTy::Sequence { .. }
+            | MarshalTy::View { .. }
+            | MarshalTy::Vector { .. }
+            | MarshalTy::Mask { .. } => read_marshal(&runtime, ty, *raw)?,
         });
     }
     Ok(WasmExecution { returned, steps })
