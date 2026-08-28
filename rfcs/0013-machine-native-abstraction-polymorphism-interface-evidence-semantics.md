@@ -1,6 +1,8 @@
 # RFC 0013: Machine-Native Abstraction, Polymorphism, Interface, and Evidence Semantics
 
-- **Status:** Draft — Track 1 (Explicit universal abstraction) **Implemented** (Profile 0.10)
+- **Status:** Draft — Track 1 (Explicit universal abstraction) and Track 12
+  (bounded specialization/provenance) **implemented experimentally** in
+  Source Profile 0.10; Tracks 2–11 and 13–15 remain future work
 - **Target:** Cross-cutting 0.4–1.0
 - **Depends on:** RFC 0001, RFC 0002, RFC 0003, RFC 0005, RFC 0006, RFC 0007, RFC 0008, RFC 0009, RFC 0010, RFC 0011, RFC 0012
 
@@ -1579,58 +1581,56 @@ Acceptance criteria:
 - HIR traceability.
 
 ### Track 12 — Generic specialization and provenance
-1603: 
-1604: Deterministic monomorphization with canonical instantiation identity, specialization provenance, and call-site rewriting.
-1605: 
-1606: Acceptance criteria:
-1607: 
-1608: - canonical instantiation identity from canonical arguments;
-1609: - specialization identity linked to generic definition and instantiation;
-1609: - call-site rewriting to specialized functions;
-1610: - provenance preserved through HIR/SSA/selected-SSA.
+Deterministic monomorphization with canonical instantiation identity,
+specialization provenance, and call-site rewriting.
+
+Acceptance criteria:
+
+- canonical instantiation identity from canonical arguments;
+- specialization identity linked to generic definition and instantiation;
+- call-site rewriting to specialized functions;
+- provenance preserved through HIR/SSA/selected-SSA.
 
 ## Implementation Status (Track 1 + Track 12)
-1611: 
-1612: **Track 1 — Explicit universal abstraction: IMPLEMENTED (Profile 0.10)**
-1613: 
-1614: - Explicit generic parameters (`<T>`, `<N: Nat>`) on functions;
-1615: - Generic calls with explicit arguments (`f<4>`, `f<Point, 4>`);
-1616: - Canonical generic definition identity anchored to declaring module;
-1616: - Canonical instantiation identity from canonical arguments (sorted `type:...|value:...`);
-1618: - Deterministic specialization with canonical substitution (type params → `GenericParam`, value params → concrete `u32`);
-1620: - Specialization identity (`specialization:<generic_id>::<hash>`) and instantiation identity (`instantiation:<generic_id>::<hash>`);
-1621: - Call-site rewriting in concrete functions (`f<4>` → `f__spec_<hash>`) with provenance preserved in `generic_args`, `instantiation`, `specialization` fields;
-1622: - Canonical identity for generic parameters, instantiations, specializations in semantic identity map;
-1623: - Generic specialization provenance in `Program.generic_specializations`, `HighLevelIr.generic_specializations`, `SsaModule.generic_specializations`;
-1624: - Recursive instantiation detection with diagnostic `MNE227` (expanding substitution) and cycle limit;
-1625: - HIR/SSA provenance for generic parameters, instantiations, specializations through `GenericParam` identity kind;
-1626: - `sequence-index-bounds` and `view-range-valid` obligations correctly handled in generic context;
-1627: - Negative diagnostics: `MNE220` (missing args), `MNE221` (count mismatch), `MNE222` (kind mismatch), `MNE224` (non-constant value arg), `MNE225` (bound out of range), `MNE227` (expanding/recursive), `MNE228` (empty name), `MNE229` (unsupported kind), `MNE232` (type param used as bound);
-1628: - Positive diagnostics: `MNE220` (missing args), `MNE221` (count mismatch), `MNE222` (kind mismatch), `MNE224` (non-constant value arg), `MNE225` (bound out of range), `MNE227` (expanding/recursive), `MNE228` (empty name), `MNE229` (unsupported kind), `MNE232` (type param used as bound);
-1629: - Five executable backends (research bytecode, portable WASM, C11, LLVM, Cranelift) agree on generic specialization corpus;
-1630: - Stdlib arity-specific families (`contains4`, `sum4`, `min4`, `max4`, `count4`, `contains_byte4`, `count_nonzero4`, `count_true4`, `any_true4`, `all_true4`) delegate to N-parameterized generics (`contains<N>`, `sum<N>`, `min<N>`, `max<N>`, `count<N>`, `contains_byte<N>`, `count_nonzero<N>`, `count_true<N>`, `any_true<N>`, `all_true<N>`);
-1631: - Geometry stdlib sequence helpers generalized (`first_point<N>`, `contains_any<N>`, `union<N>`) with `*4` wrappers delegating to generic.
+**Track 1 — Explicit universal abstraction: IMPLEMENTED (Profile 0.10)**
+
+- Explicit generic parameters (`<T>`, `<N: Nat>`) on functions;
+- Generic calls with explicit arguments (`f<4>`, `f<Point, 4>`);
+- Canonical generic definition identity anchored to declaring module;
+- Canonical instantiation identity from declaration-ordered canonical arguments (`type:...|value:...`);
+- Deterministic specialization with canonical substitution (type params → `GenericParam`, value params → concrete `u32`);
+- Specialization identity (`specialization:<generic_id>::<hash>`) and instantiation identity (`instantiation:<generic_id>::<hash>`);
+- Call-site rewriting in concrete functions (`f<4>` → `f__spec_<hash>`) with provenance preserved in `generic_args`, `instantiation`, `specialization` fields;
+- Canonical identity for generic parameters, instantiations, specializations in semantic identity map;
+- Generic specialization provenance in `Program.generic_specializations`, `HighLevelIr.generic_specializations`, `SsaModule.generic_specializations`;
+- Recursive instantiation detection with diagnostic `MNE227` (expanding substitution) and cycle limit;
+- HIR/SSA provenance for generic parameters, instantiations, specializations through `GenericParam` identity kind;
+- `sequence-index-bounds` and `view-range-valid` obligations correctly handled in generic context;
+- Negative diagnostics include `MNE220` (missing args), `MNE221` (count mismatch), `MNE222` (kind mismatch), `MNE224` (non-constant value arg), `MNE225` (bound out of range), `MNE227` (expanding/recursive), `MNE228` (empty name), `MNE229` (unsupported kind), and `MNE232` (type param used as bound);
+- Five executable backends are audited against the generic specialization corpus; each result retains returned/unsupported/unknown status and unresolved obligations rather than treating matching status as success;
+- Stdlib arity-specific families (`contains4`, `sum4`, `min4`, `max4`, `count4`, `contains_byte4`, `count_nonzero4`, `count_true4`, `any_true4`, `all_true4`) delegate to N-parameterized generics (`contains<N>`, `sum<N>`, `min<N>`, `max<N>`, `count<N>`, `contains_byte<N>`, `count_nonzero<N>`, `count_true<N>`, `any_true<N>`, `all_true<N>`);
+- Geometry stdlib sequence helpers generalized (`first_point<N>`, `contains_any<N>`, `union<N>`) with `*4` wrappers delegating to generic.
 1632: 
-1633: **Track 12 — Generic specialization and provenance: IMPLEMENTED**
-1633: 
-1634: - Deterministic monomorphization with canonical instantiation identity;
-1635: - Specialization provenance tracked from generic definition through HIR/SSA;
-1636: - Call-site rewriting preserves specialization provenance in `instantiation`/`specialization` fields;
-1637: - Deterministic ordering of specializations via sorted canonical arguments.
+**Track 12 — Generic specialization and provenance: IMPLEMENTED**
+
+- Deterministic monomorphization with canonical instantiation identity;
+- Specialization provenance tracked from generic definition through HIR/SSA;
+- Call-site rewriting preserves specialization provenance in `instantiation`/`specialization` fields;
+- Deterministic ordering of specializations via canonical generic identity and declaration-ordered arguments.
 1638: 
-1639: **Tracks 2–11, 13–15: Future work**
-1640: 
-1641: - Constrained polymorphism (`Ordered<T>`, `Eq<T>`, etc.) with evidence passing;
-1642: - Coherence/ambiguity resolution;
-1643: - Parametricity verifier;
-1643: - Effect-row, authority, usage, representation polymorphism;
-1645: - Higher-kinded polymorphism;
-1646: - Existential/generative abstraction;
-1647: - Associated types/constrained type functions;
-1648: - Controlled introspection;
-1649: - Evidence erasure and dictionary specialization;
-1650: - Multi-versioning and partial evaluation;
-1651: - Forge-driven realization search.
+**Tracks 2–11, 13–15: Future work**
+
+- Constrained polymorphism (`Ordered<T>`, `Eq<T>`, etc.) with evidence passing;
+- Coherence/ambiguity resolution;
+- Parametricity verifier;
+- Effect-row, authority, usage, representation polymorphism;
+- Higher-kinded polymorphism;
+- Existential/generative abstraction;
+- Associated types/constrained type functions;
+- Controlled introspection;
+- Evidence erasure and dictionary specialization;
+- Multi-versioning and partial evaluation;
+- Forge-driven realization search.
 
 Implement one constrained interface such as `Ordered<T>`.
 

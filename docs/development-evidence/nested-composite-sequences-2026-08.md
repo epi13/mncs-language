@@ -64,6 +64,8 @@ as a cell user.
 
 - sequences of masks or vectors
 - unbounded / dynamic collections
-- generic type parameters (RFC 0013)
+- constrained/evidence polymorphism and higher-kinded generic parameters
+  (RFC 0013 Tracks 2–15; the bounded explicit Profile 0.10 tranche is recorded
+  separately)
 - native SIMD selection
 - executable RISC-V / eBPF / PTX (artifact-only; eBPF `CGX410`)

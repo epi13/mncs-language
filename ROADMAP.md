@@ -25,7 +25,7 @@ milestone 0.5.
 
 ### Language
 
-Source Profiles **0.1–0.9** exist and remain additive. Profiles 0.6 (payload
+Source Profiles **0.1–0.10** exist and remain additive. Profiles 0.6 (payload
 sums, strict booleans, checked division, explicit arithmetic intents, module
 imports) and 0.7 (bounded data: `byte`, fixed sequences `[E; N]`, bounded
 views `[E; up_to M]` with runtime length observations, three-state bounds
@@ -41,7 +41,7 @@ Profiles 0.1–0.5 remain as originally summarized below. Programs can express m
 
 ### Compiler
 
-Executable stages: source envelope → CST/AST → semantic program → HIR → SSA → selected SSA → `TargetLoweringPlan` → backend adapter → `BackendArtifact` + evidence. Transformations are identity-bound. Profile 0.9 also publishes the semantic binding substrate from the same elaboration that feeds body, HIR, SSA, and execution; it is not a second resolver. Record construct/project flow through body validation (MNB048–057), HIR, SSA, both reference executors, and the WASM realization. Experimental: evidence-gated no-overflow elision, translation validators, backend promises. Missing: general memory/layout, unrestricted loops, proof kernel, production backend, and sound generic type parameters.
+Executable stages: source envelope → CST/AST → semantic program → HIR → SSA → selected SSA → `TargetLoweringPlan` → backend adapter → `BackendArtifact` + evidence. Transformations are identity-bound. Profile 0.9 also publishes the semantic binding substrate from the same elaboration that feeds body, HIR, SSA, and execution; Profile 0.10 adds explicit type/Nat parameters and deterministic monomorphization on the same path. Generic templates are rejected at the lowering boundary, and concrete SSA is checked for unresolved generic types, parameterized bounds, and invalid specialization provenance. Experimental: evidence-gated no-overflow elision, translation validators, backend promises. Missing: general memory/layout, unrestricted loops, proof kernel, and soundness beyond the bounded explicit-polymorphism tranche.
 
 ### Backends
 
@@ -63,7 +63,10 @@ dynamic indexes retain unresolved obligations — by design. Nested composite
 sequence elements and logical `[bool; N]` windows are now realized on the
 five executable backends; sequences of masks or vectors remain refused.
 
-WASM is one realization. Generic orchestration is adapter-neutral.
+WASM is one realization. Generic orchestration is adapter-neutral. The
+Profile 0.10 generic corpus is retained as backend-by-backend evidence; an
+experiment remains `UNKNOWN` when unresolved runtime obligations remain, even
+when returned values agree.
 
 ### Verification
 
@@ -91,11 +94,12 @@ Language-owned experiment and compiler-study records emit producer-native Family
    Sequence-, view-, vector-, and mask-typed language-level signatures now
    cross the process boundary on all five executable backends through
    canonical cells and packed descriptors, including nested composite
-   sequence elements and logical `[bool; N]` windows. The next language
-   tranche should settle explicit generic type parameters only after type
-   identity, instantiation, recursion, and backend obligations have a
-   complete design; this run does not fake generic support. Native SIMD
-   selection and executable RISC-V/eBPF/PTX remain later work.
+   sequence elements and logical `[bool; N]` windows. The historical generic
+   design gate is closed by the bounded Profile 0.10 tranche below, which
+   carries type identity, instantiation, recursion, and backend obligations
+   through the executable path. Native SIMD selection and executable
+   RISC-V/eBPF/PTX
+   remain later work.
 
 1. **Implemented / exercised (experimental):** Source Profile 0.10 explicit polymorphism (RFC 0013 Track 1 + Track 12).
    Explicit generic parameters (`<T>`, `<N: Nat>`) on functions; generic calls with explicit arguments (`f<4>`, `f<Point, 4>`);
@@ -105,8 +109,9 @@ Language-owned experiment and compiler-study records emit producer-native Family
    `count_true4`, `any_true4`, `all_true4`) delegate to N-parameterized generics (`contains<N>`, `sum<N>`, `min<N>`,
    `max<N>`, `count<N>`, `contains_byte<N>`, `count_nonzero<N>`, `count_true<N>`, `any_true<N>`, `all_true<N>`).
    Geometry stdlib sequence helpers generalized (`first_point<N>`, `contains_any<N>`, `union<N>`) with `*4` wrappers delegating.
-   Five executable backends agree on generic specialization corpus. Negative diagnostics cover missing/mismatched
-   args, kind errors, non-constant args, bound errors, recursion, and unsupported features.
+   Five executable backends are audited against the generic specialization corpus with per-backend status retained;
+   returned-value agreement does not promote unresolved studies to PASS. Negative diagnostics cover missing/mismatched
+   args, kind errors, non-constant args, bound errors, recursion/expansion limits, malformed syntax, and unsupported features.
 
 1. ~~Logical product/record values as Source Profile 0.5~~ — **implemented (experimental)** as of
    2026-08-23: nominal records with canonical field identity, construction, functional update,

@@ -26,9 +26,12 @@ Implemented:
 - stdlib namespace-pressure fixture and bounded research-bytecode/portable-WASM
   corpus.
 
-Explicitly not implemented: general generic type parameters, package/version
-resolution, arbitrary re-export policy, memory/layout semantics, or a claim
-that every backend supports the new consumer shape.
+Explicitly not implemented in this historical Profile 0.9 record: general
+generic type parameters, package/version resolution, arbitrary re-export
+policy, memory/layout semantics, or a claim that every backend supports the
+new consumer shape. The subsequent bounded Profile 0.10 tranche implements
+explicit type/Nat parameters and deterministic specialization; the other
+items remain out of scope.
 
 ## Verification commands
 
@@ -73,8 +76,7 @@ post-edit probes and their failures are recorded in the task handoff.
 ## Remaining uncertainty
 
 Finite corpus agreement does not prove namespace completeness, generic
-soundness, package compatibility, or target equivalence. The next high-value
-language tranche is explicit generics only after the type-parameter and
-instantiation identity can be carried through all semantic and realization
-layers. Until then, duplicated nominal helpers remain an honest pressure test,
-not a substitute for generic semantics.
+soundness, package compatibility, or target equivalence. The historical
+generic design gate is now closed by Profile 0.10; duplicated nominal helpers
+remain an honest pressure test, not a substitute for the newer generic
+semantics.

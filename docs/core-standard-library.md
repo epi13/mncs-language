@@ -2,11 +2,12 @@
 
 Status: **research-active / partially realized** (2026-08-27).
 
-The current tranche is Profile 0.9 namespace pressure: overlapping core
-exports can be consumed through aliases while the compiler retains declaring
-module identity and emits inspectable binding evidence. Generic library
-abstractions remain a design question; no generic syntax is implied by these
-modules.
+The current tranche is Profile 0.10 explicit polymorphism over the bounded
+sequence/view substrate. Overlapping core exports can still be consumed
+through aliases while the compiler retains declaring-module identity and
+emits inspectable binding evidence. Generic library primitives are explicit,
+fully specialized before lowering, and remain subject to the same backend
+capability and unresolved-obligation rules as non-generic code.
 
 MNCS should develop a standard library, but it should not begin as a monolithic host-runtime API patterned after an existing language. The library must preserve the same separation already enforced by the language architecture: logical semantics are authoritative, capabilities are explicit, physical representation is a realization choice, and target-specific implementations do not redefine meaning.
 
@@ -290,7 +291,7 @@ The language service remains an adapter/index over authoritative compiler semant
 
 ### Stage A — establish the Core contract
 
-Status: **planned; may begin immediately**.
+Status: **implemented / exercised incrementally**.
 
 - define the conceptual `core` / portable `std` / capability-library split;
 - identify the smallest operations expressible by the current source profile;
@@ -298,6 +299,11 @@ Status: **planned; may begin immediately**.
 - define how library operation identity and contracts are represented;
 - explicitly list blockers discovered in module/type/backend support;
 - avoid committing to final package syntax.
+
+The Profile 0.10 sequence module is the first authoritative generic-library
+consumer: fixed-window wrappers delegate to `N: Nat` implementations, while
+view helpers preserve the runtime-empty case explicitly. The generic
+implementation is source-owned; wrappers do not define a second algorithm.
 
 ### Stage B — first executable `mncs.core`
 
