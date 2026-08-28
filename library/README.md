@@ -62,16 +62,16 @@ resolution provenance.
 | `core/ordering.mncs` | `mncs.core.ordering.v1` | comparison-only `min/max/clamp` for i32/i64 (no arithmetic, hence no overflow obligations) |
 | `core/bounds.mncs` | `mncs.core.bounds.v1` (Profile 0.5) | comparison-only `clamp_i64`, intentionally overlapping `ordering` to pressure namespace qualification |
 | `core/result.mncs` | `mncs.core.result.v1` (Profile 0.6) | the standard Result shape with real reason payloads: `Ok { value }`, `Err { reason }`, `divide`, `bounded_divide`, `value_or`, `reason_of`; exhaustive matching with payload binders |
-| `core/sequences.mncs` | `mncs.core.sequences.v1` (Profile 0.8) | bounded folds, membership, counting, option-shaped first/last, extrema, find-index, equality, functional put; sequence- and view-typed signatures |
-| `core/bytes.mncs` | `mncs.core.bytes.v1` (Profile 0.7) | byte bitwise/shift/order, folding fingerprint, nibble split |
+| `core/sequences.mncs` | `mncs.core.sequences.v1` (Profile 0.8) | bounded folds, membership, counting, prefix/suffix views, reverse, extrema, find-index, equality, functional put, unsigned `u64` identity; sequence- and view-typed signatures |
+| `core/bytes.mncs` | `mncs.core.bytes.v1` (Profile 0.7) | byte bitwise/shift/order, folding fingerprint, nibble split, ASCII classifiers, wrapping checksum |
 | `core/numeric.mncs` | `mncs.core.numeric.v1` (Profile 0.8) | wrapping 4-lane sum/mean/centroid and L2-squared; vector kernels live in `vector.v1` |
 | `core/random.mncs` | `mncs.core.random.v1` (Profile 0.6) | deterministic MMIX LCG streams, bounded draws, split/derive |
 | `core/version.mncs` | `mncs.core.version.v1` (Profile 0.6) | version triples, envelopes, pre-1.0 breaking rule |
 | `core/vector.mncs` | `mncs.core.vector.v1` (Profile 0.8) | wrapping dot product, masked positive sum, functional lane replacement, and vector-typed reduce/double exports |
-| `core/mask.mncs` | `mncs.core.mask.v1` (Profile 0.8) | bounded any/all/none predicate kernels |
-| `core/geometry.mncs` | `mncs.core.geometry.v1` (Profile 0.8) | typed Point/Size/Rect/Insets with containment, intersection, union, clipping, translation, and branchless selection helpers |
+| `core/mask.mncs` | `mncs.core.mask.v1` (Profile 0.8) | bounded any/all/none kernels plus mask-typed `any_of`/`all_of`/`none_of`/`and4`/`or4`/`xor4`/`not4`/`identity4` exports |
+| `core/geometry.mncs` | `mncs.core.geometry.v1` (Profile 0.8) | typed Point/Size/Rect/Insets with containment, intersection, union, clipping, translation, alignment/place, split, disjoint/adjacent, and branchless selection helpers |
 | `core/partition.mncs` | `mncs.core.partition.v1` | overflow-safe weighted four-lane partitioning with deterministic remainder allocation, zero/negative-weight normalization, cap-friendly leftovers, and explicit validity |
-| `std/encoding.mncs` | `mncs.std.encoding.v1` (Profile 0.7) | canonical big-endian `encode_u32`/`decode_u32` and version encodings with executable round-trip laws |
+| `std/encoding.mncs` | `mncs.std.encoding.v1` (Profile 0.7) | canonical big-endian `encode_u16`/`u32`/`u64` and version encodings with executable round-trip laws |
 | `std/simd.mncs` | `mncs.std.simd.v1` (Profile 0.8) | explicit-intent affine/ReLU/reduction kernel |
 | `std/ansi.mncs` | `mncs.std.ansi.v1` | bounded ANSI/VT parsing into generic Character, Arrow, Focus, Paste, Mouse, Resize, and Unknown events |
 
@@ -114,9 +114,10 @@ see `docs/source-profile-0.6.md`.
 | status | PASS (30 cases) | PASS (30 cases) | PASS (30 cases) |
 | logic | PASS (18 cases) | PASS (18 cases) | not re-run this tranche |
 | ordering | PASS (36 cases) | PASS (36 cases) | not re-run this tranche |
-| sequences | 9-case ABI corpus met on all five executable backends | same | same |
-| encoding | 4-case ABI corpus met on all five executable backends | same | same |
-| vector | 2-case ABI corpus met on all five executable backends | same | same |
+| sequences | ABI corpora (signed, unsigned, extra helpers) met on all five executable backends | same | same |
+| encoding | u32 and u64 sequence-typed encode/decode met on all five executable backends | same | same |
+| vector | signed and unsigned vector/mask ABI corpora met on all five executable backends | same | same |
+| mask | 13-case mask-only ABI corpus met on all five executable backends | same | same |
 | partition | 2-case corpus returned; exact-cost status remains `UNKNOWN` | not exercised | not exercised |
 | ansi consumer probe | 7-case corpus returned; exact-cost status remains `UNKNOWN` | not exercised | not exercised |
 

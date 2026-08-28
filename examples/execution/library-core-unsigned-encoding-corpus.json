@@ -1,0 +1,269 @@
+{
+  "schema_version": "0.1",
+  "name": "library-core-unsigned-encoding",
+  "cases": [
+    {
+      "id": "u64-roundtrip-max",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.std.encoding.v1",
+          "function": "u64_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 18446744073709551615,
+              "type": {
+                "bits": 64,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 8192
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "u64-roundtrip-high-bit",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.std.encoding.v1",
+          "function": "u64_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 8192
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "u64-roundtrip-high-bit-plus-one",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.std.encoding.v1",
+          "function": "u64_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775809,
+              "type": {
+                "bits": 64,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 8192
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "u64-roundtrip-control",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.std.encoding.v1",
+          "function": "u64_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 7,
+              "type": {
+                "bits": 64,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 8192
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "encode-u64-high-bit",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.std.encoding.v1",
+          "function": "encode_u64"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 8192
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "sequence": {
+            "values": [
+              {
+                "byte": {
+                  "value": 128
+                }
+              },
+              {
+                "byte": {
+                  "value": 0
+                }
+              },
+              {
+                "byte": {
+                  "value": 0
+                }
+              },
+              {
+                "byte": {
+                  "value": 0
+                }
+              },
+              {
+                "byte": {
+                  "value": 0
+                }
+              },
+              {
+                "byte": {
+                  "value": 0
+                }
+              },
+              {
+                "byte": {
+                  "value": 0
+                }
+              },
+              {
+                "byte": {
+                  "value": 0
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "decode-u64-high-bit",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.std.encoding.v1",
+          "function": "decode_u64"
+        },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                {
+                  "byte": {
+                    "value": 128
+                  }
+                },
+                {
+                  "byte": {
+                    "value": 0
+                  }
+                },
+                {
+                  "byte": {
+                    "value": 0
+                  }
+                },
+                {
+                  "byte": {
+                    "value": 0
+                  }
+                },
+                {
+                  "byte": {
+                    "value": 0
+                  }
+                },
+                {
+                  "byte": {
+                    "value": 0
+                  }
+                },
+                {
+                  "byte": {
+                    "value": 0
+                  }
+                },
+                {
+                  "byte": {
+                    "value": 0
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "step_budget": 8192
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "integer": {
+            "value": 9223372036854775808,
+            "type": {
+              "bits": 64,
+              "signed": false
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "properties": []
+}

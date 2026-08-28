@@ -1,0 +1,61 @@
+{
+  "schema_version": "0.1",
+  "name": "abi-unsigned-records",
+  "cases": [
+    {
+      "id": "identity-pair-high-bit",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.unsigned_records", "function": "identity_pair" },
+        "arguments": [{
+          "record": {
+            "type_identity": "mncs:0.2:record-type:examples.abi.unsigned_records::WordPair::hi%3Au64%3Blo%3Au64%3B",
+            "name": "WordPair",
+            "fields": [
+              ["hi", { "integer": { "value": 9223372036854775808, "type": { "bits": 64, "signed": false } } }],
+              ["lo", { "integer": { "value": 18446744073709551615, "type": { "bits": 64, "signed": false } } }]
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "record": {
+          "type_identity": "mncs:0.2:record-type:examples.abi.unsigned_records::WordPair::hi%3Au64%3Blo%3Au64%3B",
+          "name": "WordPair",
+          "fields": [
+            ["hi", { "integer": { "value": 9223372036854775808, "type": { "bits": 64, "signed": false } } }],
+            ["lo", { "integer": { "value": 18446744073709551615, "type": { "bits": 64, "signed": false } } }]
+          ]
+        }
+      }]
+    },
+    {
+      "id": "hi-of-high-bit",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.unsigned_records", "function": "hi_of" },
+        "arguments": [{
+          "record": {
+            "type_identity": "mncs:0.2:record-type:examples.abi.unsigned_records::WordPair::hi%3Au64%3Blo%3Au64%3B",
+            "name": "WordPair",
+            "fields": [
+              ["hi", { "integer": { "value": 9223372036854775808, "type": { "bits": 64, "signed": false } } }],
+              ["lo", { "integer": { "value": 7, "type": { "bits": 64, "signed": false } } }]
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "integer": {
+          "value": 9223372036854775808,
+          "type": { "bits": 64, "signed": false }
+        }
+      }]
+    }
+  ],
+  "properties": []
+}

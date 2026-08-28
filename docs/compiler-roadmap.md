@@ -542,6 +542,11 @@ The repository-side compiler spine and first frontend vertical slice are impleme
    explicit source contract clauses remain pending.
 9. **Pending:** design a sound explicit parametric abstraction tranche with
    generic-definition/instantiation identity before adding generic syntax.
+   The 2026-08 ABI repair did not add generics: `contains4`/`min4`/`max4`
+   families remain arity-specific until substitution identity, recursive
+   instantiation refusal, canonical artifact identity, and backend
+   obligations can be specified together. Bounded sequence/vector
+   helpers stay explicit in `N` rather than simulating polymorphism.
 10. **Pending external execution:** run and compare the first Linux/Windows/Raspberry Pi source/semantic/HIR/SSA identity study. GitHub-hosted Windows is CI evidence; a native Raspberry Pi run must come from Fabric.
 11. **Pending:** add a replaceable portable backend adapter for a deliberately bounded subset.
 12. **Pending:** introduce the first native backend experiment only after the portable/backend-validation seam is exercised.

@@ -62,11 +62,28 @@ Cranelift provide conservative scalarized fixed-lane fallbacks over canonical
 8-byte arena slots. Scalar `select` lowers to WASM `select`, LLVM `select`,
 Cranelift `select`, and a branch-free unsigned blend in portable C.
 
-This tranche does **not** claim WASM SIMD `v128`, LLVM native vector IR,
-Cranelift SIMD, PTX predication, float vectors, sequence/vector memory views,
-or ABI boundary support for vector values. Those are late-bound realizations,
-not missing semantic definitions. External PTX/eBPF/RISC-V adapters remain
-precisely unsupported for these operations.
+Logical `vec<T, N>` and `mask<N>` values now cross language-level signatures
+on the five executable backends through the canonical cell / packed-bit
+process boundary (see
+`docs/development-evidence/sequence-view-boundary-abi-2026-08.md`). That is
+logical ABI support, not a native vector calling convention.
+
+This profile still does **not** claim:
+
+- WASM SIMD `v128`
+- LLVM native vector IR
+- Cranelift SIMD
+- PTX predication
+- float vectors
+- sequence/vector memory views as a second layout
+- a target-specific SIMD register ABI
+
+Current realizations remain conservative: research bytecode interprets
+semantic lanes; portable WASM uses packed lane cells and a packed `i64`
+mask; C11, LLVM, and Cranelift scalarize over canonical 8-byte slots.
+Native SIMD selection is a later target-specific step. External
+PTX/eBPF/RISC-V adapters remain precisely unsupported for these
+operations.
 
 ## Spatial and representation pilot
 

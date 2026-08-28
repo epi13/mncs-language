@@ -250,6 +250,112 @@ fn rect_center(r: Rect) -> (result: Point) {
     return Point { column: cx, row: cy };
 }
 
+// Alignment inside a parent: 0 = start, 1 = center, 2 = end. These are
+// machine-known codes, not stringly-typed layout policy. Negative leftover
+// space clamps to the origin so a larger child still has a defined point.
+fn align_offset(available: i64, needed: i64, align: i64) -> (result: i64) {
+    let room: i64 = available -% needed;
+    let noneg: i64 = select(room < 0, 0, room);
+    let center: i64 = noneg / 2;
+    let start_or_center: i64 = select(align == 1, center, 0);
+    return select(align == 2, noneg, start_or_center);
+}
+
+fn point_anchor(parent: Rect, child: Size, align_x: i64, align_y: i64) -> (result: Point) {
+    let dx: i64 = align_offset(parent.size.columns, child.columns, align_x);
+    let dy: i64 = align_offset(parent.size.rows, child.rows, align_y);
+    return Point { column: parent.origin.column +% dx, row: parent.origin.row +% dy };
+}
+
+fn rect_place(parent: Rect, child: Size, align_x: i64, align_y: i64) -> (result: Rect) {
+    return Rect { origin: point_anchor(parent, child, align_x, align_y), size: child };
+}
+
+record RectPair { first: Rect, second: Rect }
+
+fn rect_split_horizontal(r: Rect, first_width: i64) -> (result: RectPair) {
+    let raw: i64 = select(first_width < 0, 0, first_width);
+    let cut: i64 = select(raw > r.size.columns, r.size.columns, raw);
+    let first: Rect = Rect { origin: r.origin, size: Size { columns: cut, rows: r.size.rows } };
+    let second: Rect = Rect {
+        origin: Point { column: r.origin.column +% cut, row: r.origin.row },
+        size: Size { columns: r.size.columns -% cut, rows: r.size.rows }
+    };
+    return RectPair { first: first, second: second };
+}
+
+fn rect_split_vertical(r: Rect, first_height: i64) -> (result: RectPair) {
+    let raw: i64 = select(first_height < 0, 0, first_height);
+    let cut: i64 = select(raw > r.size.rows, r.size.rows, raw);
+    let first: Rect = Rect { origin: r.origin, size: Size { columns: r.size.columns, rows: cut } };
+    let second: Rect = Rect {
+        origin: Point { column: r.origin.column, row: r.origin.row +% cut },
+        size: Size { columns: r.size.columns, rows: r.size.rows -% cut }
+    };
+    return RectPair { first: first, second: second };
+}
+
+fn rect_disjoint(a: Rect, b: Rect) -> (result: bool) {
+    return select(rect_intersects(a, b), false, true);
+}
+
+// Adjacent means the closures touch on an edge while the open interiors
+// do not overlap. Empty rectangles are never adjacent.
+fn rect_adjacent(a: Rect, b: Rect) -> (result: bool) {
+    if rect_is_empty(a) {
+        return false;
+    }
+    if rect_is_empty(b) {
+        return false;
+    }
+    if rect_intersects(a, b) {
+        return false;
+    }
+    let a_right: i64 = rect_right(a);
+    let a_bottom: i64 = rect_bottom(a);
+    let b_right: i64 = rect_right(b);
+    let b_bottom: i64 = rect_bottom(b);
+    let col_touch: bool = (a_right == b.origin.column) || (b_right == a.origin.column);
+    let row_overlap: bool = (a.origin.row < b_bottom) && (b.origin.row < a_bottom);
+    let row_touch: bool = (a_bottom == b.origin.row) || (b_bottom == a.origin.row);
+    let col_overlap: bool = (a.origin.column < b_right) && (b.origin.column < a_right);
+    return (col_touch && row_overlap) || (row_touch && col_overlap);
+}
+
+// Scalar ABI probes for alignment/split/relation so the helpers can be
+// executed without constructing record identities at the process boundary.
+fn align_center_offset(available: i64, needed: i64) -> (result: i64) {
+    return align_offset(available, needed, 1);
+}
+
+fn align_end_offset(available: i64, needed: i64) -> (result: i64) {
+    return align_offset(available, needed, 2);
+}
+
+fn split_first_width(parent_w: i64, cut: i64) -> (result: i64) {
+    let parent: Rect = Rect { origin: Point { column: 0, row: 0 }, size: Size { columns: parent_w, rows: 1 } };
+    let parts: RectPair = rect_split_horizontal(parent, cut);
+    return parts.first.size.columns;
+}
+
+fn split_second_width(parent_w: i64, cut: i64) -> (result: i64) {
+    let parent: Rect = Rect { origin: Point { column: 0, row: 0 }, size: Size { columns: parent_w, rows: 1 } };
+    let parts: RectPair = rect_split_horizontal(parent, cut);
+    return parts.second.size.columns;
+}
+
+fn disjoint_horizontal(a_cols: i64, b_col: i64) -> (result: bool) {
+    let a: Rect = Rect { origin: Point { column: 0, row: 0 }, size: Size { columns: a_cols, rows: 2 } };
+    let b: Rect = Rect { origin: Point { column: b_col, row: 0 }, size: Size { columns: 2, rows: 2 } };
+    return rect_disjoint(a, b);
+}
+
+fn adjacent_horizontal(a_cols: i64, b_col: i64) -> (result: bool) {
+    let a: Rect = Rect { origin: Point { column: 0, row: 0 }, size: Size { columns: a_cols, rows: 2 } };
+    let b: Rect = Rect { origin: Point { column: b_col, row: 0 }, size: Size { columns: 2, rows: 2 } };
+    return rect_adjacent(a, b);
+}
+
 // Branchless selection helpers used by layout.
 // `select` is the language primitive: both candidates are evaluated eagerly
 // and the condition chooses lane-wise without introducing control divergence.

@@ -70,3 +70,36 @@ fn nibbles(value: byte) -> (result: Pair) {
     let low: byte = value & 15;
     return Pair { left: high, right: low };
 }
+
+// ASCII classifiers. These are byte-domain predicates, not text types.
+// Parsers import them instead of restating 48..57 locally.
+fn is_digit(value: byte) -> (result: bool) {
+    let n: i64 = value as i64;
+    return n >= 48 && n <= 57;
+}
+
+fn is_ascii_alpha(value: byte) -> (result: bool) {
+    let n: i64 = value as i64;
+    let lower: bool = n >= 97 && n <= 122;
+    let upper: bool = n >= 65 && n <= 90;
+    return lower || upper;
+}
+
+fn is_ascii_space(value: byte) -> (result: bool) {
+    let n: i64 = value as i64;
+    let control: bool = (n >= 9) && (n <= 13);
+    return (n == 32) || control;
+}
+
+fn digit_value(value: byte) -> (result: i64) {
+    return (value as i64) - 48;
+}
+
+// Wrapping additive checksum. Deterministic and total; not a cryptographic
+// hash and not a claim of collision resistance.
+fn checksum4(data: [byte; 4]) -> (result: byte) {
+    let s0: i64 = (data[0] as i64) +% (data[1] as i64);
+    let s1: i64 = s0 +% (data[2] as i64);
+    let s2: i64 = s1 +% (data[3] as i64);
+    return (s2 % 256) as byte;
+}

@@ -10,6 +10,8 @@ mncs 0.8;
 // is Unknown rather than an inferred stronger event.
 module mncs.std.ansi.v1;
 
+use mncs.core.bytes.v1;
+
 enum AnsiEvent {
     Character { codepoint: i64 },
     Escape,
@@ -33,13 +35,8 @@ fn byte_value(value: byte) -> (result: i64) {
     return value as i64;
 }
 
-fn is_digit(value: byte) -> (result: bool) {
-    let n: i64 = byte_value(value);
-    return n >= 48 && n <= 57;
-}
-
 fn one_digit(value: byte) -> (result: i64) {
-    return byte_value(value) - 48;
+    return digit_value(value);
 }
 
 fn two_digits(high: byte, low: byte) -> (result: i64) {

@@ -1649,6 +1649,12 @@ fn values_agree(left: &[ExecutionValue], right: &[ExecutionValue]) -> bool {
                 ExecutionValue::Sequence { values: left },
                 ExecutionValue::Sequence { values: right },
             ) => values_agree(left, right),
+            (ExecutionValue::Vector { values: left }, ExecutionValue::Vector { values: right }) => {
+                values_agree(left, right)
+            }
+            (ExecutionValue::Mask { lanes: left }, ExecutionValue::Mask { lanes: right }) => {
+                left == right
+            }
             _ => false,
         })
 }

@@ -41,16 +41,51 @@ const EXECUTABLE_BACKENDS: [&str; 5] = [
     "mncs-cranelift",
 ];
 
-fn cases_met(result: &Value) -> usize {
-    result["cases"]
+fn assert_value_agreement(
+    backend: &str,
+    code: Option<i32>,
+    result: &Value,
+    stderr: &str,
+    expected_len: usize,
+) {
+    assert_eq!(
+        code,
+        Some(0),
+        "{backend}: unexpected exit; stderr={stderr}; result={result:#}"
+    );
+    let cases = result["cases"]
         .as_array()
-        .map(|cases| {
-            cases
-                .iter()
-                .filter(|case_| case_["expectation_met"] == true || case_["status_met"] == true)
-                .count()
-        })
-        .unwrap_or(0)
+        .unwrap_or_else(|| panic!("{backend}: missing cases; {result:#}"));
+    assert_eq!(
+        cases.len(),
+        expected_len,
+        "{backend}: case count {} != {expected_len}",
+        cases.len()
+    );
+    for case in cases {
+        let id = case["case_id"].as_str().unwrap_or("?");
+        assert_eq!(
+            case["status"], "returned",
+            "{backend} {id}: status {:#}",
+            case["status"]
+        );
+        if !case["status_met"].is_null() {
+            assert_eq!(
+                case["status_met"], true,
+                "{backend} {id}: status_met is not true: {case:#}"
+            );
+        }
+        assert_eq!(
+            case["expectation_met"], true,
+            "{backend} {id}: logical value mismatch; returned={:#}",
+            case["returned"]
+        );
+    }
+    let overall = result["status"].as_str().unwrap_or("");
+    assert!(
+        overall == "PASS" || overall == "UNKNOWN",
+        "{backend}: overall status {overall} is not PASS or UNKNOWN"
+    );
 }
 
 /// Every core module must pass its bounded corpus on the research bytecode
@@ -234,13 +269,7 @@ fn sequence_typed_library_exports_agree_per_backend() {
     let corpus = example("execution/library-core-sequences-corpus.json");
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_experiment(&source, backend, &corpus);
-        let met = cases_met(&result);
-        if met != 9 {
-            panic!(
-                "{backend}: expected 9 met sequence ABI cases, got {met} (exit {code:?}); stderr={stderr}; cases={:#?}",
-                result["cases"]
-            );
-        }
+        assert_value_agreement(backend, code, &result, &stderr, 9);
     }
 }
 
@@ -252,13 +281,7 @@ fn encoding_sequence_results_agree_per_backend() {
     let corpus = example("execution/library-std-encoding-corpus.json");
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_experiment(&source, backend, &corpus);
-        let met = cases_met(&result);
-        if met != 4 {
-            panic!(
-                "{backend}: expected 4 met encoding ABI cases, got {met} (exit {code:?}); stderr={stderr}; cases={:#?}",
-                result["cases"]
-            );
-        }
+        assert_value_agreement(backend, code, &result, &stderr, 4);
     }
 }
 
@@ -270,12 +293,6 @@ fn vector_typed_library_exports_agree_per_backend() {
     let corpus = example("execution/library-core-vector-corpus.json");
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_experiment(&source, backend, &corpus);
-        let met = cases_met(&result);
-        if met != 2 {
-            panic!(
-                "{backend}: expected 2 met vector ABI cases, got {met} (exit {code:?}); stderr={stderr}; cases={:#?}",
-                result["cases"]
-            );
-        }
+        assert_value_agreement(backend, code, &result, &stderr, 2);
     }
 }

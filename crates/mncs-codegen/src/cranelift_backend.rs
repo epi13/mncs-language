@@ -1305,7 +1305,7 @@ fn aot_fallback_execute(
         .ok_or_else(|| "neither clang nor gcc is present".to_owned())?;
     // The linked object contains every module function, so the driver must
     // define the cell runtime whenever any function manipulates cells.
-    let driver = if crate::support::scalar_module_uses_cells(&scalar) {
+    let driver = if crate::support::scalar_module_needs_arena_symbols(&scalar) {
         crate::support::process_driver_cell_runtime(
             &request.target.function,
             &contract.inputs,
@@ -2481,19 +2481,16 @@ fn jit_boundary_arguments(
     let lowered = lower_to_scalar(&payload.program, &payload.ssa, &names);
     let _ = lowered.functions.first();
     let uses_cells = crate::support::scalar_module_uses_cells(&lowered);
-    let needs_cells = uses_cells
-        || request.arguments.iter().any(|value| match value {
-            mncs_model::ExecutionValue::Record { .. }
-            | mncs_model::ExecutionValue::Sequence { .. }
-            | mncs_model::ExecutionValue::Vector { .. } => true,
-            mncs_model::ExecutionValue::Finite { payload, .. } => !payload.is_empty(),
-            _ => false,
-        })
+    let needs_call_file = uses_cells
+        || request
+            .arguments
+            .iter()
+            .any(crate::support::value_uses_call_file)
         || input_contracts
             .iter()
-            .any(crate::support::contract_needs_arena)
-        || output_contract.is_some_and(crate::support::contract_needs_arena);
-    if !needs_cells {
+            .any(crate::support::contract_uses_call_file)
+        || output_contract.is_some_and(crate::support::contract_uses_call_file);
+    if !needs_call_file {
         // Historical scalar protocol: decimal argv strings.
         let raw_args = argv_from_request(request)?
             .iter()

@@ -1,0 +1,29 @@
+{
+  "schema_version": "0.1",
+  "name": "abi-mask-only",
+  "cases": [
+    {
+      "id": "any-active-alternating",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.mask_only", "function": "any_active" },
+        "arguments": [{ "mask": { "lanes": [true, false, true, false] } }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "identity-mask",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.mask_only", "function": "identity" },
+        "arguments": [{ "mask": { "lanes": [false, true, false, true] } }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "mask": { "lanes": [false, true, false, true] } }]
+    }
+  ],
+  "properties": []
+}

@@ -42,3 +42,18 @@ fn doubled4(a: i32, b: i32, c: i32, d: i32) -> (result: vec<i32, 4>) {
     let values: vec<i32, 4> = vector(a, b, c, d);
     return vec_add_wrap(values, values);
 }
+
+// Unsigned 64-bit vector identity and reduction. These exist to keep the
+// high bit of a u64 lane through the canonical cell ABI.
+fn identity_u64(values: vec<u64, 4>) -> (result: vec<u64, 4>) {
+    return values;
+}
+
+fn reduce_u64(values: vec<u64, 4>) -> (result: u64) {
+    return reduce_sum_wrap(values);
+}
+
+fn positives_u64(values: vec<u64, 4>) -> (result: mask<4>) {
+    let zero: vec<u64, 4> = splat(0);
+    return vec_gt(values, zero);
+}
