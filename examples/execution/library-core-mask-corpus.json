@@ -1,0 +1,164 @@
+{
+  "schema_version": "0.1",
+  "name": "library-core-mask",
+  "cases": [
+    {
+      "id": "any-of-all-false",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.mask.v1", "function": "any_of" },
+        "arguments": [{ "mask": { "lanes": [false, false, false, false] } }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": false } }]
+    },
+    {
+      "id": "any-of-all-true",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.mask.v1", "function": "any_of" },
+        "arguments": [{ "mask": { "lanes": [true, true, true, true] } }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "any-of-alternating",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.mask.v1", "function": "any_of" },
+        "arguments": [{ "mask": { "lanes": [true, false, true, false] } }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "all-of-all-true",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.mask.v1", "function": "all_of" },
+        "arguments": [{ "mask": { "lanes": [true, true, true, true] } }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "all-of-alternating",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.mask.v1", "function": "all_of" },
+        "arguments": [{ "mask": { "lanes": [true, false, true, false] } }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": false } }]
+    },
+    {
+      "id": "none-of-all-false",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.mask.v1", "function": "none_of" },
+        "arguments": [{ "mask": { "lanes": [false, false, false, false] } }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "none-of-one-true",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.mask.v1", "function": "none_of" },
+        "arguments": [{ "mask": { "lanes": [false, false, true, false] } }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": false } }]
+    },
+    {
+      "id": "from-bools-mask-result",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.mask.v1", "function": "from_bools" },
+        "arguments": [
+          { "boolean": { "value": true } },
+          { "boolean": { "value": false } },
+          { "boolean": { "value": false } },
+          { "boolean": { "value": true } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "mask": { "lanes": [true, false, false, true] } }]
+    },
+    {
+      "id": "identity4-mask-to-mask",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.mask.v1", "function": "identity4" },
+        "arguments": [{ "mask": { "lanes": [true, false, true, false] } }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "mask": { "lanes": [true, false, true, false] } }]
+    },
+    {
+      "id": "not4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.mask.v1", "function": "not4" },
+        "arguments": [{ "mask": { "lanes": [true, false, true, false] } }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "mask": { "lanes": [false, true, false, true] } }]
+    },
+    {
+      "id": "and4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.mask.v1", "function": "and4" },
+        "arguments": [
+          { "mask": { "lanes": [true, true, false, false] } },
+          { "mask": { "lanes": [true, false, true, false] } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "mask": { "lanes": [true, false, false, false] } }]
+    },
+    {
+      "id": "or4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.mask.v1", "function": "or4" },
+        "arguments": [
+          { "mask": { "lanes": [true, true, false, false] } },
+          { "mask": { "lanes": [true, false, true, false] } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "mask": { "lanes": [true, true, true, false] } }]
+    },
+    {
+      "id": "xor4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.mask.v1", "function": "xor4" },
+        "arguments": [
+          { "mask": { "lanes": [true, true, false, false] } },
+          { "mask": { "lanes": [true, false, true, false] } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "mask": { "lanes": [false, true, true, false] } }]
+    }
+  ],
+  "properties": []
+}

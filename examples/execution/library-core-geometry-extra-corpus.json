@@ -1,0 +1,119 @@
+{
+  "schema_version": "0.1",
+  "name": "library-core-geometry-extra",
+  "cases": [
+    {
+      "id": "align-center-10-4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.geometry.v1", "function": "align_center_offset" },
+        "arguments": [
+          { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 3, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "align-end-10-4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.geometry.v1", "function": "align_end_offset" },
+        "arguments": [
+          { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 6, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "align-center-child-larger",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.geometry.v1", "function": "align_center_offset" },
+        "arguments": [
+          { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "split-first-10-4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.geometry.v1", "function": "split_first_width" },
+        "arguments": [
+          { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "split-second-10-4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.geometry.v1", "function": "split_second_width" },
+        "arguments": [
+          { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 6, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "split-clamp-oversize",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.geometry.v1", "function": "split_first_width" },
+        "arguments": [
+          { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 99, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 10, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "disjoint-touching-edge",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.geometry.v1", "function": "disjoint_horizontal" },
+        "arguments": [
+          { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "adjacent-touching-edge",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.geometry.v1", "function": "adjacent_horizontal" },
+        "arguments": [
+          { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": true } }]
+    }
+  ],
+  "properties": []
+}

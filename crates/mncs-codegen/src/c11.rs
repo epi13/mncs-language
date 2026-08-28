@@ -679,9 +679,9 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
         ScalarInst::Compare {
             dest,
             predicate,
+            operand,
             lhs,
             rhs,
-            ..
         } => {
             let pred = match predicate.as_str() {
                 "eq" => "==",
@@ -691,13 +691,27 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 "gt" => ">",
                 _ => ">=",
             };
+            // C `int64_t` storage is bit-preserving; unsigned MNCS integers
+            // still compare in their unsigned domain, matching LLVM `icmp u*`
+            // and Cranelift unsigned IntCC.
+            let left = names.value(lhs);
+            let right = names.value(rhs);
+            let compare = if operand.signed || matches!(predicate.as_str(), "eq" | "ne") {
+                format!("{left} {pred} {right}")
+            } else {
+                let unsigned_ty = match operand.bits {
+                    8 => "uint8_t",
+                    16 => "uint16_t",
+                    32 => "uint32_t",
+                    _ => "uint64_t",
+                };
+                format!("({unsigned_ty}){left} {pred} ({unsigned_ty}){right}")
+            };
             let _ = writeln!(
                 out,
-                "      {} = ({})({} {pred} {});",
+                "      {} = ({})({compare});",
                 names.value(&dest.id),
-                c_type(dest.ty),
-                names.value(lhs),
-                names.value(rhs)
+                c_type(dest.ty)
             );
         }
         ScalarInst::FiniteConstruct { dest, discriminant } => {

@@ -21,7 +21,29 @@
 
 use std::collections::BTreeMap;
 
-use mncs_model::{Program, SemanticId};
+use mncs_model::{IntegerType, Program, SemanticId};
+
+/// Reconstruct a logical integer from a stored slot bit pattern.
+/// Unsigned values keep their full domain; signed values sign-extend
+/// from the declared width. Never route unsigned 64-bit cells through `i64`.
+pub(crate) fn integer_from_slot_bits(raw: u64, ty: IntegerType) -> i128 {
+    if ty.signed {
+        match ty.bits {
+            64 => raw as i64 as i128,
+            32 => i128::from(raw as u32 as i32),
+            16 => i128::from(raw as u16 as i16),
+            8 => i128::from(raw as u8 as i8),
+            bits => {
+                let shift = 64 - bits.min(64);
+                i128::from((raw as i64) << shift >> shift)
+            }
+        }
+    } else if ty.bits >= 64 {
+        i128::from(raw)
+    } else {
+        i128::from(raw & ((1_u64 << ty.bits) - 1))
+    }
+}
 
 /// Byte width of one stored field inside its 8-byte slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -739,18 +761,14 @@ impl<'a> ArenaReader<'a> {
         }
         match BodyType::from_semantic_name(declared_type) {
             BodyType::Integer(ty) => {
-                let value: i128 = match slot_width_registry(declared_type, self.registry) {
-                    SlotWidth::W32 => {
-                        let bits = self.get32(offset)?;
-                        if ty.signed {
-                            i32::from_le_bytes(bits.to_le_bytes()) as i128
-                        } else {
-                            bits as i128
-                        }
-                    }
-                    SlotWidth::W64 => self.get64(offset)? as i64 as i128,
+                let raw = match slot_width_registry(declared_type, self.registry) {
+                    SlotWidth::W32 => u64::from(self.get32(offset)?),
+                    SlotWidth::W64 => self.get64(offset)?,
                 };
-                Ok(mncs_model::ExecutionValue::Integer { value, ty })
+                Ok(mncs_model::ExecutionValue::Integer {
+                    value: integer_from_slot_bits(raw, ty),
+                    ty,
+                })
             }
             BodyType::Named(name) if name == "bool" => Ok(mncs_model::ExecutionValue::Boolean {
                 value: self.get32(offset)? == 1,
@@ -965,5 +983,76 @@ mod codec_tests {
     fn view_descriptor_packs_offset_and_length() {
         assert_eq!(pack_view(16, 3), 16 | (3_u64 << 32));
         assert_eq!(unpack_view(16 | (3_u64 << 32)), (16, 3));
+    }
+
+    #[test]
+    fn unsigned_u64_slot_bits_keep_the_high_bit() {
+        let ty = IntegerType {
+            bits: 64,
+            signed: false,
+        };
+        assert_eq!(integer_from_slot_bits(u64::MAX, ty), i128::from(u64::MAX));
+        assert_eq!(
+            integer_from_slot_bits(1_u64 << 63, ty),
+            9_223_372_036_854_775_808
+        );
+        assert_eq!(
+            integer_from_slot_bits((1_u64 << 63) + 1, ty),
+            9_223_372_036_854_775_809
+        );
+        assert_eq!(integer_from_slot_bits(7, ty), 7);
+        let signed = IntegerType {
+            bits: 64,
+            signed: true,
+        };
+        assert_eq!(
+            integer_from_slot_bits(1_u64 << 63, signed),
+            i64::MIN as i128
+        );
+    }
+
+    #[test]
+    fn exact_u64_sequence_preserves_high_bit_values() {
+        let contract = BackendValueContract::Sequence {
+            semantic_type: "[u64; 4]".to_owned(),
+            element: "u64".to_owned(),
+            length: 4,
+        };
+        let u64_ty = IntegerType {
+            bits: 64,
+            signed: false,
+        };
+        let value = ExecutionValue::Sequence {
+            values: vec![
+                ExecutionValue::Integer {
+                    value: i128::from(u64::MAX),
+                    ty: u64_ty,
+                },
+                ExecutionValue::Integer {
+                    value: 1_i128 << 63,
+                    ty: u64_ty,
+                },
+                ExecutionValue::Integer {
+                    value: (1_i128 << 63) + 1,
+                    ty: u64_ty,
+                },
+                ExecutionValue::Integer {
+                    value: 7,
+                    ty: u64_ty,
+                },
+            ],
+        };
+        let mut writer = ArenaWriter::new(BTreeMap::new());
+        let boundary = writer
+            .encode_argument_with_contract(&value, Some(&contract))
+            .expect("encodes");
+        let BoundaryValue::Cell(root) = boundary else {
+            panic!("exact sequence crosses as a cell");
+        };
+        let image = writer.into_image();
+        let registry = BTreeMap::new();
+        let reader = ArenaReader::new(&image, &registry);
+        let decoded = reader.decode(root, &contract).expect("decodes");
+        assert_eq!(decoded, value);
     }
 }

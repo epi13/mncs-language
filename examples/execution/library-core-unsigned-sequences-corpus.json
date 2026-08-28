@@ -1,0 +1,271 @@
+{
+  "schema_version": "0.1",
+  "name": "library-core-unsigned-sequences",
+  "cases": [
+    {
+      "id": "identity-u64-high-bits",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.sequences.v1",
+          "function": "identity_u64"
+        },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                {
+                  "integer": {
+                    "value": 18446744073709551615,
+                    "type": {
+                      "bits": 64,
+                      "signed": false
+                    }
+                  }
+                },
+                {
+                  "integer": {
+                    "value": 9223372036854775808,
+                    "type": {
+                      "bits": 64,
+                      "signed": false
+                    }
+                  }
+                },
+                {
+                  "integer": {
+                    "value": 9223372036854775809,
+                    "type": {
+                      "bits": 64,
+                      "signed": false
+                    }
+                  }
+                },
+                {
+                  "integer": {
+                    "value": 7,
+                    "type": {
+                      "bits": 64,
+                      "signed": false
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "sequence": {
+            "values": [
+              {
+                "integer": {
+                  "value": 18446744073709551615,
+                  "type": {
+                    "bits": 64,
+                    "signed": false
+                  }
+                }
+              },
+              {
+                "integer": {
+                  "value": 9223372036854775808,
+                  "type": {
+                    "bits": 64,
+                    "signed": false
+                  }
+                }
+              },
+              {
+                "integer": {
+                  "value": 9223372036854775809,
+                  "type": {
+                    "bits": 64,
+                    "signed": false
+                  }
+                }
+              },
+              {
+                "integer": {
+                  "value": 7,
+                  "type": {
+                    "bits": 64,
+                    "signed": false
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "first-u64-max",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.sequences.v1",
+          "function": "first_u64"
+        },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                {
+                  "integer": {
+                    "value": 18446744073709551615,
+                    "type": {
+                      "bits": 64,
+                      "signed": false
+                    }
+                  }
+                },
+                {
+                  "integer": {
+                    "value": 1,
+                    "type": {
+                      "bits": 64,
+                      "signed": false
+                    }
+                  }
+                },
+                {
+                  "integer": {
+                    "value": 2,
+                    "type": {
+                      "bits": 64,
+                      "signed": false
+                    }
+                  }
+                },
+                {
+                  "integer": {
+                    "value": 3,
+                    "type": {
+                      "bits": 64,
+                      "signed": false
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "integer": {
+            "value": 18446744073709551615,
+            "type": {
+              "bits": 64,
+              "signed": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "first-u64-view-empty",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.sequences.v1",
+          "function": "first_u64_view"
+        },
+        "arguments": [
+          {
+            "sequence": {
+              "values": []
+            }
+          },
+          {
+            "integer": {
+              "value": 99,
+              "type": {
+                "bits": 64,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "integer": {
+            "value": 99,
+            "type": {
+              "bits": 64,
+              "signed": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "first-u64-view-high-bit",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.sequences.v1",
+          "function": "first_u64_view"
+        },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                {
+                  "integer": {
+                    "value": 9223372036854775808,
+                    "type": {
+                      "bits": 64,
+                      "signed": false
+                    }
+                  }
+                },
+                {
+                  "integer": {
+                    "value": 1,
+                    "type": {
+                      "bits": 64,
+                      "signed": false
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 64,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "integer": {
+            "value": 9223372036854775808,
+            "type": {
+              "bits": 64,
+              "signed": false
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "properties": []
+}

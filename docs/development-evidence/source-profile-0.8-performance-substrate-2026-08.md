@@ -55,14 +55,19 @@ four negative fixtures regression tests.
 
 ## Backend realizations
 
-- Research bytecode: complete semantic integer-vector/mask reference path.
+- Research bytecode: complete semantic integer-vector/mask reference path,
+  including vector/mask-typed language-level signatures.
 - WASM MVP: packed `i64` masks and packed i32/i64 lane cells, scalarized fixed
-  lanes; no `v128` claim.
-- C11: portable canonical-cell scalar fallback; no compiler vector extension.
+  lanes; language-level vector/mask signatures marshal through linear memory.
+  No `v128` claim.
+- C11: portable canonical-cell scalar fallback and call-file packed-mask
+  words; no compiler vector extension.
 - LLVM: conservative scalarized LLVM IR fallback; scalar select is native
-  LLVM `select`; no native vector-IR claim in this tranche.
+  LLVM `select`; vector/mask signatures use canonical cells / packed bits.
+  No native vector-IR claim.
 - Cranelift: conservative scalarized JIT/CLIF fallback with native scalar
-  select; no SIMD claim.
+  select; vector/mask signatures use the same cell/call-file boundary.
+  No SIMD claim.
 - PTX/eBPF/RISC-V: unsupported for semantic vectors/masks; no fabricated
   lowering or execution result.
 
@@ -108,6 +113,22 @@ that its Rust frontend does not yet handle several Rust AST node families
 links. The graph therefore confirms focused method/control-flow presence and
 overlay construction, but it is not complete enough for a universal
 reachability or data-flow equivalence claim.
+
+## Process-boundary follow-up
+
+Logical vector and mask values now also cross language-level signatures
+on the five executable backends. That is a canonical-cell / packed-bit
+ABI claim, not a native SIMD claim:
+
+- masks use the call-file protocol as packed 64-bit words even when they
+  do not allocate arena cells; they are not decimal argv scalars
+- unsigned `u64` cells reconstruct from declared signedness, so values
+  `>= 2^63` stay in the unsigned domain through WASM and native arena
+  decoding
+- ABI regression tests require the returned logical value, not only the
+  execution status
+
+See `docs/development-evidence/sequence-view-boundary-abi-2026-08.md`.
 
 ## Deferred work
 

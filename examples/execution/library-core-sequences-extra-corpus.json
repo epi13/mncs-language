@@ -1,0 +1,180 @@
+{
+  "schema_version": "0.1",
+  "name": "library-core-sequences-extra",
+  "cases": [
+    {
+      "id": "prefix2",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "prefix2" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "sequence": {
+          "values": [
+            { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } },
+            { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }
+          ]
+        }
+      }]
+    },
+    {
+      "id": "suffix2",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "suffix2" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "sequence": {
+          "values": [
+            { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } },
+            { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+          ]
+        }
+      }]
+    },
+    {
+      "id": "contains-byte4-hit",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "contains_byte4" },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                { "byte": { "value": 1 } },
+                { "byte": { "value": 2 } },
+                { "byte": { "value": 3 } },
+                { "byte": { "value": 4 } }
+              ]
+            }
+          },
+          { "byte": { "value": 3 } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "contains-byte4-miss",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "contains_byte4" },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                { "byte": { "value": 1 } },
+                { "byte": { "value": 2 } },
+                { "byte": { "value": 3 } },
+                { "byte": { "value": 4 } }
+              ]
+            }
+          },
+          { "byte": { "value": 9 } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": false } }]
+    },
+    {
+      "id": "count-nonzero4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "count_nonzero4" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": -3, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 3, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "reverse4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "reverse4" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "sequence": {
+          "values": [
+            { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } },
+            { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } },
+            { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } },
+            { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }
+          ]
+        }
+      }]
+    },
+    {
+      "id": "starts-with2",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "starts_with2" },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+              ]
+            }
+          },
+          { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": true } }]
+    }
+  ],
+  "properties": []
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": "0.1",
+  "name": "library-core-view-over-capacity",
+  "cases": [
+    {
+      "id": "first-u64-view-too-long",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.sequences.v1",
+          "function": "first_u64_view"
+        },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                { "integer": { "value": 1, "type": { "bits": 64, "signed": false } } },
+                { "integer": { "value": 2, "type": { "bits": 64, "signed": false } } },
+                { "integer": { "value": 3, "type": { "bits": 64, "signed": false } } },
+                { "integer": { "value": 4, "type": { "bits": 64, "signed": false } } },
+                { "integer": { "value": 5, "type": { "bits": 64, "signed": false } } }
+              ]
+            }
+          },
+          { "integer": { "value": 0, "type": { "bits": 64, "signed": false } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "invalid_request"
+    }
+  ],
+  "properties": []
+}

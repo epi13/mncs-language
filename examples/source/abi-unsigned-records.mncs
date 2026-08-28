@@ -1,0 +1,19 @@
+mncs 0.8;
+
+// Unsigned 64-bit record fields across the process boundary.
+// High-bit values must survive as logical u64, not signed i64.
+module examples.abi.unsigned_records;
+
+record WordPair { hi: u64, lo: u64 }
+
+fn identity_pair(pair: WordPair) -> (result: WordPair) {
+    return pair;
+}
+
+fn hi_of(pair: WordPair) -> (result: u64) {
+    return pair.hi;
+}
+
+fn make_pair(hi: u64, lo: u64) -> (result: WordPair) {
+    return WordPair { hi: hi, lo: lo };
+}

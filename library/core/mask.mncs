@@ -1,6 +1,11 @@
 mncs 0.8;
 
 // mncs.core.mask — logical predicate composition over four bounded lanes.
+//
+// Scalar-entry kernels remain for consumers that still wrap lanes as
+// integers. Mask-typed exports are the process-boundary surface: a
+// `mask<4>` argument or result is a packed logical predicate, not four
+// booleans and not an arena cell.
 module mncs.core.mask.v1;
 
 fn any_negative4(a: i32, b: i32, c: i32, d: i32) -> (result: bool) {
@@ -20,4 +25,44 @@ fn none_negative4(a: i32, b: i32, c: i32, d: i32) -> (result: bool) {
     let values: vec<i32, 4> = vector(a, b, c, d);
     let zero: vec<i32, 4> = splat(0);
     return mask_none(vec_lt(values, zero));
+}
+
+// Mask-typed boundary. These functions exist so a process can import a
+// packed predicate without reconstructing it from scalar lanes.
+fn from_bools(a: bool, b: bool, c: bool, d: bool) -> (result: mask<4>) {
+    let values: vec<i32, 4> = vector(a as i32, b as i32, c as i32, d as i32);
+    let zero: vec<i32, 4> = splat(0);
+    return vec_ne(values, zero);
+}
+
+fn any_of(m: mask<4>) -> (result: bool) {
+    return mask_any(m);
+}
+
+fn all_of(m: mask<4>) -> (result: bool) {
+    return mask_all(m);
+}
+
+fn none_of(m: mask<4>) -> (result: bool) {
+    return mask_none(m);
+}
+
+fn and4(left: mask<4>, right: mask<4>) -> (result: mask<4>) {
+    return mask_and(left, right);
+}
+
+fn or4(left: mask<4>, right: mask<4>) -> (result: mask<4>) {
+    return mask_or(left, right);
+}
+
+fn xor4(left: mask<4>, right: mask<4>) -> (result: mask<4>) {
+    return mask_xor(left, right);
+}
+
+fn not4(m: mask<4>) -> (result: mask<4>) {
+    return mask_not(m);
+}
+
+fn identity4(m: mask<4>) -> (result: mask<4>) {
+    return m;
 }

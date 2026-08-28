@@ -1308,15 +1308,8 @@ fn read_slot(runtime: &Runtime, ty: &MarshalTy, address: i64) -> Result<Executio
                     value: i128::from(raw as u8),
                 });
             }
-            let value = if integer.bits == 64 {
-                raw as i64 as i128
-            } else if integer.signed {
-                i128::from(raw as u32 as i32)
-            } else {
-                i128::from(raw as u32)
-            };
             Ok(ExecutionValue::Integer {
-                value,
+                value: crate::composite::integer_from_slot_bits(raw, *integer),
                 ty: *integer,
             })
         }
@@ -1438,14 +1431,10 @@ fn read_vector_cell(
     let mut values = Vec::with_capacity(lanes as usize);
     for index in 0..lanes {
         let raw = runtime.load(address + i64::from(index) * lane_bytes, lane_bytes as usize)?;
-        let value = if element.bits == 64 {
-            raw as i64 as i128
-        } else if element.signed {
-            i128::from(raw as u32 as i32)
-        } else {
-            i128::from(raw as u32)
-        };
-        values.push(ExecutionValue::Integer { value, ty: element });
+        values.push(ExecutionValue::Integer {
+            value: crate::composite::integer_from_slot_bits(raw, element),
+            ty: element,
+        });
     }
     Ok(ExecutionValue::Vector { values })
 }
@@ -1499,7 +1488,7 @@ pub fn execute_function_typed(
         returned.push(match ty {
             MarshalTy::Bool => ExecutionValue::Boolean { value: *raw == 1 },
             MarshalTy::Int(integer) => ExecutionValue::Integer {
-                value: i128::from(*raw),
+                value: crate::composite::integer_from_slot_bits(*raw as u64, *integer),
                 ty: *integer,
             },
             MarshalTy::BareFinite {

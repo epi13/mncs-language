@@ -1,0 +1,76 @@
+{
+  "schema_version": "0.1",
+  "name": "library-core-vector-u64",
+  "cases": [
+    {
+      "id": "identity-u64-vector",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.vector.v1", "function": "identity_u64" },
+        "arguments": [{
+          "vector": {
+            "values": [
+              { "integer": { "value": 18446744073709551615, "type": { "bits": 64, "signed": false } } },
+              { "integer": { "value": 9223372036854775808, "type": { "bits": 64, "signed": false } } },
+              { "integer": { "value": 9223372036854775809, "type": { "bits": 64, "signed": false } } },
+              { "integer": { "value": 7, "type": { "bits": 64, "signed": false } } }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "vector": {
+          "values": [
+            { "integer": { "value": 18446744073709551615, "type": { "bits": 64, "signed": false } } },
+            { "integer": { "value": 9223372036854775808, "type": { "bits": 64, "signed": false } } },
+            { "integer": { "value": 9223372036854775809, "type": { "bits": 64, "signed": false } } },
+            { "integer": { "value": 7, "type": { "bits": 64, "signed": false } } }
+          ]
+        }
+      }]
+    },
+    {
+      "id": "reduce-u64-small",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.vector.v1", "function": "reduce_u64" },
+        "arguments": [{
+          "vector": {
+            "values": [
+              { "integer": { "value": 1, "type": { "bits": 64, "signed": false } } },
+              { "integer": { "value": 2, "type": { "bits": 64, "signed": false } } },
+              { "integer": { "value": 3, "type": { "bits": 64, "signed": false } } },
+              { "integer": { "value": 4, "type": { "bits": 64, "signed": false } } }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 10, "type": { "bits": 64, "signed": false } } }]
+    },
+    {
+      "id": "positives-u64-mask",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.vector.v1", "function": "positives_u64" },
+        "arguments": [{
+          "vector": {
+            "values": [
+              { "integer": { "value": 0, "type": { "bits": 64, "signed": false } } },
+              { "integer": { "value": 1, "type": { "bits": 64, "signed": false } } },
+              { "integer": { "value": 9223372036854775808, "type": { "bits": 64, "signed": false } } },
+              { "integer": { "value": 0, "type": { "bits": 64, "signed": false } } }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "mask": { "lanes": [false, true, true, false] } }]
+    }
+  ],
+  "properties": []
+}

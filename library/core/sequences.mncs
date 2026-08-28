@@ -158,3 +158,55 @@ fn find_index4(xs: [i64; 4], needle: i64) -> (result: i64) {
     }
     return found;
 }
+
+// Prefix/suffix views over a fixed window. The result is a bounded view
+// whose runtime length is a type-level fact of the slice endpoints.
+fn prefix2(xs: [i64; 4]) -> (result: [i64; up_to 4]) {
+    return xs[0..2];
+}
+
+fn suffix2(xs: [i64; 4]) -> (result: [i64; up_to 4]) {
+    return xs[2..4];
+}
+
+// Unsigned 64-bit windows. Identity and first-element access keep the
+// high bit through the cell/view ABI rather than wrapping into i64.
+fn identity_u64(xs: [u64; 4]) -> (result: [u64; 4]) {
+    return xs;
+}
+
+fn first_u64(xs: [u64; 4]) -> (result: u64) {
+    return xs[0];
+}
+
+fn first_u64_view(view: [u64; up_to 4], fallback: u64) -> (result: u64) {
+    if view.len == 0 {
+        return fallback;
+    }
+    return view[0];
+}
+
+fn contains_byte4(xs: [byte; 4], needle: byte) -> (result: bool) {
+    iterate i over xs carrying hit: bool = false {
+        next hit = hit || xs[i] == needle;
+    }
+    return hit;
+}
+
+// Boolean windows are not a sequence element type in the current
+// envelope. Count nonzero i64 slots instead of pretending `[bool; N]`
+// exists as a process-boundary value.
+fn count_nonzero4(xs: [i64; 4]) -> (result: i64) {
+    iterate i over xs carrying hits: i64 = 0 {
+        next hits = hits + ((xs[i] != 0) as i64);
+    }
+    return hits;
+}
+
+fn reverse4(xs: [i64; 4]) -> (result: [i64; 4]) {
+    return [xs[3], xs[2], xs[1], xs[0]];
+}
+
+fn starts_with2(xs: [i64; 4], a: i64, b: i64) -> (result: bool) {
+    return (xs[0] == a) && (xs[1] == b);
+}

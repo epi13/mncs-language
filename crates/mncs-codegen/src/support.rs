@@ -400,9 +400,32 @@ pub(crate) fn contract_is_cell(contract: &BackendValueContract) -> bool {
 
 /// Whether executing this contract requires the canonical arena image.
 /// Views store their elements in the arena even though the ABI word is a
-/// packed descriptor, not a cell root.
+/// packed descriptor, not a cell root. Masks are packed bits and do not.
 pub(crate) fn contract_needs_arena(contract: &BackendValueContract) -> bool {
     contract_is_cell(contract) || matches!(contract, BackendValueContract::View { .. })
+}
+
+/// Whether a contract crosses the native process boundary through the
+/// canonical call-file protocol rather than decimal argv words.
+///
+/// Masks do not occupy arena cells, but they are still not argv scalars:
+/// they travel as packed 64-bit words in the same call-file entry array
+/// as cell roots and view descriptors. Forcing them onto argv would use
+/// signed `strtoll` and `argument_argv` currently rejects them.
+pub(crate) fn contract_uses_call_file(contract: &BackendValueContract) -> bool {
+    contract_needs_arena(contract) || matches!(contract, BackendValueContract::Mask { .. })
+}
+
+/// Whether a request value must use the call-file protocol.
+pub(crate) fn value_uses_call_file(value: &ExecutionValue) -> bool {
+    match value {
+        ExecutionValue::Record { .. }
+        | ExecutionValue::Sequence { .. }
+        | ExecutionValue::Vector { .. }
+        | ExecutionValue::Mask { .. } => true,
+        ExecutionValue::Finite { payload, .. } => !payload.is_empty(),
+        _ => false,
+    }
 }
 
 /// Build the canonical call file for one execution request. Returns `None`
@@ -413,15 +436,10 @@ pub(crate) fn build_call_file(
     output_contract: Option<&BackendValueContract>,
     composite_contracts: &BTreeMap<String, BackendValueContract>,
 ) -> Result<Option<Vec<u8>>, String> {
-    let needs_cells = arguments.iter().any(|value| match value {
-        ExecutionValue::Record { .. }
-        | ExecutionValue::Sequence { .. }
-        | ExecutionValue::Vector { .. } => true,
-        ExecutionValue::Finite { payload, .. } => !payload.is_empty(),
-        _ => false,
-    }) || input_contracts.iter().any(contract_needs_arena)
-        || output_contract.is_some_and(contract_needs_arena);
-    if !needs_cells {
+    let needs_call_file = arguments.iter().any(value_uses_call_file)
+        || input_contracts.iter().any(contract_uses_call_file)
+        || output_contract.is_some_and(contract_uses_call_file);
+    if !needs_call_file {
         // Pure scalar calls keep the historical argv-only protocol.
         return Ok(None);
     }
@@ -598,9 +616,9 @@ pub(crate) fn process_driver(
     inputs: &[mncs_model::BackendValueContract],
     output: Option<&mncs_model::BackendValueContract>,
 ) -> String {
-    let uses_cells =
-        inputs.iter().any(contract_needs_arena) || output.is_some_and(contract_needs_arena);
-    if !uses_cells {
+    let uses_call_file =
+        inputs.iter().any(contract_uses_call_file) || output.is_some_and(contract_uses_call_file);
+    if !uses_call_file {
         return process_driver_scalar_only(function, inputs);
     }
     process_driver_full(function, inputs)
@@ -868,5 +886,49 @@ mod driver_tests {
             !driver.contains("extern unsigned char mncs_arena"),
             "no externs remain"
         );
+    }
+
+    #[test]
+    fn mask_only_signatures_use_the_call_file_protocol() {
+        let mask = BackendValueContract::Mask {
+            semantic_type: "mask<4>".to_owned(),
+            lanes: 4,
+        };
+        assert!(
+            contract_uses_call_file(&mask),
+            "masks are packed call-file words"
+        );
+        assert!(
+            !contract_needs_arena(&mask),
+            "masks do not occupy arena cells"
+        );
+        let driver = process_driver("any_of", std::slice::from_ref(&mask), None);
+        assert!(
+            driver.contains("MNCS_CALL_FILE"),
+            "mask-only inputs must not fall back to argv"
+        );
+        let out_driver = process_driver("bits", &[], Some(&mask));
+        assert!(
+            out_driver.contains("MNCS_CALL_FILE"),
+            "mask-only results must not fall back to argv"
+        );
+        let packed = crate::composite::pack_mask(&[true, false, false, true]);
+        let mask_value = ExecutionValue::Mask {
+            lanes: vec![true, false, false, true],
+        };
+        assert!(value_uses_call_file(&mask_value));
+        let blob = build_call_file(
+            &[mask_value],
+            std::slice::from_ref(&mask),
+            None,
+            &BTreeMap::new(),
+        )
+        .expect("call file")
+        .expect("mask-only still emits a call file");
+        assert!(blob.len() >= 16, "header present");
+        let kind = u64::from_le_bytes(blob[16..24].try_into().unwrap());
+        let payload = u64::from_le_bytes(blob[24..32].try_into().unwrap());
+        assert_eq!(kind, 0, "mask travels as packed bits, not a cell root");
+        assert_eq!(payload, packed);
     }
 }
