@@ -1,0 +1,204 @@
+{
+  "schema_version": "0.1",
+  "name": "library-core-sequences",
+  "cases": [
+    {
+      "id": "contains4-hit",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "contains4" },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 5, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 7, "type": { "bits": 64, "signed": true } } }
+              ]
+            }
+          },
+          { "integer": { "value": 5, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "contains4-miss",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "contains4" },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 5, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 7, "type": { "bits": 64, "signed": true } } }
+              ]
+            }
+          },
+          { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "boolean": { "value": false } }]
+    },
+    {
+      "id": "min4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "min4" },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                { "integer": { "value": 9, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": -2, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }
+              ]
+            }
+          }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "integer": { "value": -2, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "max4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "max4" },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                { "integer": { "value": 9, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": -2, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }
+              ]
+            }
+          }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "integer": { "value": 9, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "find-index-hit",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "find_index4" },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 5, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 7, "type": { "bits": 64, "signed": true } } }
+              ]
+            }
+          },
+          { "integer": { "value": 5, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "find-index-miss",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "find_index4" },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 5, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 7, "type": { "bits": 64, "signed": true } } }
+              ]
+            }
+          },
+          { "integer": { "value": 8, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "first-or-view",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "first_or" },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                { "integer": { "value": 11, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 12, "type": { "bits": 64, "signed": true } } }
+              ]
+            }
+          },
+          { "integer": { "value": 99, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "integer": { "value": 11, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "first-or-empty",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "first_or" },
+        "arguments": [
+          { "sequence": { "values": [] } },
+          { "integer": { "value": 99, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "integer": { "value": 99, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "put4-result",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "put4" },
+        "arguments": [
+          {
+            "sequence": {
+              "values": [
+                { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+              ]
+            }
+          },
+          { "integer": { "value": 2, "type": { "bits": 64, "signed": false } } },
+          { "integer": { "value": 30, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [
+        {
+          "sequence": {
+            "values": [
+              { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 30, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 4, "type": { "bits": 64, "signed": true } } }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "properties": []
+}

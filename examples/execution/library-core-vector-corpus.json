@@ -1,0 +1,54 @@
+{
+  "schema_version": "0.1",
+  "name": "library-core-vector",
+  "cases": [
+    {
+      "id": "reduce-vec4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.vector.v1", "function": "reduce_vec4" },
+        "arguments": [
+          {
+            "vector": {
+              "values": [
+                { "integer": { "value": 1, "type": { "bits": 32, "signed": true } } },
+                { "integer": { "value": 2, "type": { "bits": 32, "signed": true } } },
+                { "integer": { "value": 3, "type": { "bits": 32, "signed": true } } },
+                { "integer": { "value": 4, "type": { "bits": 32, "signed": true } } }
+              ]
+            }
+          }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "integer": { "value": 10, "type": { "bits": 32, "signed": true } } }]
+    },
+    {
+      "id": "doubled4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.vector.v1", "function": "doubled4" },
+        "arguments": [
+          { "integer": { "value": 1, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": -2, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 3, "type": { "bits": 32, "signed": true } } },
+          { "integer": { "value": 4, "type": { "bits": 32, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [
+        {
+          "vector": {
+            "values": [
+              { "integer": { "value": 2, "type": { "bits": 32, "signed": true } } },
+              { "integer": { "value": -4, "type": { "bits": 32, "signed": true } } },
+              { "integer": { "value": 6, "type": { "bits": 32, "signed": true } } },
+              { "integer": { "value": 8, "type": { "bits": 32, "signed": true } } }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "properties": []
+}

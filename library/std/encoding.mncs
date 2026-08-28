@@ -17,6 +17,10 @@ mncs 0.7;
 // Wire-contract versioning (RFC 0027) will wrap this module with schema
 // identities once family records need them; the byte layout of v1 functions
 // is frozen from this commit forward.
+//
+// Realization envelope (2026-08): `encode_u32`/`decode_u32` are
+// sequence-typed exports and execute on research bytecode, portable WASM,
+// C11, LLVM IR, and Cranelift through the canonical cell ABI.
 module mncs.std.encoding.v1;
 
 // Big-endian u32 -> four bytes, most significant first. Extraction uses

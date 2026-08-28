@@ -199,6 +199,8 @@ pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
             "integer_shifts",
             "bounded_sequences_internal",
             "bounded_views_internal",
+            "sequence_or_view_boundary_crossing",
+            "vector_or_mask_boundary_crossing",
             "sequence_traversal",
             "semantic_branchless_select",
             "semantic_integer_vectors",
@@ -214,7 +216,7 @@ pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
             "effects",
             "saturating_integer_above_bounded_width",
             "widening_integer_above_64_bits",
-            "sequence_or_view_boundary_crossing",
+            "nested_composite_sequence_elements",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -946,6 +948,40 @@ fn backend_input_matches(
                     },
                 )
         }
+        (
+            BackendValueContract::Sequence {
+                element, length, ..
+            },
+            ExecutionValue::Sequence { values },
+        ) => {
+            values.len() == *length as usize
+                && values
+                    .iter()
+                    .all(|value| scalar_field_matches(element, value))
+        }
+        (
+            BackendValueContract::View {
+                element, capacity, ..
+            },
+            ExecutionValue::Sequence { values },
+        ) => {
+            values.len() <= *capacity as usize
+                && values
+                    .iter()
+                    .all(|value| scalar_field_matches(element, value))
+        }
+        (
+            BackendValueContract::Vector { element, lanes, .. },
+            ExecutionValue::Vector { values },
+        ) => {
+            values.len() == *lanes as usize
+                && values
+                    .iter()
+                    .all(|value| scalar_field_matches(element, value))
+        }
+        (BackendValueContract::Mask { lanes, .. }, ExecutionValue::Mask { lanes: bits }) => {
+            bits.len() == *lanes as usize
+        }
         _ => false,
     }
 }
@@ -959,7 +995,14 @@ fn scalar_field_matches(semantic_type: &str, value: &ExecutionValue) -> bool {
         (BodyType::Integer(expected), ExecutionValue::Integer { value, ty }) => {
             expected == *ty && support::integer_fits(*value, expected)
         }
+        (BodyType::Byte, ExecutionValue::Byte { value }) => (0..=255).contains(value),
         (BodyType::Named(_), ExecutionValue::Finite { .. } | ExecutionValue::Record { .. }) => true,
+        (
+            BodyType::Sequence { .. } | BodyType::Vector { .. } | BodyType::Mask { .. },
+            ExecutionValue::Sequence { .. }
+            | ExecutionValue::Vector { .. }
+            | ExecutionValue::Mask { .. },
+        ) => true,
         _ => false,
     }
 }
@@ -1062,6 +1105,26 @@ pub(crate) fn backend_output_value(
                 "backend record result does not carry the declared record identity ({name})"
             )),
         },
+        BackendValueContract::Sequence { length, .. } => match value {
+            ExecutionValue::Sequence { ref values } if values.len() == *length as usize => {
+                Ok(value)
+            }
+            _ => Err("backend sequence result does not match the declared length".to_owned()),
+        },
+        BackendValueContract::View { capacity, .. } => match value {
+            ExecutionValue::Sequence { ref values } if values.len() <= *capacity as usize => {
+                Ok(value)
+            }
+            _ => Err("backend view result exceeds the declared capacity".to_owned()),
+        },
+        BackendValueContract::Vector { lanes, .. } => match value {
+            ExecutionValue::Vector { ref values } if values.len() == *lanes as usize => Ok(value),
+            _ => Err("backend vector result does not match the declared lane count".to_owned()),
+        },
+        BackendValueContract::Mask { lanes, .. } => match value {
+            ExecutionValue::Mask { lanes: ref bits } if bits.len() == *lanes as usize => Ok(value),
+            _ => Err("backend mask result does not match the declared lane count".to_owned()),
+        },
     }
 }
 
@@ -1087,6 +1150,31 @@ fn marshal_ty(
                 }),
             }
         }
+        BackendValueContract::Sequence {
+            element, length, ..
+        } => MarshalTy::Sequence {
+            element: Box::new(named_marshal(element, composites)),
+            length: *length,
+        },
+        BackendValueContract::View {
+            element, capacity, ..
+        } => MarshalTy::View {
+            element: Box::new(named_marshal(element, composites)),
+            capacity: *capacity,
+        },
+        BackendValueContract::Vector { element, lanes, .. } => {
+            let BodyType::Integer(integer) = BodyType::from_semantic_name(element) else {
+                return MarshalTy::Int(IntegerType {
+                    bits: 64,
+                    signed: true,
+                });
+            };
+            MarshalTy::Vector {
+                element: integer,
+                lanes: *lanes,
+            }
+        }
+        BackendValueContract::Mask { lanes, .. } => MarshalTy::Mask { lanes: *lanes },
         BackendValueContract::Record {
             type_identity,
             name,
@@ -1151,6 +1239,24 @@ fn named_marshal(
     match BodyType::from_semantic_name(semantic_type) {
         BodyType::Named(name) if name == "bool" => crate::wasm::MarshalTy::Bool,
         BodyType::Integer(ty) => crate::wasm::MarshalTy::Int(ty),
+        BodyType::Byte => crate::wasm::MarshalTy::Int(IntegerType {
+            bits: 8,
+            signed: false,
+        }),
+        BodyType::Sequence {
+            element,
+            bound: mncs_model::SequenceBound::Exact(length),
+        } => crate::wasm::MarshalTy::Sequence {
+            element: Box::new(named_marshal(&element.semantic_name(), composites)),
+            length,
+        },
+        BodyType::Sequence {
+            element,
+            bound: mncs_model::SequenceBound::UpTo(capacity),
+        } => crate::wasm::MarshalTy::View {
+            element: Box::new(named_marshal(&element.semantic_name(), composites)),
+            capacity,
+        },
         _ => crate::wasm::MarshalTy::Int(IntegerType {
             bits: 64,
             signed: true,

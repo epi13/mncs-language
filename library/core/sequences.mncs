@@ -1,4 +1,4 @@
-mncs 0.7;
+mncs 0.8;
 
 // mncs.core.sequences — reusable operations over bounded sequences.
 //
@@ -13,11 +13,11 @@ mncs 0.7;
 // is deliberately bounded; generalization awaits RFC 0013 polymorphism and
 // must not be simulated with unbounded representations.
 //
-// Realization envelope (2026-08): reference executors and research bytecode
-// realize these operations fully, including sequence-typed parameters at
-// language-level signatures. C11, LLVM IR, portable WASM, Cranelift, and the
-// external artifact targets refuse sequence-typed boundary crossings this
-// tranche and realize the same logic through scalar-entry wrappers.
+// Realization envelope (2026-08): reference executors, research bytecode,
+// portable WASM, C11, LLVM IR, and Cranelift realize these operations,
+// including sequence-typed and view-typed language-level signatures, through
+// canonical cells (exact sequences) and packed view descriptors. Nested
+// composite sequence elements remain a later cell-of-cells step.
 module mncs.core.sequences.v1;
 
 enum Found { Yes { value: i64 }, No }
@@ -75,6 +75,20 @@ fn last_of(view: [i64; up_to 4]) -> (result: Found) {
     return Found.Yes { value: view[view.len - 1] };
 }
 
+fn first_or(view: [i64; up_to 4], fallback: i64) -> (result: i64) {
+    return match first_of(view) {
+        Found.Yes { value } => value,
+        No => fallback,
+    };
+}
+
+fn last_or(view: [i64; up_to 4], fallback: i64) -> (result: i64) {
+    return match last_of(view) {
+        Found.Yes { value } => value,
+        No => fallback,
+    };
+}
+
 // Strict ordering scan: carries the previous element and the running verdict
 // through one traversal. Pairwise adjacency comes from carried state, so no
 // index arithmetic beyond the traversal domain is needed.
@@ -117,4 +131,30 @@ fn put4(base: [i64; 4], index: u64, value: i64) -> (result: [i64; 4]) {
         return [base[0], base[1], value, base[3]];
     }
     return [base[0], base[1], base[2], value];
+}
+
+// Comparison-only extrema. No arithmetic, so no overflow obligation.
+fn min4(xs: [i64; 4]) -> (result: i64) {
+    iterate i over xs carrying acc: i64 = xs[0] {
+        next acc = select(xs[i] < acc, xs[i], acc);
+    }
+    return acc;
+}
+
+fn max4(xs: [i64; 4]) -> (result: i64) {
+    iterate i over xs carrying acc: i64 = xs[0] {
+        next acc = select(xs[i] > acc, xs[i], acc);
+    }
+    return acc;
+}
+
+// First matching index, or 4 when the needle is absent. One-past-end is a
+// total missing sentinel that stays inside the declared bound vocabulary.
+fn find_index4(xs: [i64; 4], needle: i64) -> (result: i64) {
+    iterate i over xs carrying found: i64 = 4 {
+        let at: i64 = i as i64;
+        let hit: bool = (found == 4) && (xs[i] == needle);
+        next found = select(hit, at, found);
+    }
+    return found;
 }

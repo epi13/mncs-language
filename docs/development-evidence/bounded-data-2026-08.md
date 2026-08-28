@@ -26,6 +26,10 @@ evaluation, formal verification of the compiler, or a production claim.
   `(offset | length << 32)` descriptors; external RISC-V/PTX artifact
   generation continues through shared LLVM lowering; eBPF refuses
   >5-register signatures precisely (`CGX410`).
+  **Follow-up (2026-08 sequence ABI):** language-level sequence/view/vector/mask
+  signatures now also cross the process boundary; see
+  `sequence-view-boundary-abi-2026-08.md`. Nested composite sequence
+  elements remain unsupported.
 - **Differential agreement** (layered body/SSA/backend validation PASS on
   every executable backend):
   - `examples/execution/profile07-bounded-data-corpus.json` — 5 cases:

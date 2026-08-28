@@ -92,6 +92,8 @@ pub fn llvm_capabilities() -> BackendCapabilityManifest {
             "integer_shifts",
             "bounded_sequences_internal",
             "bounded_views_internal",
+            "sequence_or_view_boundary_crossing",
+            "vector_or_mask_boundary_crossing",
             "semantic_branchless_select",
             "semantic_integer_vectors",
             "semantic_masks",
@@ -104,7 +106,7 @@ pub fn llvm_capabilities() -> BackendCapabilityManifest {
         [
             "memory",
             "effects",
-            "sequence_or_view_boundary_crossing",
+            "nested_composite_sequence_elements",
             "widening_integer",
             "host_effects",
         ]

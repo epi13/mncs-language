@@ -95,8 +95,8 @@ Current observed state after the backend-family expansion; the matrix command
 | body / SSA reference executors | realizes | realizes | realizes | realizes |
 | research bytecode | realizes | realizes | realizes | realizes |
 | portable WASM MVP | realizes | realizes | realizes | realizes (unsigned 64-bit sat mul refuses) |
-| C11 | refuse composite args (process boundary) | realizes | realizes | realizes |
-| LLVM / Cranelift | scalar envelope | realizes | realizes | realizes |
+| C11 | realizes (canonical cells + call file) | realizes | realizes | realizes |
+| LLVM / Cranelift | realizes (canonical cells + call file / JIT arena) | realizes | realizes | realizes |
 
 Backend refusal is an intentional, evidence-backed envelope, not semantic
 disagreement. No semantic workaround was added for any backend.

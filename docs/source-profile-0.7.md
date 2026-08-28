@@ -131,22 +131,25 @@ own totality obligation.
 | --- | --- | --- | --- | --- | --- |
 | body/SSA reference executors | realizes | realizes | realizes | realizes | realizes |
 | research bytecode | realizes | realizes (incl. arguments/results) | realizes | realizes | realizes |
-| portable WASM MVP | realizes | internal cells | packed descriptor, internal | realizes | realizes |
-| C11 | realizes | internal cells | packed descriptor, internal | realizes | realizes |
-| LLVM IR | realizes | internal cells | packed descriptor, internal | realizes | realizes |
-| Cranelift | realizes | internal cells | packed descriptor, internal | realizes | realizes |
+| portable WASM MVP | realizes | cells, including language-level args/results | packed descriptor, including args/results | realizes | realizes |
+| C11 | realizes | cells, including language-level args/results | packed descriptor, including args/results | realizes | realizes |
+| LLVM IR | realizes | cells, including language-level args/results | packed descriptor, including args/results | realizes | realizes |
+| Cranelift | realizes | cells, including language-level args/results | packed descriptor, including args/results | realizes | realizes |
 | RISC-V/eBPF/PTX | via shared LLVM lowering; artifact production + structural validation only |
 
-Sequence-typed function parameters/results refuse with coded diagnostics on
-the four scalar backends this tranche (the process-boundary marshal contract
-does not yet carry composites); research bytecode accepts language-level
-signatures fully. eBPF additionally refuses signatures beyond its five-
-register calling convention (`CGX410`). Backend refusal is an intentional,
-evidence-backed envelope, not semantic disagreement.
+Sequence-typed and view-typed function parameters/results now cross the
+process boundary through the canonical cell / packed-descriptor contract
+used by records. Nested composite sequence elements remain an explicit
+later step (`nested_composite_sequence_elements` is still unsupported).
+eBPF additionally refuses signatures beyond its five-register calling
+convention (`CGX410`). Backend refusal remains an evidence-backed
+envelope, not semantic disagreement.
 
 Differential agreement corpora:
 `examples/execution/profile07-bounded-data-corpus.json`,
-`examples/execution/profile07-serialization-corpus.json`.
+`examples/execution/profile07-serialization-corpus.json`,
+`examples/execution/library-core-sequences-corpus.json`,
+`examples/execution/library-std-encoding-corpus.json`.
 
 ## Identity compatibility
 

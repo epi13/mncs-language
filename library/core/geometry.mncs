@@ -12,12 +12,17 @@ mncs 0.8;
 // tracking, and any future spatial model that needs evidence-honest
 // containment, intersection, and clipping.
 //
+// Ordering helpers (`min_i64`/`max_i64`/`clamp_i64`) are imported from
+// `mncs.core.ordering.v1`; this module does not redeclare them.
+//
 // Arithmetic is intentionally plain: translations use the declared wrapping
 // addition intent (`+%`) so overflow is total and explicit; callers that
 // need saturation must use the `+|` family explicitly. Clamping is via
 // comparisons only, so no overflow obligation survives. Bounds checks
 // return false rather than failing.
 module mncs.core.geometry.v1;
+
+use mncs.core.ordering.v1;
 
 record Point { column: i64, row: i64 }
 record Size { columns: i64, rows: i64 }
@@ -75,16 +80,6 @@ fn size_clamp(s: Size, lo: Size, hi: Size) -> (result: Size) {
     let cols: i64 = clamp_i64(s.columns, lo.columns, hi.columns);
     let rows: i64 = clamp_i64(s.rows, lo.rows, hi.rows);
     return Size { columns: cols, rows: rows };
-}
-
-fn clamp_i64(value: i64, lo: i64, hi: i64) -> (result: i64) {
-    if value < lo {
-        return lo;
-    }
-    if value > hi {
-        return hi;
-    }
-    return value;
 }
 
 // ---- Rect helpers ----
@@ -150,20 +145,6 @@ fn rect_intersects(a: Rect, b: Rect) -> (result: bool) {
     let col_overlap: bool = (a.origin.column < b_right) && (b.origin.column < a_right);
     let row_overlap: bool = (a.origin.row < b_bottom) && (b.origin.row < a_bottom);
     return col_overlap && row_overlap;
-}
-
-fn max_i64(a: i64, b: i64) -> (result: i64) {
-    if a >= b {
-        return a;
-    }
-    return b;
-}
-
-fn min_i64(a: i64, b: i64) -> (result: i64) {
-    if a <= b {
-        return a;
-    }
-    return b;
 }
 
 fn rect_intersect(a: Rect, b: Rect) -> (result: Rect) {

@@ -164,6 +164,35 @@ pub enum BoundaryValue {
     Cell(u64),
 }
 
+/// Packed view descriptor used by every executable backend: the low 32 bits
+/// hold the element-cell offset, the high 32 bits the runtime length.
+pub fn pack_view(offset: u64, length: u32) -> u64 {
+    (offset & 0xffff_ffff) | ((u64::from(length)) << 32)
+}
+
+pub fn unpack_view(descriptor: u64) -> (u64, u32) {
+    (descriptor & 0xffff_ffff, (descriptor >> 32) as u32)
+}
+
+pub fn pack_mask(lanes: &[bool]) -> u64 {
+    lanes.iter().enumerate().fold(
+        0_u64,
+        |acc, (index, bit)| {
+            if *bit {
+                acc | (1_u64 << index)
+            } else {
+                acc
+            }
+        },
+    )
+}
+
+pub fn unpack_mask(bits: u64, lanes: u32) -> mncs_model::ExecutionValue {
+    mncs_model::ExecutionValue::Mask {
+        lanes: (0..lanes).map(|index| ((bits >> index) & 1) == 1).collect(),
+    }
+}
+
 /// Host-side canonical cell writer: marshals composite arguments into an
 /// arena image before a native-process call. Byte layout mirrors the cell
 /// contract above exactly.
@@ -203,27 +232,84 @@ impl ArenaWriter {
 
     /// Encode one top-level argument. Scalars and unboxed finite variants
     /// cross as raw bits; composites allocate cells.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn encode_argument(
         &mut self,
         value: &mncs_model::ExecutionValue,
     ) -> Result<BoundaryValue, String> {
-        match value {
-            mncs_model::ExecutionValue::Integer { value, .. } => {
-                Ok(BoundaryValue::Bits(*value as u64))
+        self.encode_argument_with_contract(value, None)
+    }
+
+    /// Encode one argument against its declared language-owned contract so
+    /// exact sequences, views, vectors, and masks take the correct ABI word.
+    pub fn encode_argument_with_contract(
+        &mut self,
+        value: &mncs_model::ExecutionValue,
+        contract: Option<&mncs_model::BackendValueContract>,
+    ) -> Result<BoundaryValue, String> {
+        use mncs_model::{BackendValueContract as Contract, ExecutionValue as Value};
+        match (contract, value) {
+            (Some(Contract::Mask { lanes, .. }), Value::Mask { lanes: bits }) => {
+                if bits.len() != *lanes as usize {
+                    return Err("mask argument does not match its declared lane count".to_owned());
+                }
+                Ok(BoundaryValue::Bits(pack_mask(bits)))
             }
-            mncs_model::ExecutionValue::Boolean { value } => {
-                Ok(BoundaryValue::Bits(u64::from(*value)))
+            (
+                Some(Contract::View {
+                    capacity, element, ..
+                }),
+                Value::Sequence { values },
+            ) => {
+                if values.len() > *capacity as usize {
+                    return Err("view argument exceeds its declared capacity".to_owned());
+                }
+                if values.is_empty() {
+                    return Ok(BoundaryValue::Bits(pack_view(0, 0)));
+                }
+                let root = self.encode_sequence_typed(values, element)?;
+                Ok(BoundaryValue::Bits(pack_view(
+                    root,
+                    u32::try_from(values.len()).unwrap_or(0),
+                )))
             }
-            mncs_model::ExecutionValue::Byte { value } => Ok(BoundaryValue::Bits(*value as u64)),
-            mncs_model::ExecutionValue::Finite {
-                payload,
-                discriminant,
-                type_identity,
-                ..
-            } if !self.identity_is_boxed(type_identity) && payload.is_empty() => {
+            (
+                Some(Contract::Sequence {
+                    length, element, ..
+                }),
+                Value::Sequence { values },
+            ) => {
+                if values.len() != *length as usize {
+                    return Err("sequence argument does not match its declared length".to_owned());
+                }
+                Ok(BoundaryValue::Cell(
+                    self.encode_sequence_typed(values, element)?,
+                ))
+            }
+            (Some(Contract::Vector { lanes, element, .. }), Value::Vector { values }) => {
+                if values.len() != *lanes as usize {
+                    return Err("vector argument does not match its declared lane count".to_owned());
+                }
+                Ok(BoundaryValue::Cell(
+                    self.encode_vector_native(values, element)?,
+                ))
+            }
+            (_, Value::Integer { value, .. }) => Ok(BoundaryValue::Bits(*value as u64)),
+            (_, Value::Boolean { value }) => Ok(BoundaryValue::Bits(u64::from(*value))),
+            (_, Value::Byte { value }) => Ok(BoundaryValue::Bits(*value as u64)),
+            (
+                _,
+                Value::Finite {
+                    payload,
+                    discriminant,
+                    type_identity,
+                    ..
+                },
+            ) if !self.identity_is_boxed(type_identity) && payload.is_empty() => {
                 Ok(BoundaryValue::Bits(u64::from(*discriminant)))
             }
-            other => Ok(BoundaryValue::Cell(self.encode_cell(other)?)),
+            (_, Value::Mask { lanes }) => Ok(BoundaryValue::Bits(pack_mask(lanes))),
+            (_, other) => Ok(BoundaryValue::Cell(self.encode_cell(other)?)),
         }
     }
 
@@ -272,7 +358,11 @@ impl ArenaWriter {
             }
             Value::Sequence { values } => {
                 let elements = values.clone();
-                self.encode_sequence(&elements)
+                self.encode_sequence_typed(&elements, inferred_element_type(&elements))
+            }
+            Value::Vector { values } => {
+                let elements = values.clone();
+                self.encode_vector_native(&elements, inferred_element_type(&elements))
             }
             Value::Finite {
                 discriminant,
@@ -359,42 +449,78 @@ impl ArenaWriter {
             }
             // Exact-length sequences occupy their own cells and are
             // referenced from this slot.
-            seq @ Value::Sequence { .. } => {
-                let cell = self.encode_cell(seq)?;
+            Value::Sequence { values } => {
+                let element = match mncs_model::BodyType::from_semantic_name(declared_type) {
+                    mncs_model::BodyType::Sequence { element, .. } => element.semantic_name(),
+                    _ => inferred_element_type(values).to_owned(),
+                };
+                let cell = self.encode_sequence_typed(values, &element)?;
                 self.put64(offset, cell);
                 Ok(())
             }
-            Value::Vector { .. } | Value::Mask { .. } => Err(
-                "vector and mask values do not cross the canonical composite boundary".to_owned(),
-            ),
+            Value::Vector { values } => {
+                let element = match mncs_model::BodyType::from_semantic_name(declared_type) {
+                    mncs_model::BodyType::Vector { element, .. } => element.semantic_name(),
+                    _ => inferred_element_type(values).to_owned(),
+                };
+                let cell = self.encode_vector_native(values, &element)?;
+                self.put64(offset, cell);
+                Ok(())
+            }
+            Value::Mask { lanes } => {
+                self.put64(offset, pack_mask(lanes));
+                Ok(())
+            }
         }
     }
 
     /// Encode an exact-length sequence into a fresh canonical cell: one
     /// 8-byte slot per element in index order. Returns the cell offset.
-    fn encode_sequence(&mut self, elements: &[mncs_model::ExecutionValue]) -> Result<u64, String> {
+    fn encode_sequence_typed(
+        &mut self,
+        elements: &[mncs_model::ExecutionValue],
+        element_type: &str,
+    ) -> Result<u64, String> {
         let base = self.align8();
         self.image.resize(base as usize + elements.len() * 8, 0);
         for (index, element) in elements.iter().enumerate() {
-            let slot = base + index as u64 * 8;
-            let bits = element_slot_bits(element)?;
-            self.put64(slot, bits);
+            self.store_field(base + index as u64 * 8, element, element_type)?;
         }
         Ok(base)
     }
+
+    /// Native scalar backends store one 8-byte slot per vector lane.
+    fn encode_vector_native(
+        &mut self,
+        lanes: &[mncs_model::ExecutionValue],
+        element_type: &str,
+    ) -> Result<u64, String> {
+        self.encode_sequence_typed(lanes, element_type)
+    }
 }
 
-/// Zero-extended slot bits for a scalar or byte sequence element; nested
-/// composites are rejected because they must occupy referenced cells.
-fn element_slot_bits(value: &mncs_model::ExecutionValue) -> Result<u64, String> {
-    match value {
-        mncs_model::ExecutionValue::Integer { value, .. } => Ok(*value as u64),
-        mncs_model::ExecutionValue::Boolean { value } => Ok(u64::from(*value)),
-        mncs_model::ExecutionValue::Byte { value } => Ok(*value as u64),
-        mncs_model::ExecutionValue::Finite { discriminant, .. } => Ok(u64::from(*discriminant)),
-        other => Err(format!(
-            "nested composite sequence element requires cell realization: {other:?}"
-        )),
+fn inferred_element_type(values: &[mncs_model::ExecutionValue]) -> &'static str {
+    match values.first() {
+        Some(mncs_model::ExecutionValue::Byte { .. }) => "byte",
+        Some(mncs_model::ExecutionValue::Boolean { .. }) => "bool",
+        Some(mncs_model::ExecutionValue::Integer { ty, .. }) => {
+            if ty.bits == 32 && ty.signed {
+                "i32"
+            } else if ty.bits == 32 && !ty.signed {
+                "u32"
+            } else if ty.bits == 16 && ty.signed {
+                "i16"
+            } else if ty.bits == 16 && !ty.signed {
+                "u16"
+            } else if ty.bits == 8 && !ty.signed {
+                "u8"
+            } else if !ty.signed {
+                "u64"
+            } else {
+                "i64"
+            }
+        }
+        _ => "i64",
     }
 }
 
@@ -467,6 +593,29 @@ impl<'a> ArenaReader<'a> {
         Ok(u64::from_le_bytes(bytes))
     }
 
+    /// Decode one ABI word (`root` is a cell offset, packed view, or mask
+    /// bits) against the declared contract.
+    pub fn decode_boundary(
+        &self,
+        word: u64,
+        contract: &mncs_model::BackendValueContract,
+    ) -> Result<mncs_model::ExecutionValue, String> {
+        use mncs_model::BackendValueContract as Contract;
+        match contract {
+            Contract::View {
+                element, capacity, ..
+            } => {
+                let (offset, length) = unpack_view(word);
+                if length > *capacity {
+                    return Err("decoded view length exceeds its declared capacity".to_owned());
+                }
+                self.decode_sequence_at(offset, length, element)
+            }
+            Contract::Mask { lanes, .. } => Ok(unpack_mask(word, *lanes)),
+            other => self.decode(word, other),
+        }
+    }
+
     /// Decode one value at `root` against a named declared semantic type.
     pub fn decode(
         &self,
@@ -475,9 +624,20 @@ impl<'a> ArenaReader<'a> {
     ) -> Result<mncs_model::ExecutionValue, String> {
         use mncs_model::{BackendValueContract as Contract, ExecutionValue as Value};
         match contract {
-            Contract::Scalar { .. } => {
-                Err("scalar results decode outside the cell codec".to_owned())
+            Contract::Scalar { .. } | Contract::Mask { .. } | Contract::View { .. } => {
+                Err("scalar, mask, and view results decode outside a bare cell root".to_owned())
             }
+            Contract::Sequence {
+                element, length, ..
+            } => self.decode_sequence_at(root, *length, element),
+            Contract::Vector { element, lanes, .. } => self
+                .decode_sequence_at(root, *lanes, element)
+                .map(|decoded| {
+                    let Value::Sequence { values } = decoded else {
+                        return decoded;
+                    };
+                    Value::Vector { values }
+                }),
             Contract::Record {
                 type_identity,
                 name,
@@ -595,10 +755,57 @@ impl<'a> ArenaReader<'a> {
             BodyType::Named(name) if name == "bool" => Ok(mncs_model::ExecutionValue::Boolean {
                 value: self.get32(offset)? == 1,
             }),
+            BodyType::Byte => Ok(mncs_model::ExecutionValue::Byte {
+                value: i128::from(self.get32(offset)?),
+            }),
+            BodyType::Sequence {
+                element,
+                bound: mncs_model::SequenceBound::Exact(length),
+            } => {
+                let reference = self.get64(offset)?;
+                let element_name = element.semantic_name();
+                self.decode_sequence_at(reference, length, &element_name)
+            }
+            BodyType::Sequence {
+                element,
+                bound: mncs_model::SequenceBound::UpTo(capacity),
+            } => {
+                let descriptor = self.get64(offset)?;
+                let (cell, length) = unpack_view(descriptor);
+                if length > capacity {
+                    return Err("decoded view length exceeds its declared capacity".to_owned());
+                }
+                let element_name = element.semantic_name();
+                self.decode_sequence_at(cell, length, &element_name)
+            }
+            BodyType::Vector { element, lanes } => {
+                let reference = self.get64(offset)?;
+                let element_name = element.semantic_name();
+                match self.decode_sequence_at(reference, lanes, &element_name)? {
+                    mncs_model::ExecutionValue::Sequence { values } => {
+                        Ok(mncs_model::ExecutionValue::Vector { values })
+                    }
+                    other => Ok(other),
+                }
+            }
+            BodyType::Mask { lanes } => Ok(unpack_mask(self.get64(offset)?, lanes)),
             _ => Err(format!(
                 "field type {declared_type} has no contract for decoding"
             )),
         }
+    }
+
+    fn decode_sequence_at(
+        &self,
+        root: u64,
+        length: u32,
+        element: &str,
+    ) -> Result<mncs_model::ExecutionValue, String> {
+        let mut values = Vec::with_capacity(length as usize);
+        for index in 0..length {
+            values.push(self.decode_field(root + u64::from(index) * 8, element)?);
+        }
+        Ok(mncs_model::ExecutionValue::Sequence { values })
     }
 }
 
@@ -723,5 +930,40 @@ mod codec_tests {
             };
             assert_eq!(discriminant, 1);
         }
+    }
+
+    #[test]
+    fn exact_byte_sequence_round_trips_through_the_canonical_cell() {
+        let contract = BackendValueContract::Sequence {
+            semantic_type: "[byte; 4]".to_owned(),
+            element: "byte".to_owned(),
+            length: 4,
+        };
+        let value = ExecutionValue::Sequence {
+            values: vec![
+                ExecutionValue::Byte { value: 0 },
+                ExecutionValue::Byte { value: 0 },
+                ExecutionValue::Byte { value: 4 },
+                ExecutionValue::Byte { value: 0 },
+            ],
+        };
+        let mut writer = ArenaWriter::new(BTreeMap::new());
+        let boundary = writer
+            .encode_argument_with_contract(&value, Some(&contract))
+            .expect("encodes");
+        let BoundaryValue::Cell(root) = boundary else {
+            panic!("exact sequence crosses as a cell");
+        };
+        let image = writer.into_image();
+        let registry = BTreeMap::new();
+        let reader = ArenaReader::new(&image, &registry);
+        let decoded = reader.decode(root, &contract).expect("decodes");
+        assert_eq!(decoded, value);
+    }
+
+    #[test]
+    fn view_descriptor_packs_offset_and_length() {
+        assert_eq!(pack_view(16, 3), 16 | (3_u64 << 32));
+        assert_eq!(unpack_view(16 | (3_u64 << 32)), (16, 3));
     }
 }
