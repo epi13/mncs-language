@@ -103,6 +103,13 @@ fn count_nonzero<N: Nat>(xs: [i64; N]) -> (result: i64) {
     return hits;
 }
 
+fn contains_byte<N: Nat>(xs: [byte; N], needle: byte) -> (result: bool) {
+    iterate i over xs carrying hit: bool = false {
+        next hit = hit || xs[i] == needle;
+    }
+    return hit;
+}
+
 // Sum of an exact window. Checked accumulation keeps overflow explicit.
 fn sum4(a: i64, b: i64, c: i64, d: i64) -> (result: i64) {
     let xs: [i64; 4] = [a, b, c, d];
@@ -121,20 +128,29 @@ fn count4(xs: [i64; 4], needle: i64) -> (result: i64) {
 
 // First element of a window, as a logical option. The empty case is
 // representable because a view may have runtime length zero; observing a
-// missing head is a value, never a failure.
-fn first_of(view: [i64; up_to 4]) -> (result: Found) {
+// missing head is a value, never a failure. `N` is the static view capacity;
+// the runtime length may be any value from zero through that capacity.
+fn first_of_generic<N: Nat>(view: [i64; up_to N]) -> (result: Found) {
     if view.len == 0 {
         return Found.No;
     }
     return Found.Yes { value: view[0] };
 }
 
+fn first_of(view: [i64; up_to 4]) -> (result: Found) {
+    return first_of_generic<4>(view);
+}
+
 // Last element of a window under the same option discipline.
-fn last_of(view: [i64; up_to 4]) -> (result: Found) {
+fn last_of_generic<N: Nat>(view: [i64; up_to N]) -> (result: Found) {
     if view.len == 0 {
         return Found.No;
     }
     return Found.Yes { value: view[view.len - 1] };
+}
+
+fn last_of(view: [i64; up_to 4]) -> (result: Found) {
+    return last_of_generic<4>(view);
 }
 
 fn first_or(view: [i64; up_to 4], fallback: i64) -> (result: i64) {
@@ -197,17 +213,11 @@ fn put4(base: [i64; 4], index: u64, value: i64) -> (result: [i64; 4]) {
 
 // Comparison-only extrema. No arithmetic, so no overflow obligation.
 fn min4(xs: [i64; 4]) -> (result: i64) {
-    iterate i over xs carrying acc: i64 = xs[0] {
-        next acc = select(xs[i] < acc, xs[i], acc);
-    }
-    return acc;
+    return min<4>(xs);
 }
 
 fn max4(xs: [i64; 4]) -> (result: i64) {
-    iterate i over xs carrying acc: i64 = xs[0] {
-        next acc = select(xs[i] > acc, xs[i], acc);
-    }
-    return acc;
+    return max<4>(xs);
 }
 
 // First matching index, or 4 when the needle is absent. One-past-end is a
@@ -249,40 +259,25 @@ fn first_u64_view(view: [u64; up_to 4], fallback: u64) -> (result: u64) {
 }
 
 fn contains_byte4(xs: [byte; 4], needle: byte) -> (result: bool) {
-    iterate i over xs carrying hit: bool = false {
-        next hit = hit || xs[i] == needle;
-    }
-    return hit;
+    return contains_byte<4>(xs, needle);
 }
 
 fn count_nonzero4(xs: [i64; 4]) -> (result: i64) {
-    iterate i over xs carrying hits: i64 = 0 {
-        next hits = hits + ((xs[i] != 0) as i64);
-    }
-    return hits;
+    return count_nonzero<4>(xs);
 }
 
 // Boolean windows are logical `[bool; N]` sequences, not masks. Masks
 // remain lane predicates; these helpers traverse boolean elements.
 fn count_true4(xs: [bool; 4]) -> (result: i64) {
-    iterate i over xs carrying hits: i64 = 0 {
-        next hits = hits + (xs[i] as i64);
-    }
-    return hits;
+    return count_true<4>(xs);
 }
 
 fn any_true4(xs: [bool; 4]) -> (result: bool) {
-    iterate i over xs carrying hit: bool = false {
-        next hit = hit || xs[i];
-    }
-    return hit;
+    return any_true<4>(xs);
 }
 
 fn all_true4(xs: [bool; 4]) -> (result: bool) {
-    iterate i over xs carrying hit: bool = true {
-        next hit = hit && xs[i];
-    }
-    return hit;
+    return all_true<4>(xs);
 }
 
 fn reverse4(xs: [i64; 4]) -> (result: [i64; 4]) {
