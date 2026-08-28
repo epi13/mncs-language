@@ -19,6 +19,9 @@ canonical cells, backend ABI, execution, and translation validation.
   unresolved named element types).
 - `[bool; N]` is a sequence of boolean values. It is not `mask<N>`.
   `[mask<N>; K]` is refused (`MNE105`).
+- Qualified Profile 0.9 sequence elements (`[alias.Point; N]`) canonicalize
+  to the declaring-type identity in the semantic function signature so
+  body validation agrees with elaboration.
 
 ## ABI / cells
 

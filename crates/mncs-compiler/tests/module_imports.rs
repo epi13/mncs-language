@@ -627,6 +627,51 @@ fn profile_09_qualified_finite_identities_survive_duplicate_names() {
 }
 
 #[test]
+fn profile_09_qualified_record_sequence_elements_keep_declaring_identity() {
+    let resolver = MapResolver::default().with(
+        "lib.geom",
+        "mncs 0.9;\nmodule lib.geom;\nrecord Point { column: i64, row: i64 }\n",
+    );
+    let program = elaborate(
+        &resolver,
+        r#"
+mncs 0.9;
+module app.windows;
+use lib.geom as geom;
+fn first_column(points: [geom.Point; 2]) -> (result: i64) {
+    return points[0].column;
+}
+"#,
+    )
+    .expect("qualified record sequence elements elaborate");
+    let function = program
+        .functions
+        .iter()
+        .find(|function| function.name == "first_column")
+        .expect("first_column");
+    let point_id =
+        mncs_model::record_type_id("lib.geom", "Point", &[("column", "i64"), ("row", "i64")]);
+    assert_eq!(
+        function.inputs[0].value_type,
+        format!("[{}; 2]", point_id.0)
+    );
+    let parameter = &function.body.as_ref().expect("body").parameters[0];
+    match &parameter.ty {
+        mncs_model::BodyType::Sequence { element, bound } => {
+            assert_eq!(*bound, mncs_model::SequenceBound::Exact(2));
+            match element.as_ref() {
+                mncs_model::BodyType::Record { name, identity } => {
+                    assert_eq!(name, "Point");
+                    assert_eq!(identity, &point_id);
+                }
+                other => panic!("expected record element, got {other:?}"),
+            }
+        }
+        other => panic!("expected sequence parameter, got {other:?}"),
+    }
+}
+
+#[test]
 fn profile_09_keeps_nested_local_field_projection_distinct_from_qualified_constructors() {
     let resolver = MapResolver::default();
     let program = elaborate(

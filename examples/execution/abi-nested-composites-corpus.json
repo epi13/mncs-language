@@ -254,6 +254,56 @@
           ]]
         }
       }]
+    },
+    {
+      "id": "view-window-empty-len",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.nested_composites", "function": "view_window_len" },
+        "arguments": [{
+          "record": {
+            "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::ViewWindow::words%3A%5Bu64%3B%20up_to%202%5D%3B",
+            "name": "ViewWindow",
+            "fields": [["words", { "sequence": { "values": [] } }]]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 0, "type": { "bits": 64, "signed": false } } }]
+    },
+    {
+      "id": "identity-view-window",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.nested_composites", "function": "identity_view_window" },
+        "arguments": [{
+          "record": {
+            "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::ViewWindow::words%3A%5Bu64%3B%20up_to%202%5D%3B",
+            "name": "ViewWindow",
+            "fields": [[
+              "words",
+              { "sequence": { "values": [
+                { "integer": { "value": 9223372036854775808, "type": { "bits": 64, "signed": false } } }
+              ] } }
+            ]]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "record": {
+          "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::ViewWindow::words%3A%5Bu64%3B%20up_to%202%5D%3B",
+          "name": "ViewWindow",
+          "fields": [[
+            "words",
+            { "sequence": { "values": [
+              { "integer": { "value": 9223372036854775808, "type": { "bits": 64, "signed": false } } }
+            ] } }
+          ]]
+        }
+      }]
     }
   ],
   "properties": []

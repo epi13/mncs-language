@@ -126,7 +126,7 @@ fn nested_composite_sequences_agree_per_backend() {
     run_module_corpus(
         &example("source/abi-nested-composites.mncs"),
         &example("execution/abi-nested-composites-corpus.json"),
-        8,
+        10,
     );
 }
 

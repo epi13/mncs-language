@@ -127,6 +127,13 @@ impl CompositeInfo {
             }
             match mncs_model::BodyType::from_semantic_name(semantic_type) {
                 mncs_model::BodyType::Integer(ty) if ty.bits == 64 => SlotWidth::W64,
+                // Packed view descriptors and masks occupy a full i64 word.
+                // Exact sequences and vectors are WASM cell pointers (i32).
+                mncs_model::BodyType::Sequence {
+                    bound: mncs_model::SequenceBound::UpTo(_),
+                    ..
+                }
+                | mncs_model::BodyType::Mask { .. } => SlotWidth::W64,
                 _ => SlotWidth::W32,
             }
         };

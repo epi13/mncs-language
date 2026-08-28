@@ -9,6 +9,7 @@ module examples.abi.nested_composites;
 record Point { column: i64, row: i64 }
 record PairWindow { left: u64, right: u64 }
 record WordWindow { words: [u64; 2] }
+record ViewWindow { words: [u64; up_to 2] }
 
 fn identity_points(points: [Point; 2]) -> (result: [Point; 2]) {
     return points;
@@ -39,4 +40,12 @@ fn view_first_column(points: [Point; up_to 4]) -> (result: i64) {
         return 0;
     }
     return points[0].column;
+}
+
+fn identity_view_window(window: ViewWindow) -> (result: ViewWindow) {
+    return window;
+}
+
+fn view_window_len(window: ViewWindow) -> (result: u64) {
+    return window.words.len;
 }

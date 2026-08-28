@@ -5943,15 +5943,28 @@ fn profile_type(
 }
 
 fn canonical_value_type(source: &str, ty: &BodyType) -> String {
-    if source.contains('.') {
-        match ty {
-            BodyType::Finite { identity, .. } | BodyType::Record { identity, .. } => {
-                identity.0.clone()
-            }
-            _ => source.to_owned(),
+    match ty {
+        BodyType::Sequence { element, bound } => {
+            let inner_source = source
+                .strip_prefix('[')
+                .and_then(|text| text.strip_suffix(']'))
+                .and_then(|inner| {
+                    let separator = inner.rfind(';')?;
+                    Some(inner[..separator].trim().to_owned())
+                })
+                .unwrap_or_else(|| element.semantic_name());
+            format!(
+                "[{}; {}]",
+                canonical_value_type(&inner_source, element),
+                bound.canonical_text()
+            )
         }
-    } else {
-        source.to_owned()
+        BodyType::Finite { identity, .. } | BodyType::Record { identity, .. }
+            if source.contains('.') =>
+        {
+            identity.0.clone()
+        }
+        _ => source.to_owned(),
     }
 }
 
