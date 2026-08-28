@@ -59,10 +59,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p /tmp/mncs-partition-ci
           timeout 600s cargo run -p mncs-cli -- experiment run library/core/partition.mncs \
             --backend mncs-research-bytecode \
             --corpus examples/execution/partition-corpus.json \
-            --output-dir /tmp/mncs-partition-ci
+            --output-dir /tmp/mncs-partition-ci \
+            > /tmp/mncs-partition-ci/stdout.json
           jq -e '.cases | length == 2 and all(.[]; .status == "returned" and .expectation_met == true and .status_met == true)' \
             /tmp/mncs-partition-ci/result.json
       - name: Reject undeclared effect example
