@@ -38,7 +38,7 @@ An MNCS-oriented program should make it possible to answer:
 - `crates/mncs-syntax/` — source envelopes, lossless tokens/CST, a bounded spanned AST/parser, and deterministic source-representation metrics.
 - `crates/mncs-cli/` — validation, canonicalization, identity, graph/CFG, evidence, IR, SSA, obligation, verification, comparison, diagnostic, diff, compile, backend execution, translation validation, and syntax-tournament commands.
 - `examples/` — semantic manifests, competing source candidates, canonical semantic forms, machine-intent sketches, and semantic patches.
-- `library/` — the MNCS standard library written in MNCS source itself (`mncs.core.status/logic/ordering/result.v1`, Profile 0.5/0.6; bounded data and encoding in Profile 0.7; vector/mask kernels in Profile 0.8; weighted partitioning and generic ANSI/VT events in the current research tranche), with bounded corpora under `examples/execution/`. See [the library README](library/README.md), [the core standard-library direction](docs/core-standard-library.md), [Source Profile 0.7](docs/source-profile-0.7.md), and [Source Profile 0.8](docs/source-profile-0.8.md).
+- `library/` — the MNCS standard library written in MNCS source itself (`mncs.core.status/logic/ordering/result.v1`, Profile 0.5/0.6; bounded data and encoding in Profile 0.7; vector/mask kernels in Profile 0.8; namespace-aware consumers in Profile 0.9; weighted partitioning and generic ANSI/VT events in the current research tranche), with bounded corpora under `examples/execution/`. See [the library README](library/README.md), [the core standard-library direction](docs/core-standard-library.md), [Source Profile 0.7](docs/source-profile-0.7.md), [Source Profile 0.8](docs/source-profile-0.8.md), and [Source Profile 0.9](docs/source-profile-0.9.md).
 
 Canonical semantic JSON remains an experimental bootstrap transport. Source Profile 0.1 is an executable but intentionally narrow grammar experiment, not a selected production grammar.
 
@@ -255,6 +255,18 @@ Source Profile 0.8 (experimental) adds semantic branchless selection,
 comparisons, masked selection, and fixed-order reductions. Five executable
 backends agree through reference or conservative scalarized realizations; no
 native-SIMD or constant-time claim is implied. See `docs/source-profile-0.8.md`.
+
+Source Profile 0.9 (experimental) makes the linked binding substrate
+namespace-aware. It adds qualified references such as
+`ordering.clamp_i64(...)`, optional import aliases (`use mncs.core.ordering.v1
+as ordering;`), qualified nominal type/variant/record references, and a
+versioned `SemanticBindingTable` carried by source-study output. Binding and
+reference identities are derived from semantic owners and structural slots;
+source spans remain navigation metadata. Unqualified duplicate imports fail
+closed, while distinct exports remain available through their qualification.
+Profiles 0.1–0.8 retain their prior import and canonical-identity behavior.
+See [Source Profile 0.9](docs/source-profile-0.9.md) and its [development
+evidence record](docs/development-evidence/source-profile-0.9-namespace-binding-2026-08.md).
 
 Explore the semantic foundation with the small before/after examples:
 

@@ -334,6 +334,8 @@ struct SourceStudyCommandReport {
     #[serde(flatten)]
     study: CompilationStudyResult,
     module_resolutions: Vec<ModuleResolution>,
+    binding_table: Option<mncs_model::SemanticBindingTable>,
+    name_resolutions: mncs_compiler::NameResolutionIndex,
 }
 
 fn body(path: &str) -> ExitCode {
@@ -731,6 +733,8 @@ where
             if print_json(&SourceStudyCommandReport {
                 study,
                 module_resolutions: front_end.module_resolutions,
+                binding_table: front_end.binding_table,
+                name_resolutions: front_end.name_resolutions,
             }) {
                 ExitCode::SUCCESS
             } else {

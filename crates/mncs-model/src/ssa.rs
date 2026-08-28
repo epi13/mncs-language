@@ -298,6 +298,8 @@ pub struct SsaModule {
     pub identity: SemanticId,
     pub semantic_identity: SemanticId,
     pub hir_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding_table: Option<crate::SemanticBindingTable>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub record_types: Vec<SsaRecordType>,
     pub functions: Vec<SsaFunction>,
@@ -548,6 +550,24 @@ impl Program {
                         let field_ir_type = if let Some(finite) = self
                             .finite_types
                             .iter()
+                            .find(|item| item.identity.0 == field.field_type)
+                        {
+                            IrType::Finite {
+                                identity: finite.identity.clone(),
+                                name: finite.name.clone(),
+                            }
+                        } else if let Some(nested) = self
+                            .record_types
+                            .iter()
+                            .find(|item| item.identity.0 == field.field_type)
+                        {
+                            IrType::Record {
+                                identity: nested.identity.clone(),
+                                name: nested.name.clone(),
+                            }
+                        } else if let Some(finite) = self
+                            .finite_types
+                            .iter()
                             .find(|item| item.name == field.field_type)
                         {
                             IrType::Finite {
@@ -576,6 +596,7 @@ impl Program {
             identity,
             semantic_identity,
             hir_fingerprint,
+            binding_table: self.binding_table.clone(),
             record_types,
             functions,
             obligations: ir.obligations,
@@ -1871,6 +1892,26 @@ fn body_type(ty: &crate::BodyType) -> IrType {
 }
 
 fn ir_type_from_semantic(program: &Program, name: &str) -> IrType {
+    if let Some(finite_type) = program
+        .finite_types
+        .iter()
+        .find(|finite_type| finite_type.identity.0 == name)
+    {
+        return IrType::Finite {
+            identity: finite_type.identity.clone(),
+            name: finite_type.name.clone(),
+        };
+    }
+    if let Some(record_type) = program
+        .record_types
+        .iter()
+        .find(|record_type| record_type.identity.0 == name)
+    {
+        return IrType::Record {
+            identity: record_type.identity.clone(),
+            name: record_type.name.clone(),
+        };
+    }
     program
         .finite_types
         .iter()

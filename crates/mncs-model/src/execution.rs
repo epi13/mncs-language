@@ -356,11 +356,10 @@ fn execute_inner(
             format!("step_budget must be between 1 and {MAX_EXECUTION_BUDGET}"),
         );
     }
-    let Some(function) = program
-        .functions
-        .iter()
-        .find(|function| function.name == request.target.function)
-    else {
+    let Some(function) = program.functions.iter().find(|function| {
+        function.name == request.target.function
+            && function.identity_namespace(&program.module) == request.target.module
+    }) else {
         return ExecutionResult::invalid(request, "execution target function does not exist");
     };
     let Some(body) = &function.body else {
@@ -1574,19 +1573,29 @@ fn execute_operation(
             }
             let nested_request = ExecutionRequest {
                 schema_version: request.schema_version.clone(),
-                target: ExecutionTarget {
-                    module: program
-                        .functions
-                        .iter()
-                        .find(|candidate| {
-                            function_id(
-                                candidate.identity_namespace(&program.module),
-                                &candidate.name,
-                            ) == *function
-                        })
-                        .map(|candidate| candidate.identity_namespace(&program.module).to_owned())
-                        .unwrap_or_else(|| request.target.module.clone()),
-                    function: function_name.clone(),
+                target: {
+                    let target = program.functions.iter().find(|candidate| {
+                        function_id(
+                            candidate.identity_namespace(&program.module),
+                            &candidate.name,
+                        ) == *function
+                    });
+                    ExecutionTarget {
+                        module: target
+                            .map(|candidate| {
+                                candidate.identity_namespace(&program.module).to_owned()
+                            })
+                            .unwrap_or_else(|| request.target.module.clone()),
+                        function: target
+                            .map(|candidate| candidate.name.clone())
+                            .unwrap_or_else(|| {
+                                function_name
+                                    .rsplit('.')
+                                    .next()
+                                    .unwrap_or(function_name)
+                                    .to_owned()
+                            }),
+                    }
                 },
                 arguments,
                 step_budget: remaining,
@@ -1794,6 +1803,37 @@ fn finite_payload_matches(
 }
 
 fn value_matches_named_type(program: &Program, value: &ExecutionValue, name: &str) -> bool {
+    if let Some(finite) = program
+        .finite_types
+        .iter()
+        .find(|decl| decl.identity.0 == name)
+    {
+        return value_matches_type(
+            program,
+            value,
+            &BodyType::Finite {
+                identity: finite.identity.clone(),
+                name: finite.name.clone(),
+            },
+        );
+    }
+    if let Some(record) = program
+        .record_types
+        .iter()
+        .find(|decl| decl.identity.0 == name)
+    {
+        return match value {
+            ExecutionValue::Record {
+                type_identity,
+                fields,
+                ..
+            } => {
+                type_identity == &record.identity
+                    && record_fields_match(program, &record.identity, fields)
+            }
+            _ => false,
+        };
+    }
     let derived = BodyType::from_semantic_name(name);
     if !matches!(derived, BodyType::Named(_)) {
         return value_matches_type(program, value, &derived);
@@ -2502,7 +2542,10 @@ fn subject(program: &Program, target: &Option<ExecutionTarget>) -> ExecutionSubj
         program
             .functions
             .iter()
-            .find(|candidate| candidate.name == function)
+            .find(|candidate| {
+                candidate.name == function
+                    && candidate.identity_namespace(&program.module) == module
+            })
             .map(|candidate| {
                 function_id(
                     candidate.identity_namespace(&program.module),
@@ -2621,6 +2664,7 @@ mod tests {
                 finite_types: Vec::new(),
                 record_types: Vec::new(),
                 assumptions: Vec::new(),
+                binding_table: None,
                 functions: Vec::new(),
             },
             &FunctionBody {

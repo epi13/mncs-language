@@ -39,6 +39,22 @@ jobs:
           cargo run -p mncs-cli -- validate library/core/partition.mncs
           cargo run -p mncs-cli -- validate library/std/ansi.mncs
           cargo run -p mncs-cli -- validate examples/source/ansi-parser-probe.mncs
+      - name: Exercise Profile 0.9 namespace binding consumer
+        shell: bash
+        env:
+          MNCS_LIBRARY_PATH: ${{ github.workspace }}/library
+        run: |
+          set -euo pipefail
+          cargo run -p mncs-cli -- source-study examples/source/profile09-stdlib-namespace-consumer.mncs > /tmp/mncs-profile09-study.json
+          jq -e '.binding_table.schema_version == "0.1" and ([.binding_table.references[] | select(.provenance == "aliased")] | length) > 0' /tmp/mncs-profile09-study.json
+          for backend in mncs-research-bytecode mncs-portable-wasm-mvp; do
+            output_dir="/tmp/mncs-profile09-consumer-${backend#mncs-}"
+            cargo run -p mncs-cli -- experiment run examples/source/profile09-stdlib-namespace-consumer.mncs \
+              --backend "$backend" \
+              --corpus examples/execution/profile09-stdlib-namespace-consumer-corpus.json \
+              --output-dir "$output_dir"
+            jq -e '.status == "PASS" and ([.cases[] | select(.expectation_met == true)] | length) == 1' "$output_dir/result.json"
+          done
       - name: Exercise extracted partition semantics
         shell: bash
         run: |

@@ -33,6 +33,7 @@ pub enum IdentityKind {
     FiniteType,
     FiniteVariant,
     RecordType,
+    RecordField,
     Function,
     Contract,
     Assumption,
@@ -51,6 +52,9 @@ pub enum IdentityKind {
     Obligation,
     Realization,
     Transformation,
+    Scope,
+    Binding,
+    Reference,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -106,6 +110,28 @@ impl Program {
                         &serde_json::to_string(variant).expect("finite variant"),
                     ),
                 });
+            }
+        }
+        if self.binding_table.is_some() {
+            for record_type in &self.record_types {
+                objects.push(IdentityRecord {
+                    identity: record_type.identity.clone(),
+                    kind: IdentityKind::RecordType,
+                    fingerprint: fingerprint_json(
+                        &serde_json::to_string(record_type).expect("record type"),
+                    ),
+                });
+                let record_module = identity_component(&record_type.identity, "record-type", 0)
+                    .unwrap_or_else(|| self.module.clone());
+                for field in &record_type.fields {
+                    objects.push(IdentityRecord {
+                        identity: record_field_id(&record_module, &record_type.name, &field.name),
+                        kind: IdentityKind::RecordField,
+                        fingerprint: fingerprint_json(
+                            &serde_json::to_string(field).expect("record field"),
+                        ),
+                    });
+                }
             }
         }
 
@@ -444,6 +470,44 @@ impl Program {
                 *occurrence += 1;
             }
         }
+        if let Some(table) = &self.binding_table {
+            for namespace in &table.namespaces {
+                objects.push(IdentityRecord {
+                    identity: namespace.identity.clone(),
+                    kind: IdentityKind::Module,
+                    fingerprint: fingerprint_json(
+                        &serde_json::to_string(namespace).expect("semantic namespace"),
+                    ),
+                });
+            }
+            for scope in &table.scopes {
+                objects.push(IdentityRecord {
+                    identity: scope.identity.clone(),
+                    kind: IdentityKind::Scope,
+                    fingerprint: fingerprint_json(
+                        &serde_json::to_string(scope).expect("semantic scope"),
+                    ),
+                });
+            }
+            for binding in &table.bindings {
+                objects.push(IdentityRecord {
+                    identity: binding.identity.clone(),
+                    kind: IdentityKind::Binding,
+                    fingerprint: fingerprint_json(
+                        &serde_json::to_string(binding).expect("semantic binding"),
+                    ),
+                });
+            }
+            for reference in &table.references {
+                objects.push(IdentityRecord {
+                    identity: reference.identity.clone(),
+                    kind: IdentityKind::Reference,
+                    fingerprint: fingerprint_json(
+                        &serde_json::to_string(reference).expect("semantic reference"),
+                    ),
+                });
+            }
+        }
         objects.sort_by(|left, right| left.identity.cmp(&right.identity));
         SemanticIdentities {
             schema_version: "0.2".to_owned(),
@@ -480,6 +544,38 @@ pub fn module_id(name: &str) -> SemanticId {
     make_id(IdentityKind::Module, &[name])
 }
 
+pub fn scope_id(namespace: &SemanticId, owner: &SemanticId, path: &str) -> SemanticId {
+    make_id(
+        IdentityKind::Scope,
+        &[namespace.as_str(), owner.as_str(), path],
+    )
+}
+
+pub fn binding_id(scope: &SemanticId, kind: &str, slot: usize) -> SemanticId {
+    make_id(
+        IdentityKind::Binding,
+        &[scope.as_str(), kind, &slot.to_string()],
+    )
+}
+
+/// Stable binding identity for a declaration whose semantic identity is
+/// already known. This is used for module-level imports and nominal members;
+/// lexical locals use [`binding_id`] with a structural slot inside their
+/// scope.
+pub fn binding_id_for(scope: &SemanticId, kind: &str, declaration: &SemanticId) -> SemanticId {
+    make_id(
+        IdentityKind::Binding,
+        &[scope.as_str(), kind, declaration.as_str()],
+    )
+}
+
+pub fn reference_id(namespace: &SemanticId, owner: &SemanticId, slot: usize) -> SemanticId {
+    make_id(
+        IdentityKind::Reference,
+        &[namespace.as_str(), owner.as_str(), &slot.to_string()],
+    )
+}
+
 pub fn finite_type_id(module: &str, name: &str) -> SemanticId {
     make_id(IdentityKind::FiniteType, &[module, name])
 }
@@ -503,6 +599,10 @@ pub fn record_type_id(module: &str, name: &str, fields: &[(&str, &str)]) -> Sema
             joined
         }],
     )
+}
+
+pub fn record_field_id(module: &str, record: &str, field: &str) -> SemanticId {
+    make_id(IdentityKind::RecordField, &[module, record, field])
 }
 
 pub fn finite_variant_id(module: &str, type_name: &str, variant: &str) -> SemanticId {
@@ -606,6 +706,7 @@ fn make_id(kind: IdentityKind, components: &[&str]) -> SemanticId {
         IdentityKind::FiniteType => "finite-type",
         IdentityKind::FiniteVariant => "finite-variant",
         IdentityKind::RecordType => "record-type",
+        IdentityKind::RecordField => "record-field",
         IdentityKind::Function => "function",
         IdentityKind::Contract => "contract",
         IdentityKind::Assumption => "assumption",
@@ -624,6 +725,9 @@ fn make_id(kind: IdentityKind, components: &[&str]) -> SemanticId {
         IdentityKind::Obligation => "obligation",
         IdentityKind::Realization => "realization",
         IdentityKind::Transformation => "transformation",
+        IdentityKind::Scope => "scope",
+        IdentityKind::Binding => "binding",
+        IdentityKind::Reference => "reference",
     };
     SemanticId(format!(
         "mncs:0.2:{prefix}:{}",
@@ -633,6 +737,12 @@ fn make_id(kind: IdentityKind, components: &[&str]) -> SemanticId {
             .collect::<Vec<_>>()
             .join("::")
     ))
+}
+
+fn identity_component(identity: &SemanticId, kind: &str, index: usize) -> Option<String> {
+    let prefix = format!("mncs:0.2:{kind}:");
+    let encoded = identity.as_str().strip_prefix(&prefix)?;
+    encoded.split("::").nth(index).and_then(decode_component)
 }
 
 pub(crate) fn body_id(module: &str, function: &str) -> SemanticId {

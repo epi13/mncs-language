@@ -55,6 +55,15 @@ certificate, Rust-control comparison is available, and accepted/rejected realiza
 retained in a sealed bounded refinement cycle. These project and source profile numbers do not
 define one another.
 
+Source Profile 0.9 extends the Profile 0.6 linker with namespace-qualified
+references and aliases. The linker keeps imported declarations under their
+declaring module identities, rejects ambiguous unqualified imports, and emits
+the versioned semantic binding table used by source-study, identity, HIR, SSA,
+and reference execution. This is an authoritative elaboration artifact, not a
+parallel language-service resolver. Generic type parameters remain outside
+the accepted envelope until their substitution identity and backend
+obligations are designed end to end.
+
 ## Ownership boundary
 
 ```text
@@ -527,9 +536,14 @@ The repository-side compiler spine and first frontend vertical slice are impleme
 5. **Implemented:** add Fabric-facing node/study request/result schemas and a frozen fixture.
 6. **Implemented:** add Source Profile 0.1 envelope, lexer, CST, AST, bounded elaborator, source-to-SSA fixture, and structured recovery diagnostics.
 7. **Implemented in Forge:** persist and compare language-owned compiler experiment records without deriving assurance or conformance.
-8. **Pending:** implement general scope/binding and explicit source contract clauses while keeping syntax breadth bounded.
-9. **Pending external execution:** run and compare the first Linux/Windows/Raspberry Pi source/semantic/HIR/SSA identity study. GitHub-hosted Windows is CI evidence; a native Raspberry Pi run must come from Fabric.
-10. **Pending:** add a replaceable portable backend adapter for a deliberately bounded subset.
-11. **Pending:** introduce the first native backend experiment only after the portable/backend-validation seam is exercised.
+8. **Implemented in Profile 0.9 (bounded):** publish semantic namespaces,
+   scopes, bindings, references, qualification, aliases, and fail-closed
+   duplicate handling from the authoritative elaboration path. General
+   explicit source contract clauses remain pending.
+9. **Pending:** design a sound explicit parametric abstraction tranche with
+   generic-definition/instantiation identity before adding generic syntax.
+10. **Pending external execution:** run and compare the first Linux/Windows/Raspberry Pi source/semantic/HIR/SSA identity study. GitHub-hosted Windows is CI evidence; a native Raspberry Pi run must come from Fabric.
+11. **Pending:** add a replaceable portable backend adapter for a deliberately bounded subset.
+12. **Pending:** introduce the first native backend experiment only after the portable/backend-validation seam is exercised.
 
 This ordering lets the project learn from cross-platform differences before native backend complexity can hide whether a mismatch belongs to semantics, compiler orchestration, target lowering, toolchain, or runtime execution.

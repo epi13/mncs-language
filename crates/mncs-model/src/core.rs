@@ -17,6 +17,10 @@ pub struct Program {
     pub record_types: Vec<RecordType>,
     #[serde(default)]
     pub assumptions: Vec<Assumption>,
+    /// Authoritative scope/binding/reference evidence produced by source
+    /// elaboration. Declaration-only JSON programs may omit this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding_table: Option<crate::SemanticBindingTable>,
     pub functions: Vec<Function>,
 }
 

@@ -2,6 +2,12 @@
 
 Status: **research-active / partially realized** (2026-08-27).
 
+The current tranche is Profile 0.9 namespace pressure: overlapping core
+exports can be consumed through aliases while the compiler retains declaring
+module identity and emits inspectable binding evidence. Generic library
+abstractions remain a design question; no generic syntax is implied by these
+modules.
+
 MNCS should develop a standard library, but it should not begin as a monolithic host-runtime API patterned after an existing language. The library must preserve the same separation already enforced by the language architecture: logical semantics are authoritative, capabilities are explicit, physical representation is a realization choice, and target-specific implementations do not redefine meaning.
 
 The immediate goal is to establish a small Core Standard Library track that can grow alongside the language and pressure-test missing language/compiler features through real use by MNCS programs, RAVEL/MNEL reconstruction experiments, Forge, and later self-hosting work.
@@ -176,6 +182,14 @@ A library operation or package should eventually expose identities for relevant 
 - Family Record references for durable experiments and promotions.
 
 Changing a performance preference should not silently change logical API identity. Changing semantic behavior must not masquerade as a realization-only update.
+
+Profile 0.9 now supplies the first executable substrate for this boundary:
+`SemanticNamespace`, `SemanticScope`, `SemanticBinding`, and
+`SemanticReference` records are published in the source-study result. Their
+identities are derived from module/function ownership and structural slots;
+source offsets are retained only for navigation. The binding table is built
+from the authoritative elaboration decisions and carried into canonical
+semantic identity, HIR, SSA, and execution checks.
 
 ## Language features the library should pressure-test
 

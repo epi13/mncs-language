@@ -2207,17 +2207,13 @@ fn validate_operation(
             // Call targets may live in this program's own namespace or in any
             // bound dependency namespace; identities stay anchored to the
             // declaring module either way.
-            let mut target_namespaces = vec![program.module.clone()];
-            for dependency in &program.dependencies {
-                if let Some(name) = dependency.module_name() {
-                    target_namespaces.push(name);
-                }
-            }
+            let simple_name = function_name.rsplit('.').next().unwrap_or(function_name);
             let callee = program.functions.iter().find(|candidate| {
-                candidate.name == *function_name
-                    && target_namespaces.iter().any(|namespace| {
-                        crate::identity::function_id(namespace, &candidate.name) == *callee_identity
-                    })
+                candidate.name == simple_name
+                    && crate::identity::function_id(
+                        candidate.identity_namespace(&program.module),
+                        &candidate.name,
+                    ) == *callee_identity
             });
             let Some(callee) = callee else {
                 errors.push(body_diagnostic(
@@ -2238,11 +2234,8 @@ fn validate_operation(
                 ));
             }
             for (operand, parameter) in operation.operands.iter().zip(&callee.inputs) {
-                if available
-                    .get(operand)
-                    .map(BodyType::semantic_name)
-                    .as_deref()
-                    != Some(parameter.value_type.as_str())
+                if available.get(operand)
+                    != Some(&semantic_body_type(program, &parameter.value_type))
                 {
                     errors.push(body_diagnostic(
                         "MNB051",
@@ -2252,7 +2245,7 @@ fn validate_operation(
                 }
             }
             for (result, output) in operation.results.iter().zip(&callee.outputs) {
-                if result.ty.semantic_name() != output.value_type {
+                if result.ty != semantic_body_type(program, &output.value_type) {
                     errors.push(body_diagnostic(
                         "MNB052",
                         format!("{path}.results"),
@@ -2594,6 +2587,26 @@ fn validate_return_types(
 }
 
 fn semantic_body_type(program: &Program, name: &str) -> BodyType {
+    if let Some(finite_type) = program
+        .finite_types
+        .iter()
+        .find(|finite_type| finite_type.identity.0 == name)
+    {
+        return BodyType::Finite {
+            identity: finite_type.identity.clone(),
+            name: finite_type.name.clone(),
+        };
+    }
+    if let Some(record_type) = program
+        .record_types
+        .iter()
+        .find(|record_type| record_type.identity.0 == name)
+    {
+        return BodyType::Record {
+            identity: record_type.identity.clone(),
+            name: record_type.name.clone(),
+        };
+    }
     if let Some(sequence) = semantic_sequence_type(program, name) {
         return sequence;
     }

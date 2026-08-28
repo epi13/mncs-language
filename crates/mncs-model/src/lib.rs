@@ -4,6 +4,7 @@
 //! representation is a transport format for experiments, not a proposed final
 //! language grammar.
 
+mod bindings;
 mod body;
 mod canonical;
 mod cfg;
@@ -28,6 +29,10 @@ mod translation;
 mod validation;
 mod verifier;
 
+pub use bindings::{
+    ResolutionProvenance, SemanticBinding, SemanticBindingKind, SemanticBindingTable,
+    SemanticNamespace, SemanticReference, SemanticScope, SEMANTIC_BINDING_SCHEMA_VERSION,
+};
 pub use body::{
     BodyBlock, BodyBoundedIteration, BodyCyclePolicy, BodyOperation, BodyOperationKind,
     BodyParameter, BodyTerminator, BodyType, BodyValue, BoundedIterationCompletion, BoundsEvidence,
@@ -92,8 +97,9 @@ pub use graph::{
     SemanticGraph,
 };
 pub use identity::{
-    contract_id, finite_type_id, finite_variant_id, function_id, module_id, record_type_id,
-    IdentityChange, IdentityKind, IdentityRecord, SemanticDiff, SemanticId, SemanticIdentities,
+    binding_id, binding_id_for, contract_id, finite_type_id, finite_variant_id, function_id,
+    module_id, record_field_id, record_type_id, reference_id, scope_id, IdentityChange,
+    IdentityKind, IdentityRecord, SemanticDiff, SemanticId, SemanticIdentities,
 };
 pub use ir::{
     CapabilityUse, FailurePathKind, HighLevelIr, IrBlock, IrBoundedIteration, IrError, IrFunction,

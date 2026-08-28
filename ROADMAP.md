@@ -16,8 +16,8 @@ Use these labels mechanically. Adjacent infrastructure is not completion.
 | **Planned** | Intended, not started. |
 | **Research-only / RFC-defined** | Design exists; not an executable claim. |
 
-Source Profiles (**0.1–0.8** language envelopes) are **not** project roadmap
-milestones (0.1–0.8). Source Profile 0.4 does not mean roadmap 0.4 is the
+Source Profiles (**0.1–0.9** language envelopes) are **not** project roadmap
+milestones (0.1–0.9). Source Profile 0.4 does not mean roadmap 0.4 is the
 current completion gate, and Source Profile 0.5 does not complete roadmap
 milestone 0.5.
 
@@ -25,21 +25,23 @@ milestone 0.5.
 
 ### Language
 
-Source Profiles **0.1–0.8** exist and remain additive. Profiles 0.6 (payload
+Source Profiles **0.1–0.9** exist and remain additive. Profiles 0.6 (payload
 sums, strict booleans, checked division, explicit arithmetic intents, module
 imports) and 0.7 (bounded data: `byte`, fixed sequences `[E; N]`, bounded
 views `[E; up_to M]` with runtime length observations, three-state bounds
 evidence on element observation, checked view ranges, bounded sequence
 traversal, explicit total conversions, integer shifts), and 0.8 (branchless
 selection, integer vectors, logical masks, and fixed-order reductions) are
-described in their profile documents. Earlier-profile programs keep their
-semantics and canonical identities.
+described in their profile documents. Profile 0.9 adds namespace-qualified
+imports/references, aliases, fail-closed duplicate handling, and an
+identity-stable semantic binding/reference table for tooling and evidence.
+Earlier-profile programs keep their semantics and canonical identities.
 
 Profiles 0.1–0.5 remain as originally summarized below. Programs can express modules, functions, contracts/effects/capabilities, scalar integers with wrapping/checked intent, finite enums, exhaustive match, calls with authority closure, and Profile 0.4 bounded iteration (`iterate … up_to N carrying …`, bound 1–32). **Profile 0.5 adds logical record values** (RFC 0019): nominal record declarations with canonical field identity (`record_type_id` hashes sorted `name:type;` pairs — declaration order never changes the logical type), construction with exact field coverage, functional update from a base value, and field projection. Records are values without physical layout; record equality operators are explicitly **not defined** in 0.5. Records cannot yet carry through bounded-iteration state or cross module boundaries beyond calls.
 
 ### Compiler
 
-Executable stages: source envelope → CST/AST → semantic program → HIR → SSA → selected SSA → `TargetLoweringPlan` → backend adapter → `BackendArtifact` + evidence. Transformations are identity-bound. Record construct/project flow through body validation (MNB048–057), HIR, SSA, both reference executors, and the WASM realization. Experimental: evidence-gated no-overflow elision, translation validators, backend promises. Missing: general memory/layout, unrestricted loops, proof kernel, production backend.
+Executable stages: source envelope → CST/AST → semantic program → HIR → SSA → selected SSA → `TargetLoweringPlan` → backend adapter → `BackendArtifact` + evidence. Transformations are identity-bound. Profile 0.9 also publishes the semantic binding substrate from the same elaboration that feeds body, HIR, SSA, and execution; it is not a second resolver. Record construct/project flow through body validation (MNB048–057), HIR, SSA, both reference executors, and the WASM realization. Experimental: evidence-gated no-overflow elision, translation validators, backend promises. Missing: general memory/layout, unrestricted loops, proof kernel, production backend, and sound generic type parameters.
 
 ### Backends
 
@@ -78,6 +80,15 @@ Language-owned experiment and compiler-study records emit producer-native Family
 
 ### Immediate next work
 
+0. **Implemented / exercised (experimental):** Source Profile 0.9 namespace-aware
+   binding. Qualified and aliased imports preserve declaring-module identities;
+   `source-study` emits inspectable namespaces, scopes, bindings, references,
+   provenance, and navigation spans; duplicate unqualified exports fail closed.
+   The bounded stdlib consumer is covered by research-bytecode execution. The
+   next language tranche should settle explicit generic type parameters only
+   after type identity, instantiation, recursion, and backend obligations have
+   a complete design; this tranche intentionally does not fake generic support.
+
 1. ~~Logical product/record values as Source Profile 0.5~~ — **implemented (experimental)** as of
    2026-08-23: nominal records with canonical field identity, construction, functional update,
    projection; differential agreement demonstrated across WASM (forwarding realization) and
@@ -98,7 +109,7 @@ Language-owned experiment and compiler-study records emit producer-native Family
    (demonstrated 2026-08 for CRE-1 through WASM and research-bytecode on a remote Linux worker;
    bounded-corpus agreement only, no cross-host equivalence claim).
 
-## 0.1–0.7 milestone reconciliation
+## 0.1–0.9 milestone reconciliation
 
 Roadmap **0.5 is complete as a bounded experimental milestone.** Completion does not imply a
 production compiler, universal equivalence, a general proof kernel, or completion of Source Profile

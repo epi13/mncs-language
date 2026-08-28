@@ -210,7 +210,10 @@ pub fn execute_ssa_module(
     let target_namespace = program
         .functions
         .iter()
-        .find(|candidate| candidate.name == request.target.function)
+        .find(|candidate| {
+            candidate.name == request.target.function
+                && candidate.identity_namespace(&program.module) == request.target.module
+        })
         .map(|candidate| candidate.identity_namespace(&program.module).to_owned())
         .unwrap_or_else(|| program.module.clone());
     let semantic_function = function_id(&target_namespace, &request.target.function);
@@ -391,7 +394,10 @@ pub fn compare_body_and_ssa(
         program
             .functions
             .iter()
-            .find(|candidate| candidate.name == target.function)
+            .find(|candidate| {
+                candidate.name == target.function
+                    && candidate.identity_namespace(&program.module) == target.module
+            })
             .map(|candidate| {
                 function_id(
                     candidate.identity_namespace(&program.module),
@@ -1663,28 +1669,26 @@ fn execute_instruction(
 
 fn declared_effect(
     program: &Program,
-    function_name: &str,
+    _function_name: &str,
     identity: &SemanticId,
 ) -> Option<crate::Effect> {
-    let function = program
-        .functions
-        .iter()
-        .find(|function| function.name == function_name)?;
-    function
-        .effects
-        .iter()
-        .enumerate()
-        .find_map(|(occurrence, effect)| {
-            let canonical =
-                serde_json::to_string(&crate::canonical::canonical_effect(effect)).ok()?;
-            let candidate = crate::identity::effect_id(
-                function.identity_namespace(&program.module),
-                function_name,
-                &canonical,
-                occurrence,
-            );
-            (candidate == *identity).then(|| effect.clone())
-        })
+    program.functions.iter().find_map(|function| {
+        function
+            .effects
+            .iter()
+            .enumerate()
+            .find_map(|(occurrence, effect)| {
+                let canonical =
+                    serde_json::to_string(&crate::canonical::canonical_effect(effect)).ok()?;
+                let candidate = crate::identity::effect_id(
+                    function.identity_namespace(&program.module),
+                    &function.name,
+                    &canonical,
+                    occurrence,
+                );
+                (candidate == *identity).then(|| effect.clone())
+            })
+    })
 }
 
 fn initialize_inputs(
@@ -1907,6 +1911,26 @@ fn constant_value(value: i128, ty: &IrType) -> Option<ExecutionValue> {
 /// logical records before any argument is admitted.
 fn ssa_input_type(program: &Program, ty: &IrType) -> Option<BodyType> {
     if let IrType::Named(name) = ty {
+        if let Some(finite) = program
+            .finite_types
+            .iter()
+            .find(|item| item.identity.0 == *name)
+        {
+            return Some(BodyType::Finite {
+                identity: finite.identity.clone(),
+                name: finite.name.clone(),
+            });
+        }
+        if let Some(record) = program
+            .record_types
+            .iter()
+            .find(|item| item.identity.0 == *name)
+        {
+            return Some(BodyType::Record {
+                identity: record.identity.clone(),
+                name: record.name.clone(),
+            });
+        }
         if let Some(record) = program.record_types.iter().find(|item| &item.name == name) {
             return Some(BodyType::Record {
                 identity: record.identity.clone(),
@@ -2193,7 +2217,7 @@ fn execution_subject(
         .map(|target| (target.module.clone(), target.function.clone()))
         .unwrap_or_else(|| (program.module.clone(), String::new()));
     ExecutionSubject {
-        module,
+        module: module.clone(),
         function: function.clone(),
         program_identity: Some(program_id(&program.module)),
         program_fingerprint: program.content_fingerprint().ok(),
@@ -2201,7 +2225,10 @@ fn execution_subject(
             program
                 .functions
                 .iter()
-                .find(|candidate| candidate.name == function)
+                .find(|candidate| {
+                    candidate.name == function
+                        && candidate.identity_namespace(&program.module) == module
+                })
                 .map(|candidate| {
                     function_id(
                         candidate.identity_namespace(&program.module),

@@ -13,6 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use mncs_model::{ResolutionProvenance, SemanticId};
 use mncs_syntax::SourceSpan;
 
 /// Schema version of [`NameResolutionIndex`].
@@ -34,13 +35,85 @@ pub enum ResolvedNameKind {
 
 /// One resolved name occurrence: a use-site span, the declaration span it
 /// binds to, and the kind of the declaration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct NameResolution {
     /// Span of the name occurrence (the use site).
     pub occurrence: SourceSpan,
     /// Span of the resolved declaration's name.
     pub declaration: SourceSpan,
     pub kind: ResolvedNameKind,
+    /// Stable semantic binding selected by elaboration. Older serialized
+    /// indexes may omit this field; the source spans remain useful for
+    /// navigation, while the binding table is authoritative when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<ResolutionProvenance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<SemanticId>,
+    /// Semantic declaration identity when the resolver has one. This is the
+    /// link that lets tooling inspect a binding without decoding source text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declaration_identity: Option<SemanticId>,
+}
+
+impl NameResolution {
+    pub fn new(occurrence: SourceSpan, declaration: SourceSpan, kind: ResolvedNameKind) -> Self {
+        Self {
+            occurrence,
+            declaration,
+            kind,
+            binding: None,
+            namespace: None,
+            scope: None,
+            path: Vec::new(),
+            provenance: None,
+            reference: None,
+            declaration_identity: None,
+        }
+    }
+
+    pub fn with_semantics(
+        mut self,
+        binding: SemanticId,
+        namespace: SemanticId,
+        scope: SemanticId,
+        path: Vec<String>,
+        provenance: ResolutionProvenance,
+        reference: SemanticId,
+    ) -> Self {
+        self.binding = Some(binding);
+        self.namespace = Some(namespace);
+        self.scope = Some(scope);
+        self.path = path;
+        self.provenance = Some(provenance);
+        self.reference = Some(reference);
+        self
+    }
+
+    pub fn with_binding_metadata(
+        mut self,
+        binding: SemanticId,
+        namespace: SemanticId,
+        scope: SemanticId,
+        path: Vec<String>,
+        provenance: ResolutionProvenance,
+        declaration_identity: SemanticId,
+    ) -> Self {
+        self.binding = Some(binding);
+        self.namespace = Some(namespace);
+        self.scope = Some(scope);
+        self.path = path;
+        self.provenance = Some(provenance);
+        self.declaration_identity = Some(declaration_identity);
+        self
+    }
 }
 
 /// Deterministic collection of [`NameResolution`] entries for one source
@@ -152,7 +225,7 @@ fn main(input: i64) -> (result: i64)
             vec![ResolvedNameKind::Function]
         );
         let call = span_at(source, "helper", 1);
-        let resolved = index.at_offset(call.start).copied().collect::<Vec<_>>();
+        let resolved = index.at_offset(call.start).cloned().collect::<Vec<_>>();
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].declaration, span_at(source, "helper", 0));
 
@@ -313,7 +386,7 @@ fn main(input: i64) -> (result: i64) {
         let resolved = front_end
             .name_resolutions
             .at_offset(call.start)
-            .copied()
+            .cloned()
             .collect::<Vec<_>>();
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].kind, ResolvedNameKind::Function);

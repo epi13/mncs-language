@@ -197,14 +197,17 @@ fn changed_by_kind(
 fn failure_changes(before: &Program, after: &Program) -> Vec<FailureChange> {
     let mut changes = Vec::new();
     for left in &before.functions {
-        if let Some(right) = after
-            .functions
-            .iter()
-            .find(|function| function.name == left.name)
-        {
+        if let Some(right) = after.functions.iter().find(|function| {
+            function.name == left.name
+                && function.identity_namespace(&after.module)
+                    == left.identity_namespace(&before.module)
+        }) {
             if left.failure != right.failure {
                 changes.push(FailureChange {
-                    function: crate::identity::function_id(&before.module, &left.name),
+                    function: crate::identity::function_id(
+                        left.identity_namespace(&before.module),
+                        &left.name,
+                    ),
                     before: left.failure.clone(),
                     after: right.failure.clone(),
                 });

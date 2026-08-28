@@ -12,7 +12,7 @@ same helpers ad hoc.
 library/
   core/         foundational total operations (status lattice, boolean algebra,
                 ordering/selection; bounded sequences; byte, mask, vector, and
-                weighted-partition primitives)
+                weighted-partition primitives; namespace-pressure fixtures)
   std/          portable abstractions over core — encoding.v1 and ansi.v1
                 provide canonical serialization and generic terminal events
   capability/   reserved for capability/effect-shape declarations
@@ -44,6 +44,15 @@ fixed reduction order remain visible through HIR and SSA. The current five
 executable backends agree through reference or conservative scalarized
 realizations; native SIMD selection remains a later target-specific step.
 
+## Namespace pressure (Profile 0.9)
+
+`core/ordering.mncs` and `core/bounds.mncs` intentionally export overlapping
+`clamp_i64` names. `examples/source/profile09-stdlib-namespace-consumer.mncs`
+imports both with aliases and calls `order.clamp_i64`, proving that the
+consumer retains two declaring-module identities without relying on import
+discovery order. The same source-study report exposes its binding table and
+resolution provenance.
+
 ## Modules
 
 | File | Module | Contents |
@@ -51,6 +60,7 @@ realizations; native SIMD selection remains a later target-specific step.
 | `core/status.mncs` | `mncs.core.status.v1` | `Status { PASS, FAIL, UNKNOWN }`, dominance join (`dominate`), pair combination over `StatusPair`, decidedness predicate, dominance test |
 | `core/logic.mncs` | `mncs.core.logic.v1` | total boolean algebra: `bool_not/and/or/implies/xor` |
 | `core/ordering.mncs` | `mncs.core.ordering.v1` | comparison-only `min/max/clamp` for i32/i64 (no arithmetic, hence no overflow obligations) |
+| `core/bounds.mncs` | `mncs.core.bounds.v1` (Profile 0.5) | comparison-only `clamp_i64`, intentionally overlapping `ordering` to pressure namespace qualification |
 | `core/result.mncs` | `mncs.core.result.v1` (Profile 0.6) | the standard Result shape with real reason payloads: `Ok { value }`, `Err { reason }`, `divide`, `bounded_divide`, `value_or`, `reason_of`; exhaustive matching with payload binders |
 | `core/vector.mncs` | `mncs.core.vector.v1` (Profile 0.8) | wrapping dot product, masked positive sum, and functional lane replacement |
 | `core/mask.mncs` | `mncs.core.mask.v1` (Profile 0.8) | bounded any/all/none predicate kernels |
@@ -65,8 +75,10 @@ Each library file declares one module, listed above. Source Profile 0.6 now
 supports elaboration-time linking through a host-provided `ModuleResolver`:
 imports are resolved transitively, dependency identity is preserved, and the
 linked program is lowered and executable as one authority-checked semantic
-closure. `core/result.mncs` additionally requires the Profile 0.6 payload-sum
-surface; see `docs/source-profile-0.6.md`.
+closure. Source Profile 0.9 adds qualified and aliased routes plus an
+inspectable `SemanticBindingTable`; see `docs/source-profile-0.9.md`.
+`core/result.mncs` additionally requires the Profile 0.6 payload-sum surface;
+see `docs/source-profile-0.6.md`.
 
 ## Contracts and honesty properties
 
@@ -110,6 +122,9 @@ minimal external-consumer witness is
 `examples/source/library-consumer.mncs`, with its bounded execution corpus in
 `examples/execution/library-consumer-corpus.json`; the CLI test runs it through
 both reference bytecode and portable WASM and checks resolver provenance.
+The Profile 0.9 namespace-pressure witness is
+`examples/source/profile09-stdlib-namespace-consumer.mncs`, with its corpus in
+`examples/execution/profile09-stdlib-namespace-consumer-corpus.json`.
 `examples/consumers/ravel-core-snapshot.mncs` remains useful as an
 identity-bound differential witness for RAVEL's shipped `ravel.core.v1`, and
 `crates/mncs-cli/tests/library_core.rs` retains its case-by-case agreement

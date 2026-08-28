@@ -1,0 +1,12 @@
+mncs 0.9;
+
+// Two core modules intentionally export clamp_i64. The aliases keep the
+// consumer's choice explicit and preserve each declaration's home namespace.
+module examples.profile09_stdlib_namespace_consumer;
+
+use mncs.core.ordering.v1 as order;
+use mncs.core.bounds.v1 as bounds;
+
+fn clamp_consumer(value: i64, lo: i64, hi: i64) -> (result: i64) {
+    return order.clamp_i64(value, lo, hi);
+}

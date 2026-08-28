@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1",
+  "name": "profile09-stdlib-namespace-consumer",
+  "cases": [
+    {
+      "id": "clamp-high-through-order-alias",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.profile09_stdlib_namespace_consumer",
+          "function": "clamp_consumer"
+        },
+        "arguments": [
+          { "integer": { "value": 12, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 9, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 1024
+      },
+      "expected": [
+        { "integer": { "value": 9, "type": { "bits": 64, "signed": true } } }
+      ]
+    }
+  ]
+}

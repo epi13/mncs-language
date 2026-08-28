@@ -12,6 +12,7 @@ pub const SOURCE_PROFILE_VERSION_0_5: &str = "0.5";
 pub const SOURCE_PROFILE_VERSION_0_6: &str = "0.6";
 pub const SOURCE_PROFILE_VERSION_0_7: &str = "0.7";
 pub const SOURCE_PROFILE_VERSION_0_8: &str = "0.8";
+pub const SOURCE_PROFILE_VERSION_0_9: &str = "0.9";
 
 /// True when the active source profile declares at least `version`. Profile
 /// features are strictly additive, so a numeric comparison replaces the
@@ -479,6 +480,12 @@ pub enum AstBinaryOp {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AstExpr {
     Name(SpannedText),
+    /// A namespace-qualified nominal constructor or a dotted value path that
+    /// elaboration must disambiguate against lexical field projection.
+    QualifiedPath {
+        segments: Vec<SpannedText>,
+        span: SourceSpan,
+    },
     Integer {
         text: SpannedText,
         value: i128,
@@ -583,6 +590,7 @@ impl AstExpr {
             Self::Name(name)
             | Self::Integer { text: name, .. }
             | Self::Boolean { text: name, .. } => name.span,
+            Self::QualifiedPath { span, .. } => *span,
             Self::FiniteVariant { span, .. }
             | Self::Call { span, .. }
             | Self::Match { span, .. }
@@ -725,6 +733,10 @@ pub struct AstRecordDecl {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AstUseDecl {
     pub module: SpannedText,
+    /// A Profile 0.9 namespace alias. `None` retains the Profile 0.6 meaning
+    /// where the requested module path is the qualification route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<SpannedText>,
     pub span: SourceSpan,
 }
 
@@ -1256,7 +1268,7 @@ impl<'a> Parser<'a> {
         (cst, ast)
     }
 
-    /// Parses `use other.module;`. Module imports require Profile 0.6; in
+    /// Parses `use other.module [as alias];`. Module imports require Profile 0.6; in
     /// earlier profiles the `use` keyword is an ordinary identifier, so the
     /// declaration shape produces a precise diagnostic rather than silence.
     fn use_decl(&mut self) -> (CstNode, Option<AstUseDecl>) {
@@ -1274,6 +1286,21 @@ impl<'a> Parser<'a> {
             );
         }
         let module = self.qualified_name();
+        let alias = if self.current_kind() == Some(TokenKind::AsKeyword) {
+            if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_9) {
+                self.error(
+                    "MNP181",
+                    "import aliases require source profile 0.9 or later",
+                    vec![TokenKind::AsKeyword],
+                );
+                None
+            } else {
+                self.cursor += 1;
+                self.spanned(TokenKind::Identifier, "MNP182", "expected import alias")
+            }
+        } else {
+            None
+        };
         self.expect(
             TokenKind::Semicolon,
             "MNP137",
@@ -1290,7 +1317,11 @@ impl<'a> Parser<'a> {
                     token.span
                 }),
         };
-        let decl = module.map(|module| AstUseDecl { module, span });
+        let decl = module.map(|module| AstUseDecl {
+            module,
+            alias,
+            span,
+        });
         (node, decl)
     }
 
@@ -2019,6 +2050,11 @@ impl<'a> Parser<'a> {
     fn primary_atom(&mut self) -> Option<AstExpr> {
         match self.current_kind() {
             Some(TokenKind::Identifier) => {
+                if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_9)
+                    && self.peek_kind(1) == Some(TokenKind::Dot)
+                {
+                    return self.qualified_primary();
+                }
                 let name = self.spanned(TokenKind::Identifier, "MNP062", "expected expression")?;
                 // Branchless-selection intrinsics (Profile 0.8). The names
                 // are reserved in expression head position so the semantic
@@ -2186,6 +2222,141 @@ impl<'a> Parser<'a> {
                 None
             }
         }
+    }
+
+    /// Parse the Profile 0.9 namespace-qualified expression forms. The
+    /// parser preserves the path; the resolver decides whether its leading
+    /// segment is an import alias/module route or an invalid value path.
+    fn qualified_primary(&mut self) -> Option<AstExpr> {
+        let first = self.spanned(TokenKind::Identifier, "MNP062", "expected expression")?;
+        let mut segments = vec![first.clone()];
+        while self.current_kind() == Some(TokenKind::Dot) {
+            self.cursor += 1;
+            segments.push(self.spanned(
+                TokenKind::Identifier,
+                "MNP065",
+                "expected namespace member after '.'",
+            )?);
+        }
+        if segments.len() < 2 {
+            return Some(AstExpr::Name(first));
+        }
+        let path_span = SourceSpan::covering(
+            &self.envelope.text,
+            segments.first()?.span,
+            segments.last()?.span,
+        );
+        let path_text = segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<Vec<_>>()
+            .join(".");
+        let path_name = SpannedText {
+            text: path_text,
+            span: path_span,
+        };
+        if self.current_kind() == Some(TokenKind::LeftBrace) && self.at_record_literal() {
+            return self.record_literal(path_name);
+        }
+        if self.current_kind() == Some(TokenKind::LeftParen) {
+            self.cursor += 1;
+            let mut arguments = Vec::new();
+            while self.current_kind() != Some(TokenKind::RightParen)
+                && self.cursor < self.significant.len()
+            {
+                arguments.push(self.expression()?);
+                if self.current_kind() != Some(TokenKind::Comma) {
+                    break;
+                }
+                self.cursor += 1;
+            }
+            let end = self
+                .expect(
+                    TokenKind::RightParen,
+                    "MNP066",
+                    "expected ')' after call arguments",
+                )
+                .and_then(|index| self.tokens.get(index))
+                .map_or(path_span, |token| token.span);
+            return Some(AstExpr::Call {
+                function: path_name,
+                arguments,
+                span: SourceSpan::covering(&self.envelope.text, path_span, end),
+            });
+        }
+        if segments.len() == 2 {
+            // Preserve the long-standing `value.field` parse. Elaboration
+            // will reinterpret it as a finite constructor only for a nominal
+            // type, or as a record projection for a lexical value.
+            return Some(AstExpr::FiniteVariant {
+                type_name: segments[0].clone(),
+                variant: segments[1].clone(),
+                fields: Vec::new(),
+                span: path_span,
+            });
+        }
+        if segments.len() >= 3 {
+            return Some(AstExpr::QualifiedPath {
+                segments,
+                span: path_span,
+            });
+        }
+        let variant = segments.last()?.clone();
+        let type_name = SpannedText {
+            text: segments[..segments.len() - 1]
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect::<Vec<_>>()
+                .join("."),
+            span: SourceSpan::covering(
+                &self.envelope.text,
+                segments.first()?.span,
+                segments[segments.len() - 2].span,
+            ),
+        };
+        if self.at_payload_construct() {
+            self.cursor += 1;
+            let mut fields = Vec::new();
+            while self.current_kind() != Some(TokenKind::RightBrace)
+                && self.cursor < self.significant.len()
+            {
+                let field_name = self.spanned(
+                    TokenKind::Identifier,
+                    "MNP140",
+                    "expected payload field name",
+                )?;
+                self.expect(
+                    TokenKind::Colon,
+                    "MNP141",
+                    "expected ':' after payload field name",
+                );
+                fields.push((field_name, self.expression()?));
+                if self.current_kind() != Some(TokenKind::Comma) {
+                    break;
+                }
+                self.cursor += 1;
+            }
+            let end = self
+                .expect(
+                    TokenKind::RightBrace,
+                    "MNP142",
+                    "expected '}' after payload fields",
+                )
+                .and_then(|index| self.tokens.get(index))
+                .map_or(path_span, |token| token.span);
+            return Some(AstExpr::FiniteVariant {
+                type_name,
+                variant,
+                fields,
+                span: SourceSpan::covering(&self.envelope.text, path_span, end),
+            });
+        }
+        Some(AstExpr::FiniteVariant {
+            type_name,
+            variant,
+            fields: Vec::new(),
+            span: path_span,
+        })
     }
 
     /// Parse the Profile 0.8 selection intrinsics `select(c, t, f)` and
@@ -2500,12 +2671,37 @@ impl<'a> Parser<'a> {
                 && profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_6)
             {
                 self.cursor += 1;
-                type_name = Some(variant.clone());
+                let mut qualified_type = variant.clone();
                 variant = self.spanned(
                     TokenKind::Identifier,
                     "MNP136",
                     "expected variant name after '.'",
                 )?;
+                if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_9)
+                    && self.current_kind() == Some(TokenKind::Dot)
+                {
+                    let mut segments = vec![qualified_type.clone(), variant.clone()];
+                    while self.current_kind() == Some(TokenKind::Dot) {
+                        self.cursor += 1;
+                        segments.push(self.spanned(
+                            TokenKind::Identifier,
+                            "MNP136",
+                            "expected variant name after '.'",
+                        )?);
+                    }
+                    variant = segments.pop().expect("qualified pattern has a variant");
+                    let start = segments.first().expect("qualified pattern has a type").span;
+                    let end = segments.last().expect("qualified pattern has a type").span;
+                    qualified_type = SpannedText {
+                        text: segments
+                            .iter()
+                            .map(|segment| segment.text.as_str())
+                            .collect::<Vec<_>>()
+                            .join("."),
+                        span: SourceSpan::covering(&self.envelope.text, start, end),
+                    };
+                }
+                type_name = Some(qualified_type);
             }
             // Payload bindings: `VARIANT { field: binding }` with the
             // `{ field }` shorthand, or the wildcard `{ .. }` which ignores
@@ -2698,7 +2894,29 @@ impl<'a> Parser<'a> {
     /// The returned text is canonical; elaboration owns its semantic identity.
     fn type_annotation(&mut self, code: &str, message: &str) -> Option<SpannedText> {
         if self.current_kind() != Some(TokenKind::LeftBracket) {
-            let name = self.spanned(TokenKind::Identifier, code, message)?;
+            let mut name = self.spanned(TokenKind::Identifier, code, message)?;
+            if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_9)
+                && self.current_kind() == Some(TokenKind::Dot)
+            {
+                let start = name.span;
+                let mut text = name.text.clone();
+                let mut end = start;
+                while self.current_kind() == Some(TokenKind::Dot) {
+                    self.cursor += 1;
+                    let segment = self.spanned(
+                        TokenKind::Identifier,
+                        code,
+                        "expected qualified type member after '.'",
+                    )?;
+                    text.push('.');
+                    text.push_str(&segment.text);
+                    end = segment.span;
+                }
+                name = SpannedText {
+                    text,
+                    span: SourceSpan::covering(&self.envelope.text, start, end),
+                };
+            }
             if self.current_kind() != Some(TokenKind::Lt)
                 || !matches!(name.text.as_str(), "vec" | "mask")
             {
@@ -2946,6 +3164,7 @@ pub fn source_profile_supported(version: &str) -> bool {
             | SOURCE_PROFILE_VERSION_0_6
             | SOURCE_PROFILE_VERSION_0_7
             | SOURCE_PROFILE_VERSION_0_8
+            | SOURCE_PROFILE_VERSION_0_9
     )
 }
 
@@ -3000,6 +3219,7 @@ fn infer_source_profile(text: &str) -> &'static str {
         !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with("/*")
     });
     match header {
+        Some(line) if line.trim_start().starts_with("mncs 0.9") => SOURCE_PROFILE_VERSION_0_9,
         Some(line) if line.trim_start().starts_with("mncs 0.8") => SOURCE_PROFILE_VERSION_0_8,
         Some(line) if line.trim_start().starts_with("mncs 0.7") => SOURCE_PROFILE_VERSION_0_7,
         Some(line) if line.trim_start().starts_with("mncs 0.6") => SOURCE_PROFILE_VERSION_0_6,
@@ -3093,6 +3313,41 @@ mod tests {
         );
         let parsed = parse(&envelope);
         assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+    }
+
+    #[test]
+    fn profile_09_adds_aliases_and_qualified_calls_without_rewriting_08() {
+        let legacy = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "legacy-import",
+            "mncs 0.8;\nmodule example.legacy;\nuse lib.order as order;\nfn f(value: i64) -> (result: i64) { return value; }\n",
+        );
+        let legacy_output = parse(&legacy);
+        assert!(!legacy_output.is_valid());
+        assert!(legacy_output
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "MNP181"));
+
+        let current = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "qualified-import",
+            "mncs 0.9;\nmodule example.current;\nuse lib.order as order;\nfn f(value: i64) -> (result: i64) { return order.clamp(value, 0, 1); }\n",
+        );
+        let current_output = parse(&current);
+        assert!(
+            current_output.is_valid(),
+            "{:#?}",
+            current_output.diagnostics
+        );
+        assert_eq!(
+            current_output.ast.expect("current AST").uses[0]
+                .alias
+                .as_ref()
+                .unwrap()
+                .text,
+            "order"
+        );
     }
 
     #[test]

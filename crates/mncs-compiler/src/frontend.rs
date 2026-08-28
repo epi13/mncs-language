@@ -2,24 +2,26 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use mncs_model::{
-    finite_type_id, finite_variant_id, function_id, module_id, record_type_id, ArithmeticIntent,
+    binding_id, binding_id_for, finite_type_id, finite_variant_id, function_id, module_id,
+    record_field_id, record_type_id, reference_id, scope_id, ArithmeticIntent,
     ArtifactRepresentation, BodyBlock, BodyBoundedIteration, BodyCyclePolicy, BodyOperation,
     BodyOperationKind, BodyParameter, BodyTerminator, BodyType, BodyValue,
     BoundedIterationCompletion, CompilationStatus, CompilationStudyRequest, CompilationStudyResult,
     CompilerArtifactRef, CompilerNodeProfile, CompilerPassExecutionObservation, ContractClause,
     ContractKind, Effect, FailureMode, FiniteType, FiniteVariant, Function, FunctionBody,
     IntegerType, Intent, IterationDomain, MachineIntentSpec, MachinePreference, Program,
-    RecordField, RecordType, Requirement, SemanticGraph, SemanticId, SemanticIdentities,
-    TransformationEdge, TransformationStatus, ValidationReport, Value,
-    EXECUTABLE_BODY_SCHEMA_VERSION, SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
-    SUPPORTED_SCHEMA_VERSION,
+    RecordField, RecordType, Requirement, ResolutionProvenance, SemanticBinding,
+    SemanticBindingKind, SemanticBindingTable, SemanticGraph, SemanticId, SemanticIdentities,
+    SemanticNamespace, SemanticReference, SemanticScope, TransformationEdge, TransformationStatus,
+    ValidationReport, Value, EXECUTABLE_BODY_SCHEMA_VERSION,
+    SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND, SUPPORTED_SCHEMA_VERSION,
 };
 use mncs_syntax::{
     parse, AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstStmt, ConcreteSyntaxTree,
     DiagnosticSeverity, DiagnosticStage, LexedDocument, ParseOutput, SourceArtifactKind,
     SourceDiagnostic, SourceEnvelope, SourceSpan, SpannedText, AST_SCHEMA_VERSION,
     CST_SCHEMA_VERSION, LEXICAL_SCHEMA_VERSION, SOURCE_ENVELOPE_SCHEMA_VERSION,
-    SOURCE_PROFILE_VERSION_0_4,
+    SOURCE_PROFILE_VERSION_0_4, SOURCE_PROFILE_VERSION_0_9,
 };
 use serde::Serialize;
 
@@ -36,6 +38,9 @@ pub struct SourceFrontEndResult {
     pub semantic_graph: Option<SemanticGraph>,
     pub identities: Option<SemanticIdentities>,
     pub validation: Option<ValidationReport>,
+    /// Compact, versioned semantic binding substrate used by elaboration,
+    /// tooling, and downstream identity/evidence consumers.
+    pub binding_table: Option<SemanticBindingTable>,
     /// Authoritative name resolutions recorded during elaboration. Resolutions
     /// are recorded best-effort, so a partially valid document still exposes
     /// the occurrences that elaboration resolved successfully.
@@ -124,6 +129,7 @@ impl ReferenceCompiler {
         let mut semantic_graph = None;
         let mut identities = None;
         let mut name_resolutions = NameResolutionIndex::default();
+        let mut binding_table = None;
         let mut module_resolutions = Vec::new();
         if let Some(tree) = &ast {
             artifacts.push(CompilerArtifactRef::new(
@@ -142,6 +148,7 @@ impl ReferenceCompiler {
                     (Ok(elaborated), resolutions, resolved_modules) => {
                         module_resolutions = resolved_modules;
                         let report = elaborated.validate();
+                        binding_table = elaborated.binding_table.clone();
                         let canonical = elaborated
                             .canonical_form()
                             .expect("an elaborated program is canonicalizable");
@@ -202,6 +209,7 @@ impl ReferenceCompiler {
             semantic_graph,
             identities,
             validation,
+            binding_table,
             name_resolutions,
             module_resolutions,
             artifacts,
@@ -457,7 +465,13 @@ pub fn elaborate_program_with_resolver_and_modules(
         diagnostics.append(&mut errors);
         Err(diagnostics)
     } else {
-        match link_module_with_closure(ast, &elaborated, &declaration_spans, &mut resolutions) {
+        match link_module_with_closure(
+            ast,
+            &elaborated,
+            &mut declaration_spans,
+            &mut resolutions,
+            &ast.module.text,
+        ) {
             Ok(program) => Ok(program),
             Err(mut errors) => {
                 diagnostics.append(&mut errors);
@@ -516,6 +530,7 @@ impl ModuleResolver for RecordingResolver<'_> {
 
 #[derive(Debug, Clone)]
 struct ImportedModule {
+    requested_name: String,
     program: Program,
     declarations: DeclarationSpans,
 }
@@ -525,6 +540,13 @@ struct MergedContext {
     finite_types_by_name: BTreeMap<String, FiniteType>,
     record_types_by_name: BTreeMap<String, RecordType>,
     signatures: BTreeMap<String, FunctionSignature>,
+    /// Profile 0.9 routes retain the namespace/alias key instead of folding
+    /// declarations into one global spelling table.
+    qualified_finite_types: BTreeMap<String, FiniteType>,
+    qualified_record_types: BTreeMap<String, RecordType>,
+    qualified_signatures: BTreeMap<String, FunctionSignature>,
+    namespace_aliases: BTreeMap<String, String>,
+    direct_imports: BTreeSet<String>,
     imported_finite_types: Vec<FiniteType>,
     imported_record_types: Vec<RecordType>,
     imported_functions: Vec<Function>,
@@ -615,6 +637,7 @@ fn elaborate_import_closure(
             elaborated,
             declaration_spans,
             &mut Vec::new(),
+            &dependency_name,
         );
         let dependency_program = dependency_program.map_err(|errors| {
             vec![elaboration_diagnostic(
@@ -640,8 +663,9 @@ fn elaborate_import_closure(
 fn link_module_with_closure(
     ast: &AbstractSyntaxTree,
     elaborated: &BTreeMap<String, Program>,
-    declaration_spans: &BTreeMap<String, DeclarationSpans>,
+    declaration_spans: &mut BTreeMap<String, DeclarationSpans>,
     resolutions: &mut Vec<NameResolution>,
+    declaration_key: &str,
 ) -> Result<Program, Vec<SourceDiagnostic>> {
     let mut diagnostics = Vec::new();
     let mut imported = Vec::new();
@@ -659,6 +683,7 @@ fn link_module_with_closure(
         let _ = &name;
         match elaborated.get(&name) {
             Some(program) => imported.push(ImportedModule {
+                requested_name: name.clone(),
                 program: program.clone(),
                 declarations: declaration_spans.get(&name).cloned().unwrap_or_default(),
             }),
@@ -676,7 +701,18 @@ fn link_module_with_closure(
     if !diagnostics.is_empty() {
         return Err(diagnostics);
     }
-    elaborate_linked_module(ast, &context, resolutions)
+    let mut linked_declarations = DeclarationSpans::from_ast(ast);
+    linked_declarations.merge_missing(&context.imported_declarations);
+    declaration_spans.insert(declaration_key.to_owned(), linked_declarations);
+    let mut program = elaborate_linked_module(ast, &context, resolutions)?;
+    if mncs_syntax::profile_at_least(&ast.language_version.text, SOURCE_PROFILE_VERSION_0_9) {
+        let imported_tables = imported
+            .iter()
+            .filter_map(|module| module.program.binding_table.as_ref())
+            .collect::<Vec<_>>();
+        program.binding_table = Some(build_binding_table(&program, resolutions, &imported_tables));
+    }
+    Ok(program)
 }
 
 /// Binds imported declarations into this module's namespace. Collisions fail
@@ -688,6 +724,8 @@ fn merge_imported_declarations(
     diagnostics: &mut Vec<SourceDiagnostic>,
 ) -> MergedContext {
     let mut context = MergedContext::default();
+    let namespaced =
+        mncs_syntax::profile_at_least(&ast.language_version.text, SOURCE_PROFILE_VERSION_0_9);
 
     // Local declarations occupy the namespace first.
     for declaration in &ast.finite_types {
@@ -702,6 +740,40 @@ fn merge_imported_declarations(
     }
     for function in &ast.functions {
         context.function_names.insert(function.name.text.clone());
+    }
+
+    // Register explicit and implicit qualification routes before declarations.
+    // An alias is a namespace route only; it never grants authority.
+    if namespaced {
+        for (use_decl, module) in ast.uses.iter().zip(imported) {
+            let route = use_decl
+                .alias
+                .as_ref()
+                .map_or_else(|| use_decl.module.text.clone(), |alias| alias.text.clone());
+            if context
+                .namespace_aliases
+                .insert(route.clone(), module.program.module.clone())
+                .is_some()
+            {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE181",
+                    format!("namespace alias '{route}' is declared more than once"),
+                    use_decl.span,
+                ));
+            }
+            context.direct_imports.insert(module.program.module.clone());
+            if use_decl.alias.is_some()
+                && (context.function_names.contains(&route)
+                    || context.finite_type_names.contains(&route)
+                    || context.record_type_names.contains(&route))
+            {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE182",
+                    format!("namespace alias '{route}' collides with a local declaration"),
+                    use_decl.span,
+                ));
+            }
+        }
     }
 
     // Deterministic merge order: import declaration order, then declaration
@@ -721,10 +793,57 @@ fn merge_imported_declarations(
         context
             .imported_declarations
             .merge_missing(&module.declarations);
+        if namespaced {
+            let routes = namespace_routes(ast, module);
+            for route in routes {
+                for (name, span) in &module.declarations.functions {
+                    context
+                        .imported_declarations
+                        .qualified_functions
+                        .entry(format!("{route}.{name}"))
+                        .or_insert(*span);
+                }
+                for (name, span) in &module.declarations.finite_types {
+                    context
+                        .imported_declarations
+                        .qualified_finite_types
+                        .entry(format!("{route}.{name}"))
+                        .or_insert(*span);
+                }
+                for ((type_name, variant), span) in &module.declarations.finite_variants {
+                    context
+                        .imported_declarations
+                        .qualified_finite_variants
+                        .entry((format!("{route}.{type_name}"), variant.clone()))
+                        .or_insert(*span);
+                }
+                for (name, span) in &module.declarations.record_types {
+                    context
+                        .imported_declarations
+                        .qualified_record_types
+                        .entry(format!("{route}.{name}"))
+                        .or_insert(*span);
+                }
+                for ((type_name, field_name), span) in &module.declarations.record_fields {
+                    context
+                        .imported_declarations
+                        .qualified_record_fields
+                        .entry((format!("{route}.{type_name}"), field_name.clone()))
+                        .or_insert(*span);
+                }
+            }
+        }
         for finite_type in &module.program.finite_types {
+            if namespaced {
+                for route in namespace_routes(ast, module) {
+                    context
+                        .qualified_finite_types
+                        .insert(format!("{route}.{}", finite_type.name), finite_type.clone());
+                }
+            }
             // A local declaration sharing a name with an import is always a
             // collision; the module declared both under one namespace.
-            if context.finite_type_names.contains(&finite_type.name) {
+            if context.finite_type_names.contains(&finite_type.name) && !namespaced {
                 diagnostics.push(elaboration_diagnostic(
                     "MNE174",
                     format!(
@@ -737,24 +856,40 @@ fn merge_imported_declarations(
             }
             if let Some(existing) = context.finite_types_by_name.get(&finite_type.name) {
                 if existing.identity != finite_type.identity {
-                    diagnostics.push(elaboration_diagnostic(
-                        "MNE174",
-                        format!(
-                            "imported finite type '{}' collides with an existing binding",
-                            finite_type.name
-                        ),
-                        ast.module.span,
-                    ));
+                    if !namespaced {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE174",
+                            format!(
+                                "imported finite type '{}' collides with an existing binding",
+                                finite_type.name
+                            ),
+                            ast.module.span,
+                        ));
+                    }
+                } else {
+                    continue;
                 }
-                continue;
             }
             context
                 .finite_types_by_name
                 .insert(finite_type.name.clone(), finite_type.clone());
-            context.imported_finite_types.push(finite_type.clone());
+            if !context
+                .imported_finite_types
+                .iter()
+                .any(|existing| existing.identity == finite_type.identity)
+            {
+                context.imported_finite_types.push(finite_type.clone());
+            }
         }
         for record_type in &module.program.record_types {
-            if context.record_type_names.contains(&record_type.name) {
+            if namespaced {
+                for route in namespace_routes(ast, module) {
+                    context
+                        .qualified_record_types
+                        .insert(format!("{route}.{}", record_type.name), record_type.clone());
+                }
+            }
+            if context.record_type_names.contains(&record_type.name) && !namespaced {
                 diagnostics.push(elaboration_diagnostic(
                     "MNE175",
                     format!(
@@ -767,25 +902,46 @@ fn merge_imported_declarations(
             }
             if let Some(existing) = context.record_types_by_name.get(&record_type.name) {
                 if existing.identity != record_type.identity {
-                    diagnostics.push(elaboration_diagnostic(
-                        "MNE175",
-                        format!(
-                            "imported record type '{}' collides with an existing binding",
-                            record_type.name
-                        ),
-                        ast.module.span,
-                    ));
+                    if !namespaced {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE175",
+                            format!(
+                                "imported record type '{}' collides with an existing binding",
+                                record_type.name
+                            ),
+                            ast.module.span,
+                        ));
+                    }
+                } else {
+                    continue;
                 }
-                continue;
             }
             context
                 .record_types_by_name
                 .insert(record_type.name.clone(), record_type.clone());
-            context.imported_record_types.push(record_type.clone());
+            if !context
+                .imported_record_types
+                .iter()
+                .any(|existing| existing.identity == record_type.identity)
+            {
+                context.imported_record_types.push(record_type.clone());
+            }
         }
         for function in &module.program.functions {
-            let candidate_signature = signature_from_function(module, function);
-            if context.function_names.contains(&function.name) {
+            let mut imported_function = function.clone();
+            if namespaced {
+                canonicalize_function_types(&mut imported_function, module);
+            }
+            let candidate_signature = signature_from_function(module, &imported_function);
+            if namespaced {
+                for route in namespace_routes(ast, module) {
+                    context.qualified_signatures.insert(
+                        format!("{route}.{}", function.name),
+                        candidate_signature.clone(),
+                    );
+                }
+            }
+            if context.function_names.contains(&function.name) && !namespaced {
                 diagnostics.push(elaboration_diagnostic(
                     "MNE176",
                     format!(
@@ -798,18 +954,20 @@ fn merge_imported_declarations(
             }
             if let Some(existing) = context.signatures.get(&function.name) {
                 if existing.identity != candidate_signature.identity {
-                    diagnostics.push(elaboration_diagnostic(
-                        "MNE176",
-                        format!(
-                            "imported function '{}' collides with an existing binding",
-                            function.name
-                        ),
-                        ast.module.span,
-                    ));
+                    if !namespaced {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE176",
+                            format!(
+                                "imported function '{}' collides with an existing binding",
+                                function.name
+                            ),
+                            ast.module.span,
+                        ));
+                    }
+                } else {
+                    continue;
                 }
-                continue;
             }
-            let mut imported_function = function.clone();
             if imported_function.home_module.is_none() {
                 // Locals of the dependency become linked imports here;
                 // declarations that already carry a home keep it.
@@ -821,10 +979,133 @@ fn merge_imported_declarations(
             context
                 .signatures
                 .insert(function.name.clone(), candidate_signature);
-            context.imported_functions.push(imported_function);
+            if !context.imported_functions.iter().any(|existing| {
+                existing.name == imported_function.name
+                    && existing.identity_namespace(&module.program.module)
+                        == imported_function.identity_namespace(&module.program.module)
+            }) {
+                context.imported_functions.push(imported_function);
+            }
         }
     }
+    if namespaced {
+        // Only a unique imported spelling is eligible for unqualified lookup.
+        // A local declaration takes precedence over imported candidates; two
+        // imported identities remain qualification-only.
+        context.signatures.clear();
+        context.finite_types_by_name.clear();
+        context.record_types_by_name.clear();
+        for imported in &context.imported_finite_types {
+            if context.finite_type_names.contains(&imported.name) {
+                continue;
+            }
+            let same_name = context
+                .imported_finite_types
+                .iter()
+                .filter(|candidate| candidate.name == imported.name)
+                .collect::<Vec<_>>();
+            if same_name.len() == 1 {
+                context
+                    .finite_types_by_name
+                    .insert(imported.name.clone(), imported.clone());
+            }
+        }
+        for imported in &context.imported_record_types {
+            if context.record_type_names.contains(&imported.name) {
+                continue;
+            }
+            let same_name = context
+                .imported_record_types
+                .iter()
+                .filter(|candidate| candidate.name == imported.name)
+                .collect::<Vec<_>>();
+            if same_name.len() == 1 {
+                context
+                    .record_types_by_name
+                    .insert(imported.name.clone(), imported.clone());
+            }
+        }
+        let mut grouped = BTreeMap::<String, Vec<FunctionSignature>>::new();
+        for signature in context.qualified_signatures.values() {
+            let Some(function_name) = signature.identity.0.rsplit_once("::").map(|(_, name)| name)
+            else {
+                continue;
+            };
+            grouped
+                .entry(function_name.to_owned())
+                .or_default()
+                .push(signature.clone());
+        }
+        for (name, candidates) in grouped {
+            let identities = candidates
+                .iter()
+                .map(|candidate| candidate.identity.clone())
+                .collect::<BTreeSet<_>>();
+            if identities.len() == 1 && !context.function_names.contains(&name) {
+                context.signatures.insert(name, candidates[0].clone());
+            }
+        }
+        context
+            .signatures
+            .extend(context.qualified_signatures.clone());
+    }
     context
+}
+
+fn namespace_routes(ast: &AbstractSyntaxTree, module: &ImportedModule) -> Vec<String> {
+    ast.uses
+        .iter()
+        .find(|use_decl| use_decl.module.text == module.requested_name)
+        .map(|use_decl| {
+            let mut routes = vec![use_decl.module.text.clone(), module.program.module.clone()];
+            if let Some(alias) = &use_decl.alias {
+                routes.push(alias.text.clone());
+            }
+            routes.sort();
+            routes.dedup();
+            routes
+        })
+        .unwrap_or_else(|| vec![module.program.module.clone()])
+}
+
+/// Existing semantic IDs intentionally keep their canonical components
+/// inspectable. Recovering the declaring module here lets the binding witness
+/// point at the same owner without adding a second ownership field to every
+/// nominal model object.
+fn semantic_namespace_from_identity(identity: &SemanticId) -> String {
+    let Some((_, components)) = identity.0.split_once("mncs:0.2:") else {
+        return String::new();
+    };
+    let Some((kind, encoded)) = components.split_once(':') else {
+        return String::new();
+    };
+    if !matches!(
+        kind,
+        "module" | "finite-type" | "finite-variant" | "record-type" | "record-field" | "function"
+    ) {
+        return String::new();
+    }
+    let first = encoded.split("::").next().unwrap_or_default();
+    decode_identity_component(first)
+}
+
+fn decode_identity_component(encoded: &str) -> String {
+    let mut decoded = String::with_capacity(encoded.len());
+    let bytes = encoded.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hex = &encoded[index + 1..index + 3];
+            if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                decoded.push(char::from(byte));
+                index += 3;
+                continue;
+            }
+        }
+        decoded.push(char::from(bytes[index]));
+        index += 1;
+    }
+    decoded
 }
 
 /// Builds the call-checking signature for a function declared in another
@@ -850,6 +1131,7 @@ fn signature_from_function(module: &ImportedModule, function: &Function) -> Func
         .unwrap_or(&module.program.module);
     FunctionSignature {
         identity: function_id(home, &function.name),
+        namespace: home.to_owned(),
         inputs,
         output,
         capabilities,
@@ -861,6 +1143,28 @@ fn signature_from_function(module: &ImportedModule, function: &Function) -> Func
 /// dependency programs are valid by the time merging happens, so unknown
 /// names cannot occur here.
 fn body_type_from_name(module: &ImportedModule, name: &str) -> BodyType {
+    if let Some(finite_type) = module
+        .program
+        .finite_types
+        .iter()
+        .find(|decl| decl.identity.0 == name)
+    {
+        return BodyType::Finite {
+            identity: finite_type.identity.clone(),
+            name: finite_type.name.clone(),
+        };
+    }
+    if let Some(record_type) = module
+        .program
+        .record_types
+        .iter()
+        .find(|decl| decl.identity.0 == name)
+    {
+        return BodyType::Record {
+            identity: record_type.identity.clone(),
+            name: record_type.name.clone(),
+        };
+    }
     if let Some(finite_type) = module
         .program
         .finite_types
@@ -884,6 +1188,20 @@ fn body_type_from_name(module: &ImportedModule, name: &str) -> BodyType {
         };
     }
     BodyType::from_semantic_name(name)
+}
+
+fn canonicalize_function_types(function: &mut Function, module: &ImportedModule) {
+    for value in function
+        .inputs
+        .iter_mut()
+        .chain(function.outputs.iter_mut())
+    {
+        let ty = body_type_from_name(module, &value.value_type);
+        value.value_type = match ty {
+            BodyType::Finite { identity, .. } | BodyType::Record { identity, .. } => identity.0,
+            _ => value.value_type.clone(),
+        };
+    }
 }
 
 /// Elaborate `ast` alone (no imports) and additionally return every name
@@ -940,7 +1258,7 @@ fn elaborate_linked_module(
 
     let mut declarations = DeclarationSpans::from_ast(ast);
     declarations.merge_missing(&context.imported_declarations);
-    record_annotation_type_resolutions(ast, &declarations, resolutions);
+    record_annotation_type_resolutions(ast, &declarations, context, resolutions);
     // Type names visible to field/payload positions include imported
     // bindings: cross-module composition requires a record field or variant
     // payload to be able to name an imported type (collisions were already
@@ -951,12 +1269,14 @@ fn elaborate_linked_module(
         .map(|finite| finite.name.text.clone())
         .collect();
     declared_finite_names.extend(context.finite_types_by_name.keys().cloned());
+    declared_finite_names.extend(context.qualified_finite_types.keys().cloned());
     let mut declared_record_names: BTreeSet<String> = ast
         .record_types
         .iter()
         .map(|record| record.name.text.clone())
         .collect();
     declared_record_names.extend(context.record_types_by_name.keys().cloned());
+    declared_record_names.extend(context.qualified_record_types.keys().cloned());
     let mut finite_types = Vec::new();
     let mut finite_type_names = BTreeSet::new();
     for declaration in &ast.finite_types {
@@ -1031,10 +1351,33 @@ fn elaborate_linked_module(
     for imported in &context.imported_finite_types {
         finite_types.push(imported.clone());
     }
-    let finite_types_by_name = finite_types
+    let mut finite_types_by_name = ast
+        .finite_types
         .iter()
-        .map(|finite_type| (finite_type.name.clone(), finite_type.clone()))
+        .filter_map(|declaration| {
+            finite_types
+                .iter()
+                .find(|candidate| {
+                    candidate.identity == finite_type_id(&ast.module.text, &declaration.name.text)
+                })
+                .map(|candidate| (candidate.name.clone(), candidate.clone()))
+        })
         .collect::<BTreeMap<_, _>>();
+    for imported in &context.imported_finite_types {
+        if !finite_types_by_name.contains_key(&imported.name)
+            && context
+                .imported_finite_types
+                .iter()
+                .filter(|candidate| candidate.name == imported.name)
+                .count()
+                == 1
+        {
+            finite_types_by_name.insert(imported.name.clone(), imported.clone());
+        }
+    }
+    if mncs_syntax::profile_at_least(&ast.language_version.text, SOURCE_PROFILE_VERSION_0_9) {
+        finite_types_by_name.extend(context.qualified_finite_types.clone());
+    }
     let mut record_types = Vec::new();
     let mut record_type_names: BTreeSet<String> = BTreeSet::new();
     for declaration in &ast.record_types {
@@ -1077,6 +1420,9 @@ fn elaborate_linked_module(
         .map(|(declaration, _)| declaration.name.text.clone())
         .collect::<BTreeSet<_>>();
     provisional_names.extend(context.record_types_by_name.keys().cloned());
+    provisional_names.extend(context.qualified_record_types.keys().cloned());
+    let mut provisional_record_types = context.record_types_by_name.clone();
+    provisional_record_types.extend(context.qualified_record_types.clone());
     let mut resolved_records = Vec::new();
     for (declaration, duplicate_fields) in &record_types {
         if *duplicate_fields > 0 {
@@ -1092,7 +1438,7 @@ fn elaborate_linked_module(
                 && profile_sequence_type(
                     &field.value_type.text,
                     &finite_types_by_name,
-                    &context.record_types_by_name,
+                    &provisional_record_types,
                 )
                 .is_none()
             {
@@ -1122,14 +1468,41 @@ fn elaborate_linked_module(
             fields,
         });
     }
-    let mut all_records = resolved_records;
+    let mut all_records = resolved_records.clone();
     for imported in &context.imported_record_types {
         all_records.push(imported.clone());
     }
-    let record_types_by_name = all_records
+    let mut record_types_by_name = ast
+        .record_types
         .iter()
-        .map(|record| (record.name.clone(), record.clone()))
+        .filter_map(|declaration| {
+            all_records
+                .iter()
+                .find(|candidate| {
+                    candidate.identity
+                        == record_type_id(&ast.module.text, &declaration.name.text, &[])
+                })
+                .map(|candidate| (candidate.name.clone(), candidate.clone()))
+        })
         .collect::<BTreeMap<_, _>>();
+    for local in &resolved_records {
+        record_types_by_name.insert(local.name.clone(), local.clone());
+    }
+    for imported in &context.imported_record_types {
+        if !record_types_by_name.contains_key(&imported.name)
+            && context
+                .imported_record_types
+                .iter()
+                .filter(|candidate| candidate.name == imported.name)
+                .count()
+                == 1
+        {
+            record_types_by_name.insert(imported.name.clone(), imported.clone());
+        }
+    }
+    if mncs_syntax::profile_at_least(&ast.language_version.text, SOURCE_PROFILE_VERSION_0_9) {
+        record_types_by_name.extend(context.qualified_record_types.clone());
+    }
     let mut functions = Vec::new();
     let mut names = std::collections::BTreeSet::new();
     for function in &ast.functions {
@@ -1170,6 +1543,8 @@ fn elaborate_linked_module(
             &record_types_by_name,
             &signatures,
             &declarations,
+            &context.namespace_aliases,
+            &context.direct_imports,
             resolutions,
         ) {
             Ok(elaborated) => functions.push(elaborated),
@@ -1194,11 +1569,221 @@ fn elaborate_linked_module(
             finite_types,
             record_types: all_records,
             assumptions: Vec::new(),
+            binding_table: None,
             functions: all_functions,
         })
     } else {
         Err(diagnostics)
     }
+}
+
+fn build_binding_table(
+    program: &Program,
+    resolutions: &mut [NameResolution],
+    imported_tables: &[&SemanticBindingTable],
+) -> SemanticBindingTable {
+    let root_namespace = module_id(&program.module);
+    let mut namespace_names = BTreeMap::<SemanticId, String>::new();
+    namespace_names.insert(root_namespace.clone(), program.module.clone());
+    for dependency in &program.dependencies {
+        let name = semantic_namespace_from_identity(dependency);
+        if !name.is_empty() {
+            namespace_names.insert(dependency.clone(), name);
+        }
+    }
+    for identity in program.finite_types.iter().map(|item| &item.identity) {
+        let name = semantic_namespace_from_identity(identity);
+        if !name.is_empty() {
+            namespace_names.insert(module_id(&name), name);
+        }
+    }
+    for identity in program.record_types.iter().map(|item| &item.identity) {
+        let name = semantic_namespace_from_identity(identity);
+        if !name.is_empty() {
+            namespace_names.insert(module_id(&name), name);
+        }
+    }
+    for function in &program.functions {
+        let identity = function_id(function.identity_namespace(&program.module), &function.name);
+        let name = semantic_namespace_from_identity(&identity);
+        if !name.is_empty() {
+            namespace_names.insert(module_id(&name), name);
+        }
+    }
+
+    let mut namespaces = namespace_names
+        .iter()
+        .map(|(identity, name)| SemanticNamespace {
+            identity: identity.clone(),
+            name: name.clone(),
+        })
+        .collect::<Vec<_>>();
+    for table in imported_tables {
+        namespaces.extend(table.namespaces.clone());
+    }
+    let mut scopes = Vec::new();
+    for namespace in namespace_names.keys() {
+        scopes.push(SemanticScope {
+            identity: scope_id(namespace, namespace, "module"),
+            namespace: namespace.clone(),
+            parent: None,
+            owner: None,
+            path: "module".to_owned(),
+        });
+    }
+    for function in &program.functions {
+        let name = function.identity_namespace(&program.module);
+        let namespace = module_id(name);
+        let owner = function_id(name, &function.name);
+        scopes.push(SemanticScope {
+            identity: scope_id(&namespace, &owner, "body"),
+            namespace,
+            parent: None,
+            owner: Some(owner),
+            path: "body".to_owned(),
+        });
+    }
+    for resolution in resolutions.iter() {
+        if let (Some(scope), Some(namespace)) = (&resolution.scope, &resolution.namespace) {
+            scopes.push(SemanticScope {
+                identity: scope.clone(),
+                namespace: namespace.clone(),
+                parent: None,
+                owner: None,
+                path: "lexical".to_owned(),
+            });
+        }
+    }
+    for table in imported_tables {
+        scopes.extend(table.scopes.clone());
+    }
+
+    let mut bindings = Vec::new();
+    for function in &program.functions {
+        let namespace_name = function.identity_namespace(&program.module);
+        let namespace = module_id(namespace_name);
+        let module_scope = scope_id(&namespace, &namespace, "module");
+        let identity = function_id(namespace_name, &function.name);
+        bindings.push(SemanticBinding {
+            identity: binding_id_for(&module_scope, "function", &identity),
+            spelling: function.name.clone(),
+            namespace: namespace.clone(),
+            scope: module_scope,
+            declaration: identity,
+            kind: SemanticBindingKind::Function,
+        });
+    }
+    for finite_type in &program.finite_types {
+        let namespace_name = semantic_namespace_from_identity(&finite_type.identity);
+        let namespace = module_id(&namespace_name);
+        let module_scope = scope_id(&namespace, &namespace, "module");
+        bindings.push(SemanticBinding {
+            identity: binding_id_for(&module_scope, "finite-type", &finite_type.identity),
+            spelling: finite_type.name.clone(),
+            namespace: namespace.clone(),
+            scope: module_scope.clone(),
+            declaration: finite_type.identity.clone(),
+            kind: SemanticBindingKind::FiniteType,
+        });
+        for variant in &finite_type.variants {
+            bindings.push(SemanticBinding {
+                identity: binding_id_for(&module_scope, "finite-variant", &variant.identity),
+                spelling: variant.name.clone(),
+                namespace: namespace.clone(),
+                scope: module_scope.clone(),
+                declaration: variant.identity.clone(),
+                kind: SemanticBindingKind::FiniteVariant,
+            });
+        }
+    }
+    for record_type in &program.record_types {
+        let namespace_name = semantic_namespace_from_identity(&record_type.identity);
+        let namespace = module_id(&namespace_name);
+        let module_scope = scope_id(&namespace, &namespace, "module");
+        bindings.push(SemanticBinding {
+            identity: binding_id_for(&module_scope, "record-type", &record_type.identity),
+            spelling: record_type.name.clone(),
+            namespace: namespace.clone(),
+            scope: module_scope.clone(),
+            declaration: record_type.identity.clone(),
+            kind: SemanticBindingKind::RecordType,
+        });
+        for field in &record_type.fields {
+            let identity = record_field_id(&namespace_name, &record_type.name, &field.name);
+            bindings.push(SemanticBinding {
+                identity: binding_id_for(&module_scope, "record-field", &identity),
+                spelling: field.name.clone(),
+                namespace: namespace.clone(),
+                scope: module_scope.clone(),
+                declaration: identity,
+                kind: SemanticBindingKind::RecordField,
+            });
+        }
+    }
+    for resolution in resolutions.iter() {
+        let (Some(binding), Some(namespace), Some(scope), Some(declaration)) = (
+            &resolution.binding,
+            &resolution.namespace,
+            &resolution.scope,
+            &resolution.declaration_identity,
+        ) else {
+            continue;
+        };
+        let kind = match resolution.kind {
+            ResolvedNameKind::Function => SemanticBindingKind::Function,
+            ResolvedNameKind::Parameter => SemanticBindingKind::Parameter,
+            ResolvedNameKind::Binding => SemanticBindingKind::Local,
+            ResolvedNameKind::IterationState => SemanticBindingKind::IterationState,
+            ResolvedNameKind::FiniteType => SemanticBindingKind::FiniteType,
+            ResolvedNameKind::FiniteVariant => SemanticBindingKind::FiniteVariant,
+            ResolvedNameKind::RecordType => SemanticBindingKind::RecordType,
+            ResolvedNameKind::RecordField => SemanticBindingKind::RecordField,
+        };
+        bindings.push(SemanticBinding {
+            identity: binding.clone(),
+            spelling: resolution.path.first().cloned().unwrap_or_default(),
+            namespace: namespace.clone(),
+            scope: scope.clone(),
+            declaration: declaration.clone(),
+            kind,
+        });
+    }
+    for table in imported_tables {
+        bindings.extend(table.bindings.clone());
+    }
+
+    let mut reference_slots = BTreeMap::<(SemanticId, SemanticId), usize>::new();
+    let mut references = Vec::new();
+    for resolution in resolutions.iter_mut() {
+        let (Some(binding), Some(namespace), Some(scope), Some(provenance)) = (
+            &resolution.binding,
+            &resolution.namespace,
+            &resolution.scope,
+            &resolution.provenance,
+        ) else {
+            continue;
+        };
+        let key = (namespace.clone(), scope.clone());
+        let slot = reference_slots.entry(key).or_default();
+        let identity = reference_id(namespace, scope, *slot);
+        *slot += 1;
+        resolution.reference = Some(identity.clone());
+        references.push(SemanticReference {
+            identity,
+            spelling: resolution.path.first().cloned().unwrap_or_default(),
+            occurrence_start: resolution.occurrence.start,
+            occurrence_end: resolution.occurrence.end,
+            namespace: namespace.clone(),
+            scope: scope.clone(),
+            binding: binding.clone(),
+            path: resolution.path.clone(),
+            provenance: provenance.clone(),
+        });
+    }
+    for table in imported_tables {
+        references.extend(table.references.clone());
+    }
+    SemanticBindingTable::new(namespaces, scopes, bindings, references)
 }
 
 /// Source spans of every nominal declaration name, used to point name
@@ -1210,6 +1795,11 @@ struct DeclarationSpans {
     finite_variants: BTreeMap<(String, String), SourceSpan>,
     record_types: BTreeMap<String, SourceSpan>,
     record_fields: BTreeMap<(String, String), SourceSpan>,
+    qualified_functions: BTreeMap<String, SourceSpan>,
+    qualified_finite_types: BTreeMap<String, SourceSpan>,
+    qualified_finite_variants: BTreeMap<(String, String), SourceSpan>,
+    qualified_record_types: BTreeMap<String, SourceSpan>,
+    qualified_record_fields: BTreeMap<(String, String), SourceSpan>,
 }
 
 impl DeclarationSpans {
@@ -1261,6 +1851,31 @@ impl DeclarationSpans {
         for (name, span) in &imported.record_fields {
             self.record_fields.entry(name.clone()).or_insert(*span);
         }
+        for (name, span) in &imported.qualified_functions {
+            self.qualified_functions
+                .entry(name.clone())
+                .or_insert(*span);
+        }
+        for (name, span) in &imported.qualified_finite_types {
+            self.qualified_finite_types
+                .entry(name.clone())
+                .or_insert(*span);
+        }
+        for (name, span) in &imported.qualified_finite_variants {
+            self.qualified_finite_variants
+                .entry(name.clone())
+                .or_insert(*span);
+        }
+        for (name, span) in &imported.qualified_record_types {
+            self.qualified_record_types
+                .entry(name.clone())
+                .or_insert(*span);
+        }
+        for (name, span) in &imported.qualified_record_fields {
+            self.qualified_record_fields
+                .entry(name.clone())
+                .or_insert(*span);
+        }
     }
 }
 
@@ -1270,39 +1885,85 @@ impl DeclarationSpans {
 fn record_annotation_type_resolutions(
     ast: &AbstractSyntaxTree,
     declarations: &DeclarationSpans,
+    context: &MergedContext,
     resolutions: &mut Vec<NameResolution>,
 ) {
     for function in &ast.functions {
         for parameter in function.inputs.iter().chain(&function.outputs) {
-            record_annotation(&parameter.value_type, declarations, resolutions);
+            record_annotation(
+                &parameter.value_type,
+                &function.name.text,
+                ast,
+                declarations,
+                context,
+                resolutions,
+            );
         }
-        record_annotation_block(&function.body.statements, declarations, resolutions);
+        record_annotation_block(
+            &function.body.statements,
+            &function.name.text,
+            ast,
+            declarations,
+            context,
+            resolutions,
+        );
     }
 }
 
 fn record_annotation_block(
     statements: &[AstStmt],
+    function: &str,
+    ast: &AbstractSyntaxTree,
     declarations: &DeclarationSpans,
+    context: &MergedContext,
     resolutions: &mut Vec<NameResolution>,
 ) {
     for statement in statements {
         match statement {
             AstStmt::Let { value_type, .. } => {
-                record_annotation(value_type, declarations, resolutions);
+                record_annotation(
+                    value_type,
+                    function,
+                    ast,
+                    declarations,
+                    context,
+                    resolutions,
+                );
             }
             AstStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                record_annotation_block(then_body, declarations, resolutions);
-                record_annotation_block(else_body, declarations, resolutions);
+                record_annotation_block(
+                    then_body,
+                    function,
+                    ast,
+                    declarations,
+                    context,
+                    resolutions,
+                );
+                record_annotation_block(
+                    else_body,
+                    function,
+                    ast,
+                    declarations,
+                    context,
+                    resolutions,
+                );
             }
             AstStmt::BoundedIteration {
                 state_type, body, ..
             } => {
-                record_annotation(state_type, declarations, resolutions);
-                record_annotation_block(body, declarations, resolutions);
+                record_annotation(
+                    state_type,
+                    function,
+                    ast,
+                    declarations,
+                    context,
+                    resolutions,
+                );
+                record_annotation_block(body, function, ast, declarations, context, resolutions);
             }
             AstStmt::Fail { .. } | AstStmt::Return { .. } => {}
         }
@@ -1310,9 +1971,13 @@ fn record_annotation_block(
 }
 
 fn annotation_kind(name: &str, declarations: &DeclarationSpans) -> Option<ResolvedNameKind> {
-    if declarations.finite_types.contains_key(name) {
+    if declarations.finite_types.contains_key(name)
+        || declarations.qualified_finite_types.contains_key(name)
+    {
         Some(ResolvedNameKind::FiniteType)
-    } else if declarations.record_types.contains_key(name) {
+    } else if declarations.record_types.contains_key(name)
+        || declarations.qualified_record_types.contains_key(name)
+    {
         Some(ResolvedNameKind::RecordType)
     } else {
         None
@@ -1321,23 +1986,138 @@ fn annotation_kind(name: &str, declarations: &DeclarationSpans) -> Option<Resolv
 
 fn record_annotation(
     name: &SpannedText,
+    function: &str,
+    ast: &AbstractSyntaxTree,
     declarations: &DeclarationSpans,
+    context: &MergedContext,
     resolutions: &mut Vec<NameResolution>,
 ) {
     let Some(kind) = annotation_kind(&name.text, declarations) else {
         return;
     };
     let declaration = match kind {
-        ResolvedNameKind::FiniteType => declarations.finite_types.get(&name.text),
-        _ => declarations.record_types.get(&name.text),
+        ResolvedNameKind::FiniteType => declarations
+            .qualified_finite_types
+            .get(&name.text)
+            .or_else(|| declarations.finite_types.get(&name.text)),
+        _ => declarations
+            .qualified_record_types
+            .get(&name.text)
+            .or_else(|| declarations.record_types.get(&name.text)),
     }
     .copied();
-    if let Some(declaration) = declaration {
-        resolutions.push(NameResolution {
-            occurrence: name.span,
-            declaration,
-            kind,
-        });
+    let Some(declaration) = declaration else {
+        return;
+    };
+    let Some((declaration_identity, declaration_namespace)) =
+        annotation_identity(name, kind, ast, context)
+    else {
+        resolutions.push(NameResolution::new(name.span, declaration, kind));
+        return;
+    };
+    let source_namespace = module_id(&ast.module.text);
+    let owner = function_id(&ast.module.text, function);
+    let scope = scope_id(&source_namespace, &owner, "body");
+    let declaration_namespace_id = module_id(&declaration_namespace);
+    let module_scope = scope_id(
+        &declaration_namespace_id,
+        &declaration_namespace_id,
+        "module",
+    );
+    let binding_kind = match kind {
+        ResolvedNameKind::FiniteType => "finite-type",
+        ResolvedNameKind::RecordType => "record-type",
+        _ => "nominal",
+    };
+    let mut path = name.text.split('.').map(str::to_owned).collect::<Vec<_>>();
+    if path.is_empty() {
+        path.push(name.text.clone());
+    }
+    if declaration_namespace != ast.module.text {
+        path.push(declaration_namespace.clone());
+    }
+    path.push(declaration_identity.0.clone());
+    let provenance = if declaration_namespace == ast.module.text {
+        ResolutionProvenance::Local
+    } else if path
+        .first()
+        .is_some_and(|route| context.namespace_aliases.contains_key(route))
+    {
+        ResolutionProvenance::Aliased
+    } else if name.text.contains('.') {
+        ResolutionProvenance::Qualified
+    } else if context.direct_imports.contains(&declaration_namespace) {
+        ResolutionProvenance::DirectImport
+    } else {
+        ResolutionProvenance::TransitiveImport
+    };
+    resolutions.push(
+        NameResolution::new(name.span, declaration, kind).with_binding_metadata(
+            binding_id_for(&module_scope, binding_kind, &declaration_identity),
+            source_namespace,
+            scope,
+            path,
+            provenance,
+            declaration_identity,
+        ),
+    );
+}
+
+fn annotation_identity(
+    name: &SpannedText,
+    kind: ResolvedNameKind,
+    ast: &AbstractSyntaxTree,
+    context: &MergedContext,
+) -> Option<(SemanticId, String)> {
+    match kind {
+        ResolvedNameKind::FiniteType => {
+            if let Some(finite_type) = context
+                .qualified_finite_types
+                .get(&name.text)
+                .or_else(|| context.finite_types_by_name.get(&name.text))
+            {
+                return Some((
+                    finite_type.identity.clone(),
+                    semantic_namespace_from_identity(&finite_type.identity),
+                ));
+            }
+            ast.finite_types
+                .iter()
+                .find(|declaration| declaration.name.text == name.text)
+                .map(|declaration| {
+                    (
+                        finite_type_id(&ast.module.text, &declaration.name.text),
+                        ast.module.text.clone(),
+                    )
+                })
+        }
+        ResolvedNameKind::RecordType => {
+            if let Some(record_type) = context
+                .qualified_record_types
+                .get(&name.text)
+                .or_else(|| context.record_types_by_name.get(&name.text))
+            {
+                return Some((
+                    record_type.identity.clone(),
+                    semantic_namespace_from_identity(&record_type.identity),
+                ));
+            }
+            ast.record_types
+                .iter()
+                .find(|declaration| declaration.name.text == name.text)
+                .map(|declaration| {
+                    let fields = declaration
+                        .fields
+                        .iter()
+                        .map(|field| (field.name.text.as_str(), field.value_type.text.as_str()))
+                        .collect::<Vec<_>>();
+                    (
+                        record_type_id(&ast.module.text, &declaration.name.text, &fields),
+                        ast.module.text.clone(),
+                    )
+                })
+        }
+        _ => None,
     }
 }
 
@@ -1349,6 +2129,8 @@ fn elaborate_function(
     record_types: &BTreeMap<String, RecordType>,
     signatures: &BTreeMap<String, FunctionSignature>,
     declarations: &DeclarationSpans,
+    namespace_aliases: &BTreeMap<String, String>,
+    direct_imports: &BTreeSet<String>,
     resolutions: &mut Vec<NameResolution>,
 ) -> Result<Function, Vec<SourceDiagnostic>> {
     let mut diagnostics = Vec::new();
@@ -1360,7 +2142,7 @@ fn elaborate_function(
         ));
         return Err(diagnostics);
     }
-    let inputs = function
+    let mut inputs = function
         .inputs
         .iter()
         .map(|input| Value {
@@ -1368,7 +2150,7 @@ fn elaborate_function(
             value_type: input.value_type.text.clone(),
         })
         .collect::<Vec<_>>();
-    let outputs = function
+    let mut outputs = function
         .outputs
         .iter()
         .map(|output| Value {
@@ -1398,6 +2180,15 @@ fn elaborate_function(
         record_types,
         &mut diagnostics,
     );
+    // Keep pre-0.9 source spellings stable. Qualified nominal types need an
+    // identity-bearing spelling in the semantic Program so body/IR/SSA
+    // validation cannot accidentally collapse two imported `Thing` types.
+    for (value, parameter) in inputs.iter_mut().zip(&parameters) {
+        value.value_type = canonical_value_type(&value.value_type, &parameter.ty);
+    }
+    if let Some(output) = outputs.first_mut() {
+        output.value_type = canonical_value_type(&output.value_type, &output_type);
+    }
     let mut capabilities = function
         .capabilities
         .iter()
@@ -1460,7 +2251,7 @@ fn elaborate_function(
         .filter(|clause| clause.kind.text == "assumes")
         .map(|clause| clause.name.text.clone())
         .collect::<Vec<_>>();
-    let mut env = BindingEnv::new();
+    let mut env = BindingEnv::new(&ast.module.text, &function.name.text);
     for (input, parameter) in function.inputs.iter().zip(&parameters) {
         env.bind(
             input.name.text.clone(),
@@ -1503,10 +2294,13 @@ fn elaborate_function(
         let mut builder = BodyBuilder::new(
             output_type.clone(),
             function.name.text.clone(),
+            ast.module.text.clone(),
             finite_types,
             record_types,
             signatures,
             declarations,
+            namespace_aliases,
+            direct_imports,
         );
         builder.elaborate_statements(&function.body.statements, &mut env, &mut diagnostics);
         if let Some(returned) = builder.elaborate_expr(
@@ -1569,6 +2363,7 @@ fn elaborate_function(
 #[derive(Clone)]
 struct FunctionSignature {
     identity: SemanticId,
+    namespace: String,
     inputs: Vec<BodyType>,
     output: BodyType,
     capabilities: Vec<String>,
@@ -1626,6 +2421,7 @@ impl FunctionSignature {
             .collect();
         Self {
             identity: function_id(&ast.module.text, &function.name.text),
+            namespace: ast.module.text.clone(),
             inputs,
             output,
             capabilities,
@@ -1786,6 +2582,7 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
             }
         }
         AstExpr::Name(_)
+        | AstExpr::QualifiedPath { .. }
         | AstExpr::Integer { .. }
         | AstExpr::Boolean { .. }
         | AstExpr::FiniteVariant { .. } => {}
@@ -1794,6 +2591,11 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
 
 struct BindingEnv {
     scopes: Vec<std::collections::BTreeMap<String, (ResolvedBinding, SourceSpan, BoundNameKind)>>,
+    scope_ids: Vec<SemanticId>,
+    scope_paths: Vec<String>,
+    next_scope: usize,
+    namespace: SemanticId,
+    owner: SemanticId,
     resolutions: Vec<NameResolution>,
 }
 
@@ -1801,6 +2603,25 @@ struct BindingEnv {
 struct ResolvedBinding {
     id: String,
     ty: BodyType,
+    binding: Option<SemanticId>,
+    namespace: Option<SemanticId>,
+    scope: Option<SemanticId>,
+    path: Vec<String>,
+    provenance: Option<ResolutionProvenance>,
+}
+
+impl ResolvedBinding {
+    fn plain(id: String, ty: BodyType) -> Self {
+        Self {
+            id,
+            ty,
+            binding: None,
+            namespace: None,
+            scope: None,
+            path: Vec::new(),
+            provenance: None,
+        }
+    }
 }
 
 /// Lexical role of a bound name; recorded so tools can distinguish parameter,
@@ -1823,12 +2644,29 @@ impl BoundNameKind {
             Self::IterationState | Self::TraversalIndex => ResolvedNameKind::IterationState,
         }
     }
+
+    fn binding_kind(self) -> &'static str {
+        match self {
+            Self::Parameter => "parameter",
+            Self::Binding => "local",
+            Self::IterationState => "iteration-state",
+            Self::TraversalIndex => "iteration-index",
+        }
+    }
 }
 
 impl BindingEnv {
-    fn new() -> Self {
+    fn new(module: &str, function: &str) -> Self {
+        let namespace = module_id(module);
+        let owner = function_id(module, function);
+        let root_scope = scope_id(&namespace, &owner, "body");
         Self {
             scopes: vec![std::collections::BTreeMap::new()],
+            scope_ids: vec![root_scope],
+            scope_paths: vec!["body".to_owned()],
+            next_scope: 0,
+            namespace,
+            owner,
             resolutions: Vec::new(),
         }
     }
@@ -1842,7 +2680,11 @@ impl BindingEnv {
         kind: BoundNameKind,
         diagnostics: &mut Vec<SourceDiagnostic>,
     ) {
-        let scope = self.scopes.last_mut().expect("scope stack is non-empty");
+        let scope_index = self.scopes.len() - 1;
+        let scope = self
+            .scopes
+            .get_mut(scope_index)
+            .expect("scope stack is non-empty");
         if let Some((_, existing, _)) = scope.get(&name) {
             let _ = existing;
             diagnostics.push(elaboration_diagnostic(
@@ -1852,12 +2694,35 @@ impl BindingEnv {
             ));
             return;
         }
-        self.resolutions.push(NameResolution {
-            occurrence: declaration,
-            declaration,
-            kind: kind.resolved_kind(),
-        });
-        scope.insert(name, (ResolvedBinding { id, ty }, declaration, kind));
+        let slot = scope.len();
+        let scope_identity = self.scope_ids[scope_index].clone();
+        let binding = binding_id(&scope_identity, kind.binding_kind(), slot);
+        let resolution = NameResolution::new(declaration, declaration, kind.resolved_kind())
+            .with_binding_metadata(
+                binding.clone(),
+                self.namespace.clone(),
+                scope_identity.clone(),
+                vec![name.clone()],
+                ResolutionProvenance::Local,
+                binding.clone(),
+            );
+        self.resolutions.push(resolution);
+        scope.insert(
+            name.clone(),
+            (
+                ResolvedBinding {
+                    id,
+                    ty,
+                    binding: Some(binding),
+                    namespace: Some(self.namespace.clone()),
+                    scope: Some(scope_identity),
+                    path: vec![name],
+                    provenance: Some(ResolutionProvenance::Local),
+                },
+                declaration,
+                kind,
+            ),
+        );
     }
 
     fn resolve(
@@ -1880,11 +2745,26 @@ impl BindingEnv {
     ) -> Option<(ResolvedBinding, BoundNameKind)> {
         for scope in self.scopes.iter().rev() {
             if let Some((binding, declaration, kind)) = scope.get(name) {
-                self.resolutions.push(NameResolution {
-                    occurrence: span,
-                    declaration: *declaration,
-                    kind: kind.resolved_kind(),
-                });
+                self.resolutions.push(
+                    NameResolution::new(span, *declaration, kind.resolved_kind())
+                        .with_binding_metadata(
+                            binding.binding.clone().expect("lexical binding identity"),
+                            binding
+                                .namespace
+                                .clone()
+                                .expect("lexical namespace identity"),
+                            binding.scope.clone().expect("lexical scope identity"),
+                            binding.path.clone(),
+                            binding
+                                .provenance
+                                .clone()
+                                .expect("lexical binding provenance"),
+                            binding
+                                .binding
+                                .clone()
+                                .expect("lexical declaration identity"),
+                        ),
+                );
                 return Some((binding.clone(), *kind));
             }
         }
@@ -1912,11 +2792,23 @@ impl BindingEnv {
     }
 
     fn push(&mut self) {
+        let parent_path = self
+            .scope_paths
+            .last()
+            .expect("scope path stack is non-empty")
+            .clone();
+        let path = format!("{parent_path}/block:{}", self.next_scope);
+        self.next_scope += 1;
         self.scopes.push(std::collections::BTreeMap::new());
+        self.scope_ids
+            .push(scope_id(&self.namespace, &self.owner, &path));
+        self.scope_paths.push(path);
     }
 
     fn pop(&mut self) {
         self.scopes.pop();
+        self.scope_ids.pop();
+        self.scope_paths.pop();
     }
 
     fn take_resolutions(&mut self) -> Vec<NameResolution> {
@@ -1932,10 +2824,14 @@ struct BodyBuilder<'a> {
     next_block: usize,
     output_type: BodyType,
     function: String,
+    namespace: String,
+    owner: SemanticId,
     finite_types: &'a BTreeMap<String, FiniteType>,
     record_types: &'a BTreeMap<String, RecordType>,
     signatures: &'a BTreeMap<String, FunctionSignature>,
     declarations: &'a DeclarationSpans,
+    namespace_aliases: &'a BTreeMap<String, String>,
+    direct_imports: &'a BTreeSet<String>,
     resolutions: Vec<NameResolution>,
     in_iteration: bool,
 }
@@ -1945,11 +2841,15 @@ impl<'a> BodyBuilder<'a> {
     fn new(
         output_type: BodyType,
         function: String,
+        namespace: String,
         finite_types: &'a BTreeMap<String, FiniteType>,
         record_types: &'a BTreeMap<String, RecordType>,
         signatures: &'a BTreeMap<String, FunctionSignature>,
         declarations: &'a DeclarationSpans,
+        namespace_aliases: &'a BTreeMap<String, String>,
+        direct_imports: &'a BTreeSet<String>,
     ) -> Self {
+        let owner = function_id(&namespace, &function);
         Self {
             blocks: vec![BodyBlock {
                 id: "entry".to_owned(),
@@ -1963,10 +2863,14 @@ impl<'a> BodyBuilder<'a> {
             next_block: 0,
             output_type,
             function,
+            namespace,
+            owner,
             finite_types,
             record_types,
             signatures,
             declarations,
+            namespace_aliases,
+            direct_imports,
             resolutions: Vec::new(),
             in_iteration: false,
         }
@@ -1989,6 +2893,81 @@ impl<'a> BodyBuilder<'a> {
             }
             self.elaborate_statement(statement, env, diagnostics);
         }
+    }
+
+    fn body_scope(&self) -> SemanticId {
+        let namespace = module_id(&self.namespace);
+        scope_id(&namespace, &self.owner, "body")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn semantic_resolution(
+        &self,
+        occurrence: SourceSpan,
+        declaration: SourceSpan,
+        kind: ResolvedNameKind,
+        binding_kind: &str,
+        spelling: &str,
+        declaration_namespace: &str,
+        declaration_identity: &SemanticId,
+    ) -> NameResolution {
+        let namespace = module_id(declaration_namespace);
+        let module_scope = scope_id(&namespace, &namespace, "module");
+        let binding = binding_id_for(&module_scope, binding_kind, declaration_identity);
+        let scope = self.body_scope();
+        let mut path = spelling.split('.').map(str::to_owned).collect::<Vec<_>>();
+        if path.is_empty() {
+            path.push(spelling.to_owned());
+        }
+        if declaration_namespace != self.namespace
+            && !path.contains(&declaration_namespace.to_owned())
+        {
+            path.push(declaration_namespace.to_owned());
+        }
+        path.push(declaration_identity.0.clone());
+        let provenance = if declaration_namespace == self.namespace {
+            ResolutionProvenance::Local
+        } else if path
+            .first()
+            .is_some_and(|route| self.namespace_aliases.contains_key(route))
+        {
+            ResolutionProvenance::Aliased
+        } else if spelling.contains('.') {
+            ResolutionProvenance::Qualified
+        } else if self.direct_imports.contains(declaration_namespace) {
+            ResolutionProvenance::DirectImport
+        } else {
+            ResolutionProvenance::TransitiveImport
+        };
+        NameResolution::new(occurrence, declaration, kind).with_binding_metadata(
+            binding,
+            module_id(&self.namespace),
+            scope,
+            path,
+            provenance,
+            declaration_identity.clone(),
+        )
+    }
+
+    fn module_resolution(
+        &self,
+        occurrence: SourceSpan,
+        declaration: SourceSpan,
+        kind: ResolvedNameKind,
+        binding_kind: &str,
+        spelling: &str,
+        declaration_identity: &SemanticId,
+    ) -> NameResolution {
+        let declaration_namespace = semantic_namespace_from_identity(declaration_identity);
+        self.semantic_resolution(
+            occurrence,
+            declaration,
+            kind,
+            binding_kind,
+            spelling,
+            &declaration_namespace,
+            declaration_identity,
+        )
     }
 
     fn elaborate_statement(
@@ -2573,6 +3552,52 @@ impl<'a> BodyBuilder<'a> {
         diagnostics: &mut Vec<SourceDiagnostic>,
     ) -> Option<ResolvedBinding> {
         match expr {
+            AstExpr::QualifiedPath { segments, span } => {
+                if segments.len() < 3 {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE183",
+                        "qualified path is not a value; qualify a callable or nominal declaration",
+                        *span,
+                    ));
+                    return None;
+                }
+                if env.binds(&segments[0].text) {
+                    let mut projected = AstExpr::Name(segments[0].clone());
+                    for field in &segments[1..] {
+                        projected = AstExpr::FieldProject {
+                            base: Box::new(projected),
+                            field: field.clone(),
+                            span: *span,
+                        };
+                    }
+                    return self.elaborate_expr(&projected, expected, env, diagnostics);
+                }
+                let type_name = SpannedText {
+                    text: segments[..segments.len() - 1]
+                        .iter()
+                        .map(|segment| segment.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("."),
+                    span: SourceSpan {
+                        start: segments.first()?.span.start,
+                        end: segments[segments.len() - 2].span.end,
+                        line: segments.first()?.span.line,
+                        column: segments.first()?.span.column,
+                    },
+                };
+                let variant = segments.last()?.clone();
+                self.elaborate_expr(
+                    &AstExpr::FiniteVariant {
+                        type_name,
+                        variant,
+                        fields: Vec::new(),
+                        span: *span,
+                    },
+                    expected,
+                    env,
+                    diagnostics,
+                )
+            }
             AstExpr::Name(name) => {
                 let resolved = env.resolve(&name.text, name.span, diagnostics)?;
                 if expected.is_some_and(|expected| expected != &resolved.ty) {
@@ -2624,7 +3649,7 @@ impl<'a> BodyBuilder<'a> {
                     portability: None,
                 });
                 let _ = text;
-                Some(ResolvedBinding { id, ty })
+                Some(ResolvedBinding::plain(id, ty))
             }
             AstExpr::Boolean { value, text: _ } => {
                 let ty = BodyType::Named("bool".to_owned());
@@ -2653,7 +3678,7 @@ impl<'a> BodyBuilder<'a> {
                     lowering: None,
                     portability: None,
                 });
-                Some(ResolvedBinding { id, ty })
+                Some(ResolvedBinding::plain(id, ty))
             }
             AstExpr::FiniteVariant {
                 type_name,
@@ -2694,23 +3719,39 @@ impl<'a> BodyBuilder<'a> {
                     ));
                     return None;
                 };
-                if let Some(&declaration) = self.declarations.finite_types.get(&type_name.text) {
-                    self.resolutions.push(NameResolution {
-                        occurrence: type_name.span,
+                if let Some(&declaration) = self
+                    .declarations
+                    .qualified_finite_types
+                    .get(&type_name.text)
+                    .or_else(|| self.declarations.finite_types.get(&type_name.text))
+                {
+                    self.resolutions.push(self.module_resolution(
+                        type_name.span,
                         declaration,
-                        kind: ResolvedNameKind::FiniteType,
-                    });
+                        ResolvedNameKind::FiniteType,
+                        "finite-type",
+                        &type_name.text,
+                        &finite_type.identity,
+                    ));
                 }
                 if let Some(&declaration) = self
                     .declarations
-                    .finite_variants
+                    .qualified_finite_variants
                     .get(&(type_name.text.clone(), variant.text.clone()))
+                    .or_else(|| {
+                        self.declarations
+                            .finite_variants
+                            .get(&(type_name.text.clone(), variant.text.clone()))
+                    })
                 {
-                    self.resolutions.push(NameResolution {
-                        occurrence: variant.span,
+                    self.resolutions.push(self.module_resolution(
+                        variant.span,
                         declaration,
-                        kind: ResolvedNameKind::FiniteVariant,
-                    });
+                        ResolvedNameKind::FiniteVariant,
+                        "finite-variant",
+                        &format!("{}.{}", type_name.text, variant.text),
+                        &declared_variant.identity,
+                    ));
                 }
                 let ty = BodyType::Finite {
                     identity: finite_type.identity.clone(),
@@ -2801,7 +3842,7 @@ impl<'a> BodyBuilder<'a> {
                     lowering: None,
                     portability: None,
                 });
-                Some(ResolvedBinding { id, ty })
+                Some(ResolvedBinding::plain(id, ty))
             }
             AstExpr::Call {
                 function,
@@ -2816,12 +3857,22 @@ impl<'a> BodyBuilder<'a> {
                     ));
                     return None;
                 };
-                if let Some(&declaration) = self.declarations.functions.get(&function.text) {
-                    self.resolutions.push(NameResolution {
-                        occurrence: function.span,
+                if let Some(&declaration) = self
+                    .declarations
+                    .qualified_functions
+                    .get(&function.text)
+                    .or_else(|| self.declarations.functions.get(&function.text))
+                {
+                    let resolution = self.semantic_resolution(
+                        function.span,
                         declaration,
-                        kind: ResolvedNameKind::Function,
-                    });
+                        ResolvedNameKind::Function,
+                        "function",
+                        &function.text,
+                        &signature.namespace,
+                        &signature.identity,
+                    );
+                    self.resolutions.push(resolution);
                 }
                 if arguments.len() != signature.inputs.len() {
                     diagnostics.push(elaboration_diagnostic(
@@ -2897,10 +3948,7 @@ impl<'a> BodyBuilder<'a> {
                     lowering: None,
                     portability: None,
                 });
-                Some(ResolvedBinding {
-                    id,
-                    ty: signature.output.clone(),
-                })
+                Some(ResolvedBinding::plain(id, signature.output.clone()))
             }
             AstExpr::Match { value, arms, span } => {
                 let subject = self.elaborate_expr(value, None, env, diagnostics)?;
@@ -2918,7 +3966,8 @@ impl<'a> BodyBuilder<'a> {
                 };
                 let finite_type = self
                     .finite_types
-                    .get(type_name)
+                    .values()
+                    .find(|candidate| &candidate.identity == type_identity)
                     .expect("finite body type came from declaration")
                     .clone();
                 let Some(result_type) = expected.cloned() else {
@@ -2936,7 +3985,12 @@ impl<'a> BodyBuilder<'a> {
                     // A qualified pattern `Type.VARIANT` must name the
                     // subject's own type.
                     if let Some(qualifier) = &arm.type_name {
-                        if qualifier.text != *type_name {
+                        if self
+                            .finite_types
+                            .get(&qualifier.text)
+                            .map(|candidate| &candidate.identity)
+                            != Some(type_identity)
+                        {
                             diagnostics.push(elaboration_diagnostic(
                                 "MNE176",
                                 "qualified pattern names a different finite type than the match subject",
@@ -2944,14 +3998,38 @@ impl<'a> BodyBuilder<'a> {
                             ));
                             continue;
                         }
-                        if let Some(&declaration) =
-                            self.declarations.finite_types.get(&qualifier.text)
+                        if let Some(&declaration) = self
+                            .declarations
+                            .qualified_finite_types
+                            .get(&qualifier.text)
+                            .or_else(|| self.declarations.finite_types.get(&qualifier.text))
                         {
-                            self.resolutions.push(NameResolution {
-                                occurrence: qualifier.span,
+                            let resolution = NameResolution::new(
+                                qualifier.span,
                                 declaration,
-                                kind: ResolvedNameKind::FiniteType,
-                            });
+                                ResolvedNameKind::FiniteType,
+                            )
+                            .with_binding_metadata(
+                                binding_id_for(
+                                    &scope_id(
+                                        &module_id(&self.namespace),
+                                        &module_id(&self.namespace),
+                                        "module",
+                                    ),
+                                    "finite-type",
+                                    type_identity,
+                                ),
+                                module_id(&self.namespace),
+                                self.body_scope(),
+                                vec![qualifier.text.clone(), type_identity.0.clone()],
+                                if qualifier.text.contains('.') {
+                                    ResolutionProvenance::Qualified
+                                } else {
+                                    ResolutionProvenance::Local
+                                },
+                                type_identity.clone(),
+                            );
+                            self.resolutions.push(resolution);
                         }
                     }
                     let Some(variant) = finite_type
@@ -2966,16 +4044,44 @@ impl<'a> BodyBuilder<'a> {
                         ));
                         continue;
                     };
-                    if let Some(&declaration) = self
-                        .declarations
-                        .finite_variants
-                        .get(&(type_name.clone(), arm.variant.text.clone()))
-                    {
-                        self.resolutions.push(NameResolution {
-                            occurrence: arm.variant.span,
+                    let qualified_declaration = arm.type_name.as_ref().and_then(|qualifier| {
+                        self.declarations
+                            .qualified_finite_variants
+                            .get(&(qualifier.text.clone(), arm.variant.text.clone()))
+                            .copied()
+                    });
+                    if let Some(declaration) = qualified_declaration.or_else(|| {
+                        self.declarations
+                            .finite_variants
+                            .get(&(type_name.clone(), arm.variant.text.clone()))
+                            .copied()
+                    }) {
+                        let resolution = NameResolution::new(
+                            arm.variant.span,
                             declaration,
-                            kind: ResolvedNameKind::FiniteVariant,
-                        });
+                            ResolvedNameKind::FiniteVariant,
+                        )
+                        .with_binding_metadata(
+                            binding_id_for(
+                                &scope_id(
+                                    &module_id(&self.namespace),
+                                    &module_id(&self.namespace),
+                                    "module",
+                                ),
+                                "finite-variant",
+                                &variant.identity,
+                            ),
+                            module_id(&self.namespace),
+                            self.body_scope(),
+                            vec![arm.variant.text.clone(), variant.identity.0.clone()],
+                            if arm.type_name.is_some() {
+                                ResolutionProvenance::Qualified
+                            } else {
+                                ResolutionProvenance::Local
+                            },
+                            variant.identity.clone(),
+                        );
+                        self.resolutions.push(resolution);
                     }
                     // Payload bindings must cover the variant's declared
                     // payload exactly once each, with no extras.
@@ -3170,10 +4276,7 @@ impl<'a> BodyBuilder<'a> {
                     env.pop();
                 }
                 self.current = join_index;
-                Some(ResolvedBinding {
-                    id: result_id,
-                    ty: result_type,
-                })
+                Some(ResolvedBinding::plain(result_id, result_type))
             }
             AstExpr::RecordLiteral {
                 type_name,
@@ -3189,12 +4292,21 @@ impl<'a> BodyBuilder<'a> {
                     ));
                     return None;
                 };
-                if let Some(&declaration) = self.declarations.record_types.get(&type_name.text) {
-                    self.resolutions.push(NameResolution {
-                        occurrence: type_name.span,
+                if let Some(&declaration) = self
+                    .declarations
+                    .qualified_record_types
+                    .get(&type_name.text)
+                    .or_else(|| self.declarations.record_types.get(&type_name.text))
+                {
+                    let resolution = self.module_resolution(
+                        type_name.span,
                         declaration,
-                        kind: ResolvedNameKind::RecordType,
-                    });
+                        ResolvedNameKind::RecordType,
+                        "record-type",
+                        &type_name.text,
+                        &record_type.identity,
+                    );
+                    self.resolutions.push(resolution);
                 }
                 for (name, _) in fields {
                     if record_type
@@ -3204,14 +4316,30 @@ impl<'a> BodyBuilder<'a> {
                     {
                         if let Some(&declaration) = self
                             .declarations
-                            .record_fields
+                            .qualified_record_fields
                             .get(&(type_name.text.clone(), name.text.clone()))
+                            .or_else(|| {
+                                self.declarations
+                                    .record_fields
+                                    .get(&(type_name.text.clone(), name.text.clone()))
+                            })
                         {
-                            self.resolutions.push(NameResolution {
-                                occurrence: name.span,
+                            let record_namespace =
+                                semantic_namespace_from_identity(&record_type.identity);
+                            let field_identity = mncs_model::record_field_id(
+                                &record_namespace,
+                                &record_type.name,
+                                &name.text,
+                            );
+                            let resolution = self.module_resolution(
+                                name.span,
                                 declaration,
-                                kind: ResolvedNameKind::RecordField,
-                            });
+                                ResolvedNameKind::RecordField,
+                                "record-field",
+                                &format!("{}.{}", type_name.text, name.text),
+                                &field_identity,
+                            );
+                            self.resolutions.push(resolution);
                         }
                     }
                 }
@@ -3325,7 +4453,7 @@ impl<'a> BodyBuilder<'a> {
                     lowering: None,
                     portability: None,
                 });
-                Some(ResolvedBinding { id, ty })
+                Some(ResolvedBinding::plain(id, ty))
             }
             AstExpr::FieldProject { base, field, span } => {
                 // Length observation on a bounded sequence: `xs.len` (0.7).
@@ -3372,18 +4500,19 @@ impl<'a> BodyBuilder<'a> {
                             ));
                         }
                         let _ = bound;
-                        return Some(ResolvedBinding {
+                        return Some(ResolvedBinding::plain(
                             id,
-                            ty: BodyType::Integer(IntegerType {
+                            BodyType::Integer(IntegerType {
                                 bits: 64,
                                 signed: false,
                             }),
-                        });
+                        ));
                     }
                 }
                 let subject = self.elaborate_expr(base, None, env, diagnostics)?;
                 let BodyType::Record {
-                    name: type_name, ..
+                    identity: type_identity,
+                    name: type_name,
                 } = &subject.ty
                 else {
                     diagnostics.push(elaboration_diagnostic(
@@ -3393,7 +4522,13 @@ impl<'a> BodyBuilder<'a> {
                     ));
                     return None;
                 };
-                let Some(record_type) = self.record_types.get(type_name).cloned() else {
+                let Some(record_type) = self
+                    .record_types
+                    .values()
+                    .find(|candidate| &candidate.identity == type_identity)
+                    .cloned()
+                    .or_else(|| self.record_types.get(type_name).cloned())
+                else {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE161",
                         "field projection requires a value of a declared record type",
@@ -3413,16 +4548,38 @@ impl<'a> BodyBuilder<'a> {
                     ));
                     return None;
                 };
-                if let Some(&declaration) = self
+                let qualified_declaration = self
                     .declarations
-                    .record_fields
-                    .get(&(record_type.name.clone(), field.text.clone()))
-                {
-                    self.resolutions.push(NameResolution {
-                        occurrence: field.span,
+                    .qualified_record_fields
+                    .iter()
+                    .find(|((qualified_type, field_name), _)| {
+                        field_name == &field.text
+                            && qualified_type
+                                .rsplit('.')
+                                .next()
+                                .is_some_and(|name| name == record_type.name)
+                    })
+                    .map(|(_, declaration)| declaration);
+                if let Some(&declaration) = qualified_declaration.or_else(|| {
+                    self.declarations
+                        .record_fields
+                        .get(&(record_type.name.clone(), field.text.clone()))
+                }) {
+                    let record_namespace = semantic_namespace_from_identity(&record_type.identity);
+                    let field_identity = mncs_model::record_field_id(
+                        &record_namespace,
+                        &record_type.name,
+                        &field.text,
+                    );
+                    let resolution = self.module_resolution(
+                        field.span,
                         declaration,
-                        kind: ResolvedNameKind::RecordField,
-                    });
+                        ResolvedNameKind::RecordField,
+                        "record-field",
+                        &format!("{}.{}", record_type.name, field.text),
+                        &field_identity,
+                    );
+                    self.resolutions.push(resolution);
                 }
                 let result_ty = profile_type(
                     &declared_field.field_type,
@@ -3552,10 +4709,7 @@ impl<'a> BodyBuilder<'a> {
                     lowering: None,
                     portability: None,
                 });
-                Some(ResolvedBinding {
-                    id,
-                    ty: operand_type,
-                })
+                Some(ResolvedBinding::plain(id, operand_type))
             }
             AstExpr::SequenceReplace {
                 sequence,
@@ -3666,10 +4820,7 @@ impl<'a> BodyBuilder<'a> {
                     lowering: None,
                     portability: None,
                 });
-                Some(ResolvedBinding {
-                    id,
-                    ty: result_type,
-                })
+                Some(ResolvedBinding::plain(id, result_type))
             }
             AstExpr::VectorIntrinsic {
                 name,
@@ -3742,12 +4893,12 @@ impl<'a> BodyBuilder<'a> {
                     lowering: None,
                     portability: None,
                 });
-                Some(ResolvedBinding {
+                Some(ResolvedBinding::plain(
                     id,
-                    ty: expected
+                    expected
                         .cloned()
                         .unwrap_or_else(|| BodyType::Named("invalid".to_owned())),
-                })
+                ))
             }
             AstExpr::Index { base, index, span } => {
                 let subject = self.elaborate_expr(base, None, env, diagnostics)?;
@@ -3828,10 +4979,7 @@ impl<'a> BodyBuilder<'a> {
                     lowering: None,
                     portability: None,
                 });
-                Some(ResolvedBinding {
-                    id,
-                    ty: (**element_type).clone(),
-                })
+                Some(ResolvedBinding::plain(id, (**element_type).clone()))
             }
             AstExpr::Slice {
                 base,
@@ -3895,7 +5043,7 @@ impl<'a> BodyBuilder<'a> {
                     lowering: None,
                     portability: None,
                 });
-                Some(ResolvedBinding { id, ty: result_ty })
+                Some(ResolvedBinding::plain(id, result_ty))
             }
             AstExpr::Cast {
                 value,
@@ -3953,7 +5101,7 @@ impl<'a> BodyBuilder<'a> {
                     lowering: None,
                     portability: None,
                 });
-                Some(ResolvedBinding { id, ty: to })
+                Some(ResolvedBinding::plain(id, to))
             }
             AstExpr::Binary {
                 op, left, right, ..
@@ -4013,7 +5161,7 @@ impl<'a> BodyBuilder<'a> {
                         lowering: None,
                         portability: None,
                     });
-                    return Some(ResolvedBinding { id, ty: result_ty });
+                    return Some(ResolvedBinding::plain(id, result_ty));
                 }
                 let arithmetic =
                     matches!(op, AstBinaryOp::Add | AstBinaryOp::Sub | AstBinaryOp::Mul);
@@ -4061,7 +5209,7 @@ impl<'a> BodyBuilder<'a> {
                         lowering: None,
                         portability: None,
                     });
-                    return Some(ResolvedBinding { id, ty: bool_type });
+                    return Some(ResolvedBinding::plain(id, bool_type));
                 }
                 // Byte-oriented operators (Profile 0.7): bitwise and/or/xor
                 // and unsigned comparisons over bytes.
@@ -4130,7 +5278,7 @@ impl<'a> BodyBuilder<'a> {
                         lowering: None,
                         portability: None,
                     });
-                    return Some(ResolvedBinding { id, ty: result_ty });
+                    return Some(ResolvedBinding::plain(id, result_ty));
                 }
                 let id = self.new_value("v");
                 let (kind, result_ty) = match op {
@@ -4224,7 +5372,7 @@ impl<'a> BodyBuilder<'a> {
                     lowering: None,
                     portability: None,
                 });
-                Some(ResolvedBinding { id, ty: result_ty })
+                Some(ResolvedBinding::plain(id, result_ty))
             }
         }
     }
@@ -4653,7 +5801,7 @@ impl<'a> BodyBuilder<'a> {
             lowering: None,
             portability: None,
         });
-        ResolvedBinding { id, ty }
+        ResolvedBinding::plain(id, ty)
     }
 
     fn finish_return(
@@ -4716,7 +5864,7 @@ impl<'a> BodyBuilder<'a> {
             lowering: None,
             portability: None,
         });
-        ResolvedBinding { id, ty: field_type }
+        ResolvedBinding::plain(id, field_type)
     }
 
     fn new_value(&mut self, prefix: &str) -> String {
@@ -4792,6 +5940,19 @@ fn profile_type(
         ));
         BodyType::Named(name.to_owned())
     })
+}
+
+fn canonical_value_type(source: &str, ty: &BodyType) -> String {
+    if source.contains('.') {
+        match ty {
+            BodyType::Finite { identity, .. } | BodyType::Record { identity, .. } => {
+                identity.0.clone()
+            }
+            _ => source.to_owned(),
+        }
+    } else {
+        source.to_owned()
+    }
 }
 
 /// Resolve a canonical bounded-sequence spelling `[E; N]` / `[E; up_to M]`

@@ -105,6 +105,23 @@ fn canonical_program(program: &Program) -> JsonValue {
             JsonValue::Array(sorted_record_types(&program.record_types)),
         ));
     }
+    if let Some(binding_table) = &program.binding_table {
+        if !binding_table.is_empty() {
+            // Source locations are navigation evidence, not semantic
+            // identity. Keep the binding decisions in the canonical form,
+            // but erase occurrence coordinates before fingerprinting so a
+            // harmless edit that shifts text does not rename the program.
+            let mut semantic_bindings = binding_table.clone();
+            for reference in &mut semantic_bindings.references {
+                reference.occurrence_start = 0;
+                reference.occurrence_end = 0;
+            }
+            fields.push((
+                "binding_table",
+                serde_json::to_value(semantic_bindings).expect("binding table is serializable"),
+            ));
+        }
+    }
     object(fields)
 }
 
@@ -258,13 +275,46 @@ fn sorted_assumptions(values: &[Assumption]) -> Vec<JsonValue> {
 
 fn sorted_functions(values: &[Function]) -> Vec<JsonValue> {
     let mut values: Vec<_> = values.iter().map(canonical_function).collect();
-    values.sort_by_key(|value| {
-        value
-            .get("name")
-            .and_then(JsonValue::as_str)
-            .unwrap_or("")
-            .to_owned()
-    });
+    let mut name_counts = BTreeMap::<String, usize>::new();
+    for value in &values {
+        *name_counts
+            .entry(
+                value
+                    .get("name")
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or("")
+                    .to_owned(),
+            )
+            .or_default() += 1;
+    }
+    if name_counts.values().any(|count| *count > 1) {
+        // Imported Profile 0.9 declarations may share a final spelling; the
+        // declaring module becomes the deterministic tie-breaker. When all
+        // names are unique, retain the established name-only ordering for
+        // earlier profiles.
+        values.sort_by_key(|value| {
+            (
+                value
+                    .get("home_module")
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or("")
+                    .to_owned(),
+                value
+                    .get("name")
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or("")
+                    .to_owned(),
+            )
+        });
+    } else {
+        values.sort_by_key(|value| {
+            value
+                .get("name")
+                .and_then(JsonValue::as_str)
+                .unwrap_or("")
+                .to_owned()
+        });
+    }
     values
 }
 
@@ -399,6 +449,7 @@ mod tests {
             finite_types: vec![],
             record_types: Vec::new(),
             assumptions: vec![],
+            binding_table: None,
             functions: vec![Function {
                 home_module: None,
                 name: "f".to_owned(),

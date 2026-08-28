@@ -118,3 +118,59 @@ fn external_consumer_executes_linked_stdlib_across_reference_backends() {
             .all(|case_| case_["expectation_met"] == true));
     }
 }
+
+#[test]
+fn profile09_consumer_disambiguates_duplicate_core_exports() {
+    let source = example("source/profile09-stdlib-namespace-consumer.mncs");
+    let corpus = example("execution/profile09-stdlib-namespace-consumer-corpus.json");
+    let library_root = library_dir();
+    let study = binary()
+        .env("MNCS_LIBRARY_PATH", &library_root)
+        .args(["source-study", &source])
+        .output()
+        .expect("run profile 0.9 source study");
+    assert!(
+        study.status.success(),
+        "{}",
+        String::from_utf8_lossy(&study.stdout)
+    );
+    let study_json: Value = serde_json::from_slice(&study.stdout).expect("source-study JSON");
+    assert_eq!(study_json["binding_table"]["schema_version"], "0.1");
+    assert!(study_json["binding_table"]["references"]
+        .as_array()
+        .expect("binding references")
+        .iter()
+        .any(|reference| reference["provenance"] == "aliased"
+            && reference["path"]
+                .as_array()
+                .is_some_and(|path| path.iter().any(|part| part == "mncs.core.ordering.v1"))));
+
+    for backend in ["mncs-research-bytecode", "mncs-portable-wasm-mvp"] {
+        let output = binary()
+            .env("MNCS_LIBRARY_PATH", &library_root)
+            .args([
+                "experiment",
+                "run",
+                &source,
+                "--backend",
+                backend,
+                "--corpus",
+                &corpus,
+            ])
+            .output()
+            .expect("execute profile 0.9 stdlib consumer");
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+            panic!(
+                "{backend}: {error} ({})",
+                String::from_utf8_lossy(&output.stderr)
+            )
+        });
+        assert!(output.status.success(), "{backend}: {result:#?}");
+        assert_eq!(result["status"], "PASS", "{backend}: {result:#?}");
+        assert!(result["cases"]
+            .as_array()
+            .expect("profile 0.9 case observations")
+            .iter()
+            .all(|case_| case_["expectation_met"] == true));
+    }
+}

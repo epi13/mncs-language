@@ -333,6 +333,8 @@ pub struct HighLevelIr {
     pub schema_version: String,
     pub semantic_identity: SemanticId,
     pub semantic_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding_table: Option<crate::SemanticBindingTable>,
     pub functions: Vec<IrFunction>,
     pub state_regions: Vec<IrStateRegion>,
     pub obligations: Vec<ObligationRecord>,
@@ -679,6 +681,7 @@ impl Program {
             semantic_fingerprint: self
                 .content_fingerprint()
                 .expect("validated canonical form"),
+            binding_table: self.binding_table.clone(),
             functions,
             state_regions,
             obligations,
@@ -1216,7 +1219,14 @@ fn lower_executable_body(
                     let callee = program
                         .functions
                         .iter()
-                        .find(|candidate| candidate.name == *function_name)
+                        .find(|candidate| {
+                            candidate.name
+                                == function_name.rsplit('.').next().unwrap_or(function_name)
+                                && crate::function_id(
+                                    candidate.identity_namespace(&program.module),
+                                    &candidate.name,
+                                ) == *callee_identity
+                        })
                         .expect("validated call target");
                     (
                         IrOperationKind::Call {
@@ -1594,6 +1604,26 @@ fn ir_type(ty: &BodyType) -> IrType {
 }
 
 fn ir_type_from_semantic(program: &Program, name: &str) -> IrType {
+    if let Some(finite_type) = program
+        .finite_types
+        .iter()
+        .find(|finite_type| finite_type.identity.0 == name)
+    {
+        return IrType::Finite {
+            identity: finite_type.identity.clone(),
+            name: finite_type.name.clone(),
+        };
+    }
+    if let Some(record_type) = program
+        .record_types
+        .iter()
+        .find(|record_type| record_type.identity.0 == name)
+    {
+        return IrType::Record {
+            identity: record_type.identity.clone(),
+            name: record_type.name.clone(),
+        };
+    }
     if let Some(finite_type) = program
         .finite_types
         .iter()

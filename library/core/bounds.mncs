@@ -1,0 +1,16 @@
+mncs 0.5;
+
+// mncs.core.bounds — a second scalar bounds vocabulary used to pressure the
+// Profile 0.9 namespace rules. Its clamp has the same name as the ordering
+// module's helper but remains a distinct declaration identity.
+module mncs.core.bounds.v1;
+
+fn clamp_i64(value: i64, lo: i64, hi: i64) -> (result: i64) {
+    if value < lo {
+        return lo;
+    }
+    if value > hi {
+        return hi;
+    }
+    return value;
+}

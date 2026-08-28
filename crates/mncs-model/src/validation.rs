@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{finite_type_id, finite_variant_id, Program, Value, SUPPORTED_SCHEMA_VERSION};
+use crate::{
+    finite_type_id, finite_variant_id, function_id, Program, Value, SUPPORTED_SCHEMA_VERSION,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ValidationReport {
@@ -76,16 +78,16 @@ impl Program {
                     .any(|namespace| expected_for(namespace) == *actual)
             };
 
-        let mut finite_type_names = BTreeSet::new();
+        let mut finite_type_identities = BTreeSet::new();
         for (type_index, finite_type) in self.finite_types.iter().enumerate() {
             let type_path = format!("finite_types[{type_index}]");
             if finite_type.name.trim().is_empty()
-                || !finite_type_names.insert(finite_type.name.as_str())
+                || !finite_type_identities.insert(finite_type.identity.clone())
             {
                 errors.push(diagnostic(
                     "MNCS014",
                     format!("{type_path}.name"),
-                    "finite type names must be non-empty and unique",
+                    "finite type identities must be non-empty and unique",
                 ));
             }
             if !identity_matches_some_namespace(
@@ -138,7 +140,7 @@ impl Program {
             }
         }
 
-        let mut function_names = BTreeSet::new();
+        let mut function_identities = BTreeSet::new();
         for (function_index, function) in self.functions.iter().enumerate() {
             let function_path = format!("functions[{function_index}]");
             if function.name.trim().is_empty() {
@@ -147,11 +149,14 @@ impl Program {
                     format!("{function_path}.name"),
                     "function name must not be empty",
                 ));
-            } else if !function_names.insert(function.name.as_str()) {
+            } else if !function_identities.insert(function_id(
+                function.identity_namespace(&self.module),
+                &function.name,
+            )) {
                 errors.push(diagnostic(
                     "MNCS005",
                     format!("{function_path}.name"),
-                    format!("duplicate function name {:?}", function.name),
+                    format!("duplicate function identity for {:?}", function.name),
                 ));
             }
 
@@ -365,6 +370,7 @@ pub(crate) mod tests {
                 supplied_by: "StorageBackend".to_owned(),
                 confidence: AssumptionConfidence::External,
             }],
+            binding_table: None,
             functions: vec![Function {
                 home_module: None,
                 name: "transfer".to_owned(),
