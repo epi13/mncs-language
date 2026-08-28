@@ -363,7 +363,7 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
     let _ = writeln!(out, "target datalayout = \"{layout}\"");
     let _ = writeln!(out, "target triple = \"{triple}\"");
     out.push('\n');
-    if module_uses_cells(module) {
+    if crate::support::scalar_module_needs_arena_symbols(module) {
         // Canonical composite cell arena (MNCS cell layout v0.1): 8-byte
         // aligned cells; slot access is plain i32/i64 load/store at 8-byte
         // strides so alignment holds by construction.
@@ -393,33 +393,6 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
         out.push('\n');
     }
     out
-}
-
-/// Whether any lowered function manipulates canonical cells.
-fn module_uses_cells(module: &ScalarModule) -> bool {
-    module.functions.iter().any(|function| {
-        function.params.iter().any(|param| param.ty.is_cell())
-            || function.result.ty.is_cell()
-            || function.blocks.iter().any(|block| {
-                block.insts.iter().any(|inst| match inst {
-                    ScalarInst::CellAlloc { .. }
-                    | ScalarInst::CellStoreDiscriminant { .. }
-                    | ScalarInst::CellStore { .. }
-                    | ScalarInst::CellLoad { .. }
-                    | ScalarInst::SequenceReplace { .. } => true,
-                    ScalarInst::Sequence(nested) => nested.iter().any(|nested| {
-                        matches!(
-                            nested,
-                            ScalarInst::CellAlloc { .. }
-                                | ScalarInst::CellStoreDiscriminant { .. }
-                                | ScalarInst::CellStore { .. }
-                                | ScalarInst::CellLoad { .. }
-                        )
-                    }),
-                    _ => false,
-                })
-            })
-    })
 }
 
 fn emit_function(out: &mut String, function: &ScalarFunction) {

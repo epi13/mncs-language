@@ -87,7 +87,8 @@ fn is_ascii_alpha(value: byte) -> (result: bool) {
 
 fn is_ascii_space(value: byte) -> (result: bool) {
     let n: i64 = value as i64;
-    return ((n == 32) || (n == 9)) || ((n == 10) || (n == 13));
+    let control: bool = (n >= 9) && (n <= 13);
+    return (n == 32) || control;
 }
 
 fn digit_value(value: byte) -> (result: i64) {

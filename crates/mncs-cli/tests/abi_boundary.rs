@@ -105,6 +105,15 @@ fn mask_only_exports_agree_per_backend() {
     }
 }
 
+#[test]
+fn mask_only_module_without_cells_agrees_per_backend() {
+    run_module_corpus(
+        &example("source/abi-mask-only.mncs"),
+        &example("execution/abi-mask-only-corpus.json"),
+        2,
+    );
+}
+
 fn run_module_corpus(source: &str, corpus: &str, expected_len: usize) {
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_experiment(source, backend, corpus);

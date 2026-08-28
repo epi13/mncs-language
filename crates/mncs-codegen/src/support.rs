@@ -571,6 +571,22 @@ uint64_t mncs_slot_load64(uint64_t at) {
     )
 }
 
+/// Whether the native process driver will need `mncs_arena` / `mncs_bump`.
+/// Call-file copies an arena image even when the image is empty, so mask-only
+/// and view-only modules still require the symbols even if they never
+/// allocate cells.
+pub(crate) fn scalar_module_needs_arena_symbols(module: &crate::scalar::ScalarModule) -> bool {
+    use crate::scalar::ScalarTy;
+    scalar_module_uses_cells(module)
+        || module.functions.iter().any(|function| {
+            function
+                .params
+                .iter()
+                .any(|param| matches!(param.ty, ScalarTy::View | ScalarTy::Mask(_)))
+                || matches!(function.result.ty, ScalarTy::View | ScalarTy::Mask(_))
+        })
+}
+
 /// Whether any lowered function in the module manipulates canonical cells.
 pub(crate) fn scalar_module_uses_cells(module: &crate::scalar::ScalarModule) -> bool {
     use crate::scalar::ScalarInst;

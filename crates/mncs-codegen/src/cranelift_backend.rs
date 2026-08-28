@@ -1305,7 +1305,7 @@ fn aot_fallback_execute(
         .ok_or_else(|| "neither clang nor gcc is present".to_owned())?;
     // The linked object contains every module function, so the driver must
     // define the cell runtime whenever any function manipulates cells.
-    let driver = if crate::support::scalar_module_uses_cells(&scalar) {
+    let driver = if crate::support::scalar_module_needs_arena_symbols(&scalar) {
         crate::support::process_driver_cell_runtime(
             &request.target.function,
             &contract.inputs,

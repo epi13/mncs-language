@@ -1,0 +1,15 @@
+mncs 0.8;
+
+// Mask-only process-boundary module: no sequence, view, vector, or record
+// contracts. The native call-file driver still copies an arena image, so
+// C11/LLVM/Cranelift must define mncs_arena/mncs_bump even though this
+// module never allocates cells.
+module examples.abi.mask_only;
+
+fn any_active(m: mask<4>) -> (result: bool) {
+    return mask_any(m);
+}
+
+fn identity(m: mask<4>) -> (result: mask<4>) {
+    return m;
+}

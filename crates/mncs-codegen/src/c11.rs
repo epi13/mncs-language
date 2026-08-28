@@ -311,10 +311,16 @@ fn emit_module(module: &ScalarModule) -> String {
     let mut out = String::from(
         "/* MNCS C11 realization 0.2. Not MNCS semantics. No C undefined behavior for integers. */\n#include <stdint.h>\n#include <stdbool.h>\n#include <string.h>\n\n",
     );
-    if module_uses_cells(module) {
+    if crate::support::scalar_module_needs_arena_symbols(module) {
         out.push_str(
-            "/* Canonical composite cell arena (MNCS cell layout v0.1): 8-byte\n   aligned cells, record field i at byte offset i*8, boxed finite tag\n   in slot 0 with payloads from byte 8. Slot access uses memcpy so no\n   alignment or aliasing assumptions are made. */\n#define MNCS_ARENA_BYTES (4u * 1024u * 1024u)\nunsigned char mncs_arena[MNCS_ARENA_BYTES];\nuint64_t mncs_bump = 0;\nuint64_t mncs_cell_alloc(uint64_t bytes) {\n  uint64_t base = (mncs_bump + 7u) & ~(uint64_t)7u;\n  mncs_bump = base + bytes;\n  return base;\n}\nvoid mncs_slot_store32(unsigned char *a, uint64_t at, uint32_t v) {\n  memcpy(a + at, &v, sizeof v);\n}\nvoid mncs_slot_store64(unsigned char *a, uint64_t at, uint64_t v) {\n  memcpy(a + at, &v, sizeof v);\n}\nuint32_t mncs_slot_load32(const unsigned char *a, uint64_t at) {\n  uint32_t v;\n  memcpy(&v, a + at, sizeof v);\n  return v;\n}\nuint64_t mncs_slot_load64(const unsigned char *a, uint64_t at) {\n  uint64_t v;\n  memcpy(&v, a + at, sizeof v);\n  return v;\n}\n\n",
+            "/* Canonical composite cell arena (MNCS cell layout v0.1). Defined\n   whenever the call-file driver may copy an arena image, including\n   mask-only modules that never allocate cells. */\n#define MNCS_ARENA_BYTES (4u * 1024u * 1024u)\nunsigned char mncs_arena[MNCS_ARENA_BYTES];\nuint64_t mncs_bump = 0;\n",
         );
+        if module_uses_cells(module) {
+            out.push_str(
+                "uint64_t mncs_cell_alloc(uint64_t bytes) {\n  uint64_t base = (mncs_bump + 7u) & ~(uint64_t)7u;\n  mncs_bump = base + bytes;\n  return base;\n}\nvoid mncs_slot_store32(unsigned char *a, uint64_t at, uint32_t v) {\n  memcpy(a + at, &v, sizeof v);\n}\nvoid mncs_slot_store64(unsigned char *a, uint64_t at, uint64_t v) {\n  memcpy(a + at, &v, sizeof v);\n}\nuint32_t mncs_slot_load32(const unsigned char *a, uint64_t at) {\n  uint32_t v;\n  memcpy(&v, a + at, sizeof v);\n  return v;\n}\nuint64_t mncs_slot_load64(const unsigned char *a, uint64_t at) {\n  uint64_t v;\n  memcpy(&v, a + at, sizeof v);\n  return v;\n}\n",
+            );
+        }
+        out.push('\n');
     }
     for function in &module.functions {
         emit_prototype(&mut out, function);
