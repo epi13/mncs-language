@@ -94,7 +94,8 @@ pub fn backend_family_matrix() -> BackendFamilyMatrix {
         // realizations with artifact validation). Still planned:
         // SPIR-V codegen, host execution for the external families
         // (emulators/kernel verifier/GPU runtime), bare-metal bring-up,
-        // Native SIMD selection and nested composite sequence elements.
+        // and native SIMD selection. Nested composite sequence elements
+        // and logical `[bool; N]` windows are now realized.
         planned_unimplemented: vec![
             "spir-v / gpu compute codegen".to_owned(),
             "riscv execution via emulator on hosts that lack one".to_owned(),

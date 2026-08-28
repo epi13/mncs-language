@@ -1,0 +1,51 @@
+mncs 0.8;
+
+// Nested composite sequences and records that contain sequences.
+// `[Point; N]` is a language-level sequence of records; `PairWindow`
+// stores an exact sequence field. High-bit u64 nested payloads must
+// keep their unsigned domain through the cell-of-cells ABI.
+module examples.abi.nested_composites;
+
+record Point { column: i64, row: i64 }
+record PairWindow { left: u64, right: u64 }
+record WordWindow { words: [u64; 2] }
+record ViewWindow { words: [u64; up_to 2] }
+
+fn identity_points(points: [Point; 2]) -> (result: [Point; 2]) {
+    return points;
+}
+
+fn first_column(points: [Point; 2]) -> (result: i64) {
+    return points[0].column;
+}
+
+fn identity_nested(xs: [[i64; 2]; 2]) -> (result: [[i64; 2]; 2]) {
+    return xs;
+}
+
+fn nested_first(xs: [[i64; 2]; 2]) -> (result: i64) {
+    return xs[0][0];
+}
+
+fn identity_window(window: WordWindow) -> (result: WordWindow) {
+    return window;
+}
+
+fn first_word(window: WordWindow) -> (result: u64) {
+    return window.words[0];
+}
+
+fn view_first_column(points: [Point; up_to 4]) -> (result: i64) {
+    if points.len == 0 {
+        return 0;
+    }
+    return points[0].column;
+}
+
+fn identity_view_window(window: ViewWindow) -> (result: ViewWindow) {
+    return window;
+}
+
+fn view_window_len(window: ViewWindow) -> (result: u64) {
+    return window.words.len;
+}

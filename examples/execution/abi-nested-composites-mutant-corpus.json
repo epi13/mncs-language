@@ -1,0 +1,43 @@
+{
+  "schema_version": "0.1",
+  "name": "abi-nested-composites-mutant",
+  "cases": [
+    {
+      "id": "first-column-wrong-expected",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.nested_composites", "function": "first_column" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              {
+                "record": {
+                  "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::Point::column%3Ai64%3Brow%3Ai64%3B",
+                  "name": "Point",
+                  "fields": [
+                    ["column", { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } }],
+                    ["row", { "integer": { "value": 7, "type": { "bits": 64, "signed": true } } }]
+                  ]
+                }
+              },
+              {
+                "record": {
+                  "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::Point::column%3Ai64%3Brow%3Ai64%3B",
+                  "name": "Point",
+                  "fields": [
+                    ["column", { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }],
+                    ["row", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }]
+                  ]
+                }
+              }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 99, "type": { "bits": 64, "signed": true } } }]
+    }
+  ],
+  "properties": []
+}

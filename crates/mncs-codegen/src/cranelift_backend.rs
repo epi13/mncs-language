@@ -95,6 +95,8 @@ pub fn cranelift_capabilities() -> BackendCapabilityManifest {
             "bounded_sequences_internal",
             "bounded_views_internal",
             "sequence_or_view_boundary_crossing",
+            "nested_composite_sequence_elements",
+            "boolean_sequence_elements",
             "vector_or_mask_boundary_crossing",
             "semantic_branchless_select",
             "semantic_integer_vectors",
@@ -108,7 +110,7 @@ pub fn cranelift_capabilities() -> BackendCapabilityManifest {
         [
             "memory",
             "effects",
-            "nested_composite_sequence_elements",
+            "unbounded_sequences",
             "widening_integer",
             "non_host_isa_jit",
         ]

@@ -174,6 +174,66 @@
       },
       "expected_status": "returned",
       "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "count-true4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "count_true4" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              { "boolean": { "value": true } },
+              { "boolean": { "value": false } },
+              { "boolean": { "value": false } },
+              { "boolean": { "value": true } }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "any-true4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "any_true4" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              { "boolean": { "value": false } },
+              { "boolean": { "value": false } },
+              { "boolean": { "value": true } },
+              { "boolean": { "value": false } }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "all-true4-mixed",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "all_true4" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              { "boolean": { "value": true } },
+              { "boolean": { "value": true } },
+              { "boolean": { "value": false } },
+              { "boolean": { "value": true } }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": false } }]
     }
   ],
   "properties": []

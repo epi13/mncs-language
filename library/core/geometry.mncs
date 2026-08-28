@@ -241,6 +241,25 @@ fn rect_from_point_size(p: Point, s: Size) -> (result: Rect) {
     return Rect { origin: p, size: s };
 }
 
+// Sequence-typed spatial helpers. A window of points or rects is a
+// language-level `[Record; N]` value, not four scalar wrappers.
+fn first_point4(points: [Point; 4]) -> (result: Point) {
+    return points[0];
+}
+
+fn contains_any4(rects: [Rect; 4], p: Point) -> (result: bool) {
+    iterate i over rects carrying hit: bool = false {
+        next hit = hit || rect_contains_point(rects[i], p);
+    }
+    return hit;
+}
+
+fn union4(rects: [Rect; 4]) -> (result: Rect) {
+    let a: Rect = rect_union(rects[0], rects[1]);
+    let b: Rect = rect_union(rects[2], rects[3]);
+    return rect_union(a, b);
+}
+
 fn rect_center(r: Rect) -> (result: Point) {
     if rect_is_empty(r) {
         return r.origin;

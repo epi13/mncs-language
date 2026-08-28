@@ -157,6 +157,9 @@ fn slot_width(semantic_type: &str, program: &mncs_model::Program) -> SlotWidth {
     }
     match mncs_model::BodyType::from_semantic_name(semantic_type) {
         mncs_model::BodyType::Integer(ty) if ty.bits == 64 => SlotWidth::W64,
+        mncs_model::BodyType::Sequence { .. }
+        | mncs_model::BodyType::Vector { .. }
+        | mncs_model::BodyType::Mask { .. } => SlotWidth::W64,
         _ => SlotWidth::W32,
     }
 }
@@ -165,14 +168,28 @@ fn slot_width_registry(
     semantic_type: &str,
     registry: &BTreeMap<String, mncs_model::BackendValueContract>,
 ) -> SlotWidth {
-    if registry.values().any(|contract| match contract {
-        mncs_model::BackendValueContract::Record { name, .. } => name == semantic_type,
-        _ => false,
-    }) {
-        return SlotWidth::W64;
+    if let Some(contract) = registry.get(semantic_type) {
+        match contract {
+            mncs_model::BackendValueContract::Record { .. }
+            | mncs_model::BackendValueContract::Sequence { .. }
+            | mncs_model::BackendValueContract::View { .. }
+            | mncs_model::BackendValueContract::Vector { .. }
+            | mncs_model::BackendValueContract::Mask { .. } => return SlotWidth::W64,
+            mncs_model::BackendValueContract::Finite { payloads, .. } => {
+                return if finite_payloads_declare_payloads(payloads) {
+                    SlotWidth::W64
+                } else {
+                    SlotWidth::W32
+                };
+            }
+            mncs_model::BackendValueContract::Scalar { .. } => {}
+        }
     }
     match mncs_model::BodyType::from_semantic_name(semantic_type) {
         mncs_model::BodyType::Integer(ty) if ty.bits == 64 => SlotWidth::W64,
+        mncs_model::BodyType::Sequence { .. }
+        | mncs_model::BodyType::Vector { .. }
+        | mncs_model::BodyType::Mask { .. } => SlotWidth::W64,
         _ => SlotWidth::W32,
     }
 }
@@ -469,13 +486,33 @@ impl ArenaWriter {
                 self.put32(offset, *value as u32);
                 Ok(())
             }
-            // Exact-length sequences occupy their own cells and are
-            // referenced from this slot.
             Value::Sequence { values } => {
-                let element = match mncs_model::BodyType::from_semantic_name(declared_type) {
-                    mncs_model::BodyType::Sequence { element, .. } => element.semantic_name(),
-                    _ => inferred_element_type(values).to_owned(),
-                };
+                let (element, view_capacity) =
+                    match mncs_model::BodyType::from_semantic_name(declared_type) {
+                        mncs_model::BodyType::Sequence {
+                            element,
+                            bound: mncs_model::SequenceBound::UpTo(capacity),
+                        } => (element.semantic_name(), Some(capacity)),
+                        mncs_model::BodyType::Sequence { element, .. } => {
+                            (element.semantic_name(), None)
+                        }
+                        _ => (inferred_element_type(values).to_owned(), None),
+                    };
+                if let Some(capacity) = view_capacity {
+                    if values.len() > capacity as usize {
+                        return Err("view field exceeds its declared capacity".to_owned());
+                    }
+                    if values.is_empty() {
+                        self.put64(offset, pack_view(0, 0));
+                        return Ok(());
+                    }
+                    let cell = self.encode_sequence_typed(values, &element)?;
+                    self.put64(
+                        offset,
+                        pack_view(cell, u32::try_from(values.len()).unwrap_or(0)),
+                    );
+                    return Ok(());
+                }
                 let cell = self.encode_sequence_typed(values, &element)?;
                 self.put64(offset, cell);
                 Ok(())

@@ -1,0 +1,310 @@
+{
+  "schema_version": "0.1",
+  "name": "abi-nested-composites",
+  "cases": [
+    {
+      "id": "first-column",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.nested_composites", "function": "first_column" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              {
+                "record": {
+                  "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::Point::column%3Ai64%3Brow%3Ai64%3B",
+                  "name": "Point",
+                  "fields": [
+                    ["column", { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } }],
+                    ["row", { "integer": { "value": 7, "type": { "bits": 64, "signed": true } } }]
+                  ]
+                }
+              },
+              {
+                "record": {
+                  "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::Point::column%3Ai64%3Brow%3Ai64%3B",
+                  "name": "Point",
+                  "fields": [
+                    ["column", { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }],
+                    ["row", { "integer": { "value": 2, "type": { "bits": 64, "signed": true } } }]
+                  ]
+                }
+              }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 3, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "identity-points",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.nested_composites", "function": "identity_points" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              {
+                "record": {
+                  "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::Point::column%3Ai64%3Brow%3Ai64%3B",
+                  "name": "Point",
+                  "fields": [
+                    ["column", { "integer": { "value": -4, "type": { "bits": 64, "signed": true } } }],
+                    ["row", { "integer": { "value": 9, "type": { "bits": 64, "signed": true } } }]
+                  ]
+                }
+              },
+              {
+                "record": {
+                  "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::Point::column%3Ai64%3Brow%3Ai64%3B",
+                  "name": "Point",
+                  "fields": [
+                    ["column", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }],
+                    ["row", { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }]
+                  ]
+                }
+              }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "sequence": {
+          "values": [
+            {
+              "record": {
+                "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::Point::column%3Ai64%3Brow%3Ai64%3B",
+                "name": "Point",
+                "fields": [
+                  ["column", { "integer": { "value": -4, "type": { "bits": 64, "signed": true } } }],
+                  ["row", { "integer": { "value": 9, "type": { "bits": 64, "signed": true } } }]
+                ]
+              }
+            },
+            {
+              "record": {
+                "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::Point::column%3Ai64%3Brow%3Ai64%3B",
+                "name": "Point",
+                "fields": [
+                  ["column", { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }],
+                  ["row", { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }]
+                ]
+              }
+            }
+          ]
+        }
+      }]
+    },
+    {
+      "id": "nested-first",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.nested_composites", "function": "nested_first" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              { "sequence": { "values": [
+                { "integer": { "value": 11, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 12, "type": { "bits": 64, "signed": true } } }
+              ] } },
+              { "sequence": { "values": [
+                { "integer": { "value": 21, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 22, "type": { "bits": 64, "signed": true } } }
+              ] } }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 11, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "first-word-high-bit",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.nested_composites", "function": "first_word" },
+        "arguments": [{
+          "record": {
+            "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::WordWindow::words%3A%5Bu64%3B%202%5D%3B",
+            "name": "WordWindow",
+            "fields": [[
+              "words",
+              { "sequence": { "values": [
+                { "integer": { "value": 9223372036854775808, "type": { "bits": 64, "signed": false } } },
+                { "integer": { "value": 7, "type": { "bits": 64, "signed": false } } }
+              ] } }
+            ]]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 9223372036854775808, "type": { "bits": 64, "signed": false } } }]
+    },
+    {
+      "id": "view-first-column-empty",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.nested_composites", "function": "view_first_column" },
+        "arguments": [{ "sequence": { "values": [] } }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "view-first-column",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.nested_composites", "function": "view_first_column" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              {
+                "record": {
+                  "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::Point::column%3Ai64%3Brow%3Ai64%3B",
+                  "name": "Point",
+                  "fields": [
+                    ["column", { "integer": { "value": 42, "type": { "bits": 64, "signed": true } } }],
+                    ["row", { "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }]
+                  ]
+                }
+              }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 42, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "identity-nested",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.nested_composites", "function": "identity_nested" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              { "sequence": { "values": [
+                { "integer": { "value": 11, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 12, "type": { "bits": 64, "signed": true } } }
+              ] } },
+              { "sequence": { "values": [
+                { "integer": { "value": 21, "type": { "bits": 64, "signed": true } } },
+                { "integer": { "value": 22, "type": { "bits": 64, "signed": true } } }
+              ] } }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "sequence": {
+          "values": [
+            { "sequence": { "values": [
+              { "integer": { "value": 11, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 12, "type": { "bits": 64, "signed": true } } }
+            ] } },
+            { "sequence": { "values": [
+              { "integer": { "value": 21, "type": { "bits": 64, "signed": true } } },
+              { "integer": { "value": 22, "type": { "bits": 64, "signed": true } } }
+            ] } }
+          ]
+        }
+      }]
+    },
+    {
+      "id": "identity-window",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.nested_composites", "function": "identity_window" },
+        "arguments": [{
+          "record": {
+            "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::WordWindow::words%3A%5Bu64%3B%202%5D%3B",
+            "name": "WordWindow",
+            "fields": [[
+              "words",
+              { "sequence": { "values": [
+                { "integer": { "value": 9223372036854775808, "type": { "bits": 64, "signed": false } } },
+                { "integer": { "value": 7, "type": { "bits": 64, "signed": false } } }
+              ] } }
+            ]]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "record": {
+          "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::WordWindow::words%3A%5Bu64%3B%202%5D%3B",
+          "name": "WordWindow",
+          "fields": [[
+            "words",
+            { "sequence": { "values": [
+              { "integer": { "value": 9223372036854775808, "type": { "bits": 64, "signed": false } } },
+              { "integer": { "value": 7, "type": { "bits": 64, "signed": false } } }
+            ] } }
+          ]]
+        }
+      }]
+    },
+    {
+      "id": "view-window-empty-len",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.nested_composites", "function": "view_window_len" },
+        "arguments": [{
+          "record": {
+            "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::ViewWindow::words%3A%5Bu64%3B%20up_to%202%5D%3B",
+            "name": "ViewWindow",
+            "fields": [["words", { "sequence": { "values": [] } }]]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 0, "type": { "bits": 64, "signed": false } } }]
+    },
+    {
+      "id": "identity-view-window",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.nested_composites", "function": "identity_view_window" },
+        "arguments": [{
+          "record": {
+            "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::ViewWindow::words%3A%5Bu64%3B%20up_to%202%5D%3B",
+            "name": "ViewWindow",
+            "fields": [[
+              "words",
+              { "sequence": { "values": [
+                { "integer": { "value": 9223372036854775808, "type": { "bits": 64, "signed": false } } }
+              ] } }
+            ]]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "record": {
+          "type_identity": "mncs:0.2:record-type:examples.abi.nested_composites::ViewWindow::words%3A%5Bu64%3B%20up_to%202%5D%3B",
+          "name": "ViewWindow",
+          "fields": [[
+            "words",
+            { "sequence": { "values": [
+              { "integer": { "value": 9223372036854775808, "type": { "bits": 64, "signed": false } } }
+            ] } }
+          ]]
+        }
+      }]
+    }
+  ],
+  "properties": []
+}

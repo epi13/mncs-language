@@ -33,7 +33,9 @@ are total by type and whose round-trip laws are executable MNCS functions.
 Realization envelope: reference executors, research bytecode, portable WASM,
 C11, LLVM, and Cranelift realize sequence-typed and view-typed language-level
 signatures through canonical cells and packed view descriptors. Nested
-composite sequence elements remain unsupported.
+composite sequence elements (`[Record; N]`, nested exact sequences, records
+that store sequences) and logical `[bool; N]` windows are included.
+Sequences of masks or vectors remain refused.
 
 ## Branchless vectors and masks (Profile 0.8)
 

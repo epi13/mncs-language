@@ -1,0 +1,76 @@
+{
+  "schema_version": "0.1",
+  "name": "abi-bool-sequences",
+  "cases": [
+    {
+      "id": "identity4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.bool_sequences", "function": "identity4" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              { "boolean": { "value": true } },
+              { "boolean": { "value": false } },
+              { "boolean": { "value": true } },
+              { "boolean": { "value": true } }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{
+        "sequence": {
+          "values": [
+            { "boolean": { "value": true } },
+            { "boolean": { "value": false } },
+            { "boolean": { "value": true } },
+            { "boolean": { "value": true } }
+          ]
+        }
+      }]
+    },
+    {
+      "id": "count-true4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.bool_sequences", "function": "count_true4" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              { "boolean": { "value": true } },
+              { "boolean": { "value": false } },
+              { "boolean": { "value": true } },
+              { "boolean": { "value": true } }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "integer": { "value": 3, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "first-bool-false",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.abi.bool_sequences", "function": "first_bool" },
+        "arguments": [{
+          "sequence": {
+            "values": [
+              { "boolean": { "value": false } },
+              { "boolean": { "value": true } },
+              { "boolean": { "value": true } },
+              { "boolean": { "value": true } }
+            ]
+          }
+        }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": false } }]
+    }
+  ],
+  "properties": []
+}

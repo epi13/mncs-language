@@ -200,6 +200,8 @@ pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
             "bounded_sequences_internal",
             "bounded_views_internal",
             "sequence_or_view_boundary_crossing",
+            "nested_composite_sequence_elements",
+            "boolean_sequence_elements",
             "vector_or_mask_boundary_crossing",
             "sequence_traversal",
             "semantic_branchless_select",
@@ -216,7 +218,7 @@ pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
             "effects",
             "saturating_integer_above_bounded_width",
             "widening_integer_above_64_bits",
-            "nested_composite_sequence_elements",
+            "unbounded_sequences",
         ]
         .into_iter()
         .map(str::to_owned)
@@ -375,6 +377,8 @@ pub fn research_bytecode_capabilities() -> BackendCapabilityManifest {
             "integer_shifts",
             "bounded_sequences",
             "bounded_views",
+            "nested_composite_sequence_elements",
+            "boolean_sequence_elements",
             "sequence_traversal",
             "semantic_branchless_select",
             "semantic_integer_vectors",
