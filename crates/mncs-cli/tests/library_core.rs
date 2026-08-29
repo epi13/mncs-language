@@ -175,7 +175,7 @@ fn json_cursor_preserves_bounded_validity_across_executable_backends() {
             &example("execution/json-cursor-corpus.json"),
         );
         assert_eq!(code, Some(0), "{backend}: json cursor exit; {stderr}");
-        assert_value_agreement(backend, code, &result, &stderr, 4);
+        assert_value_agreement(backend, code, &result, &stderr, 11);
     }
 }
 
