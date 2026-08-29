@@ -53,7 +53,19 @@ fn trace_timing(stage: &str, started: Instant) {
     }
 }
 
+const CLI_WORKER_STACK_BYTES: usize = 8 * 1024 * 1024;
+
 fn main() -> ExitCode {
+    std::thread::Builder::new()
+        .name("mncs-cli".to_owned())
+        .stack_size(CLI_WORKER_STACK_BYTES)
+        .spawn(run_cli)
+        .expect("unable to start bounded CLI worker")
+        .join()
+        .unwrap_or_else(|_| ExitCode::from(101))
+}
+
+fn run_cli() -> ExitCode {
     let mut args = env::args().skip(1);
     let Some(command) = args.next() else {
         print_usage();
