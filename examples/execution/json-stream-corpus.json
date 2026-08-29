@@ -53,6 +53,122 @@
       },
       "expected": [{ "integer": { "value": -101, "type": { "bits": 64, "signed": true } } }],
       "expected_status": "returned"
+    },
+    {
+      "id": "incomplete-container",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_stream_probe", "function": "inspect" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 123 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": -1, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    },
+    {
+      "id": "multiple-roots",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_stream_probe", "function": "inspect" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 123 } }, { "byte": { "value": 125 } },
+          { "byte": { "value": 123 } }, { "byte": { "value": 125 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": -101, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    },
+    {
+      "id": "trailing-garbage",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_stream_probe", "function": "inspect" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 123 } }, { "byte": { "value": 125 } },
+          { "byte": { "value": 120 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": -101, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    },
+    {
+      "id": "valid-unicode-escape",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_stream_probe", "function": "inspect" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 34 } }, { "byte": { "value": 92 } },
+          { "byte": { "value": 117 } }, { "byte": { "value": 48 } },
+          { "byte": { "value": 48 } }, { "byte": { "value": 52 } },
+          { "byte": { "value": 49 } }, { "byte": { "value": 34 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    },
+    {
+      "id": "incomplete-unicode-escape",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_stream_probe", "function": "inspect" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 34 } }, { "byte": { "value": 92 } },
+          { "byte": { "value": 117 } }, { "byte": { "value": 48 } },
+          { "byte": { "value": 48 } }, { "byte": { "value": 52 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": -1, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    },
+    {
+      "id": "malformed-unicode-escape",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_stream_probe", "function": "inspect" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 34 } }, { "byte": { "value": 92 } },
+          { "byte": { "value": 117 } }, { "byte": { "value": 48 } },
+          { "byte": { "value": 48 } }, { "byte": { "value": 71 } },
+          { "byte": { "value": 49 } }, { "byte": { "value": 34 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": -101, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    },
+    {
+      "id": "unicode-escape-split-between-chunks",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_stream_probe", "function": "inspect_split" },
+        "arguments": [
+          { "sequence": { "values": [
+            { "byte": { "value": 34 } }, { "byte": { "value": 92 } },
+            { "byte": { "value": 117 } }, { "byte": { "value": 48 } },
+            { "byte": { "value": 48 } }
+          ] } },
+          { "sequence": { "values": [
+            { "byte": { "value": 52 } }, { "byte": { "value": 49 } },
+            { "byte": { "value": 34 } }
+          ] } }
+        ],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
     }
   ]
 }

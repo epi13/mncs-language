@@ -1452,7 +1452,7 @@ fn read_marshal(
             read_sequence_cell(runtime, address, element, *length)
         }
         MarshalTy::View { element, capacity } => {
-            let (offset, length) = crate::composite::unpack_view(address as u64);
+            let (raw_offset, length) = crate::composite::unpack_view(address as u64);
             if length > *capacity {
                 return Err(trap(
                     ExecutionStatus::RuntimeFailure,
@@ -1460,9 +1460,13 @@ fn read_marshal(
                 ));
             }
             if is_byte_marshal_ty(element) {
-                read_byte_view(runtime, offset as i64, length)
+                // Bit 0 is an internal representation marker for byte views
+                // derived from exact canonical-cell sequences. It is removed
+                // at the process boundary; external host descriptors remain
+                // ordinary low-offset/high-length values.
+                read_byte_view(runtime, (raw_offset & !1) as i64, length)
             } else {
-                read_sequence_cell(runtime, offset as i64, element, length)
+                read_sequence_cell(runtime, raw_offset as i64, element, length)
             }
         }
         MarshalTy::Vector { element, lanes } => {
@@ -2285,6 +2289,90 @@ mod tests {
                 value: 0xab,
                 ty: IntegerType {
                     bits: 32,
+                    signed: false,
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn host_buffer_export_returns_packed_capacity_and_offset() {
+        let mut module = WasmModule {
+            functions: vec![WasmFunction {
+                name: "probe".to_owned(),
+                params: Vec::new(),
+                results: vec![ValType::I64],
+                locals: Vec::new(),
+                body: vec![
+                    // Helper indices are stable because emit_alloc_helpers
+                    // appends them after this probe function.
+                    Instr::I32Const(64),
+                    Instr::Call(2),
+                    Instr::Drop,
+                    Instr::Call(3),
+                    Instr::I32Const(64),
+                    Instr::Call(1),
+                    Instr::I64ExtendI32U,
+                ],
+            }],
+            memory: Some(WasmMemory { min_pages: 1 }),
+            globals: vec![WasmGlobal {
+                valtype: ValType::I32,
+                mutable: true,
+                init: 8,
+            }],
+        };
+        crate::lower::emit_alloc_helpers(&mut module);
+        let decoded = decode_module(&encode_module(&module)).expect("decode host ABI module");
+        let execution = execute_function_typed(
+            &decoded,
+            "mncs_host_buffer",
+            &[ExecutionValue::Integer {
+                value: 64,
+                ty: IntegerType {
+                    bits: 32,
+                    signed: false,
+                },
+            }],
+            &[MarshalTy::Int(IntegerType {
+                bits: 32,
+                signed: false,
+            })],
+            &[MarshalTy::Int(IntegerType {
+                bits: 64,
+                signed: false,
+            })],
+            100,
+        )
+        .expect("execute host buffer ABI");
+        assert_eq!(
+            execution.returned,
+            vec![ExecutionValue::Integer {
+                value: (64_i128 << 32) | 8,
+                ty: IntegerType {
+                    bits: 64,
+                    signed: false,
+                },
+            }]
+        );
+        let recycled = execute_function_typed(
+            &decoded,
+            "probe",
+            &[],
+            &[],
+            &[MarshalTy::Int(IntegerType {
+                bits: 64,
+                signed: false,
+            })],
+            100,
+        )
+        .expect("execute host buffer reset");
+        assert_eq!(
+            recycled.returned,
+            vec![ExecutionValue::Integer {
+                value: 72,
+                ty: IntegerType {
+                    bits: 64,
                     signed: false,
                 },
             }]

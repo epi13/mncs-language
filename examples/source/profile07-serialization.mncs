@@ -58,8 +58,13 @@ fn fingerprint_header(header: Header) -> (result: u64) {
 fn header_roundtrip(magic: byte, major: u16, len: u32) -> (result: bool) {
     let header: Header = Header { magic: magic, marker: 77, version_major: major, payload_len: len };
     let encoded: [byte; 8] = encode_header(header);
-    let window: [byte; up_to 8] = encoded[0..4];
-    let prefix_ok: bool = (window.len == 4) && (window[0] == magic) && (window[1] == 77);
+    // Start at a non-zero element so exact byte sequences exercise their
+    // canonical eight-byte cell stride when projected into a byte view.
+    let window: [byte; up_to 8] = encoded[1..5];
+    let prefix_ok: bool = (window.len == 4)
+        && (window[0] == 77)
+        && (window[1] == (major / 256) as byte)
+        && (window[2] == (major % 256) as byte);
     let decoded_ok: bool = match decode_header(encoded) {
         Decoded.Ok { header: decoded } =>
             (decoded.payload_len == len) && (decoded.version_major == major),

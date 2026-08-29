@@ -37,6 +37,12 @@ composite sequence elements (`[Record; N]`, nested exact sequences, records
 that store sequences) and logical `[bool; N]` windows are included.
 Sequences of masks or vectors remain refused.
 
+Portable-WASM modules with composite memory export the typed
+`mncs_host_buffer(i32) -> i64` / `mncs_host_buffer_reset()` boundary. The
+descriptor carries `offset` in low32 and reserved `capacity` in high32; reset
+recycles compiler-owned temporary allocations after a host call while leaving
+the reserved input region intact.
+
 ## Branchless vectors and masks (Profile 0.8)
 
 `core/vector.v1` and `core/mask.v1` expose reusable bounded integer-vector
@@ -66,7 +72,7 @@ resolution provenance.
 | `core/result.mncs` | `mncs.core.result.v1` (Profile 0.6) | the standard Result shape with real reason payloads: `Ok { value }`, `Err { reason }`, `divide`, `bounded_divide`, `value_or`, `reason_of`; exhaustive matching with payload binders |
 | `core/sequences.mncs` | `mncs.core.sequences.v1` (Profiles 0.8/0.10) | bounded folds, membership, counting, prefix/suffix views, generic exact-sequence and empty-view helpers over `N: Nat`, reverse, extrema, find-index, equality, functional put, unsigned `u64` identity; sequence- and view-typed signatures |
 | `std/json.mncs` | `mncs.std.json.v1` (Profile 0.10) | bounded syntax scanner over a 64-byte byte view for JSON objects, arrays, strings, numbers, literals, whitespace, nesting, separators, control bytes, and escapes; scalar status/summary contract |
-| `std/json_stream.mncs` | `mncs.std.json_stream.v1` (Profile 0.10) | scalar structural stream state for feeding larger documents as <=64-byte views; validates quotes, escape introducers, control bytes, matched delimiters, and bounded nesting |
+| `std/json_stream.mncs` | `mncs.std.json_stream.v1` (Profile 0.10) | scalar structural stream state for feeding larger documents as <=64-byte views; validates quotes, four-digit Unicode escapes, control bytes, matched delimiters, bounded nesting, and one closed root |
 | `std/json_projection.mncs` | `mncs.std.json_projection.v1` (Profile 0.10) | bounded raw key/member projections over <=64-byte views with <=32-byte target windows; escaped text is validated by the scanner but is not decoded by this projection layer |
 | `core/bytes.mncs` | `mncs.core.bytes.v1` (Profile 0.7) | byte bitwise/shift/order, folding fingerprint, nibble split, ASCII classifiers, wrapping checksum |
 | `core/numeric.mncs` | `mncs.core.numeric.v1` (Profile 0.8) | wrapping 4-lane sum/mean/centroid and L2-squared; vector kernels live in `vector.v1` |
@@ -125,8 +131,8 @@ see `docs/source-profile-0.6.md`.
 | mask | 13-case mask-only ABI corpus met on all five executable backends | same | same |
 | partition | 2-case corpus returned; exact-cost status remains `UNKNOWN` | not exercised | not exercised |
 | ansi consumer probe | 7-case corpus returned; exact-cost status remains `UNKNOWN` | not exercised | not exercised |
-| `std/json` bounded scanner | 3-case corpus returned; status remains `UNKNOWN` for unresolved obligations | same | source-level bounded probe |
-| `std/json_stream` structural stream | 3-case corpus returned; status remains `UNKNOWN` for unresolved obligations | same | source-level bounded probe |
+| `std/json` bounded scanner | expanded delimiter/number corpus; status remains `UNKNOWN` for unresolved obligations | same | source-level bounded probe |
+| `std/json_stream` structural stream | expanded root/unicode corpus; status remains `UNKNOWN` for unresolved obligations | same | source-level bounded probe |
 | `std/json_projection` raw projections | 1-case corpus returned; status remains `UNKNOWN` for unresolved obligations | same | source-level bounded probe |
 
 The linked `status` consumer now executes on both reference bytecode and
