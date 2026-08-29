@@ -1,53 +1,90 @@
-# Atlas JSON/WASM vertical slice — 2026-08
+# Atlas JSON/WASM typed-model slice — 2026-08
 
-This record captures the first real browser-facing consumer of the bounded
+This record captures the second browser-facing consumer of the bounded
 sequence/view and portable-WASM work in `mncs-language`. The companion Atlas
-checkout owns the page and application adapter; this repository owns the
+checkout owns the page and thin host adapter; this repository owns the
 language, compiler, backend, and reusable standard-library substrate.
 
-## Scope
+## Scope and authority
 
-The slice does not replace the Atlas production site. It adds an explicitly
-experimental page that fetches `atlas.json` as bytes, writes 64-byte views into
-WASM memory, and asks MNCS-produced modules for scalar observations:
+The slice remains explicitly experimental. It does not replace the Atlas
+production site, change conformance, or make the non-normative Atlas an
+authority. The experimental page fetches `atlas.json` as bytes, validates the
+structural stream, feeds 64-byte host views to MNCS/WASM, reconstructs a
+bounded typed `AtlasModel`, obtains a structured `RenderPlan`, and applies
+that plan through safe browser DOM operations.
 
-- a structural JSON stream result (`1` for complete, `-1` for incomplete,
-  `-101` for malformed);
-- raw-key/member projections for the five maturity values and relationship
-  `from` fields;
-- a raw maturity-field count.
-
-HTML/CSS remain the presentation shell. JavaScript owns fetch, linear-memory
-writes, chunk scheduling, and DOM rendering. It does not call `JSON.parse` or
-`Response.json()`. The production Atlas and its existing `site/assets/app.js`
-remain unchanged as the default path, with the experimental page retaining a
-visible static fallback if either module or the data fails.
+The current Atlas schema is bounded in this artifact at fifteen project
+records, nineteen relationship records, a twelve-level JSON container stack,
+and a 24 KiB model input. Text is represented as borrowed spans into the
+original input, so the model does not materialize a JSON DOM or copy every
+string into an unbounded heap.
 
 ## Reusable language work
 
-The Atlas pressure generalized into three MNCS standard-library modules:
+The Atlas pressure generalized into these MNCS standard-library modules:
 
+- `library/std/text_view.mncs` — `TextView { start, length, encoded,
+  utf8_valid }`, fixed-window key matching, and explicit decodability flags.
+- `library/std/json_cursor.mncs` — a streaming structural cursor with
+  absolute byte position, container events, string start/end spans, bounded
+  raw key bytes, JSON escape/unicode tracking, a twelve-level stack, and basic
+  UTF-8 lead/continuation validation. Unknown keys longer than the 16-byte
+  matcher window saturate instead of invalidating a document.
+- `library/std/json_stream.mncs` — the existing scalar structural gate for
+  complete JSON streams, with quoted-string/escape state, four-digit Unicode
+  escape tracking, control-byte rejection, matched delimiters, a twelve-level
+  bounded stack, and one-root/trailing-byte rejection. The Atlas host runs it
+  before accepting the typed model result.
+- `library/std/json_projection.mncs` — retained as the earlier raw scalar
+  projection witness and comparison point. It exposes exact raw key/value
+  projections over 64-byte views with 32-byte target windows; escaped text is
+  deliberately not decoded here.
 - `library/std/json.mncs` — a bounded complete-input JSON scanner covering
   objects, arrays, strings, numbers, literals, whitespace, separators,
   control-byte rejection, nesting, and JSON escapes. It reports a scalar
   summary/status rather than pretending to be a general heap-backed JSON DOM.
-- `library/std/json_stream.mncs` — a scalar stream envelope for larger input,
-  with quoted-string/escape state, four-digit Unicode escape tracking,
-  control-byte rejection, matched object and array delimiters, a twelve-level
-  bounded container stack, and one-root/trailing-byte rejection.
-- `library/std/json_projection.mncs` — exact raw key/value projections over
-  64-byte views with 32-byte target windows. Escaped text is deliberately not
-  decoded here; lexical validation and text decoding are separate concerns.
 
-The modules are linked by the normal Profile 0.6 import resolver and consumed
-by Atlas adapters; no parser implementation was copied into the Atlas repo.
-The committed corpora cover valid scalars, nested empty values, malformed
-closes, truncation/incomplete state, escapes, and a schema-shaped projection.
+The model pressure also fixed two language/backend gaps:
 
-## Backend and ABI pressure
+1. local records can now appear inside bounded record fields such as
+   `[Project; 15]`; the compiler seeds local record declarations into the
+   provisional type namespace before resolving record fields;
+2. portable WASM record lowering now distinguishes an eight-byte canonical
+   slot from its low-32-bit cell-reference payload. Nested record/sequence
+   fields no longer emit an invalid `i64.load`/`i32.local` or
+   `i64.store`/`i32.local` pairing.
+3. portable WASM checked i64 multiplication now uses guarded quotient checks,
+   including the signed `MIN * -1` case, instead of rejecting the bounded
+   cursor's generated index arithmetic as `CGN302`.
 
-The portable WASM backend gained the minimum host-facing behavior required by
-the experiment:
+Composite modules use a bounded 512-page (32 MiB) arena in this experiment.
+This is an implementation budget, not a claim of unbounded storage safety;
+the allocator still traps when the fixed memory is exhausted and the Atlas
+host rejects inputs above the model's declared 24 KiB bound.
+
+## Typed model and render boundary
+
+`mncs-atlas/mncs/atlas-model.mncs` owns schema-shaped meaning. Its
+`AtlasModel` contains top-level text spans, a fixed `[Project; 15]`, project
+and relationship counts, five maturity buckets, validity, and completion.
+Its `RenderPlan` contains fixed render nodes. Node operations are:
+
+| Operation | Meaning | Targets |
+| --- | --- | --- |
+| `1` | append card from text spans and maturity code | project grid or status grid |
+| `2` | clear a render target | project grid or status grid |
+| `3` | render summary metrics | summary surface |
+
+The browser reads the canonical composite-cell ABI from the render-plan
+pointer. It decodes `TextView` spans, validates external repository URLs to
+HTTP(S), creates elements, and assigns `textContent`; it does not use
+`JSON.parse`, `Response.json()`, or `innerHTML` for the experimental path.
+Maturity labels/classes come from static legend data in the page, leaving the
+MNCS model responsible for numeric classification and the host responsible
+only for DOM presentation.
+
+## Existing host ABI retained by the slice
 
 - modules with memory now export it as `memory`, and the decoder accepts the
   function plus memory export forms while rejecting unsupported export kinds;
@@ -76,62 +113,70 @@ addresses remain aligned and use the ordinary low-offset/high-length ABI.
 
 ## Observed executions
 
-All results below are bounded observations. `UNKNOWN` is retained when the
-experiment has unresolved compiler obligations; it is not upgraded because
-the returned corpus values look right.
+All results are bounded observations. `UNKNOWN` is retained when compiler or
+independent-equivalence obligations remain unresolved.
 
-| Experiment | Corpus observation | Artifact |
+| Experiment | Observation | Artifact |
 | --- | --- | --- |
+| Atlas scan / portable WASM + Node | 20,413 bytes in 319 chunks; result `1` | 6,658 bytes; SHA-256 recorded in the generated Atlas manifest |
+| Atlas typed model / portable WASM + Node | 15 projects, 19 relationships, 33 render nodes, valid and complete | 53,066 bytes; 512 memory pages; SHA-256 recorded in the generated Atlas manifest |
+| Atlas model corpus | one-project typed probe expectation met | status remains `UNKNOWN` |
+| JSON cursor / five executable backends | all five realizations agree on complete, incomplete-root, long-key, and malformed-UTF-8 witnesses | status remains `UNKNOWN` because compiler obligations remain |
 | `json-stream-probe` / portable WASM | 10/10 expectations met across root, Unicode, and split-chunk cases; status `UNKNOWN` while unresolved obligations remain | final source probe remains bounded/research-only |
 | `json-probe` / portable WASM | 7/7 focused added number cases met; status `UNKNOWN` while unresolved obligations remain | final source probe remains bounded/research-only |
-| Atlas scan artifact / native Node host | 20,413 bytes in 319 chunks; result `1`; host region `{offset:8, capacity:64}` | 6,657 bytes; SHA-256 `fcca761e6ef4d4b268232b55ebff007a6a521f919c05ede5c86d4c874cf67998` |
-| Atlas projection artifact / native Node host | `[16, 4, 5, 4, 1, 1, 19]`; one module instance; host region `{offset:8, capacity:64}` | 10,760 bytes; SHA-256 `ebe9a18522cef05c1cf76a9c173465762f83762ab4800d9f8df40710fb38f0c6` |
+| Atlas scan artifact / native Node host | 20,413 bytes in 319 chunks; result `1`; host region `{offset:8, capacity:64}` | 6,658 bytes; SHA-256 recorded in the generated Atlas manifest |
+| Atlas projection artifact / native Node host | `[16, 4, 5, 4, 1, 1, 19]`; one module instance; host region `{offset:8, capacity:64}` | 10,761 bytes; SHA-256 recorded in the generated Atlas manifest |
 
-The first projection value is a raw count of `maturity` keys, including the
-one documentation link in the machine map's top-level metadata. The page calls
-this “Maturity fields” rather than claiming it is a semantic project count.
-The remaining values correspond to the five project maturity counts and the
-19 relationship `from` fields in the current Atlas map.
+The current typed model's maturity distribution is `[4, 5, 4, 1, 1]` in
+the model's fixed order: experimental, research, active infrastructure,
+incubating, orientation.
 
 ## Joern graph evidence
 
-The required focused query was run before and after the edits:
+The graph-sensitive workflow was run before and after source edits. Baseline
+snapshots are stored under each checkout's ignored `.joern-agent/` directory.
+The focused language query was run over `crates`, and the Atlas JavaScript
+query was run over `site/assets` after the initial two-path parse attempt was
+rejected by Joern's one-input CLI contract.
+
+Representative commands:
 
 ```text
-joern-parse --language rust -o /tmp/mncs-language-wasm-before-20260828.cpg crates
-joern --script /tmp/mncs-wasm-vertical-slice.sc \
-  --param cpgFile=/tmp/mncs-language-wasm-before-20260828.cpg --nocolors
+joern-parse --language rust -o /tmp/mncs-language-baseline-20260829.cpg crates
+joern --script scripts/joern/source-vertical-slice.sc \
+  --param cpgFile=/tmp/mncs-language-baseline-20260829.cpg --nocolors
 
-joern-parse --language rust -o /tmp/mncs-language-wasm-final3-20260828.cpg crates
-joern --script /tmp/mncs-wasm-vertical-slice.sc \
-  --param cpgFile=/tmp/mncs-language-wasm-final3-20260828.cpg --nocolors
+joern-parse --language rust -o /tmp/mncs-language-post-20260829-v2.cpg crates
+joern --script scripts/joern/source-vertical-slice.sc \
+  --param cpgFile=/tmp/mncs-language-post-20260829-v2.cpg --nocolors
+
+joern-parse --language javascript -o /tmp/mncs-atlas-post-20260829.cpg site/assets
 ```
 
-Both snapshots retain one `encode_module`, `decode_module`, and
-`emit_alloc_helpers` method, with `lower_selected_ssa` as caller. Encoder
-control counts remain `(IF,2),(WHILE,1)`; decoder counts remain
-`(IF,3),(WHILE,1)`; allocator-helper counts remain `(IF,2),(WHILE,2)`.
-The query also retains the byte-oriented memory boundary calls. Joern reports
-the same CFG fallback warnings for Rust `break`/`continue`. Its current Rust
-frontend does not expose the `decode_exports` `match` as a control structure in
-this query, so that result is an analysis limitation, not evidence that the
-branch is absent.
+The language focused slice retains the compiler/backend call boundary and
+the expected control-flow counts for module encoding, decoding, lowering, and
+allocation helpers. Joern reports the known Rust `break`/`continue` CFG
+warnings. Its JavaScript frontend is a structural reachability observation,
+not a browser semantic proof; it does not prove DOM safety or WebAssembly
+runtime validity. The original Atlas two-file parse command failed because
+`joern-parse` accepts one path per invocation; this limitation is recorded
+rather than treated as a clean query result.
 
-## Remaining blockers
+## Remaining cutover blockers
 
-This is not yet a production web runtime. The full Atlas card/status renderer,
-navigation state, journal enhancement, formatting, DOM command model, UTF-8
-decoding, and browser event/fetch host protocol remain HTML/CSS/JavaScript.
-Python remains the repository integrity and Journal Maintainer implementation.
-The current portable-WASM contract is a research execution envelope, and its
-unresolved obligations keep these experiments `UNKNOWN`. Before a default-site
-switch, MNCS still needs richer structured return or render-command values,
-independent backend/runtime validation, and a larger corpus including
-malformed/truncated Atlas data and text/UTF-8 cases.
+This is not yet a production web runtime. The production `/` path remains the
+static/progressive-enhancement Atlas and its existing `app.js`; navigation,
+journal enhancement, formatting, and the general browser event/fetch protocol
+remain HTML/CSS/JavaScript. The experimental path still needs richer generic
+text/DOM/event host contracts, strict Unicode scalar validation,
+malformed/truncated full-Atlas differential corpora, independent equivalence
+for the full Atlas model, and a formal cutover review. The checked-in manifest
+therefore leaves artifact validation `UNKNOWN` even though build-time WASM
+magic, SHA-256, corpus checks, and browser QA pass.
 
 ## Reproduction
 
-From the sibling checkouts, build the checked-in Atlas artifacts with:
+From sibling checkouts:
 
 ```bash
 cd mncs-atlas
@@ -140,4 +185,4 @@ python3 -m http.server 8000 --directory site
 ```
 
 Open `/experimental-atlas.html`. The page is intentionally `noindex`; the
-canonical `/` path continues to use the static/progressive-enhancement site.
+canonical `/` path continues to use the static guide.

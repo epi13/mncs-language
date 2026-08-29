@@ -61,7 +61,13 @@ pub fn lower_module(
                     mutable: true,
                     init: 8,
                 }],
-                memory: Some(crate::wasm::WasmMemory { min_pages: 16 }),
+                // Composite values are immutable cells. A bounded streaming
+                // consumer may retain one state cell per input step, so the
+                // old 1 MiB arena was too small for realistic byte streams
+                // even though every individual sequence bound was finite.
+                // Keep the artifact bounded while giving host-buffer-based
+                // applications a documented 32 MiB arena budget.
+                memory: Some(crate::wasm::WasmMemory { min_pages: 512 }),
                 functions,
             }
         } else {
@@ -103,32 +109,29 @@ impl CompositeInfo {
         // Records and boxed finite variants occupy referenced cells; bare
         // tags and narrow scalars stay in 32-bit slots.
         let width_of = |semantic_type: &str| -> SlotWidth {
+            // Canonical cells reserve eight bytes per field, but a nested
+            // record/sequence/vector value is an i32 cell reference in the
+            // portable WASM locals. The store/load width below is therefore
+            // W32; the remaining slot bytes stay padding.
             if program
                 .record_types
                 .iter()
                 .any(|record| record.name == semantic_type)
             {
-                return SlotWidth::W64;
+                return SlotWidth::W32;
             }
-            if let Some(finite) = program
+            if program
                 .finite_types
                 .iter()
-                .find(|finite| finite.name == semantic_type)
+                .any(|finite| finite.name == semantic_type)
             {
-                let boxed = finite
-                    .variants
-                    .iter()
-                    .any(|variant| !variant.payload.is_empty());
-                return if boxed {
-                    SlotWidth::W64
-                } else {
-                    SlotWidth::W32
-                };
+                return SlotWidth::W32;
             }
             match mncs_model::BodyType::from_semantic_name(semantic_type) {
                 mncs_model::BodyType::Integer(ty) if ty.bits == 64 => SlotWidth::W64,
-                // Packed view descriptors and masks occupy a full i64 word.
-                // Exact sequences and vectors are WASM cell pointers (i32).
+                // Packed view descriptors and masks are full i64 values.
+                // Exact sequences and vectors are i32 cell references, like
+                // nested records above.
                 mncs_model::BodyType::Sequence {
                     bound: mncs_model::SequenceBound::UpTo(_),
                     ..
@@ -1755,7 +1758,7 @@ fn emit_checked(
         ValType::I64 if ty.signed => {
             emit_signed_i64_overflow_trap(body, left, right, dest, operator)
         }
-        ValType::I64 => emit_unsigned_i64_overflow_trap(body, left, dest, operator),
+        ValType::I64 => emit_unsigned_i64_overflow_trap(body, left, right, dest, operator),
     }
 }
 
@@ -1847,10 +1850,40 @@ fn emit_signed_i64_overflow_trap(
     dest: u32,
     operator: &str,
 ) -> Result<(), String> {
+    if operator == "mul" {
+        // For l == 0 the product cannot overflow. For l == -1 the only
+        // overflowing product is MIN * -1; all other nonzero divisors are
+        // safe for the quotient test because MIN / -1 is the sole trapping
+        // signed i64 division case.
+        body.push(Instr::LocalGet(left));
+        body.push(Instr::I64Eqz);
+        body.push(Instr::If);
+        body.push(Instr::Else);
+        body.push(Instr::LocalGet(left));
+        body.push(Instr::I64Const(-1));
+        body.push(Instr::I64Eq);
+        body.push(Instr::If);
+        body.push(Instr::LocalGet(right));
+        body.push(Instr::I64Const(i64::MIN));
+        body.push(Instr::I64Eq);
+        body.push(Instr::If);
+        body.push(Instr::Unreachable);
+        body.push(Instr::End);
+        body.push(Instr::Else);
+        body.push(Instr::LocalGet(dest));
+        body.push(Instr::LocalGet(left));
+        body.push(Instr::I64DivS);
+        body.push(Instr::LocalGet(right));
+        body.push(Instr::I64Ne);
+        body.push(Instr::If);
+        body.push(Instr::Unreachable);
+        body.push(Instr::End);
+        body.push(Instr::End);
+        body.push(Instr::End);
+        return Ok(());
+    }
     if operator != "add" && operator != "sub" {
-        return Err(
-            "checked i64 multiply is unsupported on the portable WASM MVP backend".to_owned(),
-        );
+        return Err(format!("checked i64 operator {operator} is unsupported"));
     }
     // (a ^ b) >= 0 && (a ^ result) < 0 for add; invert b for sub.
     body.push(Instr::LocalGet(left));
@@ -1877,6 +1910,7 @@ fn emit_signed_i64_overflow_trap(
 fn emit_unsigned_i64_overflow_trap(
     body: &mut Vec<Instr>,
     left: u32,
+    right: u32,
     dest: u32,
     operator: &str,
 ) -> Result<(), String> {
@@ -1897,11 +1931,28 @@ fn emit_unsigned_i64_overflow_trap(
             body.push(Instr::Unreachable);
             body.push(Instr::End);
         }
+        "mul" => {
+            // A zero multiplier cannot overflow. Otherwise, the wrapped
+            // product divided by the right operand must recover the left
+            // operand; unsigned division is total for every nonzero divisor.
+            body.push(Instr::LocalGet(right));
+            body.push(Instr::I64Eqz);
+            body.push(Instr::If);
+            body.push(Instr::Else);
+            body.push(Instr::LocalGet(dest));
+            body.push(Instr::LocalGet(right));
+            body.push(Instr::I64DivU);
+            body.push(Instr::LocalGet(left));
+            body.push(Instr::I64Ne);
+            body.push(Instr::If);
+            body.push(Instr::Unreachable);
+            body.push(Instr::End);
+            body.push(Instr::End);
+        }
         _ => {
-            return Err(
-                "checked unsigned i64 multiply is unsupported on the portable WASM MVP backend"
-                    .to_owned(),
-            )
+            return Err(format!(
+                "checked unsigned i64 operator {operator} is unsupported"
+            ))
         }
     }
     Ok(())

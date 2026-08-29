@@ -1,0 +1,241 @@
+mncs 0.10;
+
+// mncs.std.json_cursor — bounded JSON token-boundary cursor.
+//
+// Structural validity remains owned by json.v1/json_stream.v1. This cursor is
+// the reusable streaming bridge for schema-aware consumers: it preserves the
+// absolute byte span of each string, the raw key bytes for bounded matching,
+// container depth, and a small event code. It never materializes a JSON DOM.
+//
+// Event codes (one is exposed for the byte just consumed):
+//   1 key started, 2 key closed, 3 value string started, 4 value string closed
+//   5 object opened, 6 array opened, 7 object closed, 8 array closed
+//   9 colon, 10 object comma
+module mncs.std.json_cursor.v1;
+
+record Cursor {
+    position: u64,
+    depth: byte,
+    stack: u64,
+    expect_key: bool,
+    in_string: bool,
+    string_is_key: bool,
+    escaped: bool,
+    unicode_remaining: byte,
+    utf8_remaining: byte,
+    valid: bool,
+    event: byte,
+    string_start: u64,
+    string_end: u64,
+    key: [byte; 16],
+    key_length: u64,
+    pending_key: bool,
+    root_seen: bool
+}
+
+fn zero_key() -> (result: [byte; 16]) {
+    return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+}
+
+fn init() -> (result: Cursor) {
+    return Cursor {
+        position: 0,
+        depth: 0,
+        stack: 0,
+        expect_key: false,
+        in_string: false,
+        string_is_key: false,
+        escaped: false,
+        unicode_remaining: 0,
+        utf8_remaining: 0,
+        valid: true,
+        event: 0,
+        string_start: 0,
+        string_end: 0,
+        key: zero_key(),
+        key_length: 0,
+        pending_key: false,
+        root_seen: false
+    };
+}
+
+fn stack_weight(depth: u64) -> (result: u64) {
+    if depth == 0 { return 1; }
+    if depth == 1 { return 4; }
+    if depth == 2 { return 16; }
+    if depth == 3 { return 64; }
+    if depth == 4 { return 256; }
+    if depth == 5 { return 1024; }
+    if depth == 6 { return 4096; }
+    if depth == 7 { return 16384; }
+    if depth == 8 { return 65536; }
+    if depth == 9 { return 262144; }
+    if depth == 10 { return 1048576; }
+    return 4194304;
+}
+
+fn top(state: Cursor) -> (result: byte) {
+    if state.depth == 0 { return 0; }
+    return ((state.stack / stack_weight((state.depth as u64) - 1)) % 4) as byte;
+}
+
+fn push(state: Cursor, kind: byte, event: byte, expect_key: bool) -> (result: Cursor) {
+    if state.depth >= 12 {
+        return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
+    }
+    let weight: u64 = stack_weight(state.depth as u64);
+    return Cursor {
+        ..state,
+        root_seen: state.root_seen || state.depth == 0,
+        depth: ((state.depth as i64) + 1) as byte,
+        stack: state.stack +% (kind as u64) *% weight,
+        expect_key: expect_key,
+        event: event,
+        position: state.position + 1
+    };
+}
+
+fn pop(state: Cursor, kind: byte, event: byte) -> (result: Cursor) {
+    if state.depth == 0 || top(state) != kind {
+        return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
+    }
+    let weight: u64 = stack_weight((state.depth as u64) - 1);
+    return Cursor {
+        ..state,
+        depth: ((state.depth as i64) - 1) as byte,
+        stack: state.stack -% (kind as u64) *% weight,
+        expect_key: false,
+        event: event,
+        position: state.position + 1
+    };
+}
+
+fn is_hex(value: byte) -> (result: bool) {
+    let n: i64 = value as i64;
+    return (n >= 48 && n <= 57) || (n >= 65 && n <= 70) || (n >= 97 && n <= 102);
+}
+
+fn is_utf8_continuation(value: byte) -> (result: bool) {
+    let n: i64 = value as i64;
+    return n >= 128 && n <= 191;
+}
+
+fn utf8_lead_need(value: byte) -> (result: byte) {
+    let n: i64 = value as i64;
+    if n >= 194 && n <= 223 { return 1; }
+    if n >= 224 && n <= 239 { return 2; }
+    if n >= 240 && n <= 244 { return 3; }
+    return 0;
+}
+
+fn string_byte(state: Cursor, value: byte) -> (result: Cursor) {
+    if state.unicode_remaining > 0 {
+        if is_hex(value) {
+            return Cursor { ..state, unicode_remaining: ((state.unicode_remaining as i64) - 1) as byte, position: state.position + 1 };
+        }
+        return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
+    }
+    if state.escaped {
+        if value == 117 {
+            return Cursor { ..state, escaped: false, unicode_remaining: 4, position: state.position + 1 };
+        }
+        if value == 34 || value == 92 || value == 47 || value == 98 || value == 102 || value == 110 || value == 114 || value == 116 {
+            return Cursor { ..state, escaped: false, position: state.position + 1 };
+        }
+        return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
+    }
+    if value == 92 {
+        return Cursor { ..state, escaped: true, position: state.position + 1 };
+    }
+    if value == 34 {
+        if state.utf8_remaining != 0 {
+            return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
+        }
+        return Cursor {
+            ..state,
+            in_string: false,
+            expect_key: false,
+            pending_key: state.string_is_key,
+            event: select(state.string_is_key, 2, 4),
+            string_end: state.position,
+            position: state.position + 1
+        };
+    }
+    if (value as i64) < 32 {
+        return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
+    }
+    if state.utf8_remaining > 0 {
+        if is_utf8_continuation(value) {
+            return Cursor { ..state, utf8_remaining: ((state.utf8_remaining as i64) - 1) as byte, position: state.position + 1 };
+        }
+        return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
+    }
+    let need: byte = utf8_lead_need(value);
+    if (value as i64) >= 128 && need == 0 {
+        return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
+    }
+    let key_position: u64 = state.key_length;
+    if state.string_is_key {
+        if key_position >= 16 {
+            // Key matching is deliberately bounded, but unknown JSON keys
+            // must not make the whole document invalid merely because they
+            // exceed the matcher window. Keep the saturated length so no
+            // bounded target can accidentally match this key.
+            return Cursor { ..state, position: state.position + 1 };
+        }
+        let updated_key: [byte; 16] = replace(state.key, key_position, value);
+        return Cursor {
+            ..state,
+            key: updated_key,
+            key_length: key_position + 1,
+            utf8_remaining: need,
+            position: state.position + 1
+        };
+    }
+    return Cursor { ..state, utf8_remaining: need, position: state.position + 1 };
+}
+
+fn feed_byte(state: Cursor, value: byte) -> (result: Cursor) {
+    let clean: Cursor = Cursor { ..state, event: 0, pending_key: false };
+    if select(state.valid, false, true) { return Cursor { ..clean, position: state.position + 1 }; }
+    if state.in_string { return string_byte(clean, value); }
+    if value == 34 {
+        let key_string: bool = state.expect_key && top(state) == 1;
+        return Cursor {
+            ..clean,
+            in_string: true,
+            string_is_key: key_string,
+            escaped: false,
+            unicode_remaining: 0,
+            utf8_remaining: 0,
+            string_start: state.position + 1,
+            string_end: state.position,
+            key: zero_key(),
+            key_length: 0,
+            event: select(key_string, 1, 3),
+            position: state.position + 1
+        };
+    }
+    if value == 123 { return push(clean, 1, 5, true); }
+    if value == 91 { return push(clean, 2, 6, false); }
+    if value == 125 { return pop(clean, 1, 7); }
+    if value == 93 { return pop(clean, 2, 8); }
+    if value == 58 {
+        return Cursor { ..clean, expect_key: false, position: state.position + 1, event: 9 };
+    }
+    if value == 44 && top(state) == 1 {
+        return Cursor { ..clean, expect_key: true, position: state.position + 1, event: 10 };
+    }
+    return Cursor { ..clean, position: state.position + 1 };
+}
+
+fn feed_chunk(state: Cursor, input: [byte; up_to 64]) -> (result: Cursor) {
+    iterate i over input carrying current: Cursor = state {
+        next current = feed_byte(current, input[i]);
+    }
+    return current;
+}
+
+fn is_valid(state: Cursor) -> (result: bool) {
+    return state.valid && state.root_seen && state.depth == 0 && select(state.in_string, false, true) && state.utf8_remaining == 0 && state.unicode_remaining == 0;
+}
