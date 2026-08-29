@@ -115,9 +115,9 @@ text/serialization boundary. Text is a borrowed byte span with explicit
 encoding and UTF-8 validity flags; the cursor exposes bounded JSON structure,
 string/key events, absolute spans, and a twelve-level container stack. It does
 not allocate a DOM or decide application schema meaning. Unknown keys outside
-the fixed 16-byte matcher window remain structurally valid, while malformed
+the fixed 32-byte matcher window remain structurally valid, while malformed
 UTF-8 lead/continuation sequences are rejected. Schema consumers such as the
-experimental Atlas model own their field classification and render intent.
+Atlas model own their field classification and render intent.
 
 Portable library semantics should remain independent from their physical representation. A string, sequence, map, record collection, or encoded value must not be forced into one physical layout merely because the first implementation used it.
 

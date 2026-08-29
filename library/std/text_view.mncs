@@ -47,3 +47,16 @@ fn matches16(value: [byte; 16], value_length: u64, target: [byte; 16], target_le
     }
     return same;
 }
+
+// The wider matcher keeps schema consumers from having to classify a known
+// field as unknown merely because its UTF-8 spelling is longer than 16 bytes.
+// It remains bounded and allocation-free; callers still provide the target.
+fn matches32(value: [byte; 32], value_length: u64, target: [byte; 32], target_length: u64) -> (result: bool) {
+    let valid_length: bool = value_length == target_length && value_length <= 32;
+    iterate i over value carrying same: bool = valid_length {
+        let in_target: bool = i < target_length;
+        let equal: bool = value[i] == target[i];
+        next same = same && select(in_target, equal, true);
+    }
+    return same;
+}

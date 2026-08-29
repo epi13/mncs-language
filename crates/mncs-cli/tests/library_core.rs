@@ -179,6 +179,19 @@ fn json_cursor_preserves_bounded_validity_across_executable_backends() {
     }
 }
 
+#[test]
+fn json_cursor_retains_known_keys_through_the_wider_window() {
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_library_experiment(
+            &example("source/json-cursor-probe.mncs"),
+            backend,
+            &example("execution/json-cursor-wide-key-corpus.json"),
+        );
+        assert_eq!(code, Some(0), "{backend}: wide-key cursor exit; {stderr}");
+        assert_value_agreement(backend, code, &result, &stderr, 1);
+    }
+}
+
 /// Differential binding against the frozen RAVEL consumer snapshot: the
 /// consumer's local `dominate` and the library's `dominate` must agree over
 /// the full 3x3 lattice on the bytecode realization until RFC 0014 linking

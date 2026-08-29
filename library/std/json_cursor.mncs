@@ -11,6 +11,10 @@ mncs 0.10;
 //   1 key started, 2 key closed, 3 value string started, 4 value string closed
 //   5 object opened, 6 array opened, 7 object closed, 8 array closed
 //   9 colon, 10 object comma
+//
+// Key bytes are retained in a bounded 32-byte window. Unknown keys longer
+// than that window remain structurally valid and are saturated just as they
+// were in the original 16-byte window.
 module mncs.std.json_cursor.v1;
 
 record Cursor {
@@ -27,14 +31,14 @@ record Cursor {
     event: byte,
     string_start: u64,
     string_end: u64,
-    key: [byte; 16],
+    key: [byte; 32],
     key_length: u64,
     pending_key: bool,
     root_seen: bool
 }
 
-fn zero_key() -> (result: [byte; 16]) {
-    return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+fn zero_key() -> (result: [byte; 32]) {
+    return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 }
 
 fn init() -> (result: Cursor) {
@@ -176,14 +180,14 @@ fn string_byte(state: Cursor, value: byte) -> (result: Cursor) {
     }
     let key_position: u64 = state.key_length;
     if state.string_is_key {
-        if key_position >= 16 {
+        if key_position >= 32 {
             // Key matching is deliberately bounded, but unknown JSON keys
             // must not make the whole document invalid merely because they
             // exceed the matcher window. Keep the saturated length so no
             // bounded target can accidentally match this key.
             return Cursor { ..state, position: state.position + 1 };
         }
-        let updated_key: [byte; 16] = replace(state.key, key_position, value);
+        let updated_key: [byte; 32] = replace(state.key, key_position, value);
         return Cursor {
             ..state,
             key: updated_key,
