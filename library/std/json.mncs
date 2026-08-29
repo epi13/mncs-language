@@ -1,0 +1,284 @@
+mncs 0.10;
+
+// mncs.std.json — bounded JSON recognition.
+//
+// The scanner is allocation-free and operates on a byte view. It recognizes
+// objects, arrays, strings, JSON numbers, true/false/null, whitespace,
+// separators, bounded nesting, control-byte rejection, and JSON escapes. Its
+// scalar result is deliberately stable for cross-backend experiments:
+//   positive  — one complete value; 1_000_000 + objects*1_000 + arrays*10 + strings
+//   -1        — bounded input ended before a value was complete
+//   <= -101   — malformed input; -100-error is the reported error code
+//
+// This module validates syntax only. Text escape decoding, general UTF-8
+// scalar semantics, and dynamic JSON value trees remain later tranches.
+module mncs.std.json.v1;
+
+record ScanState {
+    stack: u64,
+    depth: u64,
+    expect: byte,
+    mode: byte,
+    number: byte,
+    literal: byte,
+    position: byte,
+    escape: bool,
+    unicode: byte,
+    valid: bool,
+    error: byte,
+    objects: u64,
+    arrays: u64,
+    strings: u64
+}
+
+fn is_space(value: byte) -> (result: bool) {
+    let n: i64 = value as i64;
+    return n == 9 || n == 10 || n == 13 || n == 32;
+}
+
+fn is_hex(value: byte) -> (result: bool) {
+    let n: i64 = value as i64;
+    return (n >= 48 && n <= 57) || (n >= 65 && n <= 70) || (n >= 97 && n <= 102);
+}
+
+fn after_value(expect: byte) -> (result: byte) {
+    if expect == 0 { return 7; }
+    if expect == 3 { return 4; }
+    return 6;
+}
+
+// Five bits per bounded nesting level: two bits for the container kind and
+// three bits for the parent expectation. Twelve levels fit in one u64 word.
+fn stack_weight(depth: u64) -> (result: u64) {
+    if depth == 0 { return 1; }
+    if depth == 1 { return 32; }
+    if depth == 2 { return 1024; }
+    if depth == 3 { return 32768; }
+    if depth == 4 { return 1048576; }
+    if depth == 5 { return 33554432; }
+    if depth == 6 { return 1073741824; }
+    if depth == 7 { return 34359738368; }
+    if depth == 8 { return 1099511627776; }
+    if depth == 9 { return 35184372088832; }
+    if depth == 10 { return 1125899906842624; }
+    return 36028797018963968;
+}
+
+fn scan_bad(state: ScanState, error: byte) -> (result: ScanState) {
+    return ScanState { ..state, valid: false, error: error };
+}
+
+fn scan_close_value(state: ScanState) -> (result: ScanState) {
+    return ScanState { ..state, mode: 0, expect: after_value(state.expect), position: 0 };
+}
+
+fn scan_begin_container(state: ScanState, value: byte) -> (result: ScanState) {
+    if state.depth >= 12 { return scan_bad(state, 3); }
+    let kind: u64 = select(value == 123, 1, 2);
+    let parent: u64 = after_value(state.expect) as u64;
+    let entry: u64 = kind +% (parent *% 4);
+    let stack: u64 = state.stack +% (entry *% stack_weight(state.depth));
+    let depth: u64 = state.depth + 1;
+    let expect: byte = select(value == 123, 1, 5);
+    let objects: u64 = state.objects + (value == 123) as u64;
+    let arrays: u64 = state.arrays + (value == 91) as u64;
+    return ScanState { ..state, stack: stack, depth: depth, expect: expect, objects: objects, arrays: arrays };
+}
+
+fn scan_end_container(state: ScanState, value: byte) -> (result: ScanState) {
+    if state.depth == 0 { return scan_bad(state, 1); }
+    let entry: u64 = (state.stack / stack_weight(state.depth - 1)) % 32;
+    let kind: byte = (entry % 4) as byte;
+    let correct: bool = (value == 125 && kind == 1 && (state.expect == 1 || state.expect == 4))
+        || (value == 93 && kind == 2 && (state.expect == 5 || state.expect == 6));
+    if correct {
+        return ScanState {
+            ..state,
+            stack: state.stack - entry *% stack_weight(state.depth - 1),
+            depth: state.depth - 1,
+            expect: (entry / 4) as byte,
+            mode: 0
+        };
+    }
+    return scan_bad(state, 1);
+}
+
+fn scan_begin_string(state: ScanState) -> (result: ScanState) {
+    if state.expect == 1 || state.expect == 8 || state.expect == 0 || state.expect == 3 || state.expect == 5 {
+        return ScanState { ..state, mode: 1, escape: false, unicode: 0, position: 0 };
+    }
+    return scan_bad(state, 1);
+}
+
+fn scan_string_step(state: ScanState, value: byte) -> (result: ScanState) {
+    if (state.unicode as i64) > 0 {
+        if is_hex(value) { return ScanState { ..state, unicode: ((state.unicode as i64) - 1) as byte }; }
+        return scan_bad(state, 4);
+    }
+    if state.escape {
+        if value == 117 { return ScanState { ..state, escape: false, unicode: 4 }; }
+        if value == 34 || value == 92 || value == 47 || value == 98 || value == 102 || value == 110 || value == 114 || value == 116 {
+            return ScanState { ..state, escape: false };
+        }
+        return scan_bad(state, 4);
+    }
+    if value == 92 { return ScanState { ..state, escape: true }; }
+    if value == 34 {
+        if state.expect == 1 || state.expect == 8 {
+            return ScanState { ..state, mode: 0, expect: 2, strings: state.strings + 1 };
+        }
+        return scan_close_value(ScanState { ..state, strings: state.strings + 1 });
+    }
+    if (value as i64) < 32 { return scan_bad(state, 1); }
+    return state;
+}
+
+fn scan_number_step(state: ScanState, value: byte) -> (result: ScanState) {
+    let n: i64 = value as i64;
+    if state.number == 0 {
+        if value == 48 { return ScanState { ..state, number: 1 }; }
+        if n >= 49 && n <= 57 { return ScanState { ..state, number: 2 }; }
+        return scan_bad(state, 5);
+    }
+    if state.number == 1 {
+        if value == 46 { return ScanState { ..state, number: 3 }; }
+        if value == 101 || value == 69 { return ScanState { ..state, number: 5 }; }
+        if is_space(value) || value == 44 || value == 93 || value == 125 { return scan_close_value(state); }
+        return scan_bad(state, 5);
+    }
+    if state.number == 2 {
+        if n >= 48 && n <= 57 { return state; }
+        if value == 46 { return ScanState { ..state, number: 3 }; }
+        if value == 101 || value == 69 { return ScanState { ..state, number: 5 }; }
+        if is_space(value) || value == 44 || value == 93 || value == 125 { return scan_close_value(state); }
+        return scan_bad(state, 5);
+    }
+    if state.number == 3 {
+        if n >= 48 && n <= 57 { return ScanState { ..state, number: 4 }; }
+        return scan_bad(state, 5);
+    }
+    if state.number == 4 {
+        if n >= 48 && n <= 57 { return state; }
+        if value == 101 || value == 69 { return ScanState { ..state, number: 5 }; }
+        if is_space(value) || value == 44 || value == 93 || value == 125 { return scan_close_value(state); }
+        return scan_bad(state, 5);
+    }
+    if state.number == 5 {
+        if value == 43 || value == 45 { return ScanState { ..state, number: 6 }; }
+        if n >= 48 && n <= 57 { return ScanState { ..state, number: 7 }; }
+        return scan_bad(state, 5);
+    }
+    if state.number == 6 {
+        if n >= 48 && n <= 57 { return ScanState { ..state, number: 7 }; }
+        return scan_bad(state, 5);
+    }
+    if n >= 48 && n <= 57 { return state; }
+    if is_space(value) || value == 44 || value == 93 || value == 125 { return scan_close_value(state); }
+    return scan_bad(state, 5);
+}
+
+fn literal_byte(kind: byte, position: byte) -> (result: byte) {
+    if kind == 1 {
+        if position == 1 { return 114; }
+        if position == 2 { return 117; }
+        return 101;
+    }
+    if kind == 2 {
+        if position == 1 { return 97; }
+        if position == 2 { return 108; }
+        if position == 3 { return 115; }
+        return 101;
+    }
+    if position == 1 { return 117; }
+    if position == 2 { return 108; }
+    return 108;
+}
+
+fn literal_end(kind: byte) -> (result: byte) {
+    return select(kind == 2, 5, 4);
+}
+
+fn scan_literal_step(state: ScanState, value: byte) -> (result: ScanState) {
+    if value != literal_byte(state.literal, state.position) { return scan_bad(state, 5); }
+    let position: byte = ((state.position as i64) + 1) as byte;
+    if position == literal_end(state.literal) {
+        return scan_close_value(ScanState { ..state, position: position });
+    }
+    return ScanState { ..state, position: position };
+}
+
+fn scan_structural(state: ScanState, value: byte) -> (result: ScanState) {
+    if is_space(value) { return state; }
+    if state.expect == 2 {
+        if value == 58 { return ScanState { ..state, expect: 3 }; }
+        return scan_bad(state, 1);
+    }
+    if state.expect == 4 || state.expect == 6 || state.expect == 7 {
+        if state.expect == 7 { return scan_bad(state, 1); }
+        if value == 44 { return ScanState { ..state, expect: select(state.expect == 4, 8, 5) }; }
+        if (state.expect == 4 && value == 125) || (state.expect == 6 && value == 93) {
+            return scan_end_container(state, value);
+        }
+        return scan_bad(state, 1);
+    }
+    if state.expect == 1 && value == 125 { return scan_end_container(state, value); }
+    if state.expect == 5 && value == 93 { return scan_end_container(state, value); }
+    if (state.expect == 1 || state.expect == 8) && value == 34 { return scan_begin_string(state); }
+    if state.expect == 0 || state.expect == 3 || state.expect == 5 {
+        if value == 123 || value == 91 { return scan_begin_container(state, value); }
+        if value == 34 { return scan_begin_string(state); }
+        if value == 116 { return ScanState { ..state, mode: 3, literal: 1, position: 1 }; }
+        if value == 102 { return ScanState { ..state, mode: 3, literal: 2, position: 1 }; }
+        if value == 110 { return ScanState { ..state, mode: 3, literal: 3, position: 1 }; }
+        if value == 45 { return ScanState { ..state, mode: 2, number: 0 }; }
+        if value == 48 { return ScanState { ..state, mode: 2, number: 1 }; }
+        if (value as i64) >= 49 && (value as i64) <= 57 { return ScanState { ..state, mode: 2, number: 2 }; }
+    }
+    return scan_bad(state, 1);
+}
+
+fn scan_step(state: ScanState, value: byte) -> (result: ScanState) {
+    if state.valid {
+        if state.mode == 1 { return scan_string_step(state, value); }
+        if state.mode == 2 { return scan_number_step(state, value); }
+        if state.mode == 3 { return scan_literal_step(state, value); }
+        return scan_structural(state, value);
+    }
+    return state;
+}
+
+fn scan_finish_end(state: ScanState) -> (result: ScanState) {
+    if state.mode == 2 && (state.number == 1 || state.number == 2 || state.number == 4 || state.number == 7) {
+        return scan_close_value(state);
+    }
+    return state;
+}
+
+fn scan(input: [byte; up_to 64]) -> (result: i64) {
+    let start: ScanState = ScanState {
+        stack: 0,
+        depth: 0,
+        expect: 0,
+        mode: 0,
+        number: 0,
+        literal: 0,
+        position: 0,
+        escape: false,
+        unicode: 0,
+        valid: true,
+        error: 0,
+        objects: 0,
+        arrays: 0,
+        strings: 0
+    };
+    iterate i over input carrying state: ScanState = start {
+        next state = scan_step(state, input[i]);
+    }
+    let finished: ScanState = scan_finish_end(state);
+    let complete: bool = finished.valid && finished.depth == 0 && finished.mode == 0 && finished.expect == 7;
+    if complete {
+        return 1000000 +% (finished.objects as i64) *% 1000 +% (finished.arrays as i64) *% 10 +% (finished.strings as i64);
+    }
+    if finished.valid { return 0 - 1; }
+    return 0 - (100 + finished.error as i64);
+}

@@ -259,8 +259,12 @@ fn lower_function(
         lower_terminator(&layout, &block.terminator, &mut body)?;
         body.push(Instr::End);
     }
-    body.push(Instr::Unreachable);
+    // Close the dispatcher loop before the terminal fallback. Keeping the
+    // unreachable outside the loop makes the function-level fallthrough
+    // unreachable to a standard WASM validator while preserving the
+    // embedded interpreter's fail-closed behavior.
     body.push(Instr::End);
+    body.push(Instr::Unreachable);
     Ok(WasmFunction {
         name,
         params,
@@ -913,9 +917,16 @@ fn lower_instruction(
                     body.push(Instr::LocalGet(seq));
                     body.push(Instr::I32WrapI64);
                     body.push(Instr::LocalGet(index));
-                    body.push(Instr::I64Const(3));
-                    body.push(Instr::I64Shl);
-                    body.push(Instr::I32WrapI64);
+                    if matches!(&instruction.outputs[0].ty, IrType::Named(name) if name == "byte") {
+                        // Up-to byte views are packed host buffers. Other
+                        // view elements retain the canonical eight-byte slot
+                        // stride used by the current composite ABI.
+                        body.push(Instr::I32WrapI64);
+                    } else {
+                        body.push(Instr::I64Const(3));
+                        body.push(Instr::I64Shl);
+                        body.push(Instr::I32WrapI64);
+                    }
                     body.push(Instr::I32Add);
                     load_element_width(layout, instruction, body)?;
                 }
@@ -1015,8 +1026,11 @@ fn lower_instruction(
                 }
             }
             body.push(Instr::LocalGet(start));
-            body.push(Instr::I64Const(3));
-            body.push(Instr::I64Shl);
+            let byte_view = matches!(&instruction.outputs[0].ty, IrType::Named(name) if name.contains("[byte;"));
+            if !byte_view {
+                body.push(Instr::I64Const(3));
+                body.push(Instr::I64Shl);
+            }
             body.push(Instr::I64Add);
             // Keep only the low 32 bits of the address half.
             body.push(Instr::I64Const(4_294_967_295));
@@ -2245,14 +2259,21 @@ fn load_element_width(
         .outputs
         .first()
         .ok_or_else(|| "projection has no result".to_owned())?;
-    let valtype = layout
-        .types
-        .get(&output.identity)
-        .copied()
-        .unwrap_or(ValType::I32);
-    match valtype {
-        ValType::I64 => body.push(Instr::I64Load),
-        ValType::I32 => body.push(Instr::I32Load),
+    if matches!(&output.ty, IrType::Named(name) if name == "byte") {
+        // A bounded byte view is a packed host buffer, not an arena cell.
+        // Read one unsigned byte so adjacent bytes in the same view do not
+        // get folded into a four-byte scalar load.
+        body.push(Instr::I32Load8U);
+    } else {
+        let valtype = layout
+            .types
+            .get(&output.identity)
+            .copied()
+            .unwrap_or(ValType::I32);
+        match valtype {
+            ValType::I64 => body.push(Instr::I64Load),
+            ValType::I32 => body.push(Instr::I32Load),
+        }
     }
     Ok(())
 }

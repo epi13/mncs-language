@@ -1,0 +1,16 @@
+mncs 0.10;
+
+// Consumer witness for mncs.std.json.v1. The source-facing functions all
+// consume bounded byte views, so the browser ABI can pass a pointer/length
+// descriptor without parsing or projecting JSON in JavaScript.
+module examples.json_probe;
+
+use mncs.std.json.v1;
+
+fn inspect(input: [byte; up_to 64]) -> (result: i64) {
+    let parsed: i64 = scan(input);
+    if parsed > 0 {
+        return parsed;
+    }
+    return parsed;
+}

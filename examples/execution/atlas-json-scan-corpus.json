@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.2",
+  "name": "atlas-json-scan",
+  "description": "Build witness for the Atlas structural JSON adapter.",
+  "cases": [
+    {
+      "id": "valid-small-object",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs_atlas.experimental_json_scan", "function": "atlas_scan_probe" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 123 } }, { "byte": { "value": 34 } },
+          { "byte": { "value": 97 } }, { "byte": { "value": 34 } },
+          { "byte": { "value": 58 } }, { "byte": { "value": 116 } },
+          { "byte": { "value": 114 } }, { "byte": { "value": 117 } },
+          { "byte": { "value": 101 } }, { "byte": { "value": 125 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    }
+  ]
+}

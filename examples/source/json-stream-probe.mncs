@@ -1,0 +1,8 @@
+mncs 0.10;
+module examples.json_stream_probe;
+
+use mncs.std.json_stream.v1;
+
+fn inspect(input: [byte; up_to 64]) -> (result: i64) {
+    return finish(feed_chunk(init(), input));
+}

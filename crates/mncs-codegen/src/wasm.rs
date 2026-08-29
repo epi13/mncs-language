@@ -94,6 +94,7 @@ pub enum Instr {
     I64ExtendI32S,
     I64ExtendI32U,
     I32Load,
+    I32Load8U,
     I64Load,
     I32Store,
     I64Store,
@@ -202,11 +203,20 @@ pub fn encode_module(module: &WasmModule) -> Vec<u8> {
         });
     }
     emit_section(&mut bytes, 7, |section| {
-        encode_u32(section, module.functions.len() as u32);
+        let export_count = module.functions.len() as u32 + u32::from(module.memory.is_some());
+        encode_u32(section, export_count);
         for (index, function) in module.functions.iter().enumerate() {
             encode_name(section, &function.name);
             section.push(0x00);
             encode_u32(section, index as u32);
+        }
+        if module.memory.is_some() {
+            // Browser hosts need a standard named memory export to populate
+            // packed view descriptors. The embedded interpreter ignores this
+            // non-function export while retaining the same module bytes.
+            encode_name(section, "memory");
+            section.push(0x02);
+            encode_u32(section, 0);
         }
     });
     emit_section(&mut bytes, 10, |section| {
@@ -717,6 +727,11 @@ fn execute_raw(
                 let raw = runtime.load(i64::from(address), 4)?;
                 stack.push(i64::from(raw as u32 as i32));
             }
+            Instr::I32Load8U => {
+                let address = pop_i32(&mut stack)?;
+                let raw = runtime.load(i64::from(address), 1)?;
+                stack.push(i64::from(raw as u8));
+            }
             Instr::I64Load => {
                 let address = pop_i32(&mut stack)?;
                 let raw = runtime.load(i64::from(address), 8)?;
@@ -1040,7 +1055,8 @@ pub enum MarshalTy {
         element: Box<MarshalTy>,
         length: u32,
     },
-    /// Bounded view: packed i64 descriptor, elements in an exact cell.
+    /// Bounded view: packed i64 descriptor. Byte views use packed bytes;
+    /// other elements currently use an exact eight-byte-slot cell.
     View {
         element: Box<MarshalTy>,
         capacity: u32,
@@ -1182,7 +1198,11 @@ fn write_marshal(
             if values.is_empty() {
                 return Ok(0);
             }
-            let address = write_sequence_cell(runtime, values, element)?;
+            let address = if is_byte_marshal_ty(element) {
+                write_byte_view(runtime, values)?
+            } else {
+                write_sequence_cell(runtime, values, element)?
+            };
             let packed = (address as u32 as u64) | ((values.len() as u64) << 32);
             Ok(packed as i64)
         }
@@ -1297,6 +1317,9 @@ fn write_slot(
             }
             let packed = if values.is_empty() {
                 0
+            } else if is_byte_marshal_ty(element) {
+                let address = write_byte_view(runtime, values)?;
+                (address as u32 as u64) | ((values.len() as u64) << 32)
             } else {
                 let cell = write_sequence_cell(runtime, values, element)?;
                 (cell as u32 as u64) | ((values.len() as u64) << 32)
@@ -1308,6 +1331,30 @@ fn write_slot(
             "composite field does not match its declared logical type",
         )),
     }
+}
+
+fn is_byte_marshal_ty(ty: &MarshalTy) -> bool {
+    matches!(
+        ty,
+        MarshalTy::Int(IntegerType {
+            bits: 8,
+            signed: false
+        })
+    )
+}
+
+fn write_byte_view(runtime: &mut Runtime, values: &[ExecutionValue]) -> Result<i64, WasmTrap> {
+    let address = runtime.allocate(values.len() as u32)?;
+    for (index, value) in values.iter().enumerate() {
+        let ExecutionValue::Byte { value } = value else {
+            return Err(trap(
+                ExecutionStatus::InvalidRequest,
+                "byte view contains a non-byte value",
+            ));
+        };
+        runtime.store(address + index as i64, 1, *value as u64)?;
+    }
+    Ok(address)
 }
 
 fn read_slot(runtime: &Runtime, ty: &MarshalTy, address: i64) -> Result<ExecutionValue, WasmTrap> {
@@ -1412,7 +1459,11 @@ fn read_marshal(
                     "backend returned a view longer than its declared capacity",
                 ));
             }
-            read_sequence_cell(runtime, offset as i64, element, length)
+            if is_byte_marshal_ty(element) {
+                read_byte_view(runtime, offset as i64, length)
+            } else {
+                read_sequence_cell(runtime, offset as i64, element, length)
+            }
         }
         MarshalTy::Vector { element, lanes } => {
             read_vector_cell(runtime, address, *element, *lanes)
@@ -1420,6 +1471,20 @@ fn read_marshal(
         MarshalTy::Mask { lanes } => Ok(crate::composite::unpack_mask(address as u64, *lanes)),
         other => read_slot(runtime, other, address),
     }
+}
+
+fn read_byte_view(
+    runtime: &Runtime,
+    address: i64,
+    length: u32,
+) -> Result<ExecutionValue, WasmTrap> {
+    let mut values = Vec::with_capacity(length as usize);
+    for index in 0..length {
+        values.push(ExecutionValue::Byte {
+            value: i128::from(runtime.load(address + i64::from(index), 1)? as u8),
+        });
+    }
+    Ok(ExecutionValue::Sequence { values })
 }
 
 fn read_sequence_cell(
@@ -1676,10 +1741,11 @@ fn encode_instr(out: &mut Vec<u8>, instr: &Instr) {
         Instr::I32WrapI64 => out.push(0xa7),
         Instr::I64ExtendI32S => out.push(0xac),
         Instr::I64ExtendI32U => out.push(0xad),
-        Instr::I32Load => mem_instr(out, 0x28),
-        Instr::I64Load => mem_instr(out, 0x29),
-        Instr::I32Store => mem_instr(out, 0x36),
-        Instr::I64Store => mem_instr(out, 0x37),
+        Instr::I32Load => mem_instr(out, 0x28, 2),
+        Instr::I32Load8U => mem_instr(out, 0x2d, 0),
+        Instr::I64Load => mem_instr(out, 0x29, 2),
+        Instr::I32Store => mem_instr(out, 0x36, 2),
+        Instr::I64Store => mem_instr(out, 0x37, 2),
         Instr::GlobalGet(index) => {
             out.push(0x23);
             encode_u32(out, *index);
@@ -1700,11 +1766,11 @@ fn encode_instr(out: &mut Vec<u8>, instr: &Instr) {
     }
 }
 
-/// Memory load/store immediate: alignment=2 (8-byte, valid for all widths we
-/// store at 8-byte slots) with a static byte offset.
-fn mem_instr(out: &mut Vec<u8>, opcode: u8) {
+/// Memory load/store immediate with a static byte offset. The byte load has
+/// alignment=0 because WASM validation rejects a wider alignment hint for it.
+fn mem_instr(out: &mut Vec<u8>, opcode: u8, alignment: u8) {
     out.push(opcode);
-    out.push(0x02);
+    out.push(alignment);
     encode_u32(out, 0);
 }
 
@@ -1859,16 +1925,31 @@ fn decode_exports(payload: &[u8]) -> Result<Vec<(String, u32)>, WasmTrap> {
         })?
         .to_owned();
         cursor = end;
-        if payload.get(cursor) != Some(&0x00) {
-            return Err(trap(
-                ExecutionStatus::Unsupported,
-                "only function exports are supported",
-            ));
-        }
+        let export_kind = *payload.get(cursor).ok_or_else(|| {
+            trap(
+                ExecutionStatus::InvalidRequest,
+                "truncated WASM export kind",
+            )
+        })?;
         cursor += 1;
         let (index, next) = read_u32(payload, cursor)?;
         cursor = next;
-        exports.push((name, index));
+        match export_kind {
+            0x00 => exports.push((name, index)),
+            0x02 if index == 0 => {}
+            0x02 => {
+                return Err(trap(
+                    ExecutionStatus::InvalidRequest,
+                    "WASM memory export references an unsupported memory index",
+                ));
+            }
+            _ => {
+                return Err(trap(
+                    ExecutionStatus::Unsupported,
+                    "only function and memory exports are supported",
+                ));
+            }
+        }
     }
     Ok(exports)
 }
@@ -2038,6 +2119,10 @@ fn decode_instr(payload: &[u8], cursor: usize) -> Result<(Instr, usize), WasmTra
             cursor = skip_memarg(payload, cursor)?;
             Instr::I32Load
         }
+        0x2d => {
+            cursor = skip_memarg(payload, cursor)?;
+            Instr::I32Load8U
+        }
         0x29 => {
             cursor = skip_memarg(payload, cursor)?;
             Instr::I64Load
@@ -2154,6 +2239,53 @@ mod tests {
                 ty: IntegerType {
                     bits: 32,
                     signed: true,
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn memory_export_and_packed_byte_load_roundtrip() {
+        let module = WasmModule {
+            functions: vec![WasmFunction {
+                name: "byte_roundtrip".to_owned(),
+                params: Vec::new(),
+                results: vec![ValType::I32],
+                locals: Vec::new(),
+                body: vec![
+                    Instr::I32Const(0),
+                    Instr::I32Const(0xab),
+                    Instr::I32Store,
+                    Instr::I32Const(0),
+                    Instr::I32Load8U,
+                ],
+            }],
+            memory: Some(WasmMemory { min_pages: 1 }),
+            globals: Vec::new(),
+        };
+
+        let bytes = encode_module(&module);
+        let decoded = decode_module(&bytes).expect("decode module with memory export");
+        assert_eq!(decoded.memory, module.memory);
+        let execution = execute_function_typed(
+            &decoded,
+            "byte_roundtrip",
+            &[],
+            &[],
+            &[MarshalTy::Int(IntegerType {
+                bits: 32,
+                signed: false,
+            })],
+            100,
+        )
+        .expect("execute byte load");
+        assert_eq!(
+            execution.returned,
+            vec![ExecutionValue::Integer {
+                value: 0xab,
+                ty: IntegerType {
+                    bits: 32,
+                    signed: false,
                 },
             }]
         );

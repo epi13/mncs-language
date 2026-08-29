@@ -1,0 +1,34 @@
+{
+  "schema_version": "0.2",
+  "name": "json-projection-probe",
+  "description": "Bounded raw key/value projection probe.",
+  "cases": [
+    {
+      "id": "one-match",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_projection_probe", "function": "inspect" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 123 } }, { "byte": { "value": 34 } },
+          { "byte": { "value": 109 } }, { "byte": { "value": 97 } },
+          { "byte": { "value": 116 } }, { "byte": { "value": 117 } },
+          { "byte": { "value": 114 } }, { "byte": { "value": 105 } },
+          { "byte": { "value": 116 } }, { "byte": { "value": 121 } },
+          { "byte": { "value": 34 } }, { "byte": { "value": 58 } },
+          { "byte": { "value": 34 } }, { "byte": { "value": 101 } },
+          { "byte": { "value": 120 } }, { "byte": { "value": 112 } },
+          { "byte": { "value": 101 } }, { "byte": { "value": 114 } },
+          { "byte": { "value": 105 } }, { "byte": { "value": 109 } },
+          { "byte": { "value": 101 } }, { "byte": { "value": 110 } },
+          { "byte": { "value": 116 } }, { "byte": { "value": 97 } },
+          { "byte": { "value": 108 } }, { "byte": { "value": 34 } },
+          { "byte": { "value": 125 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    }
+  ]
+}
