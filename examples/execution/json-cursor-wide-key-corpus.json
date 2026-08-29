@@ -1,0 +1,34 @@
+{
+  "schema_version": "0.2",
+  "name": "json-cursor-wide-key",
+  "description": "The reusable cursor retains known schema keys through the 32-byte matcher window.",
+  "cases": [
+    {
+      "id": "operator-components-key-length",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_cursor_probe", "function": "key_length" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 123 } }, { "byte": { "value": 34 } },
+          { "byte": { "value": 111 } }, { "byte": { "value": 112 } },
+          { "byte": { "value": 101 } }, { "byte": { "value": 114 } },
+          { "byte": { "value": 97 } }, { "byte": { "value": 116 } },
+          { "byte": { "value": 111 } }, { "byte": { "value": 114 } },
+          { "byte": { "value": 95 } }, { "byte": { "value": 99 } },
+          { "byte": { "value": 111 } }, { "byte": { "value": 109 } },
+          { "byte": { "value": 112 } }, { "byte": { "value": 111 } },
+          { "byte": { "value": 110 } }, { "byte": { "value": 101 } },
+          { "byte": { "value": 110 } }, { "byte": { "value": 116 } },
+          { "byte": { "value": 115 } }, { "byte": { "value": 34 } },
+          { "byte": { "value": 58 } }, { "byte": { "value": 49 } },
+          { "byte": { "value": 125 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": 19, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    }
+  ]
+}
+

@@ -47,7 +47,7 @@ The typed JSON path uses `std/text_view.v1` and `std/json_cursor.v1`. A
 `TextView` is a borrowed `(start, length, encoded, utf8_valid)` span into the
 host-provided input, not a hidden string allocation. `json_cursor.v1` retains
 bounded key bytes, container events, string spans, and a twelve-level stack;
-unknown keys longer than its 16-byte matcher window saturate the comparison
+unknown keys longer than its 32-byte matcher window saturate the comparison
 window instead of invalidating an otherwise well-formed document. Consumers
 may therefore build bounded schema models without introducing a JSON DOM.
 
@@ -82,8 +82,8 @@ resolution provenance.
 | `std/json.mncs` | `mncs.std.json.v1` (Profile 0.10) | bounded syntax scanner over a 64-byte byte view for JSON objects, arrays, strings, numbers, literals, whitespace, nesting, separators, control bytes, and escapes; scalar status/summary contract |
 | `std/json_stream.mncs` | `mncs.std.json_stream.v1` (Profile 0.10) | scalar structural stream state for feeding larger documents as <=64-byte views; validates quotes, four-digit Unicode escapes, control bytes, matched delimiters, bounded nesting, and one closed root |
 | `std/json_projection.mncs` | `mncs.std.json_projection.v1` (Profile 0.10) | bounded raw key/member projections over <=64-byte views with <=32-byte target windows; escaped text is validated by the scanner but is not decoded by this projection layer |
-| `std/text_view.mncs` | `mncs.std.text_view.v1` (Profile 0.10) | borrowed bounded text spans, UTF-8/decode flags, and fixed-window key matching for schema consumers |
-| `std/json_cursor.mncs` | `mncs.std.json_cursor.v1` (Profile 0.10) | streaming JSON cursor with bounded container stack, string/key events, absolute spans, saturated unknown-key matching, and basic UTF-8 lead/continuation validation |
+| `std/text_view.mncs` | `mncs.std.text_view.v1` (Profile 0.10) | borrowed bounded text spans, UTF-8/decode flags, and 16/32-byte key matching for schema consumers |
+| `std/json_cursor.mncs` | `mncs.std.json_cursor.v1` (Profile 0.10) | streaming JSON cursor with bounded container stack, string/key events, absolute spans, 32-byte saturated unknown-key matching, and basic UTF-8 lead/continuation validation |
 | `core/bytes.mncs` | `mncs.core.bytes.v1` (Profile 0.7) | byte bitwise/shift/order, folding fingerprint, nibble split, ASCII classifiers, wrapping checksum |
 | `core/numeric.mncs` | `mncs.core.numeric.v1` (Profile 0.8) | wrapping 4-lane sum/mean/centroid and L2-squared; vector kernels live in `vector.v1` |
 | `core/random.mncs` | `mncs.core.random.v1` (Profile 0.6) | deterministic MMIX LCG streams, bounded draws, split/derive |
