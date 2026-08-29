@@ -74,3 +74,14 @@ cost continue to produce `UNKNOWN` where the evidence contract requires it.
 
 See [RFC 0013](../rfcs/0013-machine-native-abstraction-polymorphism-interface-evidence-semantics.md)
 and [the Profile 0.10 evidence record](development-evidence/source-profile-0.10-generics-2026-08.md).
+
+## Stateful experiment execution
+
+The experimental execution corpus also supports bounded stateful traces
+(RFC 0045). A trace retains logical returned values across named calls, so
+streaming consumers can represent `init → transition* → finish` while each
+backend continues to use its own ordinary value ABI. Every transition carries
+status, step budget, and trace provenance; large intermediate values may be
+represented by canonical logical digests. This is an executable observation
+capability, not a claim of persistent runtime semantics or universal backend
+equivalence.

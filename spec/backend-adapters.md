@@ -129,6 +129,23 @@ A backend can validly support lowering without an in-process execution engine. G
 
 WASM magic/version checks, WASM decoding, and the embedded WASM interpreter belong to the WASM execution implementation, not generic backend execution.
 
+## Stateful execution
+
+Execution corpus schema `0.3` may declare bounded stateful cases. The language-owned runner resolves
+named `previous_result` references to logical values and invokes the selected adapter once per
+declared transition. An adapter therefore does not need to expose a shared physical session or
+export its internal state representation: returned MNCS values are the state boundary. The runner
+retains a canonical digest for every successful transition and complete logical values only where
+the corpus requests them. Each call remains subject to its own budget, and the case has explicit
+call and aggregate-step bounds.
+
+The five currently executable research realizations—research bytecode, portable WASM, C11, LLVM,
+and Cranelift—may participate when their ordinary value ABI can execute the declared calls. RISC-V,
+eBPF, and PTX remain artifact-only and must report `UNSUPPORTED` rather than inheriting stateful
+execution support from the generic runner. Agreement compares logical statuses, returned-value
+digests, and effects over the finite trace; it is not a claim about persistent runtime semantics or
+universal equivalence.
+
 ## Evidence requirements
 
 Backend evidence MUST preserve, as applicable:

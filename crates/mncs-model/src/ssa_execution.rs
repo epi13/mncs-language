@@ -161,6 +161,86 @@ pub fn execute_ssa_module(
     module: &SsaModule,
     request: &crate::ExecutionRequest,
 ) -> SsaExecutionResult {
+    execute_ssa_module_with_validation(program, module, request, true, None)
+}
+
+/// Interpret an SSA module after its immutable program/module validation has
+/// already been performed by a trusted artifact boundary. Request-specific
+/// checks still run for every call. This is used by bounded stateful backend
+/// sessions to avoid validating the same deserialized artifact on every
+/// transition without making the public one-shot API less strict.
+pub fn execute_ssa_module_prevalidated(
+    program: &Program,
+    module: &SsaModule,
+    request: &crate::ExecutionRequest,
+) -> SsaExecutionResult {
+    execute_ssa_module_with_validation(program, module, request, false, None)
+}
+
+/// Reusable immutable execution preparation for a bounded stateful session.
+/// The program and SSA validation, plus each function's block index, are
+/// performed once; request schema, target, argument, and step-budget checks
+/// continue to run at every transition.
+pub struct SsaExecutionSession<'a> {
+    program: &'a Program,
+    module: &'a SsaModule,
+    block_indices: BTreeMap<SemanticId, BTreeMap<SemanticId, usize>>,
+}
+
+impl<'a> SsaExecutionSession<'a> {
+    pub fn new(program: &'a Program, module: &'a SsaModule) -> Result<Self, String> {
+        if module.schema_version != crate::SSA_SCHEMA_VERSION {
+            return Err("unsupported SSA schema version".to_owned());
+        }
+        if module.semantic_identity != program_id(&program.module) {
+            return Err("SSA semantic program identity does not match program".to_owned());
+        }
+        if !program.validate().valid {
+            return Err("program validation failed".to_owned());
+        }
+        if !module.validate().valid {
+            return Err("SSA validation failed".to_owned());
+        }
+        let block_indices = module
+            .functions
+            .iter()
+            .map(|function| {
+                (
+                    function.semantic_identity.clone(),
+                    function
+                        .blocks
+                        .iter()
+                        .enumerate()
+                        .map(|(index, block)| (block.identity.clone(), index))
+                        .collect(),
+                )
+            })
+            .collect();
+        Ok(Self {
+            program,
+            module,
+            block_indices,
+        })
+    }
+
+    pub fn execute(&self, request: &crate::ExecutionRequest) -> SsaExecutionResult {
+        execute_ssa_module_with_validation(
+            self.program,
+            self.module,
+            request,
+            false,
+            Some(&self.block_indices),
+        )
+    }
+}
+
+fn execute_ssa_module_with_validation(
+    program: &Program,
+    module: &SsaModule,
+    request: &crate::ExecutionRequest,
+    validate_artifact: bool,
+    block_cache: Option<&BTreeMap<SemanticId, BTreeMap<SemanticId, usize>>>,
+) -> SsaExecutionResult {
     if request.schema_version != crate::EXECUTION_REQUEST_SCHEMA_VERSION {
         return SsaExecutionResult::invalid(
             request,
@@ -171,10 +251,10 @@ pub fn execute_ssa_module(
             ),
         );
     }
-    if module.schema_version != crate::SSA_SCHEMA_VERSION {
+    if validate_artifact && module.schema_version != crate::SSA_SCHEMA_VERSION {
         return SsaExecutionResult::invalid(request, "unsupported SSA schema version");
     }
-    if module.semantic_identity != program_id(&program.module) {
+    if validate_artifact && module.semantic_identity != program_id(&program.module) {
         return SsaExecutionResult::invalid(
             request,
             "SSA semantic program identity does not match program",
@@ -197,13 +277,15 @@ pub fn execute_ssa_module(
             format!("step_budget must be between 1 and {MAX_EXECUTION_BUDGET}"),
         );
     }
-    let validation = program.validate();
-    if !validation.valid {
-        return SsaExecutionResult::invalid(request, "program validation failed");
-    }
-    let module_validation = module.validate();
-    if !module_validation.valid {
-        return SsaExecutionResult::invalid(request, "SSA validation failed");
+    if validate_artifact {
+        let validation = program.validate();
+        if !validation.valid {
+            return SsaExecutionResult::invalid(request, "program validation failed");
+        }
+        let module_validation = module.validate();
+        if !module_validation.valid {
+            return SsaExecutionResult::invalid(request, "SSA validation failed");
+        }
     }
     // Resolve the target against its home module namespace when the target
     // names a linked declaration rather than a root-module function.
@@ -246,11 +328,19 @@ pub fn execute_ssa_module(
     let Some(mut values) = initialize_inputs(program, function, request, &mut result) else {
         return result;
     };
-    let blocks = function
-        .blocks
-        .iter()
-        .map(|block| (block.identity.clone(), block))
-        .collect::<BTreeMap<_, _>>();
+    let local_block_indices = if block_cache.is_none() {
+        function
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(index, block)| (block.identity.clone(), index))
+            .collect::<BTreeMap<_, _>>()
+    } else {
+        BTreeMap::new()
+    };
+    let block_indices = block_cache
+        .and_then(|cache| cache.get(&function.semantic_identity))
+        .unwrap_or(&local_block_indices);
     let Some(entry) = function.blocks.first().map(|block| block.identity.clone()) else {
         result.fail(
             ExecutionStatus::InvalidRequest,
@@ -261,7 +351,7 @@ pub fn execute_ssa_module(
     };
     let mut current = entry;
     loop {
-        let Some(block) = blocks.get(&current).copied() else {
+        let Some(block_index) = block_indices.get(&current).copied() else {
             result.fail(
                 ExecutionStatus::InvalidRequest,
                 None,
@@ -269,6 +359,7 @@ pub fn execute_ssa_module(
             );
             return result;
         };
+        let block = &function.blocks[block_index];
         trace_block(&mut result, block, "block_enter");
         for instruction in &block.instructions {
             if !consume_step(&mut result, request.step_budget) {
@@ -323,7 +414,14 @@ pub fn execute_ssa_module(
             }
             SsaTerminator::Branch { target, arguments } => {
                 let incoming = values.clone();
-                if !assign_block_arguments(&blocks, target, arguments, &incoming, &mut values) {
+                if !assign_block_arguments(
+                    function,
+                    block_indices,
+                    target,
+                    arguments,
+                    &incoming,
+                    &mut values,
+                ) {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
                         block.semantic_identity.clone(),
@@ -354,7 +452,14 @@ pub fn execute_ssa_module(
                     (else_target, else_arguments)
                 };
                 let incoming = values.clone();
-                if !assign_block_arguments(&blocks, target, arguments, &incoming, &mut values) {
+                if !assign_block_arguments(
+                    function,
+                    block_indices,
+                    target,
+                    arguments,
+                    &incoming,
+                    &mut values,
+                ) {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
                         block.semantic_identity.clone(),
@@ -1750,13 +1855,17 @@ fn initialize_inputs(
 }
 
 fn assign_block_arguments(
-    blocks: &BTreeMap<SemanticId, &SsaBlock>,
+    function: &SsaFunction,
+    block_indices: &BTreeMap<SemanticId, usize>,
     target: &SemanticId,
     arguments: &[SemanticId],
     values: &BTreeMap<SemanticId, ExecutionValue>,
     destination: &mut BTreeMap<SemanticId, ExecutionValue>,
 ) -> bool {
-    let Some(block) = blocks.get(target).copied() else {
+    let Some(block_index) = block_indices.get(target).copied() else {
+        return false;
+    };
+    let Some(block) = function.blocks.get(block_index) else {
         return false;
     };
     if block.parameters.len() != arguments.len() {

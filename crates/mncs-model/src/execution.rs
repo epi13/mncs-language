@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::canonical::{canonical_json_value, sha256_hex};
 use crate::identity::{function_id, SemanticId};
 use crate::{
     ArithmeticIntent, BodyBlock, BodyOperation, BodyOperationKind, BodyTerminator, BodyType,
@@ -19,14 +20,20 @@ pub const EXECUTION_REQUEST_SCHEMA_VERSION: &str = "0.1";
 pub const EXECUTION_RESULT_SCHEMA_VERSION: &str = "0.1";
 pub const EXECUTION_CORPUS_SCHEMA_VERSION: &str = "0.1";
 pub const EXECUTION_CORPUS_SCHEMA_VERSION_0_2: &str = "0.2";
+pub const EXECUTION_CORPUS_SCHEMA_VERSION_0_3: &str = "0.3";
 pub const EXECUTION_COMPARISON_SCHEMA_VERSION: &str = "0.1";
+pub const STATEFUL_EXECUTION_SCHEMA_VERSION: &str = "0.1";
+pub const STATEFUL_EXECUTION_COMPARISON_SCHEMA_VERSION: &str = "0.1";
 pub const MAX_EXECUTION_BUDGET: u64 = 1_000_000;
+pub const MAX_STATEFUL_CALLS: u32 = 4096;
 const MAX_TRACE_ENTRIES: usize = 256;
 
 pub fn execution_corpus_schema_supported(schema_version: &str) -> bool {
     matches!(
         schema_version,
-        EXECUTION_CORPUS_SCHEMA_VERSION | EXECUTION_CORPUS_SCHEMA_VERSION_0_2
+        EXECUTION_CORPUS_SCHEMA_VERSION
+            | EXECUTION_CORPUS_SCHEMA_VERSION_0_2
+            | EXECUTION_CORPUS_SCHEMA_VERSION_0_3
     )
 }
 
@@ -206,6 +213,457 @@ pub struct ExecutionProperty {
     pub exclusions: Vec<ExecutionValue>,
 }
 
+/// An argument in a bounded stateful trace.  A previous result is a logical
+/// value reference, not a host pointer or a backend-specific handle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StatefulArgument {
+    Literal(ExecutionValue),
+    PreviousResult { step_id: String, result_index: u32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatefulExecutionStep {
+    pub id: String,
+    pub target: ExecutionTarget,
+    pub arguments: Vec<StatefulArgument>,
+    pub step_budget: u64,
+    #[serde(default)]
+    pub policy: ExecutionPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected: Option<Vec<ExecutionValue>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_status: Option<ExecutionStatus>,
+    /// Keep the complete logical return only for selected observations.  A
+    /// digest is retained for every successful transition, allowing large
+    /// states to be compared without serializing the same state at every
+    /// chunk boundary.
+    #[serde(default)]
+    pub observe_returned: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatefulExecutionCase {
+    pub id: String,
+    pub steps: Vec<StatefulExecutionStep>,
+    pub maximum_calls: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maximum_total_steps: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_final: Option<Vec<ExecutionValue>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_final_status: Option<ExecutionStatus>,
+}
+
+impl StatefulExecutionCase {
+    pub fn validate(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+        if self.id.trim().is_empty() {
+            errors.push("stateful case id must not be empty".to_owned());
+        }
+        if self.steps.is_empty() {
+            errors.push("stateful case must contain at least one step".to_owned());
+        }
+        if self.maximum_calls == 0 || self.maximum_calls > MAX_STATEFUL_CALLS {
+            errors.push(format!(
+                "maximum_calls must be between 1 and {MAX_STATEFUL_CALLS}"
+            ));
+        }
+        if self.steps.len() > self.maximum_calls as usize {
+            errors.push("stateful step count exceeds maximum_calls".to_owned());
+        }
+        if self.maximum_total_steps == Some(0) {
+            errors.push("maximum_total_steps must be greater than zero".to_owned());
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        for (index, step) in self.steps.iter().enumerate() {
+            if step.id.trim().is_empty() || !ids.insert(step.id.clone()) {
+                errors.push(format!(
+                    "stateful step {index} has a missing or duplicate id"
+                ));
+            }
+            if step.step_budget == 0 || step.step_budget > MAX_EXECUTION_BUDGET {
+                errors.push(format!(
+                    "stateful step {:?} has an invalid step budget",
+                    step.id
+                ));
+            }
+            for argument in &step.arguments {
+                if let StatefulArgument::PreviousResult { step_id, .. } = argument {
+                    if !ids.contains(step_id) {
+                        errors.push(format!(
+                            "stateful step {:?} references a later or unknown step {:?}",
+                            step.id, step_id
+                        ));
+                    }
+                }
+            }
+        }
+        errors
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatefulCallResult {
+    pub status: ExecutionStatus,
+    pub returned: Vec<ExecutionValue>,
+    pub steps: u64,
+    pub effects: Vec<ExecutionEffectEvent>,
+    pub failure: Option<ExecutionFailure>,
+    pub program_identity: Option<SemanticId>,
+    pub program_fingerprint: Option<String>,
+}
+
+impl From<&ExecutionResult> for StatefulCallResult {
+    fn from(result: &ExecutionResult) -> Self {
+        Self {
+            status: result.status,
+            returned: result.returned.clone(),
+            steps: result.steps,
+            effects: result.effects.clone(),
+            failure: result.failure.clone(),
+            program_identity: result.program_identity.clone(),
+            program_fingerprint: result.program_fingerprint.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatefulStepObservation {
+    pub step_id: String,
+    pub target: ExecutionTarget,
+    pub status: ExecutionStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub returned: Option<Vec<ExecutionValue>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub returned_digest: Option<String>,
+    pub steps: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<ExecutionEffectEvent>,
+    pub failure: Option<ExecutionFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatefulExecutionResult {
+    pub schema_version: String,
+    pub case_id: String,
+    pub corpus_identity: String,
+    pub trace_identity: SemanticId,
+    pub status: ExecutionStatus,
+    pub observations: Vec<StatefulStepObservation>,
+    pub returned: Vec<ExecutionValue>,
+    pub steps: u64,
+    pub calls: u32,
+    pub failure: Option<ExecutionFailure>,
+    pub program_identity: Option<SemanticId>,
+    pub program_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_identity: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_identity: Option<SemanticId>,
+}
+
+impl StatefulExecutionResult {
+    pub fn seal(&mut self) {
+        self.trace_identity = SemanticId(String::new());
+        self.trace_identity = stateful_trace_identity(self);
+    }
+
+    pub fn identity_is_valid(&self) -> bool {
+        self.schema_version == STATEFUL_EXECUTION_SCHEMA_VERSION
+            && !self.case_id.trim().is_empty()
+            && !self.corpus_identity.trim().is_empty()
+            && self.trace_identity == stateful_trace_identity(self)
+            && self.calls == self.observations.len() as u32
+    }
+}
+
+/// Execute a bounded sequence while retaining only logical returned values.
+/// The closure is the backend boundary; all sequencing, reference resolution,
+/// bounds, and trace identity remain language-owned.
+pub fn execute_stateful_case<F>(
+    corpus_name: &str,
+    case: &StatefulExecutionCase,
+    mut execute: F,
+) -> StatefulExecutionResult
+where
+    F: FnMut(&ExecutionRequest) -> StatefulCallResult,
+{
+    let corpus_identity = canonical_json_value(&(corpus_name, case))
+        .map(|json| sha256_hex(json.as_bytes()))
+        .unwrap_or_default();
+    let mut result = StatefulExecutionResult {
+        schema_version: STATEFUL_EXECUTION_SCHEMA_VERSION.to_owned(),
+        case_id: case.id.clone(),
+        corpus_identity,
+        trace_identity: SemanticId(String::new()),
+        status: ExecutionStatus::InvalidRequest,
+        observations: Vec::new(),
+        returned: Vec::new(),
+        steps: 0,
+        calls: 0,
+        failure: None,
+        program_identity: None,
+        program_fingerprint: None,
+        backend_identity: None,
+        artifact_identity: None,
+    };
+    let validation = case.validate();
+    if !validation.is_empty() {
+        result.failure = Some(ExecutionFailure {
+            identity: None,
+            reason: validation.join("; "),
+        });
+        result.seal();
+        return result;
+    }
+
+    let mut previous = BTreeMap::<String, Vec<ExecutionValue>>::new();
+    for (index, step) in case.steps.iter().enumerate() {
+        let arguments = step
+            .arguments
+            .iter()
+            .map(|argument| match argument {
+                StatefulArgument::Literal(value) => Ok(value.clone()),
+                StatefulArgument::PreviousResult {
+                    step_id,
+                    result_index,
+                } => previous
+                    .get(step_id)
+                    .and_then(|values| values.get(*result_index as usize))
+                    .cloned()
+                    .ok_or_else(|| {
+                        format!(
+                            "stateful step {:?} references unavailable result {} from {:?}",
+                            step.id, result_index, step_id
+                        )
+                    }),
+            })
+            .collect::<Result<Vec<_>, _>>();
+        let arguments = match arguments {
+            Ok(arguments) => arguments,
+            Err(reason) => {
+                result.status = ExecutionStatus::InvalidRequest;
+                result.failure = Some(ExecutionFailure {
+                    identity: None,
+                    reason,
+                });
+                break;
+            }
+        };
+        let request = ExecutionRequest {
+            schema_version: EXECUTION_REQUEST_SCHEMA_VERSION.to_owned(),
+            target: step.target.clone(),
+            arguments,
+            step_budget: step.step_budget,
+            policy: step.policy.clone(),
+        };
+        let call = execute(&request);
+        result.calls += 1;
+        result.steps = match result.steps.checked_add(call.steps) {
+            Some(steps) => steps,
+            None => {
+                result.status = ExecutionStatus::BudgetExhausted;
+                result.failure = Some(ExecutionFailure {
+                    identity: None,
+                    reason: "stateful aggregate step count overflowed".to_owned(),
+                });
+                break;
+            }
+        };
+        result.program_identity = result.program_identity.or(call.program_identity.clone());
+        result.program_fingerprint = result
+            .program_fingerprint
+            .clone()
+            .or(call.program_fingerprint.clone());
+        let returned_digest = (call.status == ExecutionStatus::Returned)
+            .then(|| canonical_json_value(&call.returned).map(|json| sha256_hex(json.as_bytes())))
+            .transpose()
+            .unwrap_or(None);
+        let terminal = call.status != ExecutionStatus::Returned || index + 1 == case.steps.len();
+        result.observations.push(StatefulStepObservation {
+            step_id: step.id.clone(),
+            target: step.target.clone(),
+            status: call.status,
+            returned: (terminal || step.observe_returned || step.expected.is_some())
+                .then_some(call.returned.clone()),
+            returned_digest,
+            steps: call.steps,
+            effects: call.effects,
+            failure: call.failure.clone(),
+        });
+        if call.status != ExecutionStatus::Returned {
+            result.status = call.status;
+            result.failure = call.failure;
+            break;
+        }
+        previous.insert(step.id.clone(), call.returned.clone());
+        if let Some(maximum) = case.maximum_total_steps {
+            if result.steps > maximum {
+                result.status = ExecutionStatus::BudgetExhausted;
+                result.failure = Some(ExecutionFailure {
+                    identity: None,
+                    reason: format!(
+                        "stateful aggregate step bound {maximum} was exceeded after {:?}",
+                        step.id
+                    ),
+                });
+                break;
+            }
+        }
+        result.returned = call.returned;
+        result.status = ExecutionStatus::Returned;
+    }
+    if result.calls > case.maximum_calls {
+        result.status = ExecutionStatus::BudgetExhausted;
+        result.failure = Some(ExecutionFailure {
+            identity: None,
+            reason: "stateful call bound was exceeded".to_owned(),
+        });
+    }
+    result.seal();
+    result
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatefulExecutionMismatch {
+    pub case_id: String,
+    pub baseline: StatefulExecutionResult,
+    pub candidate: StatefulExecutionResult,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatefulExecutionComparison {
+    pub schema_version: String,
+    pub status: ComparisonStatus,
+    pub corpus_name: String,
+    pub corpus_size: usize,
+    pub matching_cases: usize,
+    pub mismatching_cases: usize,
+    pub mismatches: Vec<StatefulExecutionMismatch>,
+    pub interpretation: String,
+}
+
+pub fn compare_stateful_results(
+    corpus_name: impl Into<String>,
+    baseline: &[StatefulExecutionResult],
+    candidate: &[StatefulExecutionResult],
+) -> StatefulExecutionComparison {
+    let corpus_name = corpus_name.into();
+    if baseline.len() != candidate.len()
+        || baseline.is_empty()
+        || baseline.iter().any(|result| !result.identity_is_valid())
+        || candidate.iter().any(|result| !result.identity_is_valid())
+    {
+        return StatefulExecutionComparison {
+            schema_version: STATEFUL_EXECUTION_COMPARISON_SCHEMA_VERSION.to_owned(),
+            status: ComparisonStatus::InvalidInput,
+            corpus_name,
+            corpus_size: baseline.len().max(candidate.len()),
+            matching_cases: 0,
+            mismatching_cases: 0,
+            mismatches: Vec::new(),
+            interpretation: "stateful comparison refused invalid or incomplete trace evidence"
+                .to_owned(),
+        };
+    }
+    let mut matching_cases = 0;
+    let mut mismatches = Vec::new();
+    for left in baseline {
+        let Some(right) = candidate.iter().find(|right| right.case_id == left.case_id) else {
+            mismatches.push(StatefulExecutionMismatch {
+                case_id: left.case_id.clone(),
+                baseline: left.clone(),
+                candidate: StatefulExecutionResult {
+                    schema_version: STATEFUL_EXECUTION_SCHEMA_VERSION.to_owned(),
+                    case_id: left.case_id.clone(),
+                    corpus_identity: String::new(),
+                    trace_identity: SemanticId(String::new()),
+                    status: ExecutionStatus::InvalidRequest,
+                    observations: Vec::new(),
+                    returned: Vec::new(),
+                    steps: 0,
+                    calls: 0,
+                    failure: None,
+                    program_identity: None,
+                    program_fingerprint: None,
+                    backend_identity: None,
+                    artifact_identity: None,
+                },
+            });
+            continue;
+        };
+        let equivalent = left.corpus_identity == right.corpus_identity
+            && left.status == right.status
+            && left.returned == right.returned
+            && left
+                .observations
+                .iter()
+                .map(|observation| {
+                    (
+                        &observation.step_id,
+                        observation.status,
+                        &observation.returned_digest,
+                        &observation.effects,
+                    )
+                })
+                .eq(right.observations.iter().map(|observation| {
+                    (
+                        &observation.step_id,
+                        observation.status,
+                        &observation.returned_digest,
+                        &observation.effects,
+                    )
+                }));
+        if equivalent {
+            matching_cases += 1;
+        } else if mismatches.is_empty() {
+            mismatches.push(StatefulExecutionMismatch {
+                case_id: left.case_id.clone(),
+                baseline: left.clone(),
+                candidate: right.clone(),
+            });
+        }
+    }
+    let mismatching_cases = baseline.len() - matching_cases;
+    StatefulExecutionComparison {
+        schema_version: STATEFUL_EXECUTION_COMPARISON_SCHEMA_VERSION.to_owned(),
+        status: if mismatching_cases == 0 {
+            ComparisonStatus::EquivalentOverCorpus
+        } else {
+            ComparisonStatus::MismatchDetected
+        },
+        corpus_name,
+        corpus_size: baseline.len(),
+        matching_cases,
+        mismatching_cases,
+        mismatches,
+        interpretation: "stateful agreement is bounded logical trace evidence, not universal semantic equivalence or compiler correctness".to_owned(),
+    }
+}
+
+fn stateful_trace_identity(result: &StatefulExecutionResult) -> SemanticId {
+    let material = (
+        &result.schema_version,
+        &result.case_id,
+        &result.corpus_identity,
+        &result.status,
+        &result.observations,
+        &result.returned,
+        result.steps,
+        result.calls,
+        &result.program_identity,
+        &result.program_fingerprint,
+        &result.backend_identity,
+        &result.artifact_identity,
+    );
+    let canonical = canonical_json_value(&material).expect("stateful trace is serializable");
+    SemanticId(format!(
+        "mncs:language:execution-trace:{}",
+        sha256_hex(canonical.as_bytes())
+    ))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionCorpus {
     pub schema_version: String,
@@ -213,6 +671,8 @@ pub struct ExecutionCorpus {
     pub cases: Vec<ExecutionCase>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<ExecutionProperty>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stateful_cases: Vec<StatefulExecutionCase>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2726,5 +3186,130 @@ mod tests {
             "block_enter",
         );
         assert!(result.trace_truncated);
+    }
+
+    #[test]
+    fn stateful_trace_threads_previous_logical_results_and_hashes_every_transition() {
+        let integer = |value| ExecutionValue::Integer {
+            value,
+            ty: IntegerType {
+                bits: 64,
+                signed: true,
+            },
+        };
+        let case = StatefulExecutionCase {
+            id: "increment-sequence".to_owned(),
+            steps: vec![
+                StatefulExecutionStep {
+                    id: "init".to_owned(),
+                    target: ExecutionTarget {
+                        module: "m".to_owned(),
+                        function: "init".to_owned(),
+                    },
+                    arguments: Vec::new(),
+                    step_budget: 4,
+                    policy: ExecutionPolicy::default(),
+                    expected: None,
+                    expected_status: Some(ExecutionStatus::Returned),
+                    observe_returned: false,
+                },
+                StatefulExecutionStep {
+                    id: "next".to_owned(),
+                    target: ExecutionTarget {
+                        module: "m".to_owned(),
+                        function: "next".to_owned(),
+                    },
+                    arguments: vec![StatefulArgument::PreviousResult {
+                        step_id: "init".to_owned(),
+                        result_index: 0,
+                    }],
+                    step_budget: 4,
+                    policy: ExecutionPolicy::default(),
+                    expected: None,
+                    expected_status: Some(ExecutionStatus::Returned),
+                    observe_returned: true,
+                },
+            ],
+            maximum_calls: 2,
+            maximum_total_steps: Some(8),
+            expected_final: Some(vec![integer(2)]),
+            expected_final_status: Some(ExecutionStatus::Returned),
+        };
+        let result = execute_stateful_case("test-corpus", &case, |request| {
+            assert_eq!(
+                request.target.function,
+                if request.arguments.is_empty() {
+                    "init"
+                } else {
+                    "next"
+                }
+            );
+            let value = request
+                .arguments
+                .first()
+                .and_then(|value| match value {
+                    ExecutionValue::Integer { value, .. } => Some(*value + 1),
+                    _ => None,
+                })
+                .unwrap_or(1);
+            StatefulCallResult {
+                status: ExecutionStatus::Returned,
+                returned: vec![integer(value)],
+                steps: 1,
+                effects: Vec::new(),
+                failure: None,
+                program_identity: Some(SemanticId("program".to_owned())),
+                program_fingerprint: Some("fingerprint".to_owned()),
+            }
+        });
+        assert_eq!(result.status, ExecutionStatus::Returned);
+        assert_eq!(result.returned, vec![integer(2)]);
+        assert_eq!(result.observations.len(), 2);
+        assert!(result.observations[0].returned_digest.is_some());
+        assert!(result.observations[0].returned.is_none());
+        assert!(result.observations[1].returned.is_some());
+        assert!(result.identity_is_valid());
+        let mut mutant = result.clone();
+        mutant.observations[0].returned_digest = Some("mutated-transition".to_owned());
+        mutant.seal();
+        let comparison = compare_stateful_results("test-corpus", &[result], &[mutant]);
+        assert_eq!(comparison.status, ComparisonStatus::MismatchDetected);
+        assert_eq!(comparison.mismatching_cases, 1);
+    }
+
+    #[test]
+    fn stateful_trace_rejects_forward_result_references_before_execution() {
+        let case = StatefulExecutionCase {
+            id: "forward-reference".to_owned(),
+            steps: vec![StatefulExecutionStep {
+                id: "first".to_owned(),
+                target: ExecutionTarget {
+                    module: "m".to_owned(),
+                    function: "f".to_owned(),
+                },
+                arguments: vec![StatefulArgument::PreviousResult {
+                    step_id: "later".to_owned(),
+                    result_index: 0,
+                }],
+                step_budget: 1,
+                policy: ExecutionPolicy::default(),
+                expected: None,
+                expected_status: None,
+                observe_returned: false,
+            }],
+            maximum_calls: 1,
+            maximum_total_steps: None,
+            expected_final: None,
+            expected_final_status: None,
+        };
+        let mut called = false;
+        let result = execute_stateful_case("test-corpus", &case, |_| {
+            called = true;
+            panic!("invalid stateful case must not reach the backend");
+        });
+        assert_eq!(result.status, ExecutionStatus::InvalidRequest);
+        assert!(!called);
+        assert!(result.failure.is_some());
+        assert!(result.identity_is_valid());
     }
 }

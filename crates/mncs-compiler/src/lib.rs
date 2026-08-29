@@ -567,6 +567,24 @@ impl ReferenceCompiler {
         result: &CompilationResult,
     ) -> CompilationStudyResult {
         let request = study.compilation_request.clone();
+        let mut correspondence_errors = result.validate_integrity();
+        if !study.identity_is_valid() {
+            correspondence_errors.push(CompilerDiagnostic::new(
+                "CMP206",
+                CompilerDiagnosticKind::InvalidRequest,
+                "compilation study request identity is stale or laundered",
+            ));
+        }
+        if result.request_identity != request.identity || result.request != request {
+            correspondence_errors.push(CompilerDiagnostic::new(
+                "CMP207",
+                CompilerDiagnosticKind::InvalidRequest,
+                "compilation study and compilation result do not describe the same request",
+            ));
+        }
+        if !correspondence_errors.is_empty() {
+            return refused_study(&study, result, correspondence_errors);
+        }
         let mut unresolved_assumptions = request.assumptions.clone();
         if let Some(target) = &request.target {
             unresolved_assumptions.extend(target.assumptions.clone());
@@ -685,6 +703,63 @@ impl ReferenceCompiler {
             .unwrap_or_else(|| panic!("reference pipeline is missing pass {id:?}"))
             .clone()
     }
+}
+
+fn refused_study(
+    study: &CompilationStudyRequest,
+    result: &CompilationResult,
+    diagnostics: Vec<CompilerDiagnostic>,
+) -> CompilationStudyResult {
+    let request = &study.compilation_request;
+    let mut refused = CompilationStudyResult {
+        schema_version: COMPILER_ARTIFACT_SCHEMA_VERSION.to_owned(),
+        contract_id: COMPILATION_STUDY_RESULT_CONTRACT_ID.to_owned(),
+        identity: SemanticId(String::new()),
+        study_request_identity: study.identity.clone(),
+        compilation_request_identity: request.identity.clone(),
+        run_identity: SemanticId(format!(
+            "mncs:compiler:study-refusal:{}",
+            fingerprint(&(&study.identity, &result.identity, &diagnostics))
+        )),
+        node: study.node.clone(),
+        compiler_identity: request.compiler.identity.clone(),
+        pipeline_identity: request.pipeline.identity.clone(),
+        compiler_host_identity: request.compiler_host.identity.clone(),
+        build_host_identity: request.build_host.identity.clone(),
+        target_identity: request
+            .target
+            .as_ref()
+            .map(|target| target.identity.clone()),
+        backend_identity: request
+            .backend
+            .as_ref()
+            .map(|configuration| configuration.backend.identity.clone()),
+        realization_plan_identity: None,
+        selected_ssa_identity: None,
+        backend_artifact_identity: None,
+        backend_artifact_kind: None,
+        compilation_status: CompilationStatus::Failed,
+        stage_fingerprints: BTreeMap::new(),
+        pass_executions: Vec::new(),
+        semantic_fingerprint: None,
+        hir_fingerprint: None,
+        ssa_fingerprint: None,
+        compilation_result_identity: result.identity.clone(),
+        execution_result_references: study.execution_result_references.clone(),
+        diagnostics,
+        unresolved_obligations: Vec::new(),
+        unresolved_assumptions: Vec::new(),
+        invariants: CrossHostInvariants {
+            expected_equal: Vec::new(),
+            expected_distinct: vec![
+                "compilation_request_identity".to_owned(),
+                "compilation_result_identity".to_owned(),
+            ],
+        },
+        interpretation: COMPILATION_STUDY_OBSERVATION_INTERPRETATION.to_owned(),
+    };
+    refused.seal();
+    refused
 }
 
 pub fn compile(request: CompilationRequest, program: &Program) -> CompilationResult {
@@ -1482,6 +1557,27 @@ mod tests {
     }
 
     #[test]
+    fn reused_hir_rejects_mutated_contents_even_when_semantic_header_is_preserved() {
+        let program = program("compiler-hir-integrity");
+        let hir = program.lower_to_ir().unwrap();
+        let mut mutated = hir.clone();
+        mutated.functions[0].blocks.clear();
+        assert_eq!(mutated.semantic_identity, hir.semantic_identity);
+        assert_eq!(mutated.semantic_fingerprint, hir.semantic_fingerprint);
+        assert!(matches!(
+            program.lower_to_ssa_from_ir(&mutated),
+            Err(mncs_model::SsaError::IrIntegrity(_))
+        ));
+
+        let mut missing = hir.clone();
+        missing.functions.clear();
+        assert!(matches!(
+            program.lower_to_ssa_from_ir(&missing),
+            Err(mncs_model::SsaError::IrIntegrity(_))
+        ));
+    }
+
+    #[test]
     fn invalid_semantics_never_reach_hir_or_ssa() {
         let compiler = ReferenceCompiler::default();
         let program = Program::from_json(include_str!(concat!(
@@ -1615,6 +1711,27 @@ mod tests {
         let result = compiler.compile(request, &input_program);
         assert_eq!(result.status, CompilationStatus::Failed);
         assert!(result.diagnostics.iter().any(|item| item.code == "CMP203"));
+    }
+
+    #[test]
+    fn study_from_compilation_refuses_cross_wired_requests() {
+        let compiler = ReferenceCompiler::default();
+        let first = program("compiler-study-a");
+        let second = program("compiler-study-b");
+        let first_request = compiler.request_for_program(&first, emissions(), None);
+        let second_request = compiler.request_for_program(&second, emissions(), None);
+        let result = compiler.compile(first_request, &first);
+        let study = CompilationStudyRequest::new(
+            native_node_profile("cross-wire-test"),
+            second_request,
+            Vec::new(),
+        );
+        let refused = compiler.study_from_compilation(study, &result);
+        assert_eq!(refused.compilation_status, CompilationStatus::Failed);
+        assert!(refused.diagnostics.iter().any(|item| item.code == "CMP207"));
+        assert!(refused.identity_is_valid());
+        assert!(refused.selected_ssa_identity.is_none());
+        assert!(refused.stage_fingerprints.is_empty());
     }
 
     #[test]

@@ -21,12 +21,14 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use mncs_model::{
-    execute_ssa_module, execute_with_policy, ArtifactRepresentation, BackendArtifact,
-    BackendCapabilityManifest, BackendConfiguration, BackendEvidence, BackendIdentity,
-    BackendResult, BackendValueContract, BodyType, CompilerArtifactRef, CompilerDiagnostic,
-    CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure, ExecutionRequest, ExecutionResult,
-    ExecutionStatus, ExecutionTarget, ExecutionValue, IntegerType, Program, SemanticId, SsaModule,
-    TargetContractRef, TargetLoweringPlan, TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION,
+    execute_ssa_module, execute_ssa_module_prevalidated, execute_stateful_case,
+    execute_with_policy, ArtifactRepresentation, BackendArtifact, BackendCapabilityManifest,
+    BackendConfiguration, BackendEvidence, BackendIdentity, BackendResult, BackendValueContract,
+    BodyType, CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind, ExecutionCorpus,
+    ExecutionFailure, ExecutionRequest, ExecutionResult, ExecutionStatus, ExecutionTarget,
+    ExecutionValue, IntegerType, Program, SemanticId, SsaExecutionSession, SsaModule,
+    StatefulCallResult, StatefulExecutionCase, StatefulExecutionResult, TargetContractRef,
+    TargetLoweringPlan, TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION,
     COMPILER_ARTIFACT_SCHEMA_VERSION, LAYERED_EXECUTION_COMPARISON_INTERPRETATION,
     PORTABLE_WASM_MVP_BACKEND_NAME, PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET,
     SSA_SCHEMA_VERSION,
@@ -240,7 +242,10 @@ pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
         ["bounded_execution_agreement".to_owned()]
             .into_iter()
             .collect(),
-        ["embedded_mncs_wasm_interpreter".to_owned()]
+        [
+            "embedded_mncs_wasm_interpreter".to_owned(),
+            "language_stateful_trace_runner".to_owned(),
+        ]
             .into_iter()
             .collect(),
         [
@@ -409,7 +414,12 @@ pub fn research_bytecode_capabilities() -> BackendCapabilityManifest {
         ["bounded_execution_agreement".to_owned()]
             .into_iter()
             .collect(),
-        ["mncs_ssa_interpreter".to_owned()].into_iter().collect(),
+        [
+            "mncs_ssa_interpreter".to_owned(),
+            "language_stateful_trace_runner".to_owned(),
+        ]
+        .into_iter()
+        .collect(),
         ["language_level_call_signature".to_owned()]
             .into_iter()
             .collect(),
@@ -834,6 +844,26 @@ fn execute_portable_wasm(
             return result;
         }
     };
+    execute_portable_wasm_decoded(artifact, &module, request)
+}
+
+fn execute_portable_wasm_decoded(
+    artifact: &BackendArtifact,
+    module: &crate::wasm::WasmModule,
+    request: &ExecutionRequest,
+) -> BackendExecutionResult {
+    let mut result = BackendExecutionResult {
+        schema_version: BACKEND_EXECUTION_RESULT_SCHEMA_VERSION.to_owned(),
+        status: ExecutionStatus::InvalidRequest,
+        target: request.target.clone(),
+        backend: artifact.backend.clone(),
+        artifact_identity: Some(artifact.identity.clone()),
+        artifact_sha256: Some(artifact.bytes_sha256.clone()),
+        returned: Vec::new(),
+        steps: 0,
+        effects: Vec::new(),
+        failure: None,
+    };
     let value_contract = artifact
         .function_value_contracts
         .get(&request.target.function);
@@ -865,7 +895,7 @@ fn execute_portable_wasm(
         .map(|contract| marshal_ty(contract, &artifact.composite_value_contracts))
         .collect::<Vec<_>>();
     match execute_function_typed(
-        &module,
+        module,
         &request.target.function,
         &request.arguments,
         &param_tys,
@@ -1363,7 +1393,35 @@ fn execute_research_bytecode(
             return result;
         }
     };
-    let observation = execute_ssa_module(&payload.program, &payload.ssa, request);
+    execute_research_bytecode_payload(artifact, &payload, request, true, None)
+}
+
+fn execute_research_bytecode_payload(
+    artifact: &BackendArtifact,
+    payload: &ResearchBytecodePayload,
+    request: &ExecutionRequest,
+    validate_artifact: bool,
+    session: Option<&SsaExecutionSession<'_>>,
+) -> BackendExecutionResult {
+    let mut result = BackendExecutionResult {
+        schema_version: BACKEND_EXECUTION_RESULT_SCHEMA_VERSION.to_owned(),
+        status: ExecutionStatus::InvalidRequest,
+        target: request.target.clone(),
+        backend: artifact.backend.clone(),
+        artifact_identity: Some(artifact.identity.clone()),
+        artifact_sha256: Some(artifact.bytes_sha256.clone()),
+        returned: Vec::new(),
+        steps: 0,
+        effects: Vec::new(),
+        failure: None,
+    };
+    let observation = if let Some(session) = session {
+        session.execute(request)
+    } else if validate_artifact {
+        execute_ssa_module(&payload.program, &payload.ssa, request)
+    } else {
+        execute_ssa_module_prevalidated(&payload.program, &payload.ssa, request)
+    };
     result.status = observation.status;
     result.returned = observation.returned;
     result.steps = observation.steps;
@@ -1394,6 +1452,131 @@ pub fn execute_backend(
         },
         |adapter| adapter.execute(artifact, request),
     )
+}
+
+/// Execute one bounded stateful trace through the selected backend.  The
+/// language-owned runner retains logical values and resolves previous-result
+/// references; this adapter supplies only the per-call backend boundary.
+pub fn execute_backend_stateful(
+    artifact: &BackendArtifact,
+    corpus_name: &str,
+    case: &StatefulExecutionCase,
+) -> StatefulExecutionResult {
+    let reusable_wasm_module =
+        if artifact.backend == portable_wasm_backend() && artifact.identity_is_valid() {
+            artifact.bytes().ok().and_then(|bytes| {
+                (bytes.len() >= 8 && bytes[..4] == WASM_MAGIC && bytes[4..8] == WASM_VERSION)
+                    .then(|| decode_module(&bytes).ok())
+                    .flatten()
+            })
+        } else {
+            None
+        };
+    let reusable_research_payload = if artifact.backend == research_bytecode_backend()
+        && artifact.identity_is_valid()
+        && artifact.artifact_kind == RESEARCH_BYTECODE_ARTIFACT_KIND
+    {
+        artifact.bytes().ok().and_then(|bytes| {
+            serde_json::from_slice::<ResearchBytecodePayload>(&bytes)
+                .ok()
+                .filter(|payload| payload.schema_version == "0.1")
+        })
+    } else {
+        None
+    };
+    let mut result = if artifact.backend.name == CRANELIFT_BACKEND_NAME {
+        if let Ok(mut session) = cranelift_backend::prepare_stateful_session(artifact) {
+            execute_stateful_case(corpus_name, case, |request| {
+                let observation = session.execute(request);
+                StatefulCallResult {
+                    status: observation.status,
+                    returned: observation.returned,
+                    steps: observation.steps,
+                    effects: observation.effects,
+                    failure: observation.failure,
+                    program_identity: None,
+                    program_fingerprint: None,
+                }
+            })
+        } else {
+            execute_stateful_case(corpus_name, case, |request| {
+                let observation = execute_backend(artifact, request);
+                StatefulCallResult {
+                    status: observation.status,
+                    returned: observation.returned,
+                    steps: observation.steps,
+                    effects: observation.effects,
+                    failure: observation.failure,
+                    program_identity: None,
+                    program_fingerprint: None,
+                }
+            })
+        }
+    } else if let Some(module) = reusable_wasm_module {
+        execute_stateful_case(corpus_name, case, |request| {
+            let observation = execute_portable_wasm_decoded(artifact, &module, request);
+            StatefulCallResult {
+                status: observation.status,
+                returned: observation.returned,
+                steps: observation.steps,
+                effects: observation.effects,
+                failure: observation.failure,
+                program_identity: None,
+                program_fingerprint: None,
+            }
+        })
+    } else if let Some(payload) = reusable_research_payload {
+        if let Ok(session) = SsaExecutionSession::new(&payload.program, &payload.ssa) {
+            execute_stateful_case(corpus_name, case, |request| {
+                let observation = execute_research_bytecode_payload(
+                    artifact,
+                    &payload,
+                    request,
+                    false,
+                    Some(&session),
+                );
+                StatefulCallResult {
+                    status: observation.status,
+                    returned: observation.returned,
+                    steps: observation.steps,
+                    effects: observation.effects,
+                    failure: observation.failure,
+                    program_identity: None,
+                    program_fingerprint: None,
+                }
+            })
+        } else {
+            execute_stateful_case(corpus_name, case, |request| {
+                let observation = execute_backend(artifact, request);
+                StatefulCallResult {
+                    status: observation.status,
+                    returned: observation.returned,
+                    steps: observation.steps,
+                    effects: observation.effects,
+                    failure: observation.failure,
+                    program_identity: None,
+                    program_fingerprint: None,
+                }
+            })
+        }
+    } else {
+        execute_stateful_case(corpus_name, case, |request| {
+            let observation = execute_backend(artifact, request);
+            StatefulCallResult {
+                status: observation.status,
+                returned: observation.returned,
+                steps: observation.steps,
+                effects: observation.effects,
+                failure: observation.failure,
+                program_identity: None,
+                program_fingerprint: None,
+            }
+        })
+    };
+    result.backend_identity = Some(artifact.backend.identity.clone());
+    result.artifact_identity = Some(artifact.identity.clone());
+    result.seal();
+    result
 }
 
 impl BackendAdapter for PortableWasmAdapter {
@@ -1820,6 +2003,7 @@ mod tests {
             schema_version: mncs_model::EXECUTION_CORPUS_SCHEMA_VERSION.to_owned(),
             name: "checked-add-backend".to_owned(),
             properties: Vec::new(),
+            stateful_cases: Vec::new(),
             cases: vec![
                 ExecutionCase {
                     id: "sum".to_owned(),

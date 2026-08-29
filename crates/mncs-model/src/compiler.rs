@@ -1676,9 +1676,50 @@ impl CompilationResult {
     pub fn identity_is_valid(&self) -> bool {
         let mut material = self.clone();
         material.identity = SemanticId(String::new());
-        self.request_identity == self.request.identity
+        self.schema_version == COMPILER_ARTIFACT_SCHEMA_VERSION
+            && self.request_identity == self.request.identity
             && self.request.identity_is_valid()
             && self.identity == identified("compilation-result", &material)
+    }
+
+    pub fn validate_integrity(&self) -> Vec<CompilerDiagnostic> {
+        let mut diagnostics = Vec::new();
+        if !self.identity_is_valid() {
+            diagnostics.push(CompilerDiagnostic::new(
+                "CMP105",
+                CompilerDiagnosticKind::InvalidRequest,
+                "compilation result identity is stale or laundered",
+            ));
+        }
+        if self.request_identity != self.request.identity {
+            diagnostics.push(CompilerDiagnostic::new(
+                "CMP106",
+                CompilerDiagnosticKind::InvalidRequest,
+                "compilation result request identity does not match its request",
+            ));
+        }
+        if self
+            .artifacts
+            .iter()
+            .any(|artifact| !artifact.identity_is_valid())
+        {
+            diagnostics.push(CompilerDiagnostic::new(
+                "CMP107",
+                CompilerDiagnosticKind::InvalidRequest,
+                "compilation result contains a stale artifact reference",
+            ));
+        }
+        if let Some(evidence) = &self.evidence {
+            diagnostics.extend(evidence.validate_integrity());
+            if evidence.request_identity != self.request.identity {
+                diagnostics.push(CompilerDiagnostic::new(
+                    "CMP108",
+                    CompilerDiagnosticKind::InvalidRequest,
+                    "compilation evidence is bound to a different compilation request",
+                ));
+            }
+        }
+        diagnostics
     }
 }
 
@@ -1723,6 +1764,21 @@ impl CompilationStudyRequest {
             compilation_request,
             execution_result_references,
         }
+    }
+
+    pub fn identity_is_valid(&self) -> bool {
+        self.schema_version == COMPILER_ARTIFACT_SCHEMA_VERSION
+            && !self.node.node_identity.trim().is_empty()
+            && self.compilation_request.identity_is_valid()
+            && self.identity
+                == identified(
+                    "compilation-study-request",
+                    &(
+                        &self.node,
+                        &self.compilation_request.identity,
+                        &self.execution_result_references,
+                    ),
+                )
     }
 }
 

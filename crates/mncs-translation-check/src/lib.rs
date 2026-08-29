@@ -580,6 +580,7 @@ mod tests {
             schema_version: mncs_model::EXECUTION_CORPUS_SCHEMA_VERSION.to_owned(),
             name: "checked-add".to_owned(),
             properties: Vec::new(),
+            stateful_cases: Vec::new(),
             cases: vec![
                 ExecutionCase {
                     id: "sum".to_owned(),
@@ -693,6 +694,7 @@ mod tests {
             schema_version: mncs_model::EXECUTION_CORPUS_SCHEMA_VERSION.to_owned(),
             name: "no-overflow".to_owned(),
             properties: Vec::new(),
+            stateful_cases: Vec::new(),
             cases: vec![ExecutionCase {
                 id: "small".to_owned(),
                 request: request(1, 2),

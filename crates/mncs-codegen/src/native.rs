@@ -136,61 +136,73 @@ pub fn compile_and_run_with_call_file_full(
     args: &[String],
     call_file: Option<&Path>,
 ) -> Result<(crate::support::NativeRunView, String), NativeError> {
-    let digest = crate::support::sha256_hex(
-        sources
-            .iter()
-            .flat_map(|(name, body)| format!("{name}\n{body}").into_bytes())
-            .collect::<Vec<_>>()
-            .as_slice(),
-    );
+    let mut material = sources
+        .iter()
+        .flat_map(|(name, body)| format!("{name}\n{body}").into_bytes())
+        .collect::<Vec<_>>();
+    material.extend_from_slice(compiler.name.as_bytes());
+    material.extend_from_slice(compiler.version.as_bytes());
+    for flag in flags {
+        material.extend_from_slice(flag.as_bytes());
+    }
+    let digest = crate::support::sha256_hex(&material);
     let dir = std::env::temp_dir().join(format!("mncs-native-{}", &digest[..16]));
     fs::create_dir_all(&dir).map_err(|error| {
         NativeError::CompileFailed(format!("unable to create work directory: {error}"))
     })?;
+    let exe = dir.join("mncs-run");
+    let needs_compile = !exe.is_file();
     let mut paths = Vec::new();
     for (name, body) in sources {
         let path = dir.join(name);
-        fs::write(&path, body.as_bytes()).map_err(|error| {
-            NativeError::CompileFailed(format!("unable to write {name}: {error}"))
-        })?;
+        if needs_compile {
+            fs::write(&path, body.as_bytes()).map_err(|error| {
+                NativeError::CompileFailed(format!("unable to write {name}: {error}"))
+            })?;
+        }
         paths.push(path);
     }
-    let exe = dir.join("mncs-run");
-    let mut command = Command::new(&compiler.path);
-    command.current_dir(&dir);
-    command.args(flags);
-    for path in &paths {
-        match path.extension().and_then(|ext| ext.to_str()) {
-            Some("ll") => {
-                command
-                    .arg("-x")
-                    .arg("ir")
-                    .arg(path.file_name().unwrap_or(path.as_os_str()));
-            }
-            Some("c") => {
-                command
-                    .arg("-x")
-                    .arg("c")
-                    .arg(path.file_name().unwrap_or(path.as_os_str()));
-            }
-            _ => {
-                command.arg(path.file_name().unwrap_or(path.as_os_str()));
+    if needs_compile {
+        let temporary_exe = dir.join(format!("mncs-run-{}.tmp", std::process::id()));
+        let mut command = Command::new(&compiler.path);
+        command.current_dir(&dir);
+        command.args(flags);
+        for path in &paths {
+            match path.extension().and_then(|ext| ext.to_str()) {
+                Some("ll") => {
+                    command
+                        .arg("-x")
+                        .arg("ir")
+                        .arg(path.file_name().unwrap_or(path.as_os_str()));
+                }
+                Some("c") => {
+                    command
+                        .arg("-x")
+                        .arg("c")
+                        .arg(path.file_name().unwrap_or(path.as_os_str()));
+                }
+                _ => {
+                    command.arg(path.file_name().unwrap_or(path.as_os_str()));
+                }
             }
         }
-    }
-    command.arg("-o").arg(&exe);
-    let compiled = command.output().map_err(|error| {
-        NativeError::ToolchainUnavailable(format!(
-            "{} could not be executed: {error}",
-            compiler.name
-        ))
-    })?;
-    if !compiled.status.success() {
-        return Err(NativeError::CompileFailed(format!(
-            "{} failed: {}",
-            compiler.name,
-            String::from_utf8_lossy(&compiled.stderr)
-        )));
+        command.arg("-o").arg(&temporary_exe);
+        let compiled = command.output().map_err(|error| {
+            NativeError::ToolchainUnavailable(format!(
+                "{} could not be executed: {error}",
+                compiler.name
+            ))
+        })?;
+        if !compiled.status.success() {
+            return Err(NativeError::CompileFailed(format!(
+                "{} failed: {}",
+                compiler.name,
+                String::from_utf8_lossy(&compiled.stderr)
+            )));
+        }
+        fs::rename(&temporary_exe, &exe).map_err(|error| {
+            NativeError::CompileFailed(format!("unable to publish native executable: {error}"))
+        })?;
     }
     let run = run_executable_full(&exe, args, call_file)?;
     Ok((
@@ -317,38 +329,50 @@ pub fn compile_object_and_run_full(
     args: &[String],
     call_file: Option<&Path>,
 ) -> Result<crate::support::NativeRunView, NativeError> {
-    let digest = crate::support::sha256_hex(object_bytes);
+    let mut material = object_bytes.to_vec();
+    material.extend_from_slice(driver_source.as_bytes());
+    material.extend_from_slice(linker.name.as_bytes());
+    material.extend_from_slice(linker.version.as_bytes());
+    let digest = crate::support::sha256_hex(&material);
     let dir = std::env::temp_dir().join(format!("mncs-aot-{}", &digest[..16]));
     fs::create_dir_all(&dir).map_err(|error| {
         NativeError::CompileFailed(format!("unable to create work directory: {error}"))
     })?;
     let object_path = dir.join(object_name);
     let driver_path = dir.join(driver_name);
-    fs::write(&object_path, object_bytes)
-        .map_err(|error| NativeError::CompileFailed(format!("unable to write object: {error}")))?;
-    fs::write(&driver_path, driver_source)
-        .map_err(|error| NativeError::CompileFailed(format!("unable to write driver: {error}")))?;
     let exe = dir.join("mncs-run");
-    let compiled = Command::new(&linker.path)
-        .current_dir(&dir)
-        .arg("-O0")
-        .arg("-o")
-        .arg(&exe)
-        .arg(driver_path.file_name().unwrap_or(driver_path.as_os_str()))
-        .arg(object_path.file_name().unwrap_or(object_path.as_os_str()))
-        .output()
-        .map_err(|error| {
-            NativeError::ToolchainUnavailable(format!(
-                "{} could not be executed: {error}",
-                linker.name
-            ))
+    if !exe.is_file() {
+        fs::write(&object_path, object_bytes).map_err(|error| {
+            NativeError::CompileFailed(format!("unable to write object: {error}"))
         })?;
-    if !compiled.status.success() {
-        return Err(NativeError::CompileFailed(format!(
-            "{} link failed: {}",
-            linker.name,
-            String::from_utf8_lossy(&compiled.stderr)
-        )));
+        fs::write(&driver_path, driver_source).map_err(|error| {
+            NativeError::CompileFailed(format!("unable to write driver: {error}"))
+        })?;
+        let temporary_exe = dir.join(format!("mncs-run-{}.tmp", std::process::id()));
+        let compiled = Command::new(&linker.path)
+            .current_dir(&dir)
+            .arg("-O0")
+            .arg("-o")
+            .arg(&temporary_exe)
+            .arg(driver_path.file_name().unwrap_or(driver_path.as_os_str()))
+            .arg(object_path.file_name().unwrap_or(object_path.as_os_str()))
+            .output()
+            .map_err(|error| {
+                NativeError::ToolchainUnavailable(format!(
+                    "{} could not be executed: {error}",
+                    linker.name
+                ))
+            })?;
+        if !compiled.status.success() {
+            return Err(NativeError::CompileFailed(format!(
+                "{} link failed: {}",
+                linker.name,
+                String::from_utf8_lossy(&compiled.stderr)
+            )));
+        }
+        fs::rename(&temporary_exe, &exe).map_err(|error| {
+            NativeError::CompileFailed(format!("unable to publish native executable: {error}"))
+        })?;
     }
     match run_executable_full(&exe, args, call_file) {
         Ok(run) => Ok(crate::support::NativeRunView {

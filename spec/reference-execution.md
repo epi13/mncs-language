@@ -73,3 +73,27 @@ Its statuses distinguish `consistent_over_corpus`, `mismatch_detected`, `unsuppo
 over the declared finite corpus. It is not universal equivalence, formal compiler correctness,
 backend validation, or independent evaluation. Shared low-level arithmetic helpers mean the two paths
 are not fully independent implementations.
+
+## Stateful execution traces
+
+ExecutionCorpus schema `0.3` adds an optional `stateful_cases` collection. A
+`StatefulExecutionCase` is a bounded ordered sequence of named calls. Each
+`StatefulExecutionStep` has a target, ordinary typed literal arguments or
+`previous_result` references to an earlier step, a per-call budget, and
+optional expected status/return observations. The runner resolves references
+to logical values and invokes the existing backend call ABI, so state is
+retained across the sequence without exposing a backend-specific session
+handle.
+
+`StatefulExecutionResult` records every transition's status, effects, step
+count, and canonical returned-value digest. Complete values are retained only
+for selected observations and the final result, which keeps large streaming
+states bounded while preserving a digest for every transition. Its trace
+identity covers the ordered calls, corpus identity, program identity, backend,
+and artifact. `returned` is reported only when every declared transition
+returns; invalid references, failures, budget exhaustion, and unsupported
+backends remain explicit.
+
+`compare_stateful_results` compares status and logical transition observations
+over the finite case set. This is bounded cross-backend evidence, not universal
+equivalence, compiler correctness, persistence, or conformance.

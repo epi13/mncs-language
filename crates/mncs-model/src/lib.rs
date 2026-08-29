@@ -78,22 +78,28 @@ pub use evidence::{
     EvidenceFreshness, EvidenceManifest, EvidenceRecord, EvidenceState, EvidenceStatusReport,
 };
 pub use execution::{
-    compare as compare_execution, execute, execute_with_policy, execution_corpus_schema_supported,
-    ComparisonStatus, EffectExecutionPolicy, ExecutionCase, ExecutionComparison, ExecutionCorpus,
+    compare as compare_execution, compare_stateful_results, execute, execute_stateful_case,
+    execute_with_policy, execution_corpus_schema_supported, ComparisonStatus,
+    EffectExecutionPolicy, ExecutionCase, ExecutionComparison, ExecutionCorpus,
     ExecutionEffectEvent, ExecutionFailure, ExecutionPolicy, ExecutionProperty, ExecutionRequest,
     ExecutionResult, ExecutionStatus, ExecutionSubject, ExecutionTarget, ExecutionTraceEntry,
-    ExecutionValue, ExpectedEffectObservation, EXECUTION_COMPARISON_SCHEMA_VERSION,
-    EXECUTION_CORPUS_SCHEMA_VERSION, EXECUTION_CORPUS_SCHEMA_VERSION_0_2,
+    ExecutionValue, ExpectedEffectObservation, StatefulArgument, StatefulCallResult,
+    StatefulExecutionCase, StatefulExecutionComparison, StatefulExecutionMismatch,
+    StatefulExecutionResult, StatefulExecutionStep, StatefulStepObservation,
+    EXECUTION_COMPARISON_SCHEMA_VERSION, EXECUTION_CORPUS_SCHEMA_VERSION,
+    EXECUTION_CORPUS_SCHEMA_VERSION_0_2, EXECUTION_CORPUS_SCHEMA_VERSION_0_3,
     EXECUTION_REQUEST_SCHEMA_VERSION, EXECUTION_RESULT_SCHEMA_VERSION, MAX_EXECUTION_BUDGET,
+    MAX_STATEFUL_CALLS, STATEFUL_EXECUTION_COMPARISON_SCHEMA_VERSION,
+    STATEFUL_EXECUTION_SCHEMA_VERSION,
 };
 pub use experiment::{
     BoundedRefinementCandidateDecision, BoundedRefinementCycle, FamilyExperimentObservation,
     FamilyExperimentReference, LanguageExperimentCaseObservation, LanguageExperimentComparison,
     LanguageExperimentDefinition, LanguageExperimentPropertyObservation, LanguageExperimentResult,
-    LanguageExperimentStatus, ValidatorRequirement, BOUNDED_REFINEMENT_CYCLE_SCHEMA_VERSION,
-    FAMILY_EXPERIMENT_REFERENCE_SCHEMA_VERSION, LANGUAGE_EXPERIMENT_DEFINITION_CONTRACT_ID,
-    LANGUAGE_EXPERIMENT_INTERPRETATION, LANGUAGE_EXPERIMENT_RESULT_CONTRACT_ID,
-    LANGUAGE_EXPERIMENT_SCHEMA_VERSION,
+    LanguageExperimentStatefulCaseObservation, LanguageExperimentStatus, ValidatorRequirement,
+    BOUNDED_REFINEMENT_CYCLE_SCHEMA_VERSION, FAMILY_EXPERIMENT_REFERENCE_SCHEMA_VERSION,
+    LANGUAGE_EXPERIMENT_DEFINITION_CONTRACT_ID, LANGUAGE_EXPERIMENT_INTERPRETATION,
+    LANGUAGE_EXPERIMENT_RESULT_CONTRACT_ID, LANGUAGE_EXPERIMENT_SCHEMA_VERSION,
 };
 pub use graph::{
     EdgeKind, GraphEdge, GraphError, GraphNode, InvalidationReason, InvalidationReport,
@@ -141,10 +147,10 @@ pub use ssa::{
     SsaTransformationDecision, SsaValidationReport, SsaValue, SSA_SCHEMA_VERSION,
 };
 pub use ssa_execution::{
-    compare_body_and_ssa, execute_ssa, execute_ssa_module, LoweringDivergenceContext,
-    LoweringExecutionComparison, LoweringExecutionMismatch, LoweringExecutionStatus,
-    SsaExecutionResult, SsaExecutionTraceEntry, LOWERING_EXECUTION_COMPARISON_SCHEMA_VERSION,
-    SSA_EXECUTION_RESULT_SCHEMA_VERSION,
+    compare_body_and_ssa, execute_ssa, execute_ssa_module, execute_ssa_module_prevalidated,
+    LoweringDivergenceContext, LoweringExecutionComparison, LoweringExecutionMismatch,
+    LoweringExecutionStatus, SsaExecutionResult, SsaExecutionSession, SsaExecutionTraceEntry,
+    LOWERING_EXECUTION_COMPARISON_SCHEMA_VERSION, SSA_EXECUTION_RESULT_SCHEMA_VERSION,
 };
 pub use translation::{
     TranslationCounterexample, TranslationJudgement, TranslationValidationResult,

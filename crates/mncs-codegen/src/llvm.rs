@@ -121,7 +121,12 @@ pub fn llvm_capabilities() -> BackendCapabilityManifest {
         ["bounded_execution_agreement".to_owned()]
             .into_iter()
             .collect(),
-        ["external_clang_or_llc".to_owned()].into_iter().collect(),
+        [
+            "external_clang_or_llc".to_owned(),
+            "language_stateful_trace_runner".to_owned(),
+        ]
+        .into_iter()
+        .collect(),
         ["status_value_out_pointer_abi".to_owned()]
             .into_iter()
             .collect(),

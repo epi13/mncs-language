@@ -16,7 +16,7 @@ use crate::{
     TransformationRecord, ValidationReport,
 };
 
-pub const HIGH_LEVEL_IR_SCHEMA_VERSION: &str = "0.3";
+pub const HIGH_LEVEL_IR_SCHEMA_VERSION: &str = "0.4";
 
 fn trace_timing(stage: &str, started: Instant) {
     if std::env::var_os("MNCS_TIMINGS").is_some() {
@@ -344,6 +344,12 @@ pub struct HighLevelIr {
     pub schema_version: String,
     pub semantic_identity: SemanticId,
     pub semantic_fingerprint: String,
+    /// Content binding for the complete reusable HIR artifact.  This is
+    /// deliberately separate from `semantic_fingerprint`: a caller may not
+    /// mutate public/deserializable HIR contents while retaining only the
+    /// semantic-program header and still obtain SSA from it.
+    #[serde(default)]
+    pub content_fingerprint: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binding_table: Option<crate::SemanticBindingTable>,
     pub functions: Vec<IrFunction>,
@@ -370,6 +376,21 @@ impl HighLevelIr {
 
     pub fn fingerprint(&self) -> Result<String, serde_json::Error> {
         Ok(sha256_hex(self.canonical_json()?.as_bytes()))
+    }
+
+    pub fn content_binding(&self) -> Result<String, serde_json::Error> {
+        let mut material = self.clone();
+        material.content_fingerprint.clear();
+        Ok(sha256_hex(material.canonical_json()?.as_bytes()))
+    }
+
+    pub fn integrity_is_valid(&self) -> bool {
+        self.schema_version == HIGH_LEVEL_IR_SCHEMA_VERSION
+            && !self.semantic_fingerprint.is_empty()
+            && !self.content_fingerprint.is_empty()
+            && self
+                .content_binding()
+                .is_ok_and(|expected| expected == self.content_fingerprint)
     }
 
     pub fn trace_for(&self, semantic_identity: &SemanticId) -> Option<&TraceEntry> {
@@ -696,12 +717,13 @@ impl Program {
                 })
                 .collect(),
         };
-        let module = HighLevelIr {
+        let mut module = HighLevelIr {
             schema_version: HIGH_LEVEL_IR_SCHEMA_VERSION.to_owned(),
             semantic_identity: program_identity,
             semantic_fingerprint: self
                 .content_fingerprint()
                 .expect("validated canonical form"),
+            content_fingerprint: String::new(),
             binding_table: self.binding_table.clone(),
             functions,
             state_regions,
@@ -710,6 +732,9 @@ impl Program {
             transformations,
             generic_specializations: self.generic_specializations.clone(),
         };
+        module.content_fingerprint = module
+            .content_binding()
+            .expect("validated HIR is canonicalizable");
         trace_timing("ir-total", started);
         Ok(module)
     }
