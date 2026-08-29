@@ -1,0 +1,19 @@
+mncs 0.10;
+module examples.json_cursor_probe;
+
+use mncs.std.json_cursor.v1;
+
+fn inspect(input: [byte; up_to 64]) -> (result: i64) {
+    let state: Cursor = feed_chunk(init(), input);
+    return state.position as i64 + (state.valid as i64) * 1000;
+}
+
+fn key_length(input: [byte; up_to 64]) -> (result: i64) {
+    let state: Cursor = feed_chunk(init(), input);
+    return state.key_length as i64;
+}
+
+fn complete(input: [byte; up_to 64]) -> (result: i64) {
+    let state: Cursor = feed_chunk(init(), input);
+    return (is_valid(state) as i64);
+}

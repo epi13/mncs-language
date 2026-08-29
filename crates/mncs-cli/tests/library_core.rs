@@ -33,6 +33,30 @@ fn run_experiment(source: &str, backend: &str, corpus: &str) -> (Option<i32>, Va
     (output.status.code(), value, stderr)
 }
 
+fn run_library_experiment(
+    source: &str,
+    backend: &str,
+    corpus: &str,
+) -> (Option<i32>, Value, String) {
+    let output = binary()
+        .env("MNCS_LIBRARY_PATH", library(""))
+        .args([
+            "experiment",
+            "run",
+            source,
+            "--backend",
+            backend,
+            "--corpus",
+            corpus,
+        ])
+        .output()
+        .expect("run library experiment");
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|error| panic!("library experiment JSON ({stderr}): {error}"));
+    (output.status.code(), value, stderr)
+}
+
 const EXECUTABLE_BACKENDS: [&str; 5] = [
     "mncs-research-bytecode",
     "mncs-portable-wasm-mvp",
@@ -140,6 +164,19 @@ fn wasm_executes_core_status_record_parameter() {
     );
     assert_eq!(code, Some(0), "core/status on wasm");
     assert_eq!(result["status"], "PASS", "{:#?}", result["diagnostics"]);
+}
+
+#[test]
+fn json_cursor_preserves_bounded_validity_across_executable_backends() {
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_library_experiment(
+            &example("source/json-cursor-probe.mncs"),
+            backend,
+            &example("execution/json-cursor-corpus.json"),
+        );
+        assert_eq!(code, Some(0), "{backend}: json cursor exit; {stderr}");
+        assert_value_agreement(backend, code, &result, &stderr, 4);
+    }
 }
 
 /// Differential binding against the frozen RAVEL consumer snapshot: the

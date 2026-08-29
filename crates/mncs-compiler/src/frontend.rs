@@ -1471,6 +1471,38 @@ fn elaborate_linked_module(
     provisional_names.extend(context.qualified_record_types.keys().cloned());
     let mut provisional_record_types = context.record_types_by_name.clone();
     provisional_record_types.extend(context.qualified_record_types.clone());
+    // Record fields may contain bounded sequences of local records.  The
+    // field-type pass below runs before `resolved_records` is finalized, so
+    // seed the provisional map with the local declarations as well.  Without
+    // this, `[LocalRecord; N]` was accepted in function signatures but
+    // rejected when it appeared inside another record.
+    for (declaration, duplicate_fields) in &record_types {
+        if *duplicate_fields == 0 {
+            provisional_record_types.insert(
+                declaration.name.text.clone(),
+                RecordType {
+                    identity: record_type_id(
+                        &ast.module.text,
+                        &declaration.name.text,
+                        &declaration
+                            .fields
+                            .iter()
+                            .map(|field| (field.name.text.as_str(), field.value_type.text.as_str()))
+                            .collect::<Vec<_>>(),
+                    ),
+                    name: declaration.name.text.clone(),
+                    fields: declaration
+                        .fields
+                        .iter()
+                        .map(|field| RecordField {
+                            name: field.name.text.clone(),
+                            field_type: field.value_type.text.clone(),
+                        })
+                        .collect(),
+                },
+            );
+        }
+    }
     let mut resolved_records = Vec::new();
     for (declaration, duplicate_fields) in &record_types {
         if *duplicate_fields > 0 {

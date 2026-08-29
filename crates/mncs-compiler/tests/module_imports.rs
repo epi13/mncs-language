@@ -838,6 +838,32 @@ fn profile_09_qualified_finite_identities_survive_duplicate_names() {
 }
 
 #[test]
+fn profile_010_allows_local_record_sequences_inside_record_fields() {
+    let program = elaborate(
+        &MapResolver::default(),
+        r#"
+mncs 0.10;
+module app.record_sequence_field;
+record Project { id: i64 }
+record Atlas { projects: [Project; 2] }
+fn make() -> (result: Atlas) {
+    let project: Project = Project { id: 7 };
+    let projects: [Project; 2] = [project, project];
+    return Atlas { projects: projects };
+}
+"#,
+    )
+    .expect("local record sequence field elaborates");
+    let atlas = program
+        .record_types
+        .iter()
+        .find(|record| record.name == "Atlas")
+        .expect("Atlas record");
+    assert_eq!(atlas.fields.len(), 1);
+    assert!(atlas.fields[0].field_type.contains("Project"));
+}
+
+#[test]
 fn profile_09_qualified_record_sequence_elements_keep_declaring_identity() {
     let resolver = MapResolver::default().with(
         "lib.geom",
