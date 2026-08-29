@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
 
 use mncs_model::{
     binding_id, binding_id_for, finite_type_id, finite_variant_id, function_id, module_id,
@@ -24,6 +25,16 @@ use mncs_syntax::{
     SOURCE_PROFILE_VERSION_0_4, SOURCE_PROFILE_VERSION_0_9,
 };
 use serde::Serialize;
+
+fn trace_timing(stage: &str, started: Instant) {
+    if std::env::var_os("MNCS_TIMINGS").is_some() {
+        eprintln!(
+            "mncs-timing stage={} elapsed_ms={}",
+            stage,
+            started.elapsed().as_millis()
+        );
+    }
+}
 
 use crate::resolution::{NameResolution, NameResolutionIndex, ResolvedNameKind};
 use crate::{fingerprint, native_node_profile, ReferenceCompiler};
@@ -100,12 +111,14 @@ impl ReferenceCompiler {
         envelope: SourceEnvelope,
         resolver: &dyn ModuleResolver,
     ) -> SourceFrontEndResult {
+        let started = Instant::now();
         let ParseOutput {
             lexical,
             cst,
             ast,
             diagnostics,
         } = parse(&envelope);
+        trace_timing("parse", started);
         let mut artifacts = vec![
             CompilerArtifactRef::new(
                 ArtifactRepresentation::Source,
@@ -144,7 +157,10 @@ impl ReferenceCompiler {
                     tree.span,
                 ));
             } else {
-                match elaborate_program_with_resolver_and_modules(tree, resolver) {
+                let elaboration_started = Instant::now();
+                let elaboration = elaborate_program_with_resolver_and_modules(tree, resolver);
+                trace_timing("elaboration", elaboration_started);
+                match elaboration {
                     (Ok(elaborated), resolutions, resolved_modules) => {
                         module_resolutions = resolved_modules;
                         let report = elaborated.validate();
@@ -290,13 +306,28 @@ impl ReferenceCompiler {
         };
         let study_request = CompilationStudyRequest::new(node, request, Vec::new());
         let mut study = self.run_study(study_request, program);
+        study = self.with_front_end_observations(study, &front_end);
+        SourceStudyOutput {
+            front_end,
+            study: Some(study),
+        }
+    }
+
+    /// Add source-front-end observations to a study built from an existing
+    /// compilation result. This keeps source provenance complete without
+    /// forcing callers to resolve and compile the same module graph again.
+    pub fn with_front_end_observations(
+        &self,
+        mut study: CompilationStudyResult,
+        front_end: &SourceFrontEndResult,
+    ) -> CompilationStudyResult {
         let front_end_fingerprints = front_end
             .artifacts
             .iter()
             .map(|artifact| (artifact.representation, artifact.fingerprint.clone()))
             .collect::<BTreeMap<_, _>>();
         study.stage_fingerprints.extend(front_end_fingerprints);
-        let mut executions = self.front_end_pass_executions(&front_end);
+        let mut executions = self.front_end_pass_executions(front_end);
         executions.append(&mut study.pass_executions);
         study.pass_executions = executions;
         study.compilation_status = if front_end.is_valid() {
@@ -305,10 +336,7 @@ impl ReferenceCompiler {
             CompilationStatus::Failed
         };
         study.seal();
-        SourceStudyOutput {
-            front_end,
-            study: Some(study),
-        }
+        study
     }
 
     pub fn run_local_source_study(&self, envelope: SourceEnvelope) -> SourceStudyOutput {

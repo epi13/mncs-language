@@ -5,6 +5,7 @@
 //! join mechanism for the currently supported executable-body subset.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -21,6 +22,16 @@ use crate::{
 };
 
 pub const SSA_SCHEMA_VERSION: &str = "0.4";
+
+fn trace_timing(stage: &str, started: Instant) {
+    if std::env::var_os("MNCS_TIMINGS").is_some() {
+        eprintln!(
+            "mncs-timing stage={} elapsed_ms={}",
+            stage,
+            started.elapsed().as_millis()
+        );
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SsaValue {
@@ -334,6 +345,8 @@ pub enum SsaError {
     InvalidProgram(crate::ValidationReport),
     #[error("high-level IR lowering failed: {0}")]
     Ir(#[from] crate::IrError),
+    #[error("high-level IR does not match the supplied semantic program")]
+    IrMismatch { expected: String, actual: String },
     #[error("SSA artifact is invalid")]
     Invalid(SsaValidationReport),
 }
@@ -759,11 +772,47 @@ pub struct SsaTransformationDecision {
 
 impl Program {
     pub fn lower_to_ssa(&self) -> Result<SsaModule, SsaError> {
+        let started = Instant::now();
         let report = self.validate();
         if !report.valid {
             return Err(SsaError::InvalidProgram(report));
         }
+        trace_timing("ssa-validate", started);
         let ir = self.lower_to_ir()?;
+        trace_timing("ssa-ir", started);
+        self.lower_to_ssa_from_ir_inner(&ir, started)
+    }
+
+    /// Lower selected SSA from a HIR module already produced for this exact
+    /// semantic program. Compiler drivers use this to avoid lowering HIR a
+    /// second time merely because they also need the SSA emission.
+    pub fn lower_to_ssa_from_ir(&self, ir: &HighLevelIr) -> Result<SsaModule, SsaError> {
+        let started = Instant::now();
+        let report = self.validate();
+        if !report.valid {
+            return Err(SsaError::InvalidProgram(report));
+        }
+        let expected = self
+            .content_fingerprint()
+            .expect("validated semantic program is canonicalizable");
+        if ir.semantic_identity != crate::identity::program_id(&self.module)
+            || ir.semantic_fingerprint != expected
+        {
+            return Err(SsaError::IrMismatch {
+                expected,
+                actual: ir.semantic_fingerprint.clone(),
+            });
+        }
+        trace_timing("ssa-validate", started);
+        trace_timing("ssa-ir-reused", started);
+        self.lower_to_ssa_from_ir_inner(ir, started)
+    }
+
+    fn lower_to_ssa_from_ir_inner(
+        &self,
+        ir: &HighLevelIr,
+        started: Instant,
+    ) -> Result<SsaModule, SsaError> {
         let semantic_identity = crate::identity::program_id(&self.module);
         let mut functions = Vec::new();
         let mut trace_entries = BTreeMap::<SemanticId, SsaTraceEntry>::new();
@@ -803,6 +852,7 @@ impl Program {
                     .or_insert(entry);
             }
         }
+        trace_timing("ssa-functions", started);
         let hir_fingerprint = ir.fingerprint().expect("HIR is serializable");
         let identity = SemanticId(format!(
             "mncs:0.4:ssa:module:{}",
@@ -870,7 +920,7 @@ impl Program {
             binding_table: self.binding_table.clone(),
             record_types,
             functions,
-            obligations: ir.obligations,
+            obligations: ir.obligations.clone(),
             trace: SsaTraceMap {
                 entries: trace_entries.into_values().collect(),
             },
@@ -878,6 +928,7 @@ impl Program {
             generic_specializations: ir.generic_specializations.clone(),
         };
         let validation = module.validate();
+        trace_timing("ssa-total", started);
         if validation.valid {
             Ok(module)
         } else {

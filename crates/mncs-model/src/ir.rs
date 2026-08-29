@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -16,6 +17,16 @@ use crate::{
 };
 
 pub const HIGH_LEVEL_IR_SCHEMA_VERSION: &str = "0.3";
+
+fn trace_timing(stage: &str, started: Instant) {
+    if std::env::var_os("MNCS_TIMINGS").is_some() {
+        eprintln!(
+            "mncs-timing stage={} elapsed_ms={}",
+            stage,
+            started.elapsed().as_millis()
+        );
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IrType {
@@ -371,6 +382,7 @@ impl HighLevelIr {
 
 impl Program {
     pub fn lower_to_ir(&self) -> Result<HighLevelIr, IrError> {
+        let started = Instant::now();
         let report = self.validate();
         if !report.valid {
             return Err(IrError::InvalidProgram(report));
@@ -378,6 +390,7 @@ impl Program {
         let graph = self.semantic_graph()?;
         let evidence = self.evidence_manifest()?;
         let obligations = self.generate_obligations().obligations;
+        trace_timing("ir-prelude", started);
         let mut functions = Vec::new();
         let mut state_regions = Vec::new();
         let mut transformations = Vec::new();
@@ -669,6 +682,7 @@ impl Program {
                 failure: function.failure.clone(),
             });
         }
+        trace_timing("ir-functions", started);
         functions.sort_by(|left, right| left.identity.cmp(&right.identity));
         state_regions.sort_by(|left, right| left.identity.cmp(&right.identity));
         transformations.sort_by(|left, right| left.identity.cmp(&right.identity));
@@ -682,7 +696,7 @@ impl Program {
                 })
                 .collect(),
         };
-        Ok(HighLevelIr {
+        let module = HighLevelIr {
             schema_version: HIGH_LEVEL_IR_SCHEMA_VERSION.to_owned(),
             semantic_identity: program_identity,
             semantic_fingerprint: self
@@ -695,7 +709,9 @@ impl Program {
             trace,
             transformations,
             generic_specializations: self.generic_specializations.clone(),
-        })
+        };
+        trace_timing("ir-total", started);
+        Ok(module)
     }
 }
 

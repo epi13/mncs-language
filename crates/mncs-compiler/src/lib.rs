@@ -18,6 +18,7 @@ pub use resolution::{
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
+use std::time::Instant;
 
 use mncs_codegen::{
     configuration_for_backend, lower_with_backend, plan_for_backend, target_for_backend,
@@ -40,6 +41,16 @@ use sha2::{Digest, Sha256};
 pub const REFERENCE_LANGUAGE_PROFILE: &str = "mncs:language-profile:research-0.1";
 pub const REFERENCE_COMPILER_NAME: &str = "mncs-reference-compiler";
 pub const REFERENCE_PIPELINE_NAME: &str = "mncs-source-semantic-hir-ssa";
+
+fn trace_timing(stage: &str, started: Instant) {
+    if std::env::var_os("MNCS_TIMINGS").is_some() {
+        eprintln!(
+            "mncs-timing stage={} elapsed_ms={}",
+            stage,
+            started.elapsed().as_millis()
+        );
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ReferenceCompiler {
@@ -134,6 +145,7 @@ impl ReferenceCompiler {
     }
 
     pub fn compile(&self, request: CompilationRequest, program: &Program) -> CompilationResult {
+        let started = Instant::now();
         let mut diagnostics = request.validate();
         if request.compiler != self.identity || request.pipeline != self.pipeline {
             diagnostics.push(CompilerDiagnostic::new(
@@ -162,6 +174,7 @@ impl ReferenceCompiler {
             semantic.schema_version.clone(),
             semantic.fingerprint.clone(),
         );
+        trace_timing("compiler-semantic", started);
         if request.input != semantic_ref {
             let mut diagnostic = CompilerDiagnostic::new(
                 "CMP203",
@@ -191,6 +204,7 @@ impl ReferenceCompiler {
             );
             return failed_result(&request, diagnostics);
         }
+        trace_timing("compiler-validation", started);
 
         let hir = match program.lower_to_ir() {
             Ok(hir) => hir,
@@ -209,8 +223,9 @@ impl ReferenceCompiler {
             hir.schema_version.clone(),
             hir_fingerprint,
         );
+        trace_timing("compiler-hir", started);
 
-        let ssa = match program.lower_to_ssa() {
+        let ssa = match program.lower_to_ssa_from_ir(&hir) {
             Ok(ssa) => ssa,
             Err(error) => {
                 diagnostics.push(CompilerDiagnostic::new(
@@ -232,6 +247,7 @@ impl ReferenceCompiler {
             SSA_SCHEMA_VERSION,
             ssa_fingerprint,
         );
+        trace_timing("compiler-ssa", started);
 
         let unresolved_obligations = ssa
             .obligations
@@ -418,6 +434,7 @@ impl ReferenceCompiler {
                 }
             }
         }
+        trace_timing("compiler-backend", started);
 
         let target_unresolved = match &target_lowering_plan {
             None => false,
@@ -471,7 +488,9 @@ impl ReferenceCompiler {
             diagnostics: diagnostics.clone(),
         };
         bundle.seal();
+        trace_timing("compiler-bundle-seal", started);
         let integrity = bundle.validate_integrity();
+        trace_timing("compiler-bundle-validate", started);
         if !integrity.is_empty() {
             diagnostics.extend(integrity);
             return failed_result(&request, diagnostics);
@@ -523,6 +542,7 @@ impl ReferenceCompiler {
             diagnostics,
         };
         result.seal();
+        trace_timing("compiler-total", started);
         result
     }
 
@@ -531,8 +551,22 @@ impl ReferenceCompiler {
         study: CompilationStudyRequest,
         program: &Program,
     ) -> CompilationStudyResult {
-        let request = study.compilation_request;
-        let result = self.compile(request.clone(), program);
+        let result = self.compile(study.compilation_request.clone(), program);
+        self.study_from_compilation(study, &result)
+    }
+
+    /// Assemble a study from an already completed compilation.
+    ///
+    /// Experiment orchestration often needs both the compiled emissions and
+    /// the study record. Reusing the result keeps those consumers on the same
+    /// compilation and avoids silently lowering a large source program a
+    /// second time just to collect evidence.
+    pub fn study_from_compilation(
+        &self,
+        study: CompilationStudyRequest,
+        result: &CompilationResult,
+    ) -> CompilationStudyResult {
+        let request = study.compilation_request.clone();
         let mut unresolved_assumptions = request.assumptions.clone();
         if let Some(target) = &request.target {
             unresolved_assumptions.extend(target.assumptions.clone());
@@ -617,9 +651,9 @@ impl ReferenceCompiler {
             semantic_fingerprint,
             hir_fingerprint,
             ssa_fingerprint,
-            compilation_result_identity: result.identity,
+            compilation_result_identity: result.identity.clone(),
             execution_result_references: study.execution_result_references,
-            diagnostics: result.diagnostics,
+            diagnostics: result.diagnostics.clone(),
             unresolved_obligations,
             unresolved_assumptions,
             invariants: CrossHostInvariants {
@@ -1429,6 +1463,14 @@ mod tests {
         assert!(round_trip.request.identity_is_valid());
         let hir = program.lower_to_ir().unwrap();
         let ssa = program.lower_to_ssa().unwrap();
+        let reused_ssa = program.lower_to_ssa_from_ir(&hir).unwrap();
+        assert_eq!(reused_ssa, ssa);
+        let mut mismatched_hir = hir.clone();
+        mismatched_hir.semantic_fingerprint.push('x');
+        assert!(matches!(
+            program.lower_to_ssa_from_ir(&mismatched_hir),
+            Err(mncs_model::SsaError::IrMismatch { .. })
+        ));
         assert_eq!(
             first.emissions.hir.as_ref().unwrap().fingerprint().unwrap(),
             hir.fingerprint().unwrap()

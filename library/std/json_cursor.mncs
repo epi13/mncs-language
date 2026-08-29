@@ -26,7 +26,10 @@ record Cursor {
     string_is_key: bool,
     escaped: bool,
     unicode_remaining: byte,
+    unicode_value: u64,
+    pending_high_surrogate: bool,
     utf8_remaining: byte,
+    utf8_lead: byte,
     valid: bool,
     event: byte,
     string_start: u64,
@@ -51,7 +54,10 @@ fn init() -> (result: Cursor) {
         string_is_key: false,
         escaped: false,
         unicode_remaining: 0,
+        unicode_value: 0,
+        pending_high_surrogate: false,
         utf8_remaining: 0,
+        utf8_lead: 0,
         valid: true,
         event: 0,
         string_start: 0,
@@ -119,6 +125,13 @@ fn is_hex(value: byte) -> (result: bool) {
     return (n >= 48 && n <= 57) || (n >= 65 && n <= 70) || (n >= 97 && n <= 102);
 }
 
+fn hex_value(value: byte) -> (result: u64) {
+    let n: i64 = value as i64;
+    if n >= 48 && n <= 57 { return (n - 48) as u64; }
+    if n >= 65 && n <= 70 { return (n - 55) as u64; }
+    return (n - 87) as u64;
+}
+
 fn is_utf8_continuation(value: byte) -> (result: bool) {
     let n: i64 = value as i64;
     return n >= 128 && n <= 191;
@@ -132,27 +145,48 @@ fn utf8_lead_need(value: byte) -> (result: byte) {
     return 0;
 }
 
+fn utf8_first_continuation_valid(lead: byte, value: byte) -> (result: bool) {
+    if lead == 224 { return value >= 160 && value <= 191; }
+    if lead == 237 { return value >= 128 && value <= 159; }
+    if lead == 240 { return value >= 144 && value <= 191; }
+    if lead == 244 { return value >= 128 && value <= 143; }
+    return is_utf8_continuation(value);
+}
+
 fn string_byte(state: Cursor, value: byte) -> (result: Cursor) {
     if state.unicode_remaining > 0 {
         if is_hex(value) {
-            return Cursor { ..state, unicode_remaining: ((state.unicode_remaining as i64) - 1) as byte, position: state.position + 1 };
+            let remaining: byte = ((state.unicode_remaining as i64) - 1) as byte;
+            let updated: u64 = state.unicode_value *% 16 +% hex_value(value);
+            if remaining != 0 { return Cursor { ..state, unicode_remaining: remaining, unicode_value: updated, position: state.position + 1 }; }
+            if state.pending_high_surrogate {
+                if updated >= 56320 && updated <= 57343 { return Cursor { ..state, unicode_remaining: 0, unicode_value: updated, pending_high_surrogate: false, position: state.position + 1 }; }
+                return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
+            }
+            if updated >= 55296 && updated <= 56319 { return Cursor { ..state, unicode_remaining: 0, unicode_value: updated, pending_high_surrogate: true, position: state.position + 1 }; }
+            if updated >= 56320 && updated <= 57343 { return Cursor { ..state, valid: false, event: 0, position: state.position + 1 }; }
+            return Cursor { ..state, unicode_remaining: 0, unicode_value: updated, position: state.position + 1 };
         }
         return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
     }
     if state.escaped {
         if value == 117 {
-            return Cursor { ..state, escaped: false, unicode_remaining: 4, position: state.position + 1 };
+            return Cursor { ..state, escaped: false, unicode_remaining: 4, unicode_value: 0, position: state.position + 1 };
         }
         if value == 34 || value == 92 || value == 47 || value == 98 || value == 102 || value == 110 || value == 114 || value == 116 {
             return Cursor { ..state, escaped: false, position: state.position + 1 };
         }
         return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
     }
+    if state.pending_high_surrogate {
+        if value == 92 { return Cursor { ..state, escaped: true, position: state.position + 1 }; }
+        return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
+    }
     if value == 92 {
         return Cursor { ..state, escaped: true, position: state.position + 1 };
     }
     if value == 34 {
-        if state.utf8_remaining != 0 {
+        if state.utf8_remaining != 0 || state.pending_high_surrogate {
             return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
         }
         return Cursor {
@@ -170,11 +204,18 @@ fn string_byte(state: Cursor, value: byte) -> (result: Cursor) {
     }
     if state.utf8_remaining > 0 {
         if is_utf8_continuation(value) {
+            if state.utf8_lead != 0 {
+                if utf8_first_continuation_valid(state.utf8_lead, value) {
+                    return Cursor { ..state, utf8_remaining: ((state.utf8_remaining as i64) - 1) as byte, utf8_lead: 0, position: state.position + 1 };
+                }
+                return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
+            }
             return Cursor { ..state, utf8_remaining: ((state.utf8_remaining as i64) - 1) as byte, position: state.position + 1 };
         }
         return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
     }
     let need: byte = utf8_lead_need(value);
+    let lead: byte = select(need == 0, 0, value);
     if (value as i64) >= 128 && need == 0 {
         return Cursor { ..state, valid: false, event: 0, position: state.position + 1 };
     }
@@ -193,10 +234,11 @@ fn string_byte(state: Cursor, value: byte) -> (result: Cursor) {
             key: updated_key,
             key_length: key_position + 1,
             utf8_remaining: need,
+            utf8_lead: lead,
             position: state.position + 1
         };
     }
-    return Cursor { ..state, utf8_remaining: need, position: state.position + 1 };
+    return Cursor { ..state, utf8_remaining: need, utf8_lead: lead, position: state.position + 1 };
 }
 
 fn feed_byte(state: Cursor, value: byte) -> (result: Cursor) {
@@ -211,7 +253,10 @@ fn feed_byte(state: Cursor, value: byte) -> (result: Cursor) {
             string_is_key: key_string,
             escaped: false,
             unicode_remaining: 0,
+            unicode_value: 0,
+            pending_high_surrogate: false,
             utf8_remaining: 0,
+            utf8_lead: 0,
             string_start: state.position + 1,
             string_end: state.position,
             key: zero_key(),
@@ -241,5 +286,5 @@ fn feed_chunk(state: Cursor, input: [byte; up_to 64]) -> (result: Cursor) {
 }
 
 fn is_valid(state: Cursor) -> (result: bool) {
-    return state.valid && state.root_seen && state.depth == 0 && select(state.in_string, false, true) && state.utf8_remaining == 0 && state.unicode_remaining == 0;
+    return state.valid && state.root_seen && state.depth == 0 && select(state.in_string, false, true) && state.utf8_remaining == 0 && state.unicode_remaining == 0 && select(state.pending_high_surrogate, false, true);
 }
