@@ -32,11 +32,18 @@ The Atlas pressure generalized into these MNCS standard-library modules:
   UTF-8 lead/continuation validation. Unknown keys longer than the 16-byte
   matcher window saturate instead of invalidating a document.
 - `library/std/json_stream.mncs` — the existing scalar structural gate for
-  complete JSON streams; the Atlas host runs this before accepting the typed
-  model result.
+  complete JSON streams, with quoted-string/escape state, four-digit Unicode
+  escape tracking, control-byte rejection, matched delimiters, a twelve-level
+  bounded stack, and one-root/trailing-byte rejection. The Atlas host runs it
+  before accepting the typed model result.
 - `library/std/json_projection.mncs` — retained as the earlier raw scalar
-  projection witness and comparison point; it is no longer the experimental
-  page's application path.
+  projection witness and comparison point. It exposes exact raw key/value
+  projections over 64-byte views with 32-byte target windows; escaped text is
+  deliberately not decoded here.
+- `library/std/json.mncs` — a bounded complete-input JSON scanner covering
+  objects, arrays, strings, numbers, literals, whitespace, separators,
+  control-byte rejection, nesting, and JSON escapes. It reports a scalar
+  summary/status rather than pretending to be a general heap-backed JSON DOM.
 
 The model pressure also fixed two language/backend gaps:
 
@@ -77,6 +84,33 @@ Maturity labels/classes come from static legend data in the page, leaving the
 MNCS model responsible for numeric classification and the host responsible
 only for DOM presentation.
 
+## Existing host ABI retained by the slice
+
+- modules with memory now export it as `memory`, and the decoder accepts the
+  function plus memory export forms while rejecting unsupported export kinds;
+- the function-level fallback is emitted after the dispatcher loop, fixing a
+  real standard-WASM validation error caused by unreachable placement;
+- byte views use `i32.load8_u`, packed one-byte cells, and zero-byte alignment;
+  other composite views retain the current eight-byte arena-cell layout;
+- process-boundary marshaling now writes and reads byte views as packed host
+  buffers while preserving the existing exact-sequence/composite-cell ABI.
+- modules with composite memory now export
+  `mncs_host_buffer(i32) -> i64` plus `mncs_host_buffer_reset()`; the low 32
+  bits carry a linear-memory offset and the high 32 bits carry the reserved
+  capacity. This is the first typed host-buffer contract and lets a host reuse
+  one region while recycling target-array allocations without guessing an
+  address.
+
+The browser adapter passes an i64 descriptor with the low 32 bits as offset and
+high 32 bits as length, reusing the region returned by `mncs_host_buffer`.
+Projection selectors share one module instance, and the adapter refuses to
+render projections unless the structural scan returns `1`.
+
+For compiler-internal byte views derived from exact cell sequences, aligned
+address bit 0 records the eight-byte source stride. Lowering masks that marker
+before byte loads and the process-boundary reader removes it; host-reserved
+addresses remain aligned and use the ordinary low-offset/high-length ABI.
+
 ## Observed executions
 
 All results are bounded observations. `UNKNOWN` is retained when compiler or
@@ -88,6 +122,10 @@ independent-equivalence obligations remain unresolved.
 | Atlas typed model / portable WASM + Node | 15 projects, 19 relationships, 33 render nodes, valid and complete | 53,066 bytes; 512 memory pages; SHA-256 recorded in the generated Atlas manifest |
 | Atlas model corpus | one-project typed probe expectation met | status remains `UNKNOWN` |
 | JSON cursor / five executable backends | all five realizations agree on complete, incomplete-root, long-key, and malformed-UTF-8 witnesses | status remains `UNKNOWN` because compiler obligations remain |
+| `json-stream-probe` / portable WASM | 10/10 expectations met across root, Unicode, and split-chunk cases; status `UNKNOWN` while unresolved obligations remain | final source probe remains bounded/research-only |
+| `json-probe` / portable WASM | 7/7 focused added number cases met; status `UNKNOWN` while unresolved obligations remain | final source probe remains bounded/research-only |
+| Atlas scan artifact / native Node host | 20,413 bytes in 319 chunks; result `1`; host region `{offset:8, capacity:64}` | 6,658 bytes; SHA-256 recorded in the generated Atlas manifest |
+| Atlas projection artifact / native Node host | `[16, 4, 5, 4, 1, 1, 19]`; one module instance; host region `{offset:8, capacity:64}` | 10,761 bytes; SHA-256 recorded in the generated Atlas manifest |
 
 The current typed model's maturity distribution is `[4, 5, 4, 1, 1]` in
 the model's fixed order: experimental, research, active infrastructure,
@@ -126,14 +164,15 @@ rather than treated as a clean query result.
 
 ## Remaining cutover blockers
 
-This is not a production web runtime. The production `/` path remains the
-static/progressive-enhancement Atlas and its existing `app.js`. The
-experimental path still needs richer generic text/DOM/event host contracts,
-strict Unicode scalar validation, independent runtime equivalence beyond the
-Node smoke path, malformed/truncated full-Atlas differential corpora, and a
-formal cutover review. The checked-in manifest therefore leaves artifact
-validation `UNKNOWN` even though build-time WASM magic, SHA-256, and corpus
-checks pass.
+This is not yet a production web runtime. The production `/` path remains the
+static/progressive-enhancement Atlas and its existing `app.js`; navigation,
+journal enhancement, formatting, and the general browser event/fetch protocol
+remain HTML/CSS/JavaScript. The experimental path still needs richer generic
+text/DOM/event host contracts, strict Unicode scalar validation,
+malformed/truncated full-Atlas differential corpora, independent equivalence
+for the full Atlas model, and a formal cutover review. The checked-in manifest
+therefore leaves artifact validation `UNKNOWN` even though build-time WASM
+magic, SHA-256, corpus checks, and browser QA pass.
 
 ## Reproduction
 
