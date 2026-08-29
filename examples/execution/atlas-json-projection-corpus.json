@@ -1,0 +1,34 @@
+{
+  "schema_version": "0.2",
+  "name": "atlas-json-projection",
+  "description": "Build witness for the Atlas schema projection adapter.",
+  "cases": [
+    {
+      "id": "one-maturity-match",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs_atlas.experimental_json_projection", "function": "atlas_projection_probe" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 123 } }, { "byte": { "value": 34 } },
+          { "byte": { "value": 109 } }, { "byte": { "value": 97 } },
+          { "byte": { "value": 116 } }, { "byte": { "value": 117 } },
+          { "byte": { "value": 114 } }, { "byte": { "value": 105 } },
+          { "byte": { "value": 116 } }, { "byte": { "value": 121 } },
+          { "byte": { "value": 34 } }, { "byte": { "value": 58 } },
+          { "byte": { "value": 34 } }, { "byte": { "value": 101 } },
+          { "byte": { "value": 120 } }, { "byte": { "value": 112 } },
+          { "byte": { "value": 101 } }, { "byte": { "value": 114 } },
+          { "byte": { "value": 105 } }, { "byte": { "value": 109 } },
+          { "byte": { "value": 101 } }, { "byte": { "value": 110 } },
+          { "byte": { "value": 116 } }, { "byte": { "value": 97 } },
+          { "byte": { "value": 108 } }, { "byte": { "value": 34 } },
+          { "byte": { "value": 125 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    }
+  ]
+}

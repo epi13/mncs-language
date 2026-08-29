@@ -1,0 +1,91 @@
+mncs 0.10;
+
+// mncs.std.json.projection — bounded raw key/value projections.
+//
+// These functions are for a validated, schema-shaped JSON document. A key or
+// value containing an escape is valid JSON but does not count as an exact raw
+// projection; decoding is intentionally a separate text-library concern.
+// The matcher accepts bounded byte windows (<=32 bytes) and returns scalar
+// counts so the portable WASM host does not need a composite arena ABI.
+module mncs.std.json_projection.v1;
+
+fn is_space(value: byte) -> (result: bool) {
+    let n: i64 = value as i64;
+    return n == 9 || n == 10 || n == 13 || n == 32;
+}
+
+// Packed fields: mode (3 bits), escape (1), position (6), key/value match
+// bits (1 each), and bounded 20-bit key/member counters.
+fn projection_mode(state: i64) -> (result: byte) { return (state % 8) as byte; }
+fn projection_escaped(state: i64) -> (result: bool) { return ((state / 8) % 2) == 1; }
+fn projection_position(state: i64) -> (result: i64) { return (state / 16) % 64; }
+fn projection_key_match(state: i64) -> (result: bool) { return ((state / 1024) % 2) == 1; }
+fn projection_value_match(state: i64) -> (result: bool) { return ((state / 2048) % 2) == 1; }
+fn projection_key_hits(state: i64) -> (result: i64) { return (state / 4096) % 1048576; }
+fn projection_member_hits(state: i64) -> (result: i64) { return (state / 4294967296) % 1048576; }
+
+fn projection_pack(mode: byte, escape: bool, position: i64, key_match: bool, value_match: bool, key_hits: i64, member_hits: i64) -> (result: i64) {
+    return (mode as i64) +% (escape as i64) *% 8 +% position *% 16 +% (key_match as i64) *% 1024 +% (value_match as i64) *% 2048 +% key_hits *% 4096 +% member_hits *% 4294967296;
+}
+
+fn projection_string_step(state: i64, value: byte, target: [byte; 32], target_len: i64, key: bool) -> (result: i64) {
+    if projection_escaped(state) {
+        return projection_pack(projection_mode(state), false, projection_position(state), false, false, projection_key_hits(state), projection_member_hits(state));
+    }
+    if value == 92 {
+        return projection_pack(projection_mode(state), true, projection_position(state), projection_key_match(state), projection_value_match(state), projection_key_hits(state), projection_member_hits(state));
+    }
+    if value == 34 {
+        if key {
+            if projection_key_match(state) && projection_position(state) == target_len {
+                return projection_pack(2, false, 0, projection_key_match(state), projection_value_match(state), projection_key_hits(state), projection_member_hits(state));
+            }
+            return projection_pack(0, false, 0, false, false, projection_key_hits(state), projection_member_hits(state));
+        }
+        let hit: bool = projection_value_match(state) && projection_position(state) == target_len;
+        return projection_pack(0, false, 0, false, false, projection_key_hits(state), projection_member_hits(state) + hit as i64);
+    }
+    let position: i64 = projection_position(state);
+    let safe: u64 = (select(position < 32, position, 31)) as u64;
+    let matches: bool = position < target_len && position < 32 && value == target[safe];
+    let next_position: i64 = select(position < 33, position + 1, 33);
+    if key {
+        return projection_pack(1, false, next_position, projection_key_match(state) && matches, projection_value_match(state), projection_key_hits(state), projection_member_hits(state));
+    }
+    return projection_pack(4, false, next_position, projection_key_match(state), projection_value_match(state) && matches, projection_key_hits(state), projection_member_hits(state));
+}
+
+fn projection_step(state: i64, value: byte, key: [byte; 32], key_len: i64, target: [byte; 32], value_len: i64) -> (result: i64) {
+    if projection_mode(state) == 1 { return projection_string_step(state, value, key, key_len, true); }
+    if projection_mode(state) == 4 { return projection_string_step(state, value, target, value_len, false); }
+    if projection_mode(state) == 2 {
+        if is_space(value) { return state; }
+        if value == 58 {
+            return projection_pack(3, false, 0, projection_key_match(state), projection_value_match(state), projection_key_hits(state) + projection_key_match(state) as i64, projection_member_hits(state));
+        }
+        return projection_pack(0, false, 0, false, false, projection_key_hits(state), projection_member_hits(state));
+    }
+    if projection_mode(state) == 3 {
+        if is_space(value) { return state; }
+        if value == 34 { return projection_pack(4, false, 0, projection_key_match(state), true, projection_key_hits(state), projection_member_hits(state)); }
+        return projection_pack(0, false, 0, false, false, projection_key_hits(state), projection_member_hits(state));
+    }
+    if value == 34 { return projection_pack(1, false, 0, true, false, projection_key_hits(state), projection_member_hits(state)); }
+    return state;
+}
+
+fn project_chunk(state: i64, input: [byte; up_to 64], key: [byte; 32], key_len: i64, value: [byte; 32], value_len: i64) -> (result: i64) {
+    iterate i over input carrying current: i64 = state {
+        next current = projection_step(current, input[i], key, key_len, value, value_len);
+    }
+    return current;
+}
+
+fn count_key(input: [byte; up_to 64], key: [byte; 32], key_len: i64) -> (result: i64) {
+    let zeros: [byte; 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    return projection_key_hits(project_chunk(0, input, key, key_len, zeros, 0));
+}
+
+fn count_member(input: [byte; up_to 64], key: [byte; 32], key_len: i64, value: [byte; 32], value_len: i64) -> (result: i64) {
+    return projection_member_hits(project_chunk(0, input, key, key_len, value, value_len));
+}
