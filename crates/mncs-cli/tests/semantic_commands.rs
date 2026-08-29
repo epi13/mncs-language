@@ -439,7 +439,7 @@ fn ir_obligations_verifier_and_compare_commands_are_traceable() {
     let ir = binary().args(["ir", &manifest]).output().expect("run IR");
     assert!(ir.status.success());
     let ir_json: Value = serde_json::from_slice(&ir.stdout).expect("IR JSON");
-    assert_eq!(ir_json["schema_version"], "0.3");
+    assert_eq!(ir_json["schema_version"], "0.4");
     assert!(!ir_json["functions"][0]["blocks"]
         .as_array()
         .unwrap()
