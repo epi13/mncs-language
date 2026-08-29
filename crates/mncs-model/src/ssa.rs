@@ -835,7 +835,7 @@ impl Program {
                 .iter()
                 .find(|candidate| candidate.semantic_identity == semantic_function)
                 .expect("validated body has HIR function");
-            let (lowered, entries, records) = lower_body(self, function, body, hir_function, &ir);
+            let (lowered, entries, records) = lower_body(self, function, body, hir_function, ir);
             functions.push(lowered);
             transformations.extend(records);
             for entry in entries {
