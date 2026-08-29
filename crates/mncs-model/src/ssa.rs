@@ -347,6 +347,8 @@ pub enum SsaError {
     Ir(#[from] crate::IrError),
     #[error("high-level IR does not match the supplied semantic program")]
     IrMismatch { expected: String, actual: String },
+    #[error("high-level IR content binding is stale or laundered: {0}")]
+    IrIntegrity(String),
     #[error("SSA artifact is invalid")]
     Invalid(SsaValidationReport),
 }
@@ -803,6 +805,11 @@ impl Program {
                 actual: ir.semantic_fingerprint.clone(),
             });
         }
+        if !ir.integrity_is_valid() {
+            return Err(SsaError::IrIntegrity(
+                "complete HIR content binding does not match the reusable artifact".to_owned(),
+            ));
+        }
         trace_timing("ssa-validate", started);
         trace_timing("ssa-ir-reused", started);
         self.lower_to_ssa_from_ir_inner(ir, started)
@@ -830,11 +837,15 @@ impl Program {
                 functions.push(declaration_function(self, function, &semantic_function));
                 continue;
             };
-            let hir_function = ir
+            let Some(hir_function) = ir
                 .functions
                 .iter()
                 .find(|candidate| candidate.semantic_identity == semantic_function)
-                .expect("validated body has HIR function");
+            else {
+                return Err(SsaError::IrIntegrity(format!(
+                    "reusable HIR is missing executable function {semantic_function}"
+                )));
+            };
             let (lowered, entries, records) = lower_body(self, function, body, hir_function, ir);
             functions.push(lowered);
             transformations.extend(records);

@@ -9,10 +9,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::canonical::{canonical_json_value, sha256_hex};
 use crate::{
-    BackendArtifact, BackendCapabilityManifest, BackendIdentity, CompilationStudyResult,
-    ExecutionCorpus, ExecutionEffectEvent, ExecutionStatus, ExecutionValue,
-    ExpectedEffectObservation, RealizationRequest, SemanticId, TargetLoweringPlan,
-    TranslationJudgement, TranslationValidationResult,
+    execution_corpus_schema_supported, BackendArtifact, BackendCapabilityManifest, BackendIdentity,
+    CompilationStudyResult, ExecutionCorpus, ExecutionEffectEvent, ExecutionStatus, ExecutionValue,
+    ExpectedEffectObservation, RealizationRequest, SemanticId, StatefulExecutionResult,
+    TargetLoweringPlan, TranslationJudgement, TranslationValidationResult,
 };
 
 pub const LANGUAGE_EXPERIMENT_SCHEMA_VERSION: &str = "0.1";
@@ -284,7 +284,8 @@ impl LanguageExperimentDefinition {
             && !self.source_artifact_identity.trim().is_empty()
             && !self.source_profile.trim().is_empty()
             && self.realization.identity_is_valid()
-            && !self.corpus.cases.is_empty()
+            && execution_corpus_schema_supported(&self.corpus.schema_version)
+            && (!self.corpus.cases.is_empty() || !self.corpus.stateful_cases.is_empty())
             && self.environment_observations_are_non_semantic
             && self.identity == experiment_identity("definition", &material)
     }
@@ -329,6 +330,27 @@ pub struct LanguageExperimentPropertyObservation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LanguageExperimentStatefulCaseObservation {
+    pub case_id: String,
+    pub execution: StatefulExecutionResult,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_final: Option<Vec<ExecutionValue>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_expectation_met: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_final_status: Option<ExecutionStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_status_met: Option<bool>,
+    pub step_expectations_met: bool,
+    pub maximum_calls: u32,
+    pub call_bound_met: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maximum_total_steps: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_bound_met: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LanguageExperimentResult {
     pub schema_version: String,
     pub contract_id: String,
@@ -342,6 +364,8 @@ pub struct LanguageExperimentResult {
     pub artifact: BackendArtifact,
     pub translation_validations: Vec<TranslationValidationResult>,
     pub cases: Vec<LanguageExperimentCaseObservation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stateful_cases: Vec<LanguageExperimentStatefulCaseObservation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<LanguageExperimentPropertyObservation>,
     pub status: LanguageExperimentStatus,
@@ -398,11 +422,13 @@ impl LanguageExperimentResult {
         artifact: BackendArtifact,
         mut translation_validations: Vec<TranslationValidationResult>,
         mut cases: Vec<LanguageExperimentCaseObservation>,
+        mut stateful_cases: Vec<LanguageExperimentStatefulCaseObservation>,
         mut properties: Vec<LanguageExperimentPropertyObservation>,
         mut unresolved_reasons: Vec<String>,
     ) -> Self {
         translation_validations.sort_by(|left, right| left.identity.cmp(&right.identity));
         cases.sort_by(|left, right| left.case_id.cmp(&right.case_id));
+        stateful_cases.sort_by(|left, right| left.case_id.cmp(&right.case_id));
         properties.sort_by(|left, right| left.property_id.cmp(&right.property_id));
         unresolved_reasons.sort();
         unresolved_reasons.dedup();
@@ -423,6 +449,16 @@ impl LanguageExperimentResult {
                 .iter()
                 .any(|case_| case_.step_bound_met == Some(false))
             || cases.iter().any(|case_| case_.effects_met == Some(false))
+            || stateful_cases.iter().any(|case_| {
+                matches!(
+                    case_.execution.status,
+                    ExecutionStatus::InvalidRequest | ExecutionStatus::Unsupported
+                ) || case_.final_expectation_met == Some(false)
+                    || case_.final_status_met == Some(false)
+                    || !case_.step_expectations_met
+                    || !case_.call_bound_met
+                    || case_.step_bound_met == Some(false)
+            })
             || properties.iter().any(|property| !property.passed);
         let has_unknown = !unresolved_reasons.is_empty()
             || translation_validations
@@ -449,6 +485,7 @@ impl LanguageExperimentResult {
             artifact,
             translation_validations,
             cases,
+            stateful_cases,
             properties,
             status,
             unresolved_reasons,
@@ -487,6 +524,10 @@ impl LanguageExperimentResult {
                 .translation_validations
                 .iter()
                 .all(TranslationValidationResult::identity_is_valid)
+            && self
+                .stateful_cases
+                .iter()
+                .all(|case_| case_.execution.identity_is_valid())
             && self.identity == experiment_identity("result", &material)
     }
 
@@ -574,6 +615,7 @@ pub struct LanguageExperimentComparison {
     pub same_realization_request: bool,
     pub same_backend: bool,
     pub same_backend_artifact: bool,
+    pub same_stateful_behavior: bool,
     pub bounded_behavior_agrees: bool,
     pub earliest_divergence: Option<String>,
     pub interpretation: String,
@@ -635,8 +677,44 @@ impl LanguageExperimentComparison {
             .iter()
             .map(|property| (&property.property_id, property.passed))
             .collect::<BTreeMap<_, _>>();
-        let bounded_behavior_agrees =
-            left_cases == right_cases && left_properties == right_properties;
+        let left_stateful = left
+            .stateful_cases
+            .iter()
+            .map(|case_| {
+                (
+                    &case_.case_id,
+                    (
+                        &case_.execution.status,
+                        &case_.execution.returned,
+                        &case_.execution.observations,
+                        case_.final_expectation_met,
+                        case_.final_status_met,
+                        case_.step_expectations_met,
+                    ),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let right_stateful = right
+            .stateful_cases
+            .iter()
+            .map(|case_| {
+                (
+                    &case_.case_id,
+                    (
+                        &case_.execution.status,
+                        &case_.execution.returned,
+                        &case_.execution.observations,
+                        case_.final_expectation_met,
+                        case_.final_status_met,
+                        case_.step_expectations_met,
+                    ),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let same_stateful_behavior = left_stateful == right_stateful;
+        let bounded_behavior_agrees = left_cases == right_cases
+            && left_properties == right_properties
+            && same_stateful_behavior;
         let earliest_divergence = [
             ("source", same_source),
             ("semantic", same_semantics),
@@ -645,6 +723,7 @@ impl LanguageExperimentComparison {
             ("realization_request", same_realization_request),
             ("backend", same_backend),
             ("backend_artifact", same_backend_artifact),
+            ("stateful_behavior", same_stateful_behavior),
             ("bounded_behavior", bounded_behavior_agrees),
         ]
         .into_iter()
@@ -660,6 +739,7 @@ impl LanguageExperimentComparison {
             same_realization_request,
             same_backend,
             same_backend_artifact,
+            same_stateful_behavior,
             bounded_behavior_agrees,
             earliest_divergence,
             interpretation: LANGUAGE_EXPERIMENT_INTERPRETATION.to_owned(),

@@ -6,8 +6,11 @@ artifact. They do not claim universal equivalence, conformance, or production fi
 
 Execution corpus 0.2 additively supports typed per-case expectations for execution status,
 returned value, maximum backend step count, expected effect triples, and prohibition of unexpected
-effects. Older 0.1 corpora retain returned-value behavior. These are finite deterministic
-assertions, not arbitrary property strings or a theorem language.
+effects. Execution corpus 0.3 additionally supports bounded stateful cases: named calls can pass
+logical returned values to later calls through `previous_result` references, with per-transition
+budgets, intermediate observations, a final observation, and a whole-trace identity. Older 0.1
+and 0.2 corpora retain their behavior. These are finite deterministic assertions, not arbitrary
+property strings or a theorem language.
 
 The definition binds the exact source identity and profile, compiler configuration, selected-SSA
 realization request, execution corpus, required validators, requested result artifacts, invariants,
@@ -16,7 +19,8 @@ backend identities, required intents, artifact kinds, validator capabilities, an
 
 The result retains the definition, compiler study, backend capability manifest, target-lowering plan,
 typed backend artifact, translation-validation results, per-case execution observations, bounded
-property observations, unresolved obligations, and one conservative status. An execution corpus may
+property observations, stateful transition observations, unresolved obligations, and one conservative
+status. An execution corpus may
 bind an exact expected return for a case and finite-domain laws (`commutative`, `associative`,
 `idempotent`, `neutral`, `absorbing`, and `preserved`). A property `FAIL` retains its first
 deterministic counterexample:
@@ -47,7 +51,9 @@ mncs experiment execute DIR/backend-artifact.json CORPUS --baseline BASELINE/res
 `plan` freezes the source-to-selected-SSA identity and realization requirements. `run` performs the
 language-owned compilation, realization, validation, and bounded observation. `execute` accepts an
 already frozen backend artifact and corpus and does not recompile; this is the intended narrow Fabric
-runtime entry point. `inspect` rechecks content identities. `compare` localizes the earliest known
+runtime entry point. It executes stateful cases through the same adapter boundary while the
+language-owned runner retains logical values, never backend session handles. `inspect` rechecks
+content identities. `compare` localizes the earliest known
 semantic/representation/realization divergence and reports bounded behavior agreement separately.
 
 ### Frozen replication (`execute --baseline`)
@@ -70,7 +76,8 @@ that observes identical bounded behavior yields the identical result identity as
 behavioral divergence changes the identity while the Fabric layer separately records which worker
 and execution attempt produced it. The printed summary carries both result identities, the
 definition/backend/artifact identities, per-case/per-property agreement counts, a bounded behavior
-agreement flag, and the full experiment comparison. Exit code 1 reports `FAIL` status or observed
+agreement flag, and the full experiment comparison. Stateful replication includes the complete
+bounded transition observations in the sealed result. Exit code 1 reports `FAIL` status or observed
 baseline disagreement.
 
 The compile-time evidence inherited into a replicated result (study fingerprints, translation

@@ -8,8 +8,8 @@ use std::{
 
 use mncs_codegen::{
     backend_adapter, backend_capabilities, backend_family_matrix, backend_names,
-    compare_body_ssa_and_backend, execute_backend, lower_selected_ssa, portable_wasm_plan,
-    selected_ssa_ref, target_for_backend, target_is_portable_wasm,
+    compare_body_ssa_and_backend, execute_backend, execute_backend_stateful, lower_selected_ssa,
+    portable_wasm_plan, selected_ssa_ref, target_for_backend, target_is_portable_wasm,
 };
 use mncs_compiler::{
     native_node_profile, reference_compiler_architecture, ModuleResolution, ModuleResolver,
@@ -23,9 +23,11 @@ use mncs_model::{
     EvidenceManifest, EvidenceState, ExecutionComparison, ExecutionCorpus, ExecutionProperty,
     ExecutionRequest, ExecutionStatus, ExecutionValue, FunctionBody,
     LanguageExperimentCaseObservation, LanguageExperimentComparison, LanguageExperimentDefinition,
-    LanguageExperimentPropertyObservation, LanguageExperimentResult, LoweringExecutionComparison,
+    LanguageExperimentPropertyObservation, LanguageExperimentResult,
+    LanguageExperimentStatefulCaseObservation, LoweringExecutionComparison,
     LoweringExecutionStatus, ObligationStatus, Program, RealizationRequest, SemanticDiff,
-    SemanticId, SsaModule, TargetContractRef, ValidatorRequirement,
+    SemanticId, SsaModule, StatefulExecutionCase, StatefulExecutionResult, TargetContractRef,
+    ValidatorRequirement,
 };
 use mncs_syntax::{
     analyze, SourceArtifactKind, SourceEnvelope, SourceMetrics, SourceOrigin, SourceOriginKind,
@@ -877,6 +879,14 @@ where
                     experiment_case_observation(case_, observation)
                 })
                 .collect::<Vec<_>>();
+            let stateful_observations = corpus
+                .stateful_cases
+                .iter()
+                .map(|case_| {
+                    let execution = execute_backend_stateful(&artifact, &corpus.name, case_);
+                    stateful_case_observation(case_, execution)
+                })
+                .collect::<Vec<_>>();
             if baseline_path.is_some() && output_dir.is_none() {
                 eprintln!("error: experiment execute --baseline requires --output-dir");
                 return ExitCode::from(2);
@@ -886,6 +896,7 @@ where
                     &artifact,
                     &corpus,
                     observations,
+                    stateful_observations,
                     &baseline_file,
                     &dir,
                 );
@@ -898,8 +909,25 @@ where
                     || observation.status_met == Some(false)
                     || observation.step_bound_met == Some(false)
                     || observation.effects_met == Some(false)
+            }) || stateful_observations.iter().any(|observation| {
+                matches!(
+                    observation.execution.status,
+                    ExecutionStatus::InvalidRequest | ExecutionStatus::Unsupported
+                ) || observation.final_expectation_met == Some(false)
+                    || observation.final_status_met == Some(false)
+                    || !observation.step_expectations_met
+                    || !observation.call_bound_met
+                    || observation.step_bound_met == Some(false)
             });
-            if !print_json(&observations) {
+            let output = if stateful_observations.is_empty() {
+                serde_json::json!(observations)
+            } else {
+                serde_json::json!({
+                    "cases": observations,
+                    "stateful_cases": stateful_observations,
+                })
+            };
+            if !print_json(&output) {
                 ExitCode::from(2)
             } else if invalid {
                 ExitCode::FAILURE
@@ -1417,6 +1445,7 @@ fn build_experiment_definition(
             "backend_artifact".to_owned(),
             "translation_validation".to_owned(),
             "case_observations".to_owned(),
+            "stateful_case_observations".to_owned(),
         ],
         vec![
             "source_to_ssa_identity_chain_is_exact".to_owned(),
@@ -1509,6 +1538,16 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         })
         .collect();
     trace_timing("cli-case-observations", started);
+    let stateful_cases = prepared
+        .corpus
+        .stateful_cases
+        .iter()
+        .map(|case_| {
+            let execution = execute_backend_stateful(&artifact, &prepared.corpus.name, case_);
+            stateful_case_observation(case_, execution)
+        })
+        .collect::<Vec<_>>();
+    trace_timing("cli-stateful-case-observations", started);
     let mut unresolved = Vec::new();
     if prepared.validation_profile.as_deref() == Some("artifact-build") {
         unresolved.push(
@@ -1538,6 +1577,7 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         artifact,
         validation.into_iter().collect(),
         cases,
+        stateful_cases,
         properties,
         unresolved,
     );
@@ -1564,6 +1604,7 @@ fn execute_frozen_replication(
     artifact: &mncs_model::BackendArtifact,
     corpus: &ExecutionCorpus,
     case_observations: Vec<LanguageExperimentCaseObservation>,
+    stateful_observations: Vec<LanguageExperimentStatefulCaseObservation>,
     baseline_path: &str,
     output_dir: &Path,
 ) -> ExitCode {
@@ -1598,6 +1639,7 @@ fn execute_frozen_replication(
         artifact.clone(),
         baseline.translation_validations.clone(),
         case_observations,
+        stateful_observations,
         properties,
         baseline.unresolved_reasons.clone(),
     );
@@ -1639,12 +1681,26 @@ fn execute_frozen_replication(
         && properties_matching_baseline == baseline.properties.len()
         && replicated.cases.len() == baseline.cases.len()
         && replicated.properties.len() == baseline.properties.len();
+    let stateful_cases_matching_baseline = baseline
+        .stateful_cases
+        .iter()
+        .filter(|baseline_case| {
+            replicated
+                .stateful_cases
+                .iter()
+                .any(|case_| case_ == *baseline_case)
+        })
+        .count();
+    let stateful_behavior_agrees = stateful_cases_matching_baseline
+        == baseline.stateful_cases.len()
+        && replicated.stateful_cases.len() == baseline.stateful_cases.len();
     let earliest_case_divergence = replicated
         .cases
         .iter()
         .zip(baseline.cases.iter())
         .find(|(observed, expected)| observed != expected)
         .map(|(observed, _)| observed.case_id.clone());
+    let bounded_behavior_agrees = bounded_behavior_agrees && stateful_behavior_agrees;
     let summary = FrozenReplicationSummary {
         schema_version: FROZEN_REPLICATION_SUMMARY_SCHEMA_VERSION.to_owned(),
         baseline_result_identity: baseline.identity.clone(),
@@ -1656,8 +1712,10 @@ fn execute_frozen_replication(
         status: replicated.status,
         case_count: replicated.cases.len(),
         property_count: replicated.properties.len(),
+        stateful_case_count: replicated.stateful_cases.len(),
         cases_matching_baseline,
         properties_matching_baseline,
+        stateful_cases_matching_baseline,
         bounded_behavior_agrees,
         earliest_case_divergence,
         comparison: LanguageExperimentComparison::compare(&baseline, &replicated),
@@ -1688,8 +1746,10 @@ struct FrozenReplicationSummary {
     status: mncs_model::LanguageExperimentStatus,
     case_count: usize,
     property_count: usize,
+    stateful_case_count: usize,
     cases_matching_baseline: usize,
     properties_matching_baseline: usize,
+    stateful_cases_matching_baseline: usize,
     bounded_behavior_agrees: bool,
     earliest_case_divergence: Option<String>,
     comparison: LanguageExperimentComparison,
@@ -1754,6 +1814,51 @@ fn experiment_case_observation(
         expected_effects: case_.expected_effects.clone(),
         effects_met,
         failure_reason: observation.failure.map(|failure| failure.reason),
+    }
+}
+
+fn stateful_case_observation(
+    case_: &StatefulExecutionCase,
+    execution: StatefulExecutionResult,
+) -> LanguageExperimentStatefulCaseObservation {
+    let final_expectation_met = case_
+        .expected_final
+        .as_ref()
+        .map(|expected| expected == &execution.returned);
+    let final_status_met = case_
+        .expected_final_status
+        .map(|expected| expected == execution.status);
+    let step_expectations_met = case_.steps.len() == execution.observations.len()
+        && case_
+            .steps
+            .iter()
+            .zip(&execution.observations)
+            .all(|(step, observation)| {
+                step.expected_status
+                    .map(|expected| expected == observation.status)
+                    .unwrap_or(true)
+                    && step
+                        .expected
+                        .as_ref()
+                        .map(|expected| observation.returned.as_ref() == Some(expected))
+                        .unwrap_or(true)
+            });
+    let call_bound_met = execution.calls <= case_.maximum_calls;
+    let step_bound_met = case_
+        .maximum_total_steps
+        .map(|maximum| execution.steps <= maximum);
+    LanguageExperimentStatefulCaseObservation {
+        case_id: case_.id.clone(),
+        execution,
+        expected_final: case_.expected_final.clone(),
+        final_expectation_met,
+        expected_final_status: case_.expected_final_status,
+        final_status_met,
+        step_expectations_met,
+        maximum_calls: case_.maximum_calls,
+        call_bound_met,
+        maximum_total_steps: case_.maximum_total_steps,
+        step_bound_met,
     }
 }
 

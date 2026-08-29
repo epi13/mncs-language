@@ -21,15 +21,16 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use mncs_model::{
-    execute_ssa_module, execute_with_policy, ArtifactRepresentation, BackendArtifact,
-    BackendCapabilityManifest, BackendConfiguration, BackendEvidence, BackendIdentity,
-    BackendResult, BackendValueContract, BodyType, CompilerArtifactRef, CompilerDiagnostic,
-    CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure, ExecutionRequest, ExecutionResult,
-    ExecutionStatus, ExecutionTarget, ExecutionValue, IntegerType, Program, SemanticId, SsaModule,
-    TargetContractRef, TargetLoweringPlan, TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION,
-    COMPILER_ARTIFACT_SCHEMA_VERSION, LAYERED_EXECUTION_COMPARISON_INTERPRETATION,
-    PORTABLE_WASM_MVP_BACKEND_NAME, PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET,
-    SSA_SCHEMA_VERSION,
+    execute_ssa_module, execute_stateful_case, execute_with_policy, ArtifactRepresentation,
+    BackendArtifact, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
+    BackendIdentity, BackendResult, BackendValueContract, BodyType, CompilerArtifactRef,
+    CompilerDiagnostic, CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure,
+    ExecutionRequest, ExecutionResult, ExecutionStatus, ExecutionTarget, ExecutionValue,
+    IntegerType, Program, SemanticId, SsaModule, StatefulCallResult, StatefulExecutionCase,
+    StatefulExecutionResult, TargetContractRef, TargetLoweringPlan, TransformationStatus,
+    BACKEND_ARTIFACT_SCHEMA_VERSION, COMPILER_ARTIFACT_SCHEMA_VERSION,
+    LAYERED_EXECUTION_COMPARISON_INTERPRETATION, PORTABLE_WASM_MVP_BACKEND_NAME,
+    PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET, SSA_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 
@@ -240,7 +241,10 @@ pub fn portable_wasm_capabilities() -> BackendCapabilityManifest {
         ["bounded_execution_agreement".to_owned()]
             .into_iter()
             .collect(),
-        ["embedded_mncs_wasm_interpreter".to_owned()]
+        [
+            "embedded_mncs_wasm_interpreter".to_owned(),
+            "language_stateful_trace_runner".to_owned(),
+        ]
             .into_iter()
             .collect(),
         [
@@ -409,7 +413,12 @@ pub fn research_bytecode_capabilities() -> BackendCapabilityManifest {
         ["bounded_execution_agreement".to_owned()]
             .into_iter()
             .collect(),
-        ["mncs_ssa_interpreter".to_owned()].into_iter().collect(),
+        [
+            "mncs_ssa_interpreter".to_owned(),
+            "language_stateful_trace_runner".to_owned(),
+        ]
+        .into_iter()
+        .collect(),
         ["language_level_call_signature".to_owned()]
             .into_iter()
             .collect(),
@@ -1396,6 +1405,32 @@ pub fn execute_backend(
     )
 }
 
+/// Execute one bounded stateful trace through the selected backend.  The
+/// language-owned runner retains logical values and resolves previous-result
+/// references; this adapter supplies only the per-call backend boundary.
+pub fn execute_backend_stateful(
+    artifact: &BackendArtifact,
+    corpus_name: &str,
+    case: &StatefulExecutionCase,
+) -> StatefulExecutionResult {
+    let mut result = execute_stateful_case(corpus_name, case, |request| {
+        let observation = execute_backend(artifact, request);
+        StatefulCallResult {
+            status: observation.status,
+            returned: observation.returned,
+            steps: observation.steps,
+            effects: observation.effects,
+            failure: observation.failure,
+            program_identity: None,
+            program_fingerprint: None,
+        }
+    });
+    result.backend_identity = Some(artifact.backend.identity.clone());
+    result.artifact_identity = Some(artifact.identity.clone());
+    result.seal();
+    result
+}
+
 impl BackendAdapter for PortableWasmAdapter {
     fn capabilities(&self) -> BackendCapabilityManifest {
         portable_wasm_capabilities()
@@ -1820,6 +1855,7 @@ mod tests {
             schema_version: mncs_model::EXECUTION_CORPUS_SCHEMA_VERSION.to_owned(),
             name: "checked-add-backend".to_owned(),
             properties: Vec::new(),
+            stateful_cases: Vec::new(),
             cases: vec![
                 ExecutionCase {
                     id: "sum".to_owned(),

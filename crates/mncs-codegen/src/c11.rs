@@ -114,7 +114,12 @@ pub fn c11_capabilities() -> BackendCapabilityManifest {
         ["bounded_execution_agreement".to_owned()]
             .into_iter()
             .collect(),
-        ["external_c_compiler".to_owned()].into_iter().collect(),
+        [
+            "external_c_compiler".to_owned(),
+            "language_stateful_trace_runner".to_owned(),
+        ]
+        .into_iter()
+        .collect(),
         ["status_value_out_pointer_abi".to_owned()]
             .into_iter()
             .collect(),
