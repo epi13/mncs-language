@@ -147,10 +147,10 @@ pub use ssa::{
     SsaTransformationDecision, SsaValidationReport, SsaValue, SSA_SCHEMA_VERSION,
 };
 pub use ssa_execution::{
-    compare_body_and_ssa, execute_ssa, execute_ssa_module, LoweringDivergenceContext,
-    LoweringExecutionComparison, LoweringExecutionMismatch, LoweringExecutionStatus,
-    SsaExecutionResult, SsaExecutionTraceEntry, LOWERING_EXECUTION_COMPARISON_SCHEMA_VERSION,
-    SSA_EXECUTION_RESULT_SCHEMA_VERSION,
+    compare_body_and_ssa, execute_ssa, execute_ssa_module, execute_ssa_module_prevalidated,
+    LoweringDivergenceContext, LoweringExecutionComparison, LoweringExecutionMismatch,
+    LoweringExecutionStatus, SsaExecutionResult, SsaExecutionSession, SsaExecutionTraceEntry,
+    LOWERING_EXECUTION_COMPARISON_SCHEMA_VERSION, SSA_EXECUTION_RESULT_SCHEMA_VERSION,
 };
 pub use translation::{
     TranslationCounterexample, TranslationJudgement, TranslationValidationResult,

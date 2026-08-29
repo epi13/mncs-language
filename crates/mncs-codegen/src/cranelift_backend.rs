@@ -2518,8 +2518,23 @@ fn jit_boundary_arguments(
 ) -> Result<(Vec<i64>, Option<Vec<u8>>), String> {
     let names = function_names(&payload.program, &payload.ssa);
     let lowered = lower_to_scalar(&payload.program, &payload.ssa, &names);
-    let _ = lowered.functions.first();
     let uses_cells = crate::support::scalar_module_uses_cells(&lowered);
+    jit_boundary_arguments_for_request(
+        uses_cells,
+        input_contracts,
+        output_contract,
+        composite_contracts,
+        request,
+    )
+}
+
+fn jit_boundary_arguments_for_request(
+    uses_cells: bool,
+    input_contracts: &[mncs_model::BackendValueContract],
+    output_contract: Option<&mncs_model::BackendValueContract>,
+    composite_contracts: &std::collections::BTreeMap<String, mncs_model::BackendValueContract>,
+    request: &ExecutionRequest,
+) -> Result<(Vec<i64>, Option<Vec<u8>>), String> {
     let needs_call_file = uses_cells
         || request
             .arguments
@@ -2573,104 +2588,223 @@ fn jit_scalar(
     function_name: &str,
     raw_args: &[i64],
 ) -> Result<(ExecutionStatus, i128), String> {
-    use cranelift_jit::{JITBuilder, JITModule};
+    let mut session = JitSession::new(scalar)?;
+    session.call(function_name, raw_args)
+}
 
-    let isa = host_isa()?;
-    let mut jit_builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
-    if module_uses_cells(scalar) {
-        jit_builder.symbol("mncs_cell_alloc", host_cell_alloc as *const u8);
-        jit_builder.symbol("mncs_slot_store32", host_slot_store32 as *const u8);
-        jit_builder.symbol("mncs_slot_store64", host_slot_store64 as *const u8);
-        jit_builder.symbol("mncs_slot_load32", host_slot_load32 as *const u8);
-        jit_builder.symbol("mncs_slot_load64", host_slot_load64 as *const u8);
+struct JitSession {
+    module: cranelift_jit::JITModule,
+    declared: BTreeMap<String, cranelift_module::FuncId>,
+}
+
+impl JitSession {
+    fn new(scalar: &ScalarModule) -> Result<Self, String> {
+        use cranelift_jit::{JITBuilder, JITModule};
+
+        let isa = host_isa()?;
+        let mut jit_builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+        if module_uses_cells(scalar) {
+            jit_builder.symbol("mncs_cell_alloc", host_cell_alloc as *const u8);
+            jit_builder.symbol("mncs_slot_store32", host_slot_store32 as *const u8);
+            jit_builder.symbol("mncs_slot_store64", host_slot_store64 as *const u8);
+            jit_builder.symbol("mncs_slot_load32", host_slot_load32 as *const u8);
+            jit_builder.symbol("mncs_slot_load64", host_slot_load64 as *const u8);
+        }
+        let mut module = JITModule::new(jit_builder);
+        let declared = declare_and_build(&mut module, scalar)?;
+        module
+            .finalize_definitions()
+            .map_err(|error| error.to_string())?;
+        Ok(Self { module, declared })
     }
-    let mut module = JITModule::new(jit_builder);
-    let declared = declare_and_build(&mut module, scalar)?;
-    module
-        .finalize_definitions()
-        .map_err(|error| error.to_string())?;
-    let func_id = declared
-        .get(function_name)
-        .copied()
-        .ok_or_else(|| "requested Cranelift export is missing".to_owned())?;
-    let ptr = module.get_finalized_function(func_id);
-    let mut status: i32 = 2;
-    let mut value: i64 = 0;
-    unsafe {
-        match raw_args.len() {
-            0 => {
-                let f: extern "C" fn(*mut i32, *mut i64) = std::mem::transmute(ptr);
-                f(&mut status, &mut value);
-            }
-            1 => {
-                let f: extern "C" fn(i64, *mut i32, *mut i64) = std::mem::transmute(ptr);
-                f(raw_args[0], &mut status, &mut value);
-            }
-            2 => {
-                let f: extern "C" fn(i64, i64, *mut i32, *mut i64) = std::mem::transmute(ptr);
-                f(raw_args[0], raw_args[1], &mut status, &mut value);
-            }
-            3 => {
-                let f: extern "C" fn(i64, i64, i64, *mut i32, *mut i64) = std::mem::transmute(ptr);
-                f(
-                    raw_args[0],
-                    raw_args[1],
-                    raw_args[2],
-                    &mut status,
-                    &mut value,
-                );
-            }
-            4 => {
-                let f: extern "C" fn(i64, i64, i64, i64, *mut i32, *mut i64) =
-                    std::mem::transmute(ptr);
-                f(
-                    raw_args[0],
-                    raw_args[1],
-                    raw_args[2],
-                    raw_args[3],
-                    &mut status,
-                    &mut value,
-                );
-            }
-            5 => {
-                let f: extern "C" fn(i64, i64, i64, i64, i64, *mut i32, *mut i64) =
-                    std::mem::transmute(ptr);
-                f(
-                    raw_args[0],
-                    raw_args[1],
-                    raw_args[2],
-                    raw_args[3],
-                    raw_args[4],
-                    &mut status,
-                    &mut value,
-                );
-            }
-            6 => {
-                let f: extern "C" fn(i64, i64, i64, i64, i64, i64, *mut i32, *mut i64) =
-                    std::mem::transmute(ptr);
-                f(
-                    raw_args[0],
-                    raw_args[1],
-                    raw_args[2],
-                    raw_args[3],
-                    raw_args[4],
-                    raw_args[5],
-                    &mut status,
-                    &mut value,
-                );
-            }
-            _ => {
-                return Err(
-                    "Cranelift host trampoline currently supports at most six scalar arguments"
-                        .to_owned(),
-                );
+
+    fn call(
+        &mut self,
+        function_name: &str,
+        raw_args: &[i64],
+    ) -> Result<(ExecutionStatus, i128), String> {
+        let func_id = self
+            .declared
+            .get(function_name)
+            .copied()
+            .ok_or_else(|| "requested Cranelift export is missing".to_owned())?;
+        let ptr = self.module.get_finalized_function(func_id);
+        let mut status: i32 = 2;
+        let mut value: i64 = 0;
+        unsafe {
+            match raw_args.len() {
+                0 => {
+                    let f: extern "C" fn(*mut i32, *mut i64) = std::mem::transmute(ptr);
+                    f(&mut status, &mut value);
+                }
+                1 => {
+                    let f: extern "C" fn(i64, *mut i32, *mut i64) = std::mem::transmute(ptr);
+                    f(raw_args[0], &mut status, &mut value);
+                }
+                2 => {
+                    let f: extern "C" fn(i64, i64, *mut i32, *mut i64) = std::mem::transmute(ptr);
+                    f(raw_args[0], raw_args[1], &mut status, &mut value);
+                }
+                3 => {
+                    let f: extern "C" fn(i64, i64, i64, *mut i32, *mut i64) =
+                        std::mem::transmute(ptr);
+                    f(
+                        raw_args[0],
+                        raw_args[1],
+                        raw_args[2],
+                        &mut status,
+                        &mut value,
+                    );
+                }
+                4 => {
+                    let f: extern "C" fn(i64, i64, i64, i64, *mut i32, *mut i64) =
+                        std::mem::transmute(ptr);
+                    f(
+                        raw_args[0],
+                        raw_args[1],
+                        raw_args[2],
+                        raw_args[3],
+                        &mut status,
+                        &mut value,
+                    );
+                }
+                5 => {
+                    let f: extern "C" fn(i64, i64, i64, i64, i64, *mut i32, *mut i64) =
+                        std::mem::transmute(ptr);
+                    f(
+                        raw_args[0],
+                        raw_args[1],
+                        raw_args[2],
+                        raw_args[3],
+                        raw_args[4],
+                        &mut status,
+                        &mut value,
+                    );
+                }
+                6 => {
+                    let f: extern "C" fn(i64, i64, i64, i64, i64, i64, *mut i32, *mut i64) =
+                        std::mem::transmute(ptr);
+                    f(
+                        raw_args[0],
+                        raw_args[1],
+                        raw_args[2],
+                        raw_args[3],
+                        raw_args[4],
+                        raw_args[5],
+                        &mut status,
+                        &mut value,
+                    );
+                }
+                _ => {
+                    return Err(
+                        "Cranelift host trampoline currently supports at most six scalar arguments"
+                            .to_owned(),
+                    );
+                }
             }
         }
+        if status == 0 {
+            Ok((ExecutionStatus::Returned, i128::from(value)))
+        } else {
+            Ok((ExecutionStatus::RuntimeFailure, 0))
+        }
     }
-    if status == 0 {
-        Ok((ExecutionStatus::Returned, i128::from(value)))
-    } else {
-        Ok((ExecutionStatus::RuntimeFailure, 0))
+}
+
+/// A stateful trace session keeps the validated Cranelift payload and its
+/// finalized host module alive across transitions. The logical state still
+/// belongs to the language-owned stateful runner; this object only amortizes
+/// backend setup and preserves the physical artifact boundary.
+pub struct CraneliftStatefulSession<'a> {
+    artifact: &'a mncs_model::BackendArtifact,
+    scalar: ScalarModule,
+    jit: JitSession,
+}
+
+pub fn prepare_stateful_session<'a>(
+    artifact: &'a mncs_model::BackendArtifact,
+) -> Result<CraneliftStatefulSession<'a>, String> {
+    crate::support::backend_matches_identity(
+        artifact,
+        &cranelift_backend(),
+        CRANELIFT_ARTIFACT_KIND,
+    )
+    .map_err(|reason| reason.to_owned())?;
+    let bytes = artifact.bytes().map_err(|reason| reason.to_owned())?;
+    let payload: CraneliftPayload = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("invalid Cranelift payload: {error}"))?;
+    let names = function_names(&payload.program, &payload.ssa);
+    let scalar = lower_to_scalar(&payload.program, &payload.ssa, &names);
+    if !scalar.unsupported.is_empty() || scalar.functions.is_empty() {
+        return Err("Cranelift payload lowers to an unsupported or empty scalar module".to_owned());
+    }
+    if emit_clif(&scalar) != payload.clif {
+        return Err(
+            "Cranelift CLIF identity does not match the selected SSA in the payload".to_owned(),
+        );
+    }
+    let jit = JitSession::new(&scalar)?;
+    Ok(CraneliftStatefulSession {
+        artifact,
+        scalar,
+        jit,
+    })
+}
+
+impl CraneliftStatefulSession<'_> {
+    pub fn execute(&mut self, request: &ExecutionRequest) -> BackendExecutionResult {
+        let mut result = empty_execution(self.artifact, request);
+        let Some(contract) = self
+            .artifact
+            .function_value_contracts
+            .get(&request.target.function)
+        else {
+            return execution_failure(
+                result,
+                ExecutionStatus::InvalidRequest,
+                "Cranelift execution requires a language-owned function value contract",
+            );
+        };
+        let (raw_args, arena_image) = match jit_boundary_arguments_for_request(
+            crate::support::scalar_module_uses_cells(&self.scalar),
+            &contract.inputs,
+            contract.outputs.first(),
+            &self.artifact.composite_value_contracts,
+            request,
+        ) {
+            Ok(outcome) => outcome,
+            Err(reason) => {
+                return execution_failure(result, ExecutionStatus::InvalidRequest, reason);
+            }
+        };
+        if let Some(image) = &arena_image {
+            with_jit_arena(|arena| {
+                arena.clear();
+                arena.extend_from_slice(image);
+            });
+        }
+        match self.jit.call(request.target.function.as_str(), &raw_args) {
+            Ok((status, value)) => {
+                result.status = status;
+                result.steps = 1;
+                match crate::support::decode_native_observation(
+                    contract.outputs.first(),
+                    status,
+                    value,
+                    read_jit_arena_hex(arena_image.is_some()).as_deref(),
+                    &self.artifact.composite_value_contracts,
+                ) {
+                    Ok(returned) => {
+                        result.returned = returned;
+                        result
+                    }
+                    Err(reason) => {
+                        execution_failure(result, ExecutionStatus::InvalidRequest, reason)
+                    }
+                }
+            }
+            Err(reason) => execution_failure(result, ExecutionStatus::Unsupported, reason),
+        }
     }
 }
 
