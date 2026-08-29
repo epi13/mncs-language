@@ -58,6 +58,41 @@
       },
       "expected": [{ "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }],
       "expected_status": "returned"
+    },
+    {
+      "id": "valid-raw-utf8",
+      "request": { "schema_version": "0.1", "target": { "module": "examples.json_cursor_probe", "function": "complete" }, "arguments": [{ "sequence": { "values": [{ "byte": { "value": 123 } }, { "byte": { "value": 34 } }, { "byte": { "value": 97 } }, { "byte": { "value": 34 } }, { "byte": { "value": 58 } }, { "byte": { "value": 34 } }, { "byte": { "value": 195 } }, { "byte": { "value": 169 } }, { "byte": { "value": 34 } }, { "byte": { "value": 125 } }] } }], "step_budget": 100000, "policy": { "effects": "unsupported" } },
+      "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }], "expected_status": "returned"
+    },
+    {
+      "id": "reject-overlong-utf8",
+      "request": { "schema_version": "0.1", "target": { "module": "examples.json_cursor_probe", "function": "complete" }, "arguments": [{ "sequence": { "values": [{ "byte": { "value": 123 } }, { "byte": { "value": 34 } }, { "byte": { "value": 97 } }, { "byte": { "value": 34 } }, { "byte": { "value": 58 } }, { "byte": { "value": 34 } }, { "byte": { "value": 192 } }, { "byte": { "value": 175 } }, { "byte": { "value": 34 } }, { "byte": { "value": 125 } }] } }], "step_budget": 100000, "policy": { "effects": "unsupported" } },
+      "expected": [{ "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }], "expected_status": "returned"
+    },
+    {
+      "id": "reject-utf8-surrogate",
+      "request": { "schema_version": "0.1", "target": { "module": "examples.json_cursor_probe", "function": "complete" }, "arguments": [{ "sequence": { "values": [{ "byte": { "value": 123 } }, { "byte": { "value": 34 } }, { "byte": { "value": 97 } }, { "byte": { "value": 34 } }, { "byte": { "value": 58 } }, { "byte": { "value": 34 } }, { "byte": { "value": 237 } }, { "byte": { "value": 160 } }, { "byte": { "value": 128 } }, { "byte": { "value": 34 } }, { "byte": { "value": 125 } }] } }], "step_budget": 100000, "policy": { "effects": "unsupported" } },
+      "expected": [{ "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }], "expected_status": "returned"
+    },
+    {
+      "id": "reject-utf8-out-of-range",
+      "request": { "schema_version": "0.1", "target": { "module": "examples.json_cursor_probe", "function": "complete" }, "arguments": [{ "sequence": { "values": [{ "byte": { "value": 123 } }, { "byte": { "value": 34 } }, { "byte": { "value": 97 } }, { "byte": { "value": 34 } }, { "byte": { "value": 58 } }, { "byte": { "value": 34 } }, { "byte": { "value": 244 } }, { "byte": { "value": 144 } }, { "byte": { "value": 128 } }, { "byte": { "value": 128 } }, { "byte": { "value": 34 } }, { "byte": { "value": 125 } }] } }], "step_budget": 100000, "policy": { "effects": "unsupported" } },
+      "expected": [{ "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }], "expected_status": "returned"
+    },
+    {
+      "id": "valid-surrogate-pair-escape",
+      "request": { "schema_version": "0.1", "target": { "module": "examples.json_cursor_probe", "function": "complete" }, "arguments": [{ "sequence": { "values": [{ "byte": { "value": 123 } }, { "byte": { "value": 34 } }, { "byte": { "value": 97 } }, { "byte": { "value": 34 } }, { "byte": { "value": 58 } }, { "byte": { "value": 34 } }, { "byte": { "value": 92 } }, { "byte": { "value": 117 } }, { "byte": { "value": 68 } }, { "byte": { "value": 56 } }, { "byte": { "value": 51 } }, { "byte": { "value": 52 } }, { "byte": { "value": 92 } }, { "byte": { "value": 117 } }, { "byte": { "value": 68 } }, { "byte": { "value": 68 } }, { "byte": { "value": 49 } }, { "byte": { "value": 69 } }, { "byte": { "value": 34 } }, { "byte": { "value": 125 } }] } }], "step_budget": 100000, "policy": { "effects": "unsupported" } },
+      "expected": [{ "integer": { "value": 1, "type": { "bits": 64, "signed": true } } }], "expected_status": "returned"
+    },
+    {
+      "id": "reject-lone-high-surrogate",
+      "request": { "schema_version": "0.1", "target": { "module": "examples.json_cursor_probe", "function": "complete" }, "arguments": [{ "sequence": { "values": [{ "byte": { "value": 123 } }, { "byte": { "value": 34 } }, { "byte": { "value": 97 } }, { "byte": { "value": 34 } }, { "byte": { "value": 58 } }, { "byte": { "value": 34 } }, { "byte": { "value": 92 } }, { "byte": { "value": 117 } }, { "byte": { "value": 68 } }, { "byte": { "value": 56 } }, { "byte": { "value": 51 } }, { "byte": { "value": 52 } }, { "byte": { "value": 34 } }, { "byte": { "value": 125 } }] } }], "step_budget": 100000, "policy": { "effects": "unsupported" } },
+      "expected": [{ "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }], "expected_status": "returned"
+    },
+    {
+      "id": "reject-lone-low-surrogate",
+      "request": { "schema_version": "0.1", "target": { "module": "examples.json_cursor_probe", "function": "complete" }, "arguments": [{ "sequence": { "values": [{ "byte": { "value": 123 } }, { "byte": { "value": 34 } }, { "byte": { "value": 97 } }, { "byte": { "value": 34 } }, { "byte": { "value": 58 } }, { "byte": { "value": 34 } }, { "byte": { "value": 92 } }, { "byte": { "value": 117 } }, { "byte": { "value": 68 } }, { "byte": { "value": 68 } }, { "byte": { "value": 49 } }, { "byte": { "value": 69 } }, { "byte": { "value": 34 } }, { "byte": { "value": 125 } }] } }], "step_budget": 100000, "policy": { "effects": "unsupported" } },
+      "expected": [{ "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }], "expected_status": "returned"
     }
   ]
 }

@@ -1,22 +1,22 @@
 # Atlas JSON/WASM typed-model slice — 2026-08
 
-This record captures the second browser-facing consumer of the bounded
+This record captures the production-path Atlas consumer of the bounded
 sequence/view and portable-WASM work in `mncs-language`. The companion Atlas
 checkout owns the page and thin host adapter; this repository owns the
 language, compiler, backend, and reusable standard-library substrate.
 
 ## Scope and authority
 
-The slice remains explicitly experimental. It does not replace the Atlas
-production site, change conformance, or make the non-normative Atlas an
-authority. The experimental page fetches `atlas.json` as bytes, validates the
-structural stream, feeds 64-byte host views to MNCS/WASM, reconstructs a
-bounded typed `AtlasModel`, obtains a structured `RenderPlan`, and applies
-that plan through safe browser DOM operations.
+The slice remains explicitly experimental. It does not change conformance or
+make the non-normative Atlas an authority. The canonical Atlas page and its
+diagnostics page fetch `atlas.json` as bytes, validate the structural stream,
+feed 64-byte host views to MNCS/WASM, reconstruct a bounded typed
+`AtlasModel`, obtain a structured `RenderPlan`, and apply that plan through
+safe browser DOM operations while retaining static HTML fallback.
 
-The current Atlas schema is bounded in this artifact at fifteen project
-records, nineteen relationship records, a twelve-level JSON container stack,
-and a 24 KiB model input. Text is represented as borrowed spans into the
+The current Atlas schema is bounded in this artifact at thirty-two project
+records, sixty-four relationship records, a twelve-level JSON container stack,
+and a 65,536-byte model input. Text is represented as borrowed spans into the
 original input, so the model does not materialize a JSON DOM or copy every
 string into an unbounded heap.
 
@@ -28,9 +28,10 @@ The Atlas pressure generalized into these MNCS standard-library modules:
   utf8_valid }`, fixed-window key matching, and explicit decodability flags.
 - `library/std/json_cursor.mncs` — a streaming structural cursor with
   absolute byte position, container events, string start/end spans, bounded
-  raw key bytes, JSON escape/unicode tracking, a twelve-level stack, and basic
-  UTF-8 lead/continuation validation. Unknown keys longer than the 16-byte
-  matcher window saturate instead of invalidating a document.
+  raw key bytes, JSON escape/unicode tracking, a twelve-level stack, strict
+  UTF-8 lead/continuation validation, and UTF-16 surrogate-pair validation.
+  Unknown keys longer than the 32-byte matcher window saturate instead of
+  invalidating a document.
 - `library/std/json_stream.mncs` — the existing scalar structural gate for
   complete JSON streams, with quoted-string/escape state, four-digit Unicode
   escape tracking, control-byte rejection, matched delimiters, a twelve-level
@@ -119,9 +120,9 @@ independent-equivalence obligations remain unresolved.
 | Experiment | Observation | Artifact |
 | --- | --- | --- |
 | Atlas scan / portable WASM + Node | 20,413 bytes in 319 chunks; result `1` | 6,658 bytes; SHA-256 recorded in the generated Atlas manifest |
-| Atlas typed model / portable WASM + Node | 15 projects, 19 relationships, 33 render nodes, valid and complete | 53,066 bytes; 512 memory pages; SHA-256 recorded in the generated Atlas manifest |
+| Atlas typed model / portable WASM + Node | 15 projects, 19 relationships, 33 render nodes, valid and complete | 153,696 bytes; 512 memory pages; SHA-256 recorded in the generated Atlas manifest |
 | Atlas model corpus | one-project typed probe expectation met | status remains `UNKNOWN` |
-| JSON cursor / five executable backends | all five realizations agree on complete, incomplete-root, long-key, and malformed-UTF-8 witnesses | status remains `UNKNOWN` because compiler obligations remain |
+| JSON cursor / portable WASM | 11/11 expectations met, including strict raw UTF-8 and surrogate-pair witnesses | status remains `UNKNOWN` because compiler obligations remain |
 | `json-stream-probe` / portable WASM | 10/10 expectations met across root, Unicode, and split-chunk cases; status `UNKNOWN` while unresolved obligations remain | final source probe remains bounded/research-only |
 | `json-probe` / portable WASM | 7/7 focused added number cases met; status `UNKNOWN` while unresolved obligations remain | final source probe remains bounded/research-only |
 | Atlas scan artifact / native Node host | 20,413 bytes in 319 chunks; result `1`; host region `{offset:8, capacity:64}` | 6,658 bytes; SHA-256 recorded in the generated Atlas manifest |
@@ -164,15 +165,14 @@ rather than treated as a clean query result.
 
 ## Remaining cutover blockers
 
-This is not yet a production web runtime. The production `/` path remains the
-static/progressive-enhancement Atlas and its existing `app.js`; navigation,
-journal enhancement, formatting, and the general browser event/fetch protocol
-remain HTML/CSS/JavaScript. The experimental path still needs richer generic
-text/DOM/event host contracts, strict Unicode scalar validation,
-malformed/truncated full-Atlas differential corpora, independent equivalence
-for the full Atlas model, and a formal cutover review. The checked-in manifest
-therefore leaves artifact validation `UNKNOWN` even though build-time WASM
-magic, SHA-256, corpus checks, and browser QA pass.
+The production `/` path now uses the shared typed runtime as progressive
+enhancement; navigation, journal enhancement, formatting, and the general
+browser event/fetch protocol remain HTML/CSS/JavaScript. The host boundary is
+documented in the Atlas checkout. The remaining blockers are malformed/
+truncated full-Atlas differential execution across all backends, independent
+equivalence for the full stateful model, and a formal cutover review. The
+checked-in manifest therefore leaves artifact validation `UNKNOWN` even though
+build-time WASM magic, SHA-256, corpus checks, and Node/browser QA pass.
 
 ## Reproduction
 
@@ -184,5 +184,5 @@ python scripts/build_mncs_wasm.py
 python3 -m http.server 8000 --directory site
 ```
 
-Open `/experimental-atlas.html`. The page is intentionally `noindex`; the
-canonical `/` path continues to use the static guide.
+Open `/` or `/experimental-atlas.html`. The latter remains intentionally
+`noindex` and exposes the same runtime with diagnostic framing.

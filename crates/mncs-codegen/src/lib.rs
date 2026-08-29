@@ -18,6 +18,7 @@ mod support;
 mod wasm;
 
 use std::collections::BTreeMap;
+use std::time::Instant;
 
 use mncs_model::{
     execute_ssa_module, execute_with_policy, ArtifactRepresentation, BackendArtifact,
@@ -46,6 +47,16 @@ pub const RESEARCH_BYTECODE_FORMAT: &str =
 pub const RESEARCH_BYTECODE_ARTIFACT_KIND: &str = "research_bytecode";
 pub const BACKEND_EXECUTION_RESULT_SCHEMA_VERSION: &str = "0.1";
 pub const LAYERED_EXECUTION_COMPARISON_SCHEMA_VERSION: &str = "0.1";
+
+fn trace_timing(stage: &str, started: Instant) {
+    if std::env::var_os("MNCS_TIMINGS").is_some() {
+        eprintln!(
+            "mncs-timing stage={} elapsed_ms={}",
+            stage,
+            started.elapsed().as_millis()
+        );
+    }
+}
 
 pub trait BackendAdapter {
     fn capabilities(&self) -> BackendCapabilityManifest;
@@ -474,6 +485,7 @@ pub fn lower_selected_ssa(
     selected_ssa: CompilerArtifactRef,
     plan: &TargetLoweringPlan,
 ) -> BackendResult {
+    let started = Instant::now();
     let mut diagnostics = Vec::new();
     if selected_ssa.representation != ArtifactRepresentation::SelectedSsa
         || !selected_ssa.identity_is_valid()
@@ -497,6 +509,7 @@ pub fn lower_selected_ssa(
     if let Err(result) = validate_realizable_ssa(program, ssa, "CGN103") {
         return *result;
     }
+    trace_timing("backend-validate", started);
     if !target_is_portable_wasm(&plan.target) {
         diagnostics.push(CompilerDiagnostic::new(
             "CGN201",
@@ -543,6 +556,7 @@ pub fn lower_selected_ssa(
         })
         .collect::<Vec<_>>();
     let mut outcome = lower_module(program, ssa, &names);
+    trace_timing("backend-lower-module", started);
     if let Some(module) = outcome.module.as_mut() {
         crate::lower::emit_alloc_helpers(module);
     }
@@ -575,6 +589,7 @@ pub fn lower_selected_ssa(
     }
     let module = outcome.module.expect("checked above");
     let bytes = encode_module(&module);
+    trace_timing("backend-encode", started);
     if decode_module(&bytes).is_err() {
         diagnostics.push(CompilerDiagnostic::new(
             "CGN303",
@@ -624,6 +639,7 @@ pub fn lower_selected_ssa(
         plan.target.evidence.clone(),
         TransformationStatus::Pass,
     );
+    trace_timing("backend-total", started);
     BackendResult {
         status: TransformationStatus::Pass,
         artifact: Some(artifact),
@@ -1501,6 +1517,7 @@ pub fn compare_body_ssa_and_backend(
     artifact: &BackendArtifact,
     corpus: &ExecutionCorpus,
 ) -> LayeredExecutionComparison {
+    let started = Instant::now();
     let mut matching = 0usize;
     let mut mismatching = 0usize;
     let mut mismatches = Vec::new();
@@ -1508,8 +1525,11 @@ pub fn compare_body_ssa_and_backend(
     let mut invalid = corpus.cases.is_empty();
     for case_ in &corpus.cases {
         let body = execute_with_policy(program, &case_.request);
+        trace_timing("compare-body", started);
         let ssa_result = execute_ssa_module(program, ssa, &case_.request);
+        trace_timing("compare-ssa", started);
         let backend = execute_backend(artifact, &case_.request);
+        trace_timing("compare-backend", started);
         unsupported |= matches!(body.status, ExecutionStatus::Unsupported)
             || matches!(ssa_result.status, ExecutionStatus::Unsupported)
             || matches!(backend.status, ExecutionStatus::Unsupported);
@@ -1532,6 +1552,7 @@ pub fn compare_body_ssa_and_backend(
             }
         }
     }
+    trace_timing("compare-total", started);
     let status = if invalid && matching == 0 {
         LayeredExecutionStatus::InvalidInput
     } else if mismatching > 0 {

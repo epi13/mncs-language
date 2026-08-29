@@ -3,6 +3,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::{Command, ExitCode},
+    time::Instant,
 };
 
 use mncs_codegen::{
@@ -12,7 +13,7 @@ use mncs_codegen::{
 };
 use mncs_compiler::{
     native_node_profile, reference_compiler_architecture, ModuleResolution, ModuleResolver,
-    ReferenceCompiler,
+    ReferenceCompiler, SourceFrontEndResult,
 };
 use mncs_model::{
     compare_body_and_ssa, compare_execution, execute_ssa, execute_with_policy,
@@ -24,7 +25,7 @@ use mncs_model::{
     LanguageExperimentCaseObservation, LanguageExperimentComparison, LanguageExperimentDefinition,
     LanguageExperimentPropertyObservation, LanguageExperimentResult, LoweringExecutionComparison,
     LoweringExecutionStatus, ObligationStatus, Program, RealizationRequest, SemanticDiff,
-    SemanticId, TargetContractRef, ValidatorRequirement,
+    SemanticId, SsaModule, TargetContractRef, ValidatorRequirement,
 };
 use mncs_syntax::{
     analyze, SourceArtifactKind, SourceEnvelope, SourceMetrics, SourceOrigin, SourceOriginKind,
@@ -39,6 +40,16 @@ use serde::{Deserialize, Serialize};
 /// frozen backend artifact against a recorded baseline experiment result.
 const FROZEN_REPLICATION_SUMMARY_SCHEMA_VERSION: &str = "0.1";
 const LANGUAGE_EXPERIMENT_INTERPRETATION: &str = mncs_model::LANGUAGE_EXPERIMENT_INTERPRETATION;
+
+fn trace_timing(stage: &str, started: Instant) {
+    if env::var_os("MNCS_TIMINGS").is_some() {
+        eprintln!(
+            "mncs-timing stage={} elapsed_ms={}",
+            stage,
+            started.elapsed().as_millis()
+        );
+    }
+}
 
 fn main() -> ExitCode {
     let mut args = env::args().skip(1);
@@ -758,14 +769,17 @@ struct ExperimentOptions {
     corpus_path: String,
     output_dir: Option<PathBuf>,
     node_identity: String,
+    validation_profile: Option<String>,
 }
 
 struct PreparedExperiment {
-    envelope: SourceEnvelope,
     program: Program,
-    definition: LanguageExperimentDefinition,
-    semantic_json_source: bool,
-    source_dir: Option<PathBuf>,
+    source_artifact_identity: String,
+    source_profile: String,
+    corpus: ExecutionCorpus,
+    definition: Option<LanguageExperimentDefinition>,
+    front_end: Option<SourceFrontEndResult>,
+    validation_profile: Option<String>,
 }
 
 fn experiment_command<I>(args: I) -> ExitCode
@@ -786,20 +800,21 @@ where
                     return ExitCode::from(2);
                 }
             };
-            let prepared = match prepare_experiment(&options) {
+            let prepared = match prepare_experiment(&options, action == "plan") {
                 Ok(prepared) => prepared,
                 Err(code) => return code,
             };
             if action == "plan" {
                 if let Some(output_dir) = &options.output_dir {
+                    let definition = prepared.definition.as_ref().expect("plan definition");
                     if let Err(error) = fs::create_dir_all(output_dir).and_then(|_| {
-                        write_pretty_json(output_dir.join("definition.json"), &prepared.definition)
+                        write_pretty_json(output_dir.join("definition.json"), definition)
                     }) {
                         eprintln!("error: unable to write experiment plan: {error}");
                         return ExitCode::from(2);
                     }
                 }
-                return if print_json(&prepared.definition) {
+                return if print_json(prepared.definition.as_ref().expect("plan definition")) {
                     ExitCode::SUCCESS
                 } else {
                     ExitCode::from(2)
@@ -1032,6 +1047,7 @@ where
     let mut corpus_path = None;
     let mut output_dir = None;
     let mut node_identity = "local-experiment-node".to_owned();
+    let mut validation_profile = None;
     while let Some(option) = args.next() {
         match option.as_str() {
             "--backend" => {
@@ -1057,6 +1073,15 @@ where
                     .next()
                     .ok_or_else(|| "--node-id requires a value".to_owned())?;
             }
+            "--validation-profile" => {
+                let profile = args
+                    .next()
+                    .ok_or_else(|| "--validation-profile requires a value".to_owned())?;
+                if profile != "artifact-build" {
+                    return Err(format!("unknown validation profile {profile:?}"));
+                }
+                validation_profile = Some(profile);
+            }
             other => return Err(format!("unknown experiment option {other:?}")),
         }
     }
@@ -1078,6 +1103,7 @@ where
         corpus_path: corpus_path.ok_or_else(|| "--corpus is required".to_owned())?,
         output_dir,
         node_identity,
+        validation_profile,
     })
 }
 
@@ -1274,7 +1300,10 @@ fn rust_control_comparison(result_path: &str, control_path: &str) -> ExitCode {
     }
 }
 
-fn prepare_experiment(options: &ExperimentOptions) -> Result<PreparedExperiment, ExitCode> {
+fn prepare_experiment(
+    options: &ExperimentOptions,
+    include_definition: bool,
+) -> Result<PreparedExperiment, ExitCode> {
     let source = read_source(&options.source_path)?;
     let envelope = SourceEnvelope::new(
         SourceArtifactKind::Program,
@@ -1289,7 +1318,7 @@ fn prepare_experiment(options: &ExperimentOptions) -> Result<PreparedExperiment,
     let semantic_json_source = Path::new(&options.source_path)
         .extension()
         .is_some_and(|extension| extension == "json");
-    let program = if semantic_json_source {
+    let (program, front_end) = if semantic_json_source {
         let program = Program::from_json(&envelope.text).map_err(|error| {
             eprintln!("error: invalid canonical semantic JSON experiment source: {error}");
             ExitCode::FAILURE
@@ -1299,7 +1328,7 @@ fn prepare_experiment(options: &ExperimentOptions) -> Result<PreparedExperiment,
             let _ = print_json(&report);
             return Err(ExitCode::FAILURE);
         }
-        program
+        (program, None)
     } else {
         let resolver = FileModuleResolver::with_libraries(&options.source_path);
         let front_end = compiler.front_end_with_resolver(envelope.clone(), &resolver);
@@ -1307,19 +1336,53 @@ fn prepare_experiment(options: &ExperimentOptions) -> Result<PreparedExperiment,
             let _ = print_json(&front_end);
             return Err(ExitCode::FAILURE);
         };
-        program
+        (program, Some(front_end))
     };
-    let ssa = program.lower_to_ssa().map_err(|error| {
-        eprintln!("error: unable to produce selected SSA for experiment: {error}");
-        ExitCode::FAILURE
-    })?;
-    let selected = selected_ssa_ref(&ssa);
-    let adapter = backend_adapter(&options.backend).expect("validated by option parser");
+    let corpus = read_json::<ExecutionCorpus>(&options.corpus_path)?;
+    let source_artifact_identity = envelope.identity;
+    let source_profile = envelope.language_version;
+    let definition = if include_definition {
+        Some(build_experiment_definition(
+            &options.backend,
+            &options.source_path,
+            source_artifact_identity.clone(),
+            source_profile.clone(),
+            compiler.identity.identity.clone(),
+            corpus.clone(),
+            &program.lower_to_ssa().map_err(|error| {
+                eprintln!("error: unable to produce selected SSA for experiment: {error}");
+                ExitCode::FAILURE
+            })?,
+        )?)
+    } else {
+        None
+    };
+    Ok(PreparedExperiment {
+        program,
+        source_artifact_identity,
+        source_profile,
+        corpus,
+        definition,
+        front_end,
+        validation_profile: options.validation_profile.clone(),
+    })
+}
+
+fn build_experiment_definition(
+    backend_name: &str,
+    source_path: &str,
+    source_artifact_identity: String,
+    source_profile: String,
+    compiler_identity: SemanticId,
+    corpus: ExecutionCorpus,
+    ssa: &SsaModule,
+) -> Result<LanguageExperimentDefinition, ExitCode> {
+    let selected = selected_ssa_ref(ssa);
+    let adapter = backend_adapter(backend_name).expect("validated by option parser");
     let capabilities = adapter.capabilities();
-    let target = adapter.target();
     let realization = RealizationRequest::new(
         selected,
-        target,
+        adapter.target(),
         [capabilities.backend.clone()].into_iter().collect(),
         ["checked_integer", "explicit_failure"]
             .into_iter()
@@ -1331,15 +1394,14 @@ fn prepare_experiment(options: &ExperimentOptions) -> Result<PreparedExperiment,
             .collect(),
         "fail_closed_no_backend_fallback",
     );
-    let corpus = read_json::<ExecutionCorpus>(&options.corpus_path)?;
-    let definition = LanguageExperimentDefinition::new(
-        Path::new(&options.source_path)
+    Ok(LanguageExperimentDefinition::new(
+        Path::new(source_path)
             .file_stem()
             .and_then(|name| name.to_str())
             .unwrap_or("mncs-experiment"),
-        envelope.identity.clone(),
-        envelope.language_version.clone(),
-        compiler.identity.identity.clone(),
+        source_artifact_identity,
+        source_profile,
+        compiler_identity,
         BTreeMap::from([("backend".to_owned(), capabilities.backend.name.clone())]),
         realization,
         corpus,
@@ -1363,21 +1425,11 @@ fn prepare_experiment(options: &ExperimentOptions) -> Result<PreparedExperiment,
         "bounded_public_behavior_agreement",
         None,
         Vec::new(),
-    );
-    Ok(PreparedExperiment {
-        source_dir: Some({
-            let mut dir = PathBuf::from(&options.source_path);
-            dir.pop();
-            dir
-        }),
-        envelope,
-        program,
-        definition,
-        semantic_json_source,
-    })
+    ))
 }
 
 fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> ExitCode {
+    let started = Instant::now();
     let compiler = ReferenceCompiler::default();
     let emit = [
         ArtifactRepresentation::Semantic,
@@ -1405,35 +1457,12 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         let _ = print_json(&compilation);
         return ExitCode::FAILURE;
     }
-    let study = if prepared.semantic_json_source {
-        compiler.run_study(
-            CompilationStudyRequest::new(
-                native_node_profile(options.node_identity),
-                request,
-                Vec::new(),
-            ),
-            &prepared.program,
-        )
-    } else {
-        let resolver = FileModuleResolver {
-            root: prepared
-                .source_dir
-                .clone()
-                .unwrap_or_else(|| PathBuf::from(".")),
-            libraries: library_roots(),
-        };
-        let study_output = compiler.run_source_study_with_backend_and_resolver(
-            prepared.envelope.clone(),
-            native_node_profile(options.node_identity),
-            &options.backend,
-            &resolver,
-        );
-        let Some(study) = study_output.study else {
-            let _ = print_json(&study_output.front_end);
-            return ExitCode::FAILURE;
-        };
-        study
-    };
+    trace_timing("cli-compile", started);
+    let study_request = CompilationStudyRequest::new(
+        native_node_profile(options.node_identity),
+        request,
+        Vec::new(),
+    );
     let (Some(ssa), Some(plan), Some(artifact)) = (
         compilation.emissions.ssa.as_ref(),
         compilation.emissions.target_lowering_plan.clone(),
@@ -1442,14 +1471,35 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         let _ = print_json(&compilation);
         return ExitCode::FAILURE;
     };
-    let validation = validate_backend_lowering(
-        &prepared.program,
+    let definition = match build_experiment_definition(
+        &options.backend,
+        &options.source_path,
+        prepared.source_artifact_identity.clone(),
+        prepared.source_profile.clone(),
+        compiler.identity.identity.clone(),
+        prepared.corpus.clone(),
         ssa,
-        &artifact,
-        &prepared.definition.corpus,
-    );
+    ) {
+        Ok(definition) => definition,
+        Err(code) => return code,
+    };
+    trace_timing("cli-definition", started);
+    let study = prepared
+        .front_end
+        .as_ref()
+        .map(|front_end| {
+            compiler.with_front_end_observations(
+                compiler.study_from_compilation(study_request.clone(), &compilation),
+                front_end,
+            )
+        })
+        .unwrap_or_else(|| compiler.study_from_compilation(study_request, &compilation));
+    let validation = prepared
+        .validation_profile
+        .is_none()
+        .then(|| validate_backend_lowering(&prepared.program, ssa, &artifact, &definition.corpus));
+    trace_timing("cli-translation-validation", started);
     let cases = prepared
-        .definition
         .corpus
         .cases
         .iter()
@@ -1458,7 +1508,14 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
             experiment_case_observation(case_, observation)
         })
         .collect();
+    trace_timing("cli-case-observations", started);
     let mut unresolved = Vec::new();
+    if prepared.validation_profile.as_deref() == Some("artifact-build") {
+        unresolved.push(
+            "layered body/SSA/backend validation is deferred to the differential corpus job"
+                .to_owned(),
+        );
+    }
     if compilation.status == CompilationStatus::CompletedWithUnresolvedObligations {
         let exact_cost_only = study.unresolved_obligations.iter().all(|identity| {
             ssa.obligations.iter().any(|obligation| {
@@ -1471,14 +1528,15 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         }
     }
     let capabilities = backend_capabilities(&options.backend).expect("validated backend");
-    let properties = evaluate_execution_properties(&artifact, &prepared.definition.corpus);
+    let properties = evaluate_execution_properties(&artifact, &definition.corpus);
+    trace_timing("cli-properties", started);
     let result = LanguageExperimentResult::new(
-        prepared.definition,
+        definition,
         study,
         capabilities,
         plan,
         artifact,
-        vec![validation],
+        validation.into_iter().collect(),
         cases,
         properties,
         unresolved,
