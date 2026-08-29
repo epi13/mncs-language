@@ -1768,7 +1768,7 @@ impl CompilationStudyRequest {
 
     pub fn identity_is_valid(&self) -> bool {
         self.schema_version == COMPILER_ARTIFACT_SCHEMA_VERSION
-            && self.node.node_identity.trim().len() > 0
+            && !self.node.node_identity.trim().is_empty()
             && self.compilation_request.identity_is_valid()
             && self.identity
                 == identified(
