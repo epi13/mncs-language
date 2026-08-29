@@ -143,14 +143,14 @@ fn scan_number_step(state: ScanState, value: byte) -> (result: ScanState) {
     if state.number == 1 {
         if value == 46 { return ScanState { ..state, number: 3 }; }
         if value == 101 || value == 69 { return ScanState { ..state, number: 5 }; }
-        if is_space(value) || value == 44 || value == 93 || value == 125 { return scan_close_value(state); }
+        if is_space(value) || value == 44 || value == 93 || value == 125 { return scan_number_delimiter(state, value); }
         return scan_bad(state, 5);
     }
     if state.number == 2 {
         if n >= 48 && n <= 57 { return state; }
         if value == 46 { return ScanState { ..state, number: 3 }; }
         if value == 101 || value == 69 { return ScanState { ..state, number: 5 }; }
-        if is_space(value) || value == 44 || value == 93 || value == 125 { return scan_close_value(state); }
+        if is_space(value) || value == 44 || value == 93 || value == 125 { return scan_number_delimiter(state, value); }
         return scan_bad(state, 5);
     }
     if state.number == 3 {
@@ -160,7 +160,7 @@ fn scan_number_step(state: ScanState, value: byte) -> (result: ScanState) {
     if state.number == 4 {
         if n >= 48 && n <= 57 { return state; }
         if value == 101 || value == 69 { return ScanState { ..state, number: 5 }; }
-        if is_space(value) || value == 44 || value == 93 || value == 125 { return scan_close_value(state); }
+        if is_space(value) || value == 44 || value == 93 || value == 125 { return scan_number_delimiter(state, value); }
         return scan_bad(state, 5);
     }
     if state.number == 5 {
@@ -173,7 +173,7 @@ fn scan_number_step(state: ScanState, value: byte) -> (result: ScanState) {
         return scan_bad(state, 5);
     }
     if n >= 48 && n <= 57 { return state; }
-    if is_space(value) || value == 44 || value == 93 || value == 125 { return scan_close_value(state); }
+    if is_space(value) || value == 44 || value == 93 || value == 125 { return scan_number_delimiter(state, value); }
     return scan_bad(state, 5);
 }
 
@@ -235,6 +235,16 @@ fn scan_structural(state: ScanState, value: byte) -> (result: ScanState) {
         if (value as i64) >= 49 && (value as i64) <= 57 { return ScanState { ..state, mode: 2, number: 2 }; }
     }
     return scan_bad(state, 1);
+}
+
+// A delimiter terminates a number but still belongs to the surrounding JSON
+// grammar. Reprocess it after closing the scalar so commas and container
+// terminators advance the parent state instead of being consumed by the
+// number recognizer.
+fn scan_number_delimiter(state: ScanState, value: byte) -> (result: ScanState) {
+    let closed: ScanState = scan_close_value(state);
+    if is_space(value) { return closed; }
+    return scan_structural(closed, value);
 }
 
 fn scan_step(state: ScanState, value: byte) -> (result: ScanState) {

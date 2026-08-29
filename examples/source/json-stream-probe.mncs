@@ -6,3 +6,8 @@ use mncs.std.json_stream.v1;
 fn inspect(input: [byte; up_to 64]) -> (result: i64) {
     return finish(feed_chunk(init(), input));
 }
+
+fn inspect_split(first: [byte; up_to 64], second: [byte; up_to 64]) -> (result: i64) {
+    let after_first: i64 = feed_chunk(init(), first);
+    return finish(feed_chunk(after_first, second));
+}

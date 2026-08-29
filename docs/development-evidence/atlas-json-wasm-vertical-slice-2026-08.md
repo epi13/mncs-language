@@ -32,8 +32,9 @@ The Atlas pressure generalized into three MNCS standard-library modules:
   control-byte rejection, nesting, and JSON escapes. It reports a scalar
   summary/status rather than pretending to be a general heap-backed JSON DOM.
 - `library/std/json_stream.mncs` — a scalar stream envelope for larger input,
-  with quoted-string/escape state, control-byte rejection, matched object and
-  array delimiters, and a twelve-level bounded container stack.
+  with quoted-string/escape state, four-digit Unicode escape tracking,
+  control-byte rejection, matched object and array delimiters, a twelve-level
+  bounded container stack, and one-root/trailing-byte rejection.
 - `library/std/json_projection.mncs` — exact raw key/value projections over
   64-byte views with 32-byte target windows. Escaped text is deliberately not
   decoded here; lexical validation and text decoding are separate concerns.
@@ -56,12 +57,22 @@ the experiment:
   other composite views retain the current eight-byte arena-cell layout;
 - process-boundary marshaling now writes and reads byte views as packed host
   buffers while preserving the existing exact-sequence/composite-cell ABI.
+- modules with composite memory now export
+  `mncs_host_buffer(i32) -> i64` plus `mncs_host_buffer_reset()`; the low 32
+  bits carry a linear-memory offset and the high 32 bits carry the reserved
+  capacity. This is the first typed host-buffer contract and lets a host reuse
+  one region while recycling target-array allocations without guessing an
+  address.
 
 The browser adapter passes an i64 descriptor with the low 32 bits as offset and
-high 32 bits as length. It uses a temporary host offset of `900000` so current
-immutable target-array allocations cannot overwrite the incoming chunk. This
-is an explicit experiment manifest field, not a stable allocator promise; a
-future host ABI should reserve or reuse a typed input region.
+high 32 bits as length, reusing the region returned by `mncs_host_buffer`.
+Projection selectors share one module instance, and the adapter refuses to
+render projections unless the structural scan returns `1`.
+
+For compiler-internal byte views derived from exact cell sequences, aligned
+address bit 0 records the eight-byte source stride. Lowering masks that marker
+before byte loads and the process-boundary reader removes it; host-reserved
+addresses remain aligned and use the ordinary low-offset/high-length ABI.
 
 ## Observed executions
 
@@ -71,10 +82,10 @@ the returned corpus values look right.
 
 | Experiment | Corpus observation | Artifact |
 | --- | --- | --- |
-| `json-stream-probe` / portable WASM | 3/3 expectations met; status `UNKNOWN` | WASM SHA-256 `66c0edf9ce6b223d0f563193a955bddcec0cc74615ad09a2111d9b15e2625d65` |
-| `json-probe` / portable WASM | 3/3 expectations met: `-101`, `1002012`, `1000000`; status `UNKNOWN` | WASM SHA-256 `c6adcbcd2509fafb89765313ce0c7c030f3b19c342eec0ad1bb3ca067bf68638` |
-| Atlas scan artifact / native Node host | 20,413 bytes in 319 chunks; result `1` | 4,776 bytes; SHA-256 `fd144bd32d1cf82b85f923922daba9e5f468b6e3d8ccbd8591052316723c5746` |
-| Atlas projection artifact / native Node host | `[16, 4, 5, 4, 1, 1, 19]` | 10,649 bytes; SHA-256 `e9115becb3c65f3b4f4f40506c67d2e69f7336ca1fac18e747c83c921262564e` |
+| `json-stream-probe` / portable WASM | 10/10 expectations met across root, Unicode, and split-chunk cases; status `UNKNOWN` while unresolved obligations remain | final source probe remains bounded/research-only |
+| `json-probe` / portable WASM | 7/7 focused added number cases met; status `UNKNOWN` while unresolved obligations remain | final source probe remains bounded/research-only |
+| Atlas scan artifact / native Node host | 20,413 bytes in 319 chunks; result `1`; host region `{offset:8, capacity:64}` | 6,657 bytes; SHA-256 `fcca761e6ef4d4b268232b55ebff007a6a521f919c05ede5c86d4c874cf67998` |
+| Atlas projection artifact / native Node host | `[16, 4, 5, 4, 1, 1, 19]`; one module instance; host region `{offset:8, capacity:64}` | 10,760 bytes; SHA-256 `ebe9a18522cef05c1cf76a9c173465762f83762ab4800d9f8df40710fb38f0c6` |
 
 The first projection value is a raw count of `maturity` keys, including the
 one documentation link in the machine map's top-level metadata. The page calls
@@ -114,9 +125,9 @@ decoding, and browser event/fetch host protocol remain HTML/CSS/JavaScript.
 Python remains the repository integrity and Journal Maintainer implementation.
 The current portable-WASM contract is a research execution envelope, and its
 unresolved obligations keep these experiments `UNKNOWN`. Before a default-site
-switch, MNCS needs a stable typed host-buffer/allocator ABI, richer structured
-return or render-command values, independent backend/runtime validation, and a
-larger corpus including malformed/truncated Atlas data and text/UTF-8 cases.
+switch, MNCS still needs richer structured return or render-command values,
+independent backend/runtime validation, and a larger corpus including
+malformed/truncated Atlas data and text/UTF-8 cases.
 
 ## Reproduction
 

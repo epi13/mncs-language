@@ -52,6 +52,124 @@
       },
       "expected": [{ "integer": { "value": -101, "type": { "bits": 64, "signed": true } } }],
       "expected_status": "returned"
+    },
+    {
+      "id": "array-one-number",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_probe", "function": "inspect" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 91 } }, { "byte": { "value": 49 } },
+          { "byte": { "value": 93 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": 1000010, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    },
+    {
+      "id": "array-two-numbers",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_probe", "function": "inspect" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 91 } }, { "byte": { "value": 49 } },
+          { "byte": { "value": 44 } }, { "byte": { "value": 50 } },
+          { "byte": { "value": 93 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": 1000010, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    },
+    {
+      "id": "object-one-number",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_probe", "function": "inspect" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 123 } }, { "byte": { "value": 34 } },
+          { "byte": { "value": 97 } }, { "byte": { "value": 34 } },
+          { "byte": { "value": 58 } }, { "byte": { "value": 49 } },
+          { "byte": { "value": 125 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": 1001001, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    },
+    {
+      "id": "object-two-numbers",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_probe", "function": "inspect" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 123 } }, { "byte": { "value": 34 } },
+          { "byte": { "value": 97 } }, { "byte": { "value": 34 } },
+          { "byte": { "value": 58 } }, { "byte": { "value": 49 } },
+          { "byte": { "value": 44 } }, { "byte": { "value": 34 } },
+          { "byte": { "value": 98 } }, { "byte": { "value": 34 } },
+          { "byte": { "value": 58 } }, { "byte": { "value": 50 } },
+          { "byte": { "value": 125 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": 1001002, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    },
+    {
+      "id": "nested-number",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_probe", "function": "inspect" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 91 } }, { "byte": { "value": 123 } },
+          { "byte": { "value": 34 } }, { "byte": { "value": 97 } },
+          { "byte": { "value": 34 } }, { "byte": { "value": 58 } },
+          { "byte": { "value": 49 } }, { "byte": { "value": 125 } },
+          { "byte": { "value": 44 } }, { "byte": { "value": 50 } },
+          { "byte": { "value": 93 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": 1001011, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    },
+    {
+      "id": "decimal-exponent-number",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_probe", "function": "inspect" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 91 } }, { "byte": { "value": 49 } },
+          { "byte": { "value": 46 } }, { "byte": { "value": 53 } },
+          { "byte": { "value": 101 } }, { "byte": { "value": 43 } },
+          { "byte": { "value": 50 } }, { "byte": { "value": 93 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": 1000010, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
+    },
+    {
+      "id": "truncated-number-container",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.json_probe", "function": "inspect" },
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 91 } }, { "byte": { "value": 49 } }
+        ] } }],
+        "step_budget": 100000,
+        "policy": { "effects": "unsupported" }
+      },
+      "expected": [{ "integer": { "value": -1, "type": { "bits": 64, "signed": true } } }],
+      "expected_status": "returned"
     }
   ]
 }

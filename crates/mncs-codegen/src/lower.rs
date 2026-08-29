@@ -914,15 +914,30 @@ fn lower_instruction(
                         body.push(Instr::Unreachable);
                         body.push(Instr::End);
                     }
-                    body.push(Instr::LocalGet(seq));
-                    body.push(Instr::I32WrapI64);
-                    body.push(Instr::LocalGet(index));
                     if matches!(&instruction.outputs[0].ty, IrType::Named(name) if name == "byte") {
-                        // Up-to byte views are packed host buffers. Other
-                        // view elements retain the canonical eight-byte slot
-                        // stride used by the current composite ABI.
+                        // Bit 0 marks a byte view whose source is still an
+                        // exact canonical-cell sequence. Host-packed byte
+                        // views leave it clear. Mask the marker before the
+                        // load and preserve the source representation's
+                        // stride for the index.
+                        body.push(Instr::LocalGet(seq));
+                        body.push(Instr::I64Const(4_294_967_294));
+                        body.push(Instr::I64And);
+                        body.push(Instr::I32WrapI64);
+                        body.push(Instr::LocalGet(index));
+                        body.push(Instr::I64Const(3));
+                        body.push(Instr::I64Shl);
+                        body.push(Instr::LocalGet(index));
+                        body.push(Instr::LocalGet(seq));
+                        body.push(Instr::I64Const(1));
+                        body.push(Instr::I64And);
+                        body.push(Instr::I32WrapI64);
+                        body.push(Instr::Select);
                         body.push(Instr::I32WrapI64);
                     } else {
+                        body.push(Instr::LocalGet(seq));
+                        body.push(Instr::I32WrapI64);
+                        body.push(Instr::LocalGet(index));
                         body.push(Instr::I64Const(3));
                         body.push(Instr::I64Shl);
                         body.push(Instr::I32WrapI64);
@@ -1008,16 +1023,44 @@ fn lower_instruction(
             body.push(Instr::If);
             body.push(Instr::Unreachable);
             body.push(Instr::End);
-            // Pack (base + start*8) | (span << 32).
+            // Exact sequences use canonical eight-byte cells; an UpTo source
+            // already carries a packed view descriptor whose low half is the
+            // byte address of its element representation. Preserve that
+            // representation when applying the slice start.
+            let byte_view = matches!(&instruction.outputs[0].ty, IrType::Named(name) if name.contains("[byte;"));
             match source_bound {
                 mncs_model::SequenceBound::Exact(_) => {
                     body.push(Instr::LocalGet(seq));
                     body.push(Instr::I64ExtendI32U);
+                    body.push(Instr::LocalGet(start));
+                    body.push(Instr::I64Const(3));
+                    body.push(Instr::I64Shl);
                 }
                 mncs_model::SequenceBound::UpTo(_) => {
                     body.push(Instr::LocalGet(seq));
-                    body.push(Instr::I64Const(4_294_967_295));
+                    body.push(Instr::I64Const(if byte_view {
+                        4_294_967_294
+                    } else {
+                        4_294_967_295
+                    }));
                     body.push(Instr::I64And);
+                    if byte_view {
+                        // Select start*8 for an exact-cell byte view (marker
+                        // set) and start for a packed host byte view.
+                        body.push(Instr::LocalGet(start));
+                        body.push(Instr::I64Const(3));
+                        body.push(Instr::I64Shl);
+                        body.push(Instr::LocalGet(start));
+                        body.push(Instr::LocalGet(seq));
+                        body.push(Instr::I64Const(1));
+                        body.push(Instr::I64And);
+                        body.push(Instr::I32WrapI64);
+                        body.push(Instr::Select);
+                    } else {
+                        body.push(Instr::LocalGet(start));
+                        body.push(Instr::I64Const(3));
+                        body.push(Instr::I64Shl);
+                    }
                 }
                 mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
                     unreachable!(
@@ -1025,13 +1068,26 @@ fn lower_instruction(
                     )
                 }
             }
-            body.push(Instr::LocalGet(start));
-            let byte_view = matches!(&instruction.outputs[0].ty, IrType::Named(name) if name.contains("[byte;"));
-            if !byte_view {
-                body.push(Instr::I64Const(3));
-                body.push(Instr::I64Shl);
-            }
             body.push(Instr::I64Add);
+            if byte_view {
+                match source_bound {
+                    mncs_model::SequenceBound::Exact(_) => {
+                        body.push(Instr::I64Const(1));
+                    }
+                    mncs_model::SequenceBound::UpTo(_) => {
+                        body.push(Instr::LocalGet(seq));
+                        body.push(Instr::I64Const(1));
+                        body.push(Instr::I64And);
+                    }
+                    mncs_model::SequenceBound::Param(_)
+                    | mncs_model::SequenceBound::UpToParam(_) => {
+                        unreachable!(
+                            "generic SequenceBound must be specialized before backend lowering"
+                        )
+                    }
+                }
+                body.push(Instr::I64Or);
+            }
             // Keep only the low 32 bits of the address half.
             body.push(Instr::I64Const(4_294_967_295));
             body.push(Instr::I64And);
@@ -1932,9 +1988,23 @@ fn local(layout: &FunctionLayout, identity: &SemanticId) -> Result<u32, String> 
 /// Emit `$mncs_alloc(bytes) -> ptr` into every module that materializes
 /// composites, plus the bump-pointer global it uses (global 0).
 const ALLOC_FUNCTION_NAME: &str = "mncs_alloc";
+/// Export a stable byte-buffer reservation ABI alongside the allocator.
+/// The returned i64 packs the byte capacity in the high half and the linear
+/// memory offset in the low half.
+const HOST_BUFFER_FUNCTION_NAME: &str = "mncs_host_buffer";
+const HOST_BUFFER_RESET_FUNCTION_NAME: &str = "mncs_host_buffer_reset";
 
 pub fn emit_alloc_helpers(module: &mut WasmModule) {
     if !module.globals.is_empty() && module.memory.is_some() {
+        // Global 0 is the allocator cursor. Keep the end of the host-owned
+        // region in a second cursor so hosts can recycle target-array
+        // allocations between calls without overwriting their input bytes.
+        module.globals.push(crate::wasm::WasmGlobal {
+            valtype: ValType::I32,
+            mutable: true,
+            init: 8,
+        });
+        let host_end_global = (module.globals.len() - 1) as u32;
         // $mncs_alloc(bytes): bump the global pointer, keep 8-byte alignment,
         // return the previous pointer. Appending keeps every existing callee
         // index stable.
@@ -1962,6 +2032,35 @@ pub fn emit_alloc_helpers(module: &mut WasmModule) {
         for function in &mut module.functions {
             rewrite_alloc_calls(function, alloc_index);
         }
+        module.functions.push(WasmFunction {
+            name: HOST_BUFFER_FUNCTION_NAME.to_owned(),
+            params: vec![ValType::I32],
+            results: vec![ValType::I64],
+            locals: vec![ValType::I32],
+            body: vec![
+                // Reserve the host-owned region before any later composite
+                // allocations and return {capacity:32, offset:32}.
+                Instr::LocalGet(0),
+                Instr::Call(alloc_index),
+                Instr::LocalSet(1),
+                Instr::GlobalGet(0),
+                Instr::GlobalSet(host_end_global),
+                Instr::LocalGet(1),
+                Instr::I64ExtendI32U,
+                Instr::LocalGet(0),
+                Instr::I64ExtendI32U,
+                Instr::I64Const(32),
+                Instr::I64Shl,
+                Instr::I64Or,
+            ],
+        });
+        module.functions.push(WasmFunction {
+            name: HOST_BUFFER_RESET_FUNCTION_NAME.to_owned(),
+            params: Vec::new(),
+            results: Vec::new(),
+            locals: Vec::new(),
+            body: vec![Instr::GlobalGet(host_end_global), Instr::GlobalSet(0)],
+        });
     }
     // Any leftover marker means a lowered function asked for allocation
     // without composites being declared; fail loudly rather than encode it.
