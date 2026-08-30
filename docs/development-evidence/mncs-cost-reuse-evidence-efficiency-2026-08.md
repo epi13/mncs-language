@@ -36,6 +36,27 @@ readiness.
   bound for its large finalizer. This remains a resource limit, not an
   unbounded escape hatch.
 
+## Reuse integrity matrix
+
+Every reusable object has an explicit key, immutable subject, validator
+version, dependency set, scope, and invalidation rule:
+
+| reusable object | key and immutable subject | validator / dependencies / scope | invalidators |
+| --- | --- | --- | --- |
+| `SsaExecutionSession` | Owned `Arc<Program>` plus `Arc<SsaModule>`; program content fingerprint and exact SSA fingerprint are retained in the receipt. | SSA execution-session validator `0.1`; execution contract `0.1`; dependencies are the program identity → program fingerprint and SSA identity → SSA fingerprint; scope is the session instance. | Program or SSA content/identity/schema changes, or validator/execution-contract changes. The execution API accepts only the session-owned pair, so A's receipt cannot be applied to B. |
+| Research bytecode payload/session | Artifact identity and bytes hash; decoded payload shares the immutable program/SSA allocations with its `SsaExecutionSession`. | Payload schema `0.1`, artifact identity validation, and the SSA session receipt; scope is the backend artifact identity. | Artifact bytes, backend identity, payload schema, program/SSA identity or content, or session validator changes. |
+| WASM, Cranelift, C11, and LLVM backend sessions | Borrowed `BackendArtifact` identity plus the backend-specific prepared representation. | Artifact identity/hash and backend preparation validation; native sessions additionally retain toolchain name, path, version, source/IR, and flags; scope is the artifact identity. | Any artifact mutation (also prevented by the borrow), identity/hash mismatch, backend or target contract change, toolchain change, or preparation failure. |
+| Stateful prefix checkpoint | Exact corpus/bounds/step-prefix identity plus sealed logical state and optional backend-session scope. | Stateful checkpoint schema `0.1`; seal covers retained values, observations, counters, program identity/fingerprint, and scope; scope is the owning artifact identity for backend reuse. | Prefix step/policy/bound changes, retained-state or seal tampering, out-of-range index, cross-artifact scope, or invalid retained references. Divergent suffixes may share only an exact verified prefix. |
+| Native executable cache | Full framed source material, compiler name/path/version, flags, host OS, and architecture hashed to a complete cache directory identity. | External compiler observation; publication is same-directory temp-file compile followed by atomic rename and a completion marker containing the executable size; `backend_compile_count` increments only after an external compiler invocation succeeds. | Source, compiler, flags, host identity, missing/invalid completion marker, size-truncated output, compile failure, or failed publication. The child-process protocol remains the final check for same-size binary corruption. |
+| Evidence receipt | Receipt identity seals fact, subject, validator, scope, dependencies, outcome, and invalidation triggers. | Evidence receipt schema `0.1`; dependency map contains exact content fingerprints. | Any sealed field, subject, validator, scope, or dependency fingerprint change. |
+
+`CostReport` keeps the legacy cumulative checkpoint timing fields and adds an
+explicit adjacent-checkpoint exclusive timing field. `backend_compile_count`
+now counts only an actual external native compiler invocation that published a
+new executable; native cache hits do not masquerade as compilation. Backend
+validation and lowering counters are recorded at their shared boundaries so
+portable and external adapters use the same counter names.
+
 ## Measurements
 
 Commands used for the primary stress measurements:
@@ -86,14 +107,17 @@ about 53.9s before the explicit stress budget was raised.
 
 ## Verification and limitations
 
-- Receipt tests cover exact reuse and dependency/identity tampering.
+- Receipt tests cover exact reuse, A/B program and SSA mutations, caller-side
+  mutation after session creation, schema/identity/block-order tampering, and
+  dependency/identity tampering.
 - Stateful checkpoint tests prove that a verified prefix skips only the
-  captured calls and retains the same final logical result.
+  captured calls, can be reused by a divergent suffix, and rejects state,
+  policy, range, seal, and cross-artifact-scope mutations.
 - `cargo fmt --all -- --check`, `cargo check --workspace`, and the model suite
   pass. The complete Atlas five-backend differential also passes, with its
   machine-readable report at `/tmp/atlas-cost-reuse-full.json` for this run.
-- Timing samples include existing cumulative compiler trace points; they are
-  diagnostic measurements and should not be added as independent exclusive
-  stage durations without accounting for nesting.
+- Timing samples retain the existing cumulative compiler trace points under
+  their legacy field and record independent adjacent CLI checkpoints under the
+  explicit exclusive-duration field; they remain diagnostic measurements.
 - Local execution is not a sandbox. RSS and wall-time results are host-local;
   no cross-host performance or independent evaluator claim follows.

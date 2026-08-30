@@ -43,15 +43,20 @@ use serde::{Deserialize, Serialize};
 const FROZEN_REPLICATION_SUMMARY_SCHEMA_VERSION: &str = "0.1";
 const LANGUAGE_EXPERIMENT_INTERPRETATION: &str = mncs_model::LANGUAGE_EXPERIMENT_INTERPRETATION;
 
-fn trace_timing(stage: &str, started: Instant) {
-    mncs_model::record_stage(stage, started.elapsed());
+fn trace_timing(stage: &str, cumulative_started: &Instant, stage_started: &mut Instant) {
+    let cumulative_elapsed = cumulative_started.elapsed();
+    let exclusive_elapsed = stage_started.elapsed();
+    mncs_model::record_stage(stage, cumulative_elapsed);
+    mncs_model::record_exclusive_stage(stage, exclusive_elapsed);
     if env::var_os("MNCS_TIMINGS").is_some() {
         eprintln!(
-            "mncs-timing stage={} elapsed_ms={}",
+            "mncs-timing stage={} cumulative_elapsed_ms={} exclusive_elapsed_ms={}",
             stage,
-            started.elapsed().as_millis()
+            cumulative_elapsed.as_millis(),
+            exclusive_elapsed.as_millis(),
         );
     }
+    *stage_started = Instant::now();
 }
 
 const CLI_WORKER_STACK_BYTES: usize = 8 * 1024 * 1024;
@@ -1476,6 +1481,7 @@ fn build_experiment_definition(
 
 fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> ExitCode {
     let started = Instant::now();
+    let mut stage_started = started;
     let compiler = ReferenceCompiler::default();
     let emit = [
         ArtifactRepresentation::Semantic,
@@ -1503,7 +1509,7 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         let _ = print_json(&compilation);
         return ExitCode::FAILURE;
     }
-    trace_timing("cli-compile", started);
+    trace_timing("cli-compile", &started, &mut stage_started);
     let study_request = CompilationStudyRequest::new(
         native_node_profile(options.node_identity),
         request,
@@ -1529,7 +1535,7 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         Ok(definition) => definition,
         Err(code) => return code,
     };
-    trace_timing("cli-definition", started);
+    trace_timing("cli-definition", &started, &mut stage_started);
     let study = prepared
         .front_end
         .as_ref()
@@ -1544,7 +1550,7 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         .validation_profile
         .is_none()
         .then(|| validate_backend_lowering(&prepared.program, ssa, &artifact, &definition.corpus));
-    trace_timing("cli-translation-validation", started);
+    trace_timing("cli-translation-validation", &started, &mut stage_started);
     let cases = prepared
         .corpus
         .cases
@@ -1554,7 +1560,7 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
             experiment_case_observation(case_, observation)
         })
         .collect();
-    trace_timing("cli-case-observations", started);
+    trace_timing("cli-case-observations", &started, &mut stage_started);
     let mut stateful_session = BackendStatefulSession::new(&artifact);
     let stateful_executions =
         stateful_session.execute_cases(&prepared.corpus.name, &prepared.corpus.stateful_cases);
@@ -1565,7 +1571,11 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         .zip(stateful_executions)
         .map(|(case_, execution)| stateful_case_observation(case_, execution))
         .collect::<Vec<_>>();
-    trace_timing("cli-stateful-case-observations", started);
+    trace_timing(
+        "cli-stateful-case-observations",
+        &started,
+        &mut stage_started,
+    );
     let mut unresolved = Vec::new();
     if prepared.validation_profile.as_deref() == Some("artifact-build") {
         unresolved.push(
@@ -1586,7 +1596,7 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
     }
     let capabilities = backend_capabilities(&options.backend).expect("validated backend");
     let properties = evaluate_execution_properties(&artifact, &definition.corpus);
-    trace_timing("cli-properties", started);
+    trace_timing("cli-properties", &started, &mut stage_started);
     let result = LanguageExperimentResult::new(
         definition,
         study,

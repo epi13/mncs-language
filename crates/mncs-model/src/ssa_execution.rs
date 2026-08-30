@@ -6,6 +6,7 @@
 //! about the declared corpus and is not compiler correctness.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -182,14 +183,27 @@ pub fn execute_ssa_module_prevalidated(
 /// performed once; request schema, target, argument, and step-budget checks
 /// continue to run at every transition.
 pub struct SsaExecutionSession {
+    /// The validated executable material is owned by the session. Keeping the
+    /// pair together makes it impossible for a caller to supply a different
+    /// program or SSA module after the receipt and block indexes were built.
+    program: Arc<Program>,
+    module: Arc<SsaModule>,
     block_indices: BTreeMap<SemanticId, BTreeMap<SemanticId, usize>>,
     program_identity: SemanticId,
-    module_fingerprint: Option<String>,
+    program_fingerprint: String,
+    module_fingerprint: String,
     validation_receipt: EvidenceReceipt,
 }
 
 impl SsaExecutionSession {
     pub fn new(program: &Program, module: &SsaModule) -> Result<Self, String> {
+        Self::from_shared(Arc::new(program.clone()), Arc::new(module.clone()))
+    }
+
+    /// Construct a session from already-owned immutable artifact material.
+    /// This is used by decoded backend payloads so the payload and session
+    /// share one allocation for the validated pair.
+    pub fn from_shared(program: Arc<Program>, module: Arc<SsaModule>) -> Result<Self, String> {
         if module.schema_version != crate::SSA_SCHEMA_VERSION {
             return Err("unsupported SSA schema version".to_owned());
         }
@@ -197,12 +211,21 @@ impl SsaExecutionSession {
         if module.semantic_identity != program_identity {
             return Err("SSA semantic program identity does not match program".to_owned());
         }
+        if !module.identity_is_valid() {
+            return Err("SSA module identity does not match semantic/HIR identity".to_owned());
+        }
         if !program.validate().valid {
             return Err("program validation failed".to_owned());
         }
         if !module.validate().valid {
             return Err("SSA validation failed".to_owned());
         }
+        let program_fingerprint = program
+            .content_fingerprint()
+            .map_err(|error| format!("program fingerprint failed: {error}"))?;
+        let module_fingerprint = module
+            .fingerprint()
+            .map_err(|error| format!("SSA fingerprint failed: {error}"))?;
         let block_indices = module
             .functions
             .iter()
@@ -218,7 +241,6 @@ impl SsaExecutionSession {
                 )
             })
             .collect();
-        let module_fingerprint = module.fingerprint().ok();
         let validation_receipt = EvidenceReceipt::new(
             "SSA artifact validates against semantic program",
             module.identity.clone(),
@@ -231,14 +253,8 @@ impl SsaExecutionSession {
                 ),
             ]),
             BTreeMap::from([
-                (
-                    program_identity.clone(),
-                    program.content_fingerprint().unwrap_or_default(),
-                ),
-                (
-                    module.identity.clone(),
-                    module_fingerprint.clone().unwrap_or_default(),
-                ),
+                (program_identity.clone(), program_fingerprint.clone()),
+                (module.identity.clone(), module_fingerprint.clone()),
             ]),
             Vec::new(),
             EvidenceReceiptOutcome::Pass,
@@ -249,8 +265,11 @@ impl SsaExecutionSession {
             ],
         );
         Ok(Self {
+            program,
+            module,
             block_indices,
             program_identity,
+            program_fingerprint,
             module_fingerprint,
             validation_receipt,
         })
@@ -260,19 +279,20 @@ impl SsaExecutionSession {
         &self.validation_receipt
     }
 
-    pub fn execute(
-        &self,
-        program: &Program,
-        module: &SsaModule,
-        request: &crate::ExecutionRequest,
-    ) -> SsaExecutionResult {
+    /// Execute only the exact immutable program/SSA pair validated by this
+    /// session. Request-specific validation still runs for every transition.
+    pub fn execute(&self, request: &crate::ExecutionRequest) -> SsaExecutionResult {
         execute_ssa_module_with_validation(
-            program,
-            module,
+            &self.program,
+            &self.module,
             request,
             false,
             Some(&self.block_indices),
-            Some((&self.program_identity, &self.module_fingerprint)),
+            Some((
+                &self.program_identity,
+                &self.program_fingerprint,
+                &self.module_fingerprint,
+            )),
             None,
         )
     }
@@ -281,12 +301,7 @@ impl SsaExecutionSession {
     /// logical arguments into the evaluator. This is equivalent to `execute`
     /// but avoids deep-cloning a large immutable checkpoint merely to validate
     /// and normalize it at the backend boundary.
-    pub fn execute_owned(
-        &self,
-        program: &Program,
-        module: &SsaModule,
-        request: crate::ExecutionRequest,
-    ) -> SsaExecutionResult {
+    pub fn execute_owned(&self, request: crate::ExecutionRequest) -> SsaExecutionResult {
         let crate::ExecutionRequest {
             schema_version,
             target,
@@ -302,12 +317,16 @@ impl SsaExecutionSession {
             policy,
         };
         execute_ssa_module_with_validation(
-            program,
-            module,
+            &self.program,
+            &self.module,
             &request,
             false,
             Some(&self.block_indices),
-            Some((&self.program_identity, &self.module_fingerprint)),
+            Some((
+                &self.program_identity,
+                &self.program_fingerprint,
+                &self.module_fingerprint,
+            )),
             Some(arguments),
         )
     }
@@ -319,7 +338,7 @@ fn execute_ssa_module_with_validation(
     request: &crate::ExecutionRequest,
     validate_artifact: bool,
     block_cache: Option<&BTreeMap<SemanticId, BTreeMap<SemanticId, usize>>>,
-    cached_identity: Option<(&SemanticId, &Option<String>)>,
+    cached_identity: Option<(&SemanticId, &String, &String)>,
     owned_arguments: Option<Vec<ExecutionValue>>,
 ) -> SsaExecutionResult {
     if request.schema_version != crate::EXECUTION_REQUEST_SCHEMA_VERSION {
@@ -391,9 +410,11 @@ fn execute_ssa_module_with_validation(
         );
     };
     let (program_identity, module_fingerprint) = cached_identity
-        .map(|(program_identity, module_fingerprint)| {
-            (program_identity.clone(), module_fingerprint.clone())
-        })
+        .map(
+            |(program_identity, _program_fingerprint, module_fingerprint)| {
+                (program_identity.clone(), Some(module_fingerprint.clone()))
+            },
+        )
         .unwrap_or_else(|| (program_id(&program.module), module.fingerprint().ok()));
     let mut result = SsaExecutionResult {
         schema_version: SSA_EXECUTION_RESULT_SCHEMA_VERSION.to_owned(),
@@ -681,7 +702,7 @@ fn execute_instruction(
     result: &mut SsaExecutionResult,
     request: &crate::ExecutionRequest,
     block_cache: Option<&BTreeMap<SemanticId, BTreeMap<SemanticId, usize>>>,
-    cached_identity: Option<(&SemanticId, &Option<String>)>,
+    cached_identity: Option<(&SemanticId, &String, &String)>,
 ) -> bool {
     match &instruction.kind {
         SsaInstructionKind::Constant { value, ty } => {
@@ -2587,7 +2608,135 @@ fn invalid_comparison(program: &Program, corpus: &ExecutionCorpus) -> LoweringEx
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ExecutionTraceEntry;
+    use crate::{BodyOperationKind, ExecutionTraceEntry};
+
+    fn request_for(program: &Program, amount: i128) -> crate::ExecutionRequest {
+        crate::ExecutionRequest {
+            schema_version: crate::EXECUTION_REQUEST_SCHEMA_VERSION.to_owned(),
+            target: crate::ExecutionTarget {
+                module: program.module.clone(),
+                function: program.functions[0].name.clone(),
+            },
+            arguments: vec![ExecutionValue::Integer {
+                value: amount,
+                ty: IntegerType {
+                    bits: 32,
+                    signed: true,
+                },
+            }],
+            step_budget: 64,
+            policy: crate::ExecutionPolicy::default(),
+        }
+    }
+
+    #[test]
+    fn ssa_session_is_bound_to_one_owned_program_and_module_pair() {
+        let program_a = crate::body::tests::executable_program();
+        let module_a = program_a.lower_to_ssa().expect("SSA A");
+        let mut caller_owned_program = program_a.clone();
+        let session = SsaExecutionSession::new(&caller_owned_program, &module_a).expect("session");
+        let validation_count = crate::cost_report().semantic_validation_count;
+
+        // Mutating the caller's copy cannot launder a different program into
+        // the receipt-bound session: the session owns its immutable pair.
+        if let Some(function) = caller_owned_program.functions.first_mut() {
+            if let Some(body) = function.body.as_mut() {
+                if let Some(operation) = body.blocks[0].operations.first_mut() {
+                    if let BodyOperationKind::Constant { value, .. } = &mut operation.kind {
+                        *value = 99;
+                    }
+                }
+            }
+        }
+        let first = session.execute(&request_for(&program_a, 4));
+        let second = session.execute(&request_for(&program_a, 4));
+        assert_eq!(first.status, ExecutionStatus::Returned);
+        assert_eq!(
+            first.returned,
+            vec![ExecutionValue::Integer {
+                value: 5,
+                ty: IntegerType {
+                    bits: 32,
+                    signed: true,
+                },
+            }]
+        );
+        assert_eq!(first, second);
+        assert_eq!(
+            crate::cost_report().semantic_validation_count,
+            validation_count
+        );
+
+        let mut program_b = program_a.clone();
+        let operation = program_b.functions[0].body.as_mut().expect("body").blocks[0]
+            .operations
+            .first_mut()
+            .expect("constant");
+        if let BodyOperationKind::Constant { value, .. } = &mut operation.kind {
+            *value = 2;
+        } else {
+            panic!("fixture constant changed shape");
+        }
+        let module_b = program_b.lower_to_ssa().expect("SSA B");
+        assert_ne!(
+            program_a
+                .content_fingerprint()
+                .expect("program A fingerprint"),
+            program_b
+                .content_fingerprint()
+                .expect("program B fingerprint")
+        );
+        assert_ne!(
+            module_a.fingerprint().expect("SSA A fingerprint"),
+            module_b.fingerprint().expect("SSA B fingerprint")
+        );
+        let direct_b = execute_ssa_module(&program_b, &module_b, &request_for(&program_b, 4));
+        assert_eq!(direct_b.status, ExecutionStatus::Returned);
+        assert_eq!(
+            direct_b.returned[0],
+            ExecutionValue::Integer {
+                value: 6,
+                ty: IntegerType {
+                    bits: 32,
+                    signed: true,
+                },
+            }
+        );
+        assert_ne!(
+            first.ssa_module_fingerprint,
+            direct_b.ssa_module_fingerprint
+        );
+
+        let receipt = session.validation_receipt();
+        assert!(receipt.identity_is_valid());
+        assert!(receipt
+            .dependencies
+            .contains_key(&program_id(&program_a.module)));
+        let mut tampered_receipt = receipt.clone();
+        tampered_receipt
+            .scope
+            .insert("tampered".to_owned(), "true".to_owned());
+        assert!(!tampered_receipt.identity_is_valid());
+    }
+
+    #[test]
+    fn ssa_session_rejects_schema_identity_and_reordered_block_mutations() {
+        let program = crate::body::tests::executable_program();
+        let module = program.lower_to_ssa().expect("SSA");
+
+        let mut wrong_schema = module.clone();
+        wrong_schema.schema_version = "0.3".to_owned();
+        assert!(SsaExecutionSession::new(&program, &wrong_schema).is_err());
+
+        let mut wrong_identity = module.clone();
+        wrong_identity.identity = SemanticId("mncs:tampered:ssa".to_owned());
+        assert!(SsaExecutionSession::new(&program, &wrong_identity).is_err());
+
+        let mut reordered_blocks = module;
+        reordered_blocks.functions[0].blocks.reverse();
+        assert!(!reordered_blocks.validate().valid);
+        assert!(SsaExecutionSession::new(&program, &reordered_blocks).is_err());
+    }
 
     #[test]
     fn divergence_context_is_bounded_and_explicit() {
