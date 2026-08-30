@@ -3074,6 +3074,12 @@ impl ModuleResolver for FileModuleResolver {
         for root in roots {
             for path in Self::candidates(&root, module) {
                 if let Ok(source) = fs::read_to_string(&path) {
+                    let Some(declared) = mncs_syntax::declared_module_name(&source) else {
+                        continue;
+                    };
+                    if !mncs_syntax::module_names_compatible(module, &declared) {
+                        continue;
+                    }
                     return Some(SourceEnvelope::new(
                         SourceArtifactKind::Program,
                         path.to_string_lossy().to_string(),

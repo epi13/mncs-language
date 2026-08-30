@@ -40,6 +40,14 @@ fn combine(pair: StatusPair) -> (result: Status) {
     return dominate(pair.left, pair.right);
 }
 
+// Fixed-width aggregation for bounded evidence plans. The width is part of
+// the caller's schema; no missing slot is silently interpreted as PASS.
+fn dominate4(first: Status, second: Status, third: Status, fourth: Status) -> (result: Status) {
+    let left: Status = dominate(first, second);
+    let right: Status = dominate(third, fourth);
+    return dominate(left, right);
+}
+
 // A decided status is settled truth: PASS or FAIL. UNKNOWN is undecided by
 // definition and must stay visible wherever it arises; deciding it here would
 // be authority laundering.
