@@ -1,0 +1,23 @@
+mncs 0.6;
+
+// Random-stream contract probe: split returns deterministic, distinct child
+// roots. The standard library deliberately does not claim statistical
+// independence; applications bind their finite draw policy separately.
+module examples.profile06_random_split;
+
+use mncs.core.random.v1;
+
+fn roots_are_distinct(seed: u64) -> (result: bool) {
+    let roots: SplitStreams = split(seed);
+    return roots.left != roots.right;
+}
+
+fn split_signature(seed: u64) -> (result: u64) {
+    let roots: SplitStreams = split(seed);
+    let left: u64 = lcg_next(roots.left);
+    let right: u64 = lcg_next(roots.right);
+    if left == right {
+        return 0;
+    }
+    return roots.left +% roots.right;
+}

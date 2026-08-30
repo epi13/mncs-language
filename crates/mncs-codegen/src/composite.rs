@@ -768,7 +768,11 @@ impl<'a> ArenaReader<'a> {
         if let Some(Contract::Finite { payloads, .. }) =
             Self::resolve_contract(declared_type, self.registry)
         {
-            if !payloads.is_empty() {
+            // A payload map contains an entry for every declared variant, so
+            // its mere presence does not mean the finite is boxed. Only a
+            // payload-bearing variant crosses as a cell reference; a bare
+            // finite is stored directly in the record slot.
+            if finite_payloads_declare_payloads(payloads) {
                 let reference = self.get64(offset)?;
                 let contract =
                     Self::resolve_contract(declared_type, self.registry).expect("resolved above");
@@ -887,7 +891,7 @@ mod codec_tests {
                 (1, sid("V:FAIL")),
                 (2, sid("V:UNKNOWN")),
             ]),
-            payloads: BTreeMap::new(),
+            payloads: BTreeMap::from([(0, Vec::new()), (1, Vec::new()), (2, Vec::new())]),
         };
         let pair = BackendValueContract::Record {
             type_identity: sid("T:StatusPair"),
@@ -977,7 +981,7 @@ mod codec_tests {
                 (1, sid("V:FAIL")),
                 (2, sid("V:UNKNOWN")),
             ]),
-            payloads: BTreeMap::new(),
+            payloads: BTreeMap::from([(0, Vec::new()), (1, Vec::new()), (2, Vec::new())]),
         };
         let registry2 = BTreeMap::from([("Status".to_owned(), status_c)]);
         let reader2 = ArenaReader::new(&image, &registry2);

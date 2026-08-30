@@ -1541,6 +1541,10 @@ fn emit_checked_division(
 
 fn llvm_const(value: i128, ty: ScalarTy) -> String {
     match ty {
+        ScalarTy::Int(integer) if !integer.signed && integer.bits >= 64 => {
+            (value as u64 as i64).to_string()
+        }
+        ScalarTy::Int(integer) if !integer.signed => (value as u32 as i32).to_string(),
         ScalarTy::Int(integer) if integer.bits == 64 => value.to_string(),
         _ => i32::try_from(value).unwrap_or(value as i32).to_string(),
     }

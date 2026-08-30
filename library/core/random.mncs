@@ -40,19 +40,23 @@ fn lcg_next_bounded(state: u64, bound: u64) -> (result: BoundedDraw) {
     return BoundedDraw { next_state: stepped, value: stepped % bound };
 }
 
-// Split one stream into two independent sub-streams. The two outputs
-// are successive LCG states, so they are deterministic and distinct
-// for any input (unless the 2^64 cycle wraps, which is the defined
-// behavior).
+// Split one root into two domain-separated child roots. The tags are
+// deliberately distinct and the odd LCG multiplier preserves that
+// distinction, so the returned roots are deterministic and distinct for
+// every input under the defined wrapping arithmetic. This operation does
+// not claim statistical independence: callers that need a stronger stream
+// partition must also bind a finite draw budget and retain that policy in
+// their experiment identity.
 fn split(state: u64) -> (result: SplitStreams) {
-    let left_state: u64 = lcg_next(state);
-    let right_state: u64 = lcg_next(left_state);
+    let left_state: u64 = derive(state, 11400714819323198485);
+    let right_state: u64 = derive(state, 14029467366897019727);
     return SplitStreams { left: left_state, right: right_state };
 }
 
 // Derive a stream for a child index: seed + index wrapped, then one
-// LCG step. This is the canonical way to obtain independent per-partition
-// or per-epoch streams from a single root seed without hidden state.
+// LCG step. This is the canonical way to obtain reproducible, distinct
+// per-partition or per-epoch streams from a single root seed without hidden
+// state. It makes no statistical-independence claim.
 fn derive(seed: u64, index: u64) -> (derived: u64) {
     let mixed: u64 = seed +% index;
     return lcg_next(mixed);
@@ -66,7 +70,7 @@ fn shuffle_index(state: u64, len: u64) -> (result: ShufflePick) {
     return ShufflePick { next_state: bounded.next_state, index: bounded.value };
 }
 
-// Two independent bounded draws from one state.
+// Two sequential bounded draws from one state.
 fn two_bounded(state: u64, first_bound: u64, second_bound: u64) -> (result: TwoDraws) {
     let first_step: BoundedDraw = lcg_next_bounded(state, first_bound);
     let second_step: BoundedDraw = lcg_next_bounded(first_step.next_state, second_bound);

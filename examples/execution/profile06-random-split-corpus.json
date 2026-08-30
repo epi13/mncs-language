@@ -1,0 +1,35 @@
+{
+  "schema_version": "0.1",
+  "name": "profile06-random-split-v1",
+  "cases": [
+    {
+      "id": "zero-roots-are-distinct",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "examples.profile06_random_split", "function": "roots_are_distinct"},
+        "arguments": [
+          {"integer": {"value": 0, "type": {"bits": 64, "signed": false}}}
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [{"boolean": {"value": true}}]
+    },
+    {
+      "id": "zero-split-signature",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "examples.profile06_random_split", "function": "split_signature"},
+        "arguments": [
+          {"integer": {"value": 0, "type": {"bits": 64, "signed": false}}}
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        {"integer": {"value": 4388879671149906738, "type": {"bits": 64, "signed": false}}}
+      ]
+    }
+  ],
+  "properties": []
+}

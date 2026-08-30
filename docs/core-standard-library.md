@@ -141,6 +141,12 @@ Importing or naming one of these APIs must **not** grant authority. Operations r
 
 For example, a filesystem read should conceptually require explicit read authority for a declared scope; a clock query should require the relevant time capability; randomness should distinguish deterministic seeded computation from host entropy.
 
+The current deterministic random stream module (`mncs.core.random.v1`) exposes
+domain-separated child roots for `split`. It guarantees reproducibility and
+distinct roots under its defined wrapping arithmetic, but makes no statistical
+independence claim; a consumer that needs non-overlapping finite streams must
+bind its draw budget and partition policy in its own experiment identity.
+
 This preserves the existing MNCS rule that external effects never arise implicitly from host availability.
 
 ## Realization and intrinsic boundary

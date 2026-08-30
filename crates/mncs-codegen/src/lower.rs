@@ -1300,13 +1300,34 @@ fn emit_goto(
 }
 
 fn emit_const(body: &mut Vec<Instr>, value: i128, ty: &IrType) -> Result<(), String> {
-    match wasm_type(ty)?.0 {
-        ValType::I32 => body.push(Instr::I32Const(
-            i32::try_from(value).map_err(|_| "constant does not fit in wasm i32".to_owned())?,
-        )),
-        ValType::I64 => body.push(Instr::I64Const(
-            i64::try_from(value).map_err(|_| "constant does not fit in wasm i64".to_owned())?,
-        )),
+    let (wasm_type, integer) = wasm_type(ty)?;
+    match wasm_type {
+        ValType::I32 => {
+            let encoded = match integer {
+                Some(integer) if !integer.signed => {
+                    if value < 0 || value >= (1_i128 << integer.bits) {
+                        return Err("unsigned constant is outside its declared width".to_owned());
+                    }
+                    value as u32 as i32
+                }
+                _ => i32::try_from(value)
+                    .map_err(|_| "constant does not fit in wasm i32".to_owned())?,
+            };
+            body.push(Instr::I32Const(encoded));
+        }
+        ValType::I64 => {
+            let encoded = match integer {
+                Some(integer) if !integer.signed => {
+                    if value < 0 || value >= (1_i128 << integer.bits) {
+                        return Err("unsigned constant is outside its declared width".to_owned());
+                    }
+                    value as u64 as i64
+                }
+                _ => i64::try_from(value)
+                    .map_err(|_| "constant does not fit in wasm i64".to_owned())?,
+            };
+            body.push(Instr::I64Const(encoded));
+        }
     }
     Ok(())
 }

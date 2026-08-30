@@ -447,9 +447,10 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
         ScalarInst::Const { dest, value } => {
             let _ = writeln!(
                 out,
-                "        {} = iconst.{} {value}",
+                "        {} = iconst.{} {}",
                 names.value(&dest.id),
-                clif_ty(dest.ty)
+                clif_ty(dest.ty),
+                clif_constant(*value, dest.ty)
             );
         }
         ScalarInst::Boolean {
@@ -988,6 +989,18 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
             let _ = writeln!(out, "        call %{callee}({list})");
             let _ = writeln!(out, "        {} = load.i32 val", names.value(&dest.id));
         }
+    }
+}
+
+/// Encode a validated logical constant into the signed textual representation
+/// accepted by Cranelift while preserving the bit pattern of unsigned lanes.
+/// The scalar realization keeps every value in an i64 cell, so an unsigned
+/// i64 constant above `i64::MAX` must be written as its two's-complement i64
+/// spelling rather than silently replaced by zero.
+fn clif_constant(value: i128, ty: ScalarTy) -> i64 {
+    match ty {
+        ScalarTy::Int(integer) if !integer.signed => value as u64 as i64,
+        _ => value as i64,
     }
 }
 
@@ -1605,7 +1618,7 @@ where
                         ScalarInst::Const { dest, value } => {
                             let produced = builder
                                 .ins()
-                                .iconst(types::I64, i64::try_from(*value).unwrap_or(0));
+                                .iconst(types::I64, clif_constant(*value, dest.ty));
                             values.insert(dest.id.clone(), produced);
                         }
                         ScalarInst::Boolean {
@@ -2596,6 +2609,7 @@ fn jit_scalar(
 struct JitSession {
     module: cranelift_jit::JITModule,
     declared: BTreeMap<String, cranelift_module::FuncId>,
+    host_trampolines: BTreeMap<String, cranelift_module::FuncId>,
 }
 
 impl JitSession {
@@ -2613,10 +2627,15 @@ impl JitSession {
         }
         let mut module = JITModule::new(jit_builder);
         let declared = declare_and_build(&mut module, scalar)?;
+        let host_trampolines = declare_host_trampolines(&mut module, scalar, &declared)?;
         module
             .finalize_definitions()
             .map_err(|error| error.to_string())?;
-        Ok(Self { module, declared })
+        Ok(Self {
+            module,
+            declared,
+            host_trampolines,
+        })
     }
 
     fn call(
@@ -2697,10 +2716,21 @@ impl JitSession {
                     );
                 }
                 _ => {
-                    return Err(
-                        "Cranelift host trampoline currently supports at most six scalar arguments"
-                            .to_owned(),
-                    );
+                    let trampoline_id = self
+                        .host_trampolines
+                        .get(function_name)
+                        .copied()
+                        .ok_or_else(|| {
+                            "requested Cranelift host trampoline is missing".to_owned()
+                        })?;
+                    let trampoline = self.module.get_finalized_function(trampoline_id);
+                    // The generated wrapper loads the complete argument vector from
+                    // caller-owned memory and then invokes the original typed scalar
+                    // export. This keeps the host ABI bounded to three pointer-sized
+                    // values without imposing an accidental six-argument language limit.
+                    let f: extern "C" fn(*const i64, *mut i32, *mut i64) =
+                        std::mem::transmute(trampoline);
+                    f(raw_args.as_ptr(), &mut status, &mut value);
                 }
             }
         }
@@ -2710,6 +2740,79 @@ impl JitSession {
             Ok((ExecutionStatus::RuntimeFailure, 0))
         }
     }
+}
+
+/// Generate a host-call wrapper for every scalar export. The wrapper is a
+/// backend-private ABI adapter: it receives one pointer to a contiguous array
+/// of 64-bit argument cells plus the status/value out pointers, loads exactly
+/// the number of cells required by the selected export, and calls the normal
+/// scalar function. Language-level arity therefore remains independent from
+/// the number of Rust function-pointer arguments we can spell in this source.
+fn declare_host_trampolines<M>(
+    module: &mut M,
+    scalar: &ScalarModule,
+    declared: &BTreeMap<String, cranelift_module::FuncId>,
+) -> Result<BTreeMap<String, cranelift_module::FuncId>, String>
+where
+    M: cranelift_module::Module,
+{
+    use cranelift_codegen::ir::{types, AbiParam, InstBuilder, MemFlags};
+    use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
+    use cranelift_module::{Linkage, Module};
+
+    let mut trampolines = BTreeMap::new();
+    for (index, function) in scalar.functions.iter().enumerate() {
+        let name = format!("__mncs_host_trampoline_{index}");
+        let mut signature = module.make_signature();
+        signature.params.push(AbiParam::new(types::I64)); // argument buffer
+        signature.params.push(AbiParam::new(types::I64)); // status out pointer
+        signature.params.push(AbiParam::new(types::I64)); // value out pointer
+        let id = module
+            .declare_function(&name, Linkage::Local, &signature)
+            .map_err(|error| error.to_string())?;
+        trampolines.insert(function.export_name.clone(), id);
+
+        let mut context = module.make_context();
+        context.func.signature.params.clear();
+        context
+            .func
+            .signature
+            .params
+            .extend(signature.params.clone());
+        let target =
+            module.declare_func_in_func(declared[&function.export_name], &mut context.func);
+        let mut function_context = FunctionBuilderContext::new();
+        {
+            let mut builder = FunctionBuilder::new(&mut context.func, &mut function_context);
+            let entry = builder.create_block();
+            builder.append_block_params_for_function_params(entry);
+            builder.switch_to_block(entry);
+            let parameters = builder.block_params(entry).to_vec();
+            let argument_buffer = parameters[0];
+            let status_ptr = parameters[1];
+            let value_ptr = parameters[2];
+            let mut arguments = Vec::with_capacity(function.params.len() + 2);
+            for argument_index in 0..function.params.len() {
+                arguments.push(builder.ins().load(
+                    types::I64,
+                    MemFlags::trusted(),
+                    argument_buffer,
+                    (argument_index * std::mem::size_of::<i64>()) as i32,
+                ));
+            }
+            arguments.push(status_ptr);
+            arguments.push(value_ptr);
+            builder.ins().call(target, &arguments);
+            builder.ins().return_(&[]);
+            builder.seal_all_blocks();
+            builder.finalize();
+        }
+        module
+            .define_function(id, &mut context)
+            .map_err(|error| error.to_string())?;
+        module.clear_context(&mut context);
+    }
+    Ok(trampolines)
 }
 
 /// A stateful trace session keeps the validated Cranelift payload and its

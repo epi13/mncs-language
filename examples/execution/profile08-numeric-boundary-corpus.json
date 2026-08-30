@@ -1,0 +1,29 @@
+{
+  "schema_version": "0.1",
+  "name": "profile08-numeric-boundary-v1",
+  "cases": [
+    {
+      "id": "eight-scalar-l2",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "examples.profile08_numeric_boundary", "function": "l2_probe"},
+        "arguments": [
+          {"integer": {"value": 1, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 2, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 3, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 4, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 4, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 3, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 2, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 1, "type": {"bits": 32, "signed": true}}}
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        {"integer": {"value": 20, "type": {"bits": 32, "signed": true}}}
+      ]
+    }
+  ],
+  "properties": []
+}
