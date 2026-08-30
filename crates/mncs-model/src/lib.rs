@@ -75,8 +75,8 @@ pub use core::{
     ParseError, Program, RecordField, RecordType, Value, SUPPORTED_SCHEMA_VERSION,
 };
 pub use cost::{
-    cost_report, record_counter, record_stage, reset_cost_report, CostReport,
-    COST_REPORT_SCHEMA_VERSION,
+    cost_report, record_counter, record_exclusive_stage, record_stage, reset_cost_report,
+    CostReport, COST_REPORT_SCHEMA_VERSION,
 };
 pub use delta::{AuthorityDelta, EvidenceDelta, FailureChange, SemanticChangeSet, SemanticDelta};
 pub use evidence::{
@@ -85,7 +85,8 @@ pub use evidence::{
 };
 pub use execution::{
     compare as compare_execution, compare_stateful_results, execute, execute_stateful_case,
-    execute_stateful_case_owned, execute_stateful_case_with_checkpoint, execute_with_policy,
+    execute_stateful_case_owned, execute_stateful_case_with_checkpoint,
+    execute_stateful_case_with_checkpoint_scoped, execute_with_policy,
     execution_corpus_schema_supported, stateful_prefix_identity, ComparisonStatus,
     EffectExecutionPolicy, ExecutionCase, ExecutionComparison, ExecutionCorpus,
     ExecutionEffectEvent, ExecutionFailure, ExecutionPolicy, ExecutionProperty, ExecutionRequest,

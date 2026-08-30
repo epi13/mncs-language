@@ -13,26 +13,41 @@ could accidentally make stale observations look current.
 ## Design
 
 The prototype records a machine-readable `CostReport` beside every `experiment
-run` result. It reports stage counters, per-stage timing samples, backend
-compile/validation/session counts, artifact decode/hash counts, stateful
-calls, and reused versus new execution counts. The report is observability
+run` result. It reports stage counters, cumulative checkpoint timing,
+independent adjacent-checkpoint timing, backend lowering/compile/validation/
+session counts, artifact decode/hash counts, stateful calls, and reused versus
+new execution counts. `backend_compile` means a successful external compiler
+invocation; a native cache lookup is not a compile. The report is observability
 only; it is never consulted for semantic validity.
 
 `SsaExecutionSession` validates the exact semantic program and SSA artifact
-once, builds immutable block indexes once, and retains an
-`EvidenceReceipt`. The receipt binds a fact to its subject, validator, scope,
-dependency fingerprints, assumptions, and invalidation triggers. Reuse is
-allowed only when the receipt identity and every requested dependency match.
+once, builds immutable block indexes once, owns shared immutable copies of that
+exact pair, and retains an `EvidenceReceipt`. `execute` accepts only a request;
+it cannot be given a second program or SSA module. The receipt binds a fact to
+its subject, validator, scope, dependency fingerprints, assumptions, and
+invalidation triggers. Reuse is allowed only when the receipt identity and
+every requested dependency match. This is the central invariant: cached
+validation is reusable only for the exact immutable subject represented by the
+validation evidence.
 
 `BackendStatefulSession` keeps one decoded WASM module, research-bytecode
 payload/session, Cranelift JIT session, or prepared C11/LLVM executable set
-alive for a corpus. C11 and LLVM still launch one isolated native child per
-transition, preserving the external toolchain boundary; their session reuses
-artifact decoding, driver preparation, and compile/link results. Stateful
-prefixes may be captured only at maximal exact shared step sequences, are
-capped in count, are scoped to the artifact-bound session, and retain enough
-logical prior results for the suffix to be revalidated. An invalid or
-incomplete checkpoint is an `InvalidRequest`, never a cache hit.
+alive for a corpus. Each session borrows one identity-validated artifact and
+uses that artifact identity as the checkpoint scope. C11 and LLVM still launch
+one isolated native child per transition, preserving the external toolchain
+boundary; their session reuses artifact decoding, driver preparation, and
+compile/link results. Stateful prefixes may be captured only at maximal exact
+shared step sequences, are capped in count, are scoped to the artifact-bound
+session, and retain enough logical prior results for the suffix to be
+revalidated. An invalid or incomplete checkpoint is an `InvalidRequest`, never
+a cache hit.
+
+Native source/IR and object/link caches use full framed source, compiler path
+and version, flags, and host identity keys. Successful compiler output is
+published through a same-directory temporary-file rename and a completion
+marker; missing, truncated, or failed entries are not cache hits. Same-size
+binary corruption remains an external runtime observation and fails through
+the native protocol rather than becoming semantic evidence.
 
 Large logical aggregate fields use reference-counted immutable storage. This
 changes only physical copying; canonical serialization and the logical JSON
@@ -58,4 +73,6 @@ WASM, research bytecode, C11, LLVM, Cranelift, and the stateful experiment
 runner. It does not claim a general incremental compiler, durable checkpoint
 format, process sandbox, formal compiler correctness, or exact asymptotic cost.
 Checkpoint storage is process-local and bounded; no cache is trusted across a
-new artifact, validator, contract, schema, or execution environment.
+new artifact, validator, contract, schema, or execution environment. The
+completion marker is a bounded corruption/partial-publication guard, not a
+cryptographic attestation of an external executable's semantics.

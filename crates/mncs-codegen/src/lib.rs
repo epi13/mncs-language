@@ -18,18 +18,20 @@ mod support;
 mod wasm;
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use mncs_model::{
-    execute_ssa_module, execute_ssa_module_prevalidated, execute_stateful_case_with_checkpoint,
-    execute_with_policy, stateful_prefix_identity, ArtifactRepresentation, BackendArtifact,
-    BackendCapabilityManifest, BackendConfiguration, BackendEvidence, BackendIdentity,
-    BackendResult, BackendValueContract, BodyType, CompilerArtifactRef, CompilerDiagnostic,
-    CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure, ExecutionRequest, ExecutionResult,
-    ExecutionStatus, ExecutionTarget, ExecutionValue, IntegerType, Program, SemanticId,
-    SsaExecutionSession, SsaModule, StatefulCallResult, StatefulExecutionCase,
-    StatefulExecutionCheckpoint, StatefulExecutionResult, TargetContractRef, TargetLoweringPlan,
-    TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION, COMPILER_ARTIFACT_SCHEMA_VERSION,
+    execute_ssa_module, execute_ssa_module_prevalidated,
+    execute_stateful_case_with_checkpoint_scoped, execute_with_policy, stateful_prefix_identity,
+    ArtifactRepresentation, BackendArtifact, BackendCapabilityManifest, BackendConfiguration,
+    BackendEvidence, BackendIdentity, BackendResult, BackendValueContract, BodyType,
+    CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind, ExecutionCorpus,
+    ExecutionFailure, ExecutionRequest, ExecutionResult, ExecutionStatus, ExecutionTarget,
+    ExecutionValue, IntegerType, Program, SemanticId, SsaExecutionSession, SsaModule,
+    StatefulCallResult, StatefulExecutionCase, StatefulExecutionCheckpoint,
+    StatefulExecutionResult, TargetContractRef, TargetLoweringPlan, TransformationStatus,
+    BACKEND_ARTIFACT_SCHEMA_VERSION, COMPILER_ARTIFACT_SCHEMA_VERSION,
     LAYERED_EXECUTION_COMPARISON_INTERPRETATION, PORTABLE_WASM_MVP_BACKEND_NAME,
     PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET, SSA_SCHEMA_VERSION,
 };
@@ -497,7 +499,7 @@ pub fn lower_selected_ssa(
     selected_ssa: CompilerArtifactRef,
     plan: &TargetLoweringPlan,
 ) -> BackendResult {
-    mncs_model::record_counter("backend_compile");
+    mncs_model::record_counter("backend_lowering");
     let started = Instant::now();
     let mut diagnostics = Vec::new();
     if selected_ssa.representation != ArtifactRepresentation::SelectedSsa
@@ -522,7 +524,6 @@ pub fn lower_selected_ssa(
     if let Err(result) = validate_realizable_ssa(program, ssa, "CGN103") {
         return *result;
     }
-    mncs_model::record_counter("backend_validation");
     trace_timing("backend-validate", started);
     if !target_is_portable_wasm(&plan.target) {
         diagnostics.push(CompilerDiagnostic::new(
@@ -666,8 +667,8 @@ pub fn lower_selected_ssa(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct ResearchBytecodePayload {
     schema_version: String,
-    program: Program,
-    ssa: SsaModule,
+    program: Arc<Program>,
+    ssa: Arc<SsaModule>,
 }
 
 pub fn lower_research_bytecode(
@@ -676,6 +677,7 @@ pub fn lower_research_bytecode(
     selected_ssa: CompilerArtifactRef,
     plan: &TargetLoweringPlan,
 ) -> BackendResult {
+    mncs_model::record_counter("backend_lowering");
     let mut diagnostics = Vec::new();
     if selected_ssa.representation != ArtifactRepresentation::SelectedSsa
         || !selected_ssa.identity_is_valid()
@@ -721,8 +723,8 @@ pub fn lower_research_bytecode(
     }
     let payload = ResearchBytecodePayload {
         schema_version: "0.1".to_owned(),
-        program: program.clone(),
-        ssa: ssa.clone(),
+        program: Arc::new(program.clone()),
+        ssa: Arc::new(ssa.clone()),
     };
     let bytes = match serde_json::to_vec(&payload) {
         Ok(bytes) => bytes,
@@ -1420,7 +1422,7 @@ fn execute_research_bytecode_payload(
         failure: None,
     };
     let observation = if let Some(session) = session {
-        session.execute(&payload.program, &payload.ssa, request)
+        session.execute(request)
     } else if validate_artifact {
         execute_ssa_module(&payload.program, &payload.ssa, request)
     } else {
@@ -1463,7 +1465,7 @@ enum PreparedStatefulBackend<'a> {
     Wasm(crate::wasm::WasmModule),
     Research {
         payload: Box<ResearchBytecodePayload>,
-        session: SsaExecutionSession,
+        session: Box<SsaExecutionSession>,
     },
     C11(c11::C11StatefulSession<'a>),
     Llvm(llvm::LlvmStatefulSession<'a>),
@@ -1477,6 +1479,10 @@ enum PreparedStatefulBackend<'a> {
 /// language-owned bounded runner and retains the exact artifact identity.
 pub struct BackendStatefulSession<'a> {
     artifact: &'a BackendArtifact,
+    /// Artifact identity is also the checkpoint scope. It includes the
+    /// backend identity and artifact bytes, so logical values cannot move
+    /// between different backend/session subjects.
+    session_scope: SemanticId,
     prepared: PreparedStatefulBackend<'a>,
     prefix_cache: BTreeMap<SemanticId, StatefulExecutionCheckpoint>,
 }
@@ -1515,16 +1521,19 @@ impl<'a> BackendStatefulSession<'a> {
                         .filter(|payload| payload.schema_version == "0.1")
                 })
                 .and_then(|payload| {
-                    SsaExecutionSession::new(&payload.program, &payload.ssa)
-                        .ok()
-                        .map(|session| (payload, session))
+                    SsaExecutionSession::from_shared(
+                        Arc::clone(&payload.program),
+                        Arc::clone(&payload.ssa),
+                    )
+                    .ok()
+                    .map(|session| (payload, session))
                 })
                 .map_or(PreparedStatefulBackend::OneShot, |(payload, session)| {
                     mncs_model::record_counter("backend_session");
                     mncs_model::record_counter("reused_stage");
                     PreparedStatefulBackend::Research {
                         payload: Box::new(payload),
-                        session,
+                        session: Box::new(session),
                     }
                 })
         } else if identity_valid && artifact.backend.name == C11_BACKEND_NAME {
@@ -1559,6 +1568,7 @@ impl<'a> BackendStatefulSession<'a> {
         };
         Self {
             artifact,
+            session_scope: artifact.identity.clone(),
             prepared,
             prefix_cache: BTreeMap::new(),
         }
@@ -1597,7 +1607,11 @@ impl<'a> BackendStatefulSession<'a> {
                     .get(&key)
                     .filter(|checkpoint| {
                         prefix_uses.get(&key).copied().unwrap_or_default() > 1
-                            && checkpoint.identity_is_valid_for(corpus_name, case)
+                            && checkpoint.identity_is_valid_for_scope(
+                                corpus_name,
+                                case,
+                                Some(&self.session_scope),
+                            )
                     })
                     .cloned()
             });
@@ -1645,7 +1659,8 @@ impl<'a> BackendStatefulSession<'a> {
     ) -> (StatefulExecutionResult, Vec<StatefulExecutionCheckpoint>) {
         let artifact = self.artifact;
         let (mut result, checkpoints) = match &mut self.prepared {
-            PreparedStatefulBackend::Wasm(module) => execute_stateful_case_with_checkpoint(
+            PreparedStatefulBackend::Wasm(module) => execute_stateful_case_with_checkpoint_scoped(
+                Some(&self.session_scope),
                 corpus_name,
                 case,
                 checkpoint,
@@ -1656,7 +1671,8 @@ impl<'a> BackendStatefulSession<'a> {
                 },
             ),
             PreparedStatefulBackend::Research { payload, session } => {
-                execute_stateful_case_with_checkpoint(
+                execute_stateful_case_with_checkpoint_scoped(
+                    Some(&self.session_scope),
                     corpus_name,
                     case,
                     checkpoint,
@@ -1673,7 +1689,21 @@ impl<'a> BackendStatefulSession<'a> {
                     },
                 )
             }
-            PreparedStatefulBackend::Cranelift(session) => execute_stateful_case_with_checkpoint(
+            PreparedStatefulBackend::Cranelift(session) => {
+                execute_stateful_case_with_checkpoint_scoped(
+                    Some(&self.session_scope),
+                    corpus_name,
+                    case,
+                    checkpoint,
+                    checkpoint_indices,
+                    |request| {
+                        mncs_model::record_counter("reused_execution");
+                        stateful_call_result(session.execute(&request))
+                    },
+                )
+            }
+            PreparedStatefulBackend::C11(session) => execute_stateful_case_with_checkpoint_scoped(
+                Some(&self.session_scope),
                 corpus_name,
                 case,
                 checkpoint,
@@ -1683,7 +1713,8 @@ impl<'a> BackendStatefulSession<'a> {
                     stateful_call_result(session.execute(&request))
                 },
             ),
-            PreparedStatefulBackend::C11(session) => execute_stateful_case_with_checkpoint(
+            PreparedStatefulBackend::Llvm(session) => execute_stateful_case_with_checkpoint_scoped(
+                Some(&self.session_scope),
                 corpus_name,
                 case,
                 checkpoint,
@@ -1693,17 +1724,8 @@ impl<'a> BackendStatefulSession<'a> {
                     stateful_call_result(session.execute(&request))
                 },
             ),
-            PreparedStatefulBackend::Llvm(session) => execute_stateful_case_with_checkpoint(
-                corpus_name,
-                case,
-                checkpoint,
-                checkpoint_indices,
-                |request| {
-                    mncs_model::record_counter("reused_execution");
-                    stateful_call_result(session.execute(&request))
-                },
-            ),
-            PreparedStatefulBackend::OneShot => execute_stateful_case_with_checkpoint(
+            PreparedStatefulBackend::OneShot => execute_stateful_case_with_checkpoint_scoped(
+                Some(&self.session_scope),
                 corpus_name,
                 case,
                 checkpoint,

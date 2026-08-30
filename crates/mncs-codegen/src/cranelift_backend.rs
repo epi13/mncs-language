@@ -234,6 +234,7 @@ pub fn lower_cranelift(
     selected_ssa: CompilerArtifactRef,
     plan: &TargetLoweringPlan,
 ) -> BackendResult {
+    mncs_model::record_counter("backend_lowering");
     if let Err(result) = validate_selected_ssa(ssa, &selected_ssa, "CGF101") {
         return *result;
     }

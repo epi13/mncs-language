@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-pub const COST_REPORT_SCHEMA_VERSION: &str = "0.1";
+pub const COST_REPORT_SCHEMA_VERSION: &str = "0.2";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CostReport {
@@ -19,6 +19,11 @@ pub struct CostReport {
     pub semantic_validation_count: u64,
     pub hir_build_count: u64,
     pub ssa_build_count: u64,
+    /// Backend lowering attempts, before any optional external compiler
+    /// invocation. Backend validation has its own counter.
+    #[serde(default)]
+    pub backend_lowering_count: u64,
+    /// Actual external compiler invocations that produced a native executable.
     pub backend_compile_count: u64,
     pub backend_validation_count: u64,
     pub backend_session_count: u64,
@@ -35,7 +40,15 @@ pub struct CostReport {
     pub prefix_reuse_count: u64,
     pub new_execution_count: u64,
     pub stage_invocations: BTreeMap<String, u64>,
+    /// Legacy inclusive values retained for schema compatibility. These are
+    /// cumulative from the experiment checkpoint's shared start instant.
     pub wall_time_by_stage_ns: BTreeMap<String, u128>,
+    /// Explicit name for the cumulative checkpoint timing model.
+    #[serde(default)]
+    pub cumulative_wall_time_by_checkpoint_ns: BTreeMap<String, u128>,
+    /// Independent duration measured between adjacent CLI stage checkpoints.
+    #[serde(default)]
+    pub exclusive_wall_time_by_stage_ns: BTreeMap<String, u128>,
 }
 
 impl CostReport {
@@ -68,6 +81,7 @@ pub fn record_counter(counter: &'static str) {
         "semantic_validation" => report.semantic_validation_count += 1,
         "hir_build" => report.hir_build_count += 1,
         "ssa_build" => report.ssa_build_count += 1,
+        "backend_lowering" => report.backend_lowering_count += 1,
         "backend_compile" => report.backend_compile_count += 1,
         "backend_validation" => report.backend_validation_count += 1,
         "backend_session" => report.backend_session_count += 1,
@@ -97,4 +111,37 @@ pub fn record_stage(stage: &str, elapsed: Duration) {
         .wall_time_by_stage_ns
         .entry(stage.to_owned())
         .or_default() += elapsed.as_nanos();
+    *report
+        .cumulative_wall_time_by_checkpoint_ns
+        .entry(stage.to_owned())
+        .or_default() += elapsed.as_nanos();
+}
+
+/// Record an independently measured stage interval. Unlike `record_stage`,
+/// this does not increment invocation counts or alter the legacy inclusive
+/// timing field.
+pub fn record_exclusive_stage(stage: &str, elapsed: Duration) {
+    let mut report = report().lock().expect("cost report mutex poisoned");
+    *report
+        .exclusive_wall_time_by_stage_ns
+        .entry(stage.to_owned())
+        .or_default() += elapsed.as_nanos();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timing_report_labels_cumulative_and_exclusive_durations_separately() {
+        reset_cost_report();
+        record_stage("compile", Duration::from_nanos(11));
+        record_exclusive_stage("compile", Duration::from_nanos(7));
+        let report = cost_report();
+        assert_eq!(report.schema_version, COST_REPORT_SCHEMA_VERSION);
+        assert_eq!(report.wall_time_by_stage_ns["compile"], 11);
+        assert_eq!(report.cumulative_wall_time_by_checkpoint_ns["compile"], 11);
+        assert_eq!(report.exclusive_wall_time_by_stage_ns["compile"], 7);
+        assert_eq!(report.stage_invocations["compile"], 1);
+    }
 }

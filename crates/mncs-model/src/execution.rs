@@ -391,6 +391,10 @@ impl StatefulExecutionResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatefulExecutionCheckpoint {
     schema_version: String,
+    /// The artifact/backend session scope is present for backend-owned
+    /// checkpoints. A checkpoint without a scope remains available to the
+    /// model-only helper, which has no executable artifact to bind.
+    session_scope: Option<SemanticId>,
     prefix_identity: SemanticId,
     next_step_index: usize,
     previous: BTreeMap<String, Vec<ExecutionValue>>,
@@ -408,6 +412,7 @@ impl StatefulExecutionCheckpoint {
     fn new(
         corpus_name: &str,
         case: &StatefulExecutionCase,
+        session_scope: Option<SemanticId>,
         next_step_index: usize,
         previous: BTreeMap<String, Vec<ExecutionValue>>,
         observations: Vec<StatefulStepObservation>,
@@ -419,6 +424,7 @@ impl StatefulExecutionCheckpoint {
     ) -> Self {
         let mut checkpoint = Self {
             schema_version: STATEFUL_EXECUTION_SCHEMA_VERSION.to_owned(),
+            session_scope,
             prefix_identity: stateful_prefix_identity(corpus_name, case, next_step_index),
             next_step_index,
             previous,
@@ -438,6 +444,7 @@ impl StatefulExecutionCheckpoint {
         self.checkpoint_identity = SemanticId(String::new());
         let material = (
             &self.schema_version,
+            &self.session_scope,
             &self.prefix_identity,
             self.next_step_index,
             &self.previous,
@@ -460,6 +467,18 @@ impl StatefulExecutionCheckpoint {
     }
 
     pub fn identity_is_valid_for(&self, corpus_name: &str, case: &StatefulExecutionCase) -> bool {
+        self.identity_is_valid_for_scope(corpus_name, case, None)
+    }
+
+    pub fn identity_is_valid_for_scope(
+        &self,
+        corpus_name: &str,
+        case: &StatefulExecutionCase,
+        session_scope: Option<&SemanticId>,
+    ) -> bool {
+        if self.next_step_index > case.steps.len() || self.session_scope.as_ref() != session_scope {
+            return false;
+        }
         let prefix_step_ids = case.steps[..self.next_step_index]
             .iter()
             .map(|step| step.id.as_str())
@@ -543,7 +562,15 @@ where
     F: FnMut(ExecutionRequest) -> StatefulCallResult,
 {
     let mut checkpoints = Vec::new();
-    execute_stateful_case_inner(corpus_name, case, &mut execute, None, &[], &mut checkpoints)
+    execute_stateful_case_inner(
+        corpus_name,
+        case,
+        &mut execute,
+        None,
+        None,
+        &[],
+        &mut checkpoints,
+    )
 }
 
 /// Execute a stateful trace from an identity-checked prefix checkpoint and
@@ -551,6 +578,30 @@ where
 /// Checkpoints never bypass per-step request execution after the selected
 /// prefix, and an invalid checkpoint fails closed as an invalid request.
 pub fn execute_stateful_case_with_checkpoint<F>(
+    corpus_name: &str,
+    case: &StatefulExecutionCase,
+    checkpoint: Option<&StatefulExecutionCheckpoint>,
+    checkpoint_indices: &[usize],
+    execute: F,
+) -> (StatefulExecutionResult, Vec<StatefulExecutionCheckpoint>)
+where
+    F: FnMut(ExecutionRequest) -> StatefulCallResult,
+{
+    execute_stateful_case_with_checkpoint_scoped(
+        None,
+        corpus_name,
+        case,
+        checkpoint,
+        checkpoint_indices,
+        execute,
+    )
+}
+
+/// Scoped checkpoint variant used by reusable backend sessions. The scope
+/// must identify the exact immutable artifact/backend session that owns the
+/// retained logical values.
+pub fn execute_stateful_case_with_checkpoint_scoped<F>(
+    session_scope: Option<&SemanticId>,
     corpus_name: &str,
     case: &StatefulExecutionCase,
     checkpoint: Option<&StatefulExecutionCheckpoint>,
@@ -566,6 +617,7 @@ where
         case,
         &mut execute,
         checkpoint,
+        session_scope,
         checkpoint_indices,
         &mut checkpoints,
     );
@@ -577,6 +629,7 @@ fn execute_stateful_case_inner<F>(
     case: &StatefulExecutionCase,
     execute: &mut F,
     checkpoint: Option<&StatefulExecutionCheckpoint>,
+    session_scope: Option<&SemanticId>,
     checkpoint_indices: &[usize],
     captured_checkpoints: &mut Vec<StatefulExecutionCheckpoint>,
 ) -> StatefulExecutionResult
@@ -614,7 +667,9 @@ where
     }
 
     let start_index = checkpoint.map_or(0, StatefulExecutionCheckpoint::next_step_index);
-    if checkpoint.is_some_and(|checkpoint| !checkpoint.identity_is_valid_for(corpus_name, case)) {
+    if checkpoint.is_some_and(|checkpoint| {
+        !checkpoint.identity_is_valid_for_scope(corpus_name, case, session_scope)
+    }) {
         result.failure = Some(ExecutionFailure {
             identity: None,
             reason: "stateful prefix checkpoint identity or retained references are invalid"
@@ -786,6 +841,7 @@ where
             captured_checkpoints.push(StatefulExecutionCheckpoint::new(
                 corpus_name,
                 case,
+                session_scope.cloned(),
                 index + 1,
                 checkpoint_previous,
                 result.observations.clone(),
@@ -3358,6 +3414,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn arc_backed_aggregate_values_preserve_json_round_trip_and_equality() {
+        let integer = ExecutionValue::Integer {
+            value: 7,
+            ty: IntegerType {
+                bits: 32,
+                signed: true,
+            },
+        };
+        let sequence = ExecutionValue::Sequence {
+            values: Arc::new(vec![
+                integer.clone(),
+                ExecutionValue::Boolean { value: true },
+            ]),
+        };
+        let record = ExecutionValue::Record {
+            type_identity: SemanticId("mncs:test:record".to_owned()),
+            name: "Pair".to_owned(),
+            fields: Arc::new(vec![
+                ("left".to_owned(), integer.clone()),
+                ("items".to_owned(), sequence.clone()),
+            ]),
+        };
+        let values = vec![
+            ExecutionValue::Finite {
+                type_identity: SemanticId("mncs:test:finite".to_owned()),
+                variant_identity: SemanticId("mncs:test:finite:Some".to_owned()),
+                discriminant: 1,
+                payload: Arc::new(vec![("pair".to_owned(), record)]),
+            },
+            sequence,
+            ExecutionValue::Vector {
+                values: Arc::new(vec![integer]),
+            },
+            ExecutionValue::Mask {
+                lanes: Arc::new(vec![true, false, true]),
+            },
+        ];
+        let encoded = serde_json::to_string(&values).expect("aggregate JSON");
+        let decoded: Vec<ExecutionValue> = serde_json::from_str(&encoded).expect("round trip");
+        assert_eq!(decoded, values);
+        assert_eq!(
+            serde_json::to_string(&decoded).expect("canonical JSON"),
+            encoded
+        );
+    }
+
+    #[test]
     fn comparison_predicates_use_signed_and_unsigned_domains() {
         let signed = IntegerType {
             bits: 8,
@@ -3708,5 +3811,69 @@ mod tests {
         assert!(no_checkpoints.is_empty());
         assert_eq!(resumed.returned, vec![integer(3)]);
         assert!(resumed.identity_is_valid());
+
+        let scope_a = SemanticId("mncs:test:artifact:a".to_owned());
+        let scope_b = SemanticId("mncs:test:artifact:b".to_owned());
+        let (_scoped, scoped_checkpoints) = execute_stateful_case_with_checkpoint_scoped(
+            Some(&scope_a),
+            "test-corpus",
+            &case,
+            None,
+            &[1],
+            |_request| StatefulCallResult {
+                status: ExecutionStatus::Returned,
+                returned: vec![integer(1)],
+                steps: 1,
+                effects: Vec::new(),
+                failure: None,
+                program_identity: Some(SemanticId("program".to_owned())),
+                program_fingerprint: Some("fingerprint".to_owned()),
+            },
+        );
+        let scoped_checkpoint = scoped_checkpoints.first().expect("scoped checkpoint");
+        assert!(scoped_checkpoint.identity_is_valid_for_scope(
+            "test-corpus",
+            &case,
+            Some(&scope_a)
+        ));
+        assert!(!scoped_checkpoint.identity_is_valid_for_scope(
+            "test-corpus",
+            &case,
+            Some(&scope_b)
+        ));
+
+        // The exact prefix may be shared with a sibling whose suffix
+        // diverges, but state, policy, bounds, and the checkpoint seal may
+        // not be laundered across mutations.
+        let mut sibling = case.clone();
+        sibling.steps[2].target.function = "different-finish".to_owned();
+        assert!(scoped_checkpoint.identity_is_valid_for_scope(
+            "test-corpus",
+            &sibling,
+            Some(&scope_a)
+        ));
+        let mut changed_policy = case.clone();
+        changed_policy.steps[0].step_budget += 1;
+        assert!(!scoped_checkpoint.identity_is_valid_for_scope(
+            "test-corpus",
+            &changed_policy,
+            Some(&scope_a)
+        ));
+        let mut changed_result_index = case.clone();
+        changed_result_index.steps[1].arguments = vec![StatefulArgument::PreviousResult {
+            step_id: "init".to_owned(),
+            result_index: 1,
+        }];
+        assert!(!scoped_checkpoint.identity_is_valid_for_scope(
+            "test-corpus",
+            &changed_result_index,
+            Some(&scope_a)
+        ));
+        let mut out_of_range = scoped_checkpoint.clone();
+        out_of_range.next_step_index = case.steps.len() + 1;
+        assert!(!out_of_range.identity_is_valid_for_scope("test-corpus", &case, Some(&scope_a)));
+        let mut changed_state = scoped_checkpoint.clone();
+        changed_state.returned.push(integer(99));
+        assert!(!changed_state.identity_is_valid_for_scope("test-corpus", &case, Some(&scope_a)));
     }
 }

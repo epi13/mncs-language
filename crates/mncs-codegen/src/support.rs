@@ -66,6 +66,7 @@ pub(crate) fn validate_realizable_ssa(
 ) -> Result<(), Box<BackendResult>> {
     let report = ssa.validate_lowering_boundary(program);
     if report.valid {
+        mncs_model::record_counter("backend_validation");
         return Ok(());
     }
     let diagnostics = report

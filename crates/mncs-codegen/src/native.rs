@@ -4,8 +4,9 @@
 //! presence, version, flags, and exit status are observations.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Deserialize;
 
@@ -137,6 +138,9 @@ pub fn compile_and_run_with_call_file_full(
     call_file: Option<&Path>,
 ) -> Result<(crate::support::NativeRunView, String), NativeError> {
     let executable = NativeExecutable::compile_or_reuse(sources, compiler, flags)?;
+    if executable.was_compiled() {
+        mncs_model::record_counter("backend_compile");
+    }
     let run = executable.run(args, call_file)?;
     Ok((
         crate::support::NativeRunView {
@@ -153,7 +157,10 @@ pub fn compile_and_run_with_call_file_full(
 /// intentionally request-scoped and outside the MNCS semantic trust boundary.
 pub(crate) struct NativeExecutable {
     exe: PathBuf,
+    compiled: bool,
 }
+
+static TEMP_EXECUTABLE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 impl NativeExecutable {
     pub(crate) fn compile_or_reuse(
@@ -161,24 +168,38 @@ impl NativeExecutable {
         compiler: &ToolchainIdentity,
         flags: &[&str],
     ) -> Result<Self, NativeError> {
-        let mut material = sources
+        let source_material = sources
             .iter()
-            .flat_map(|(name, body)| format!("{name}\n{body}").into_bytes())
+            .map(|(name, body)| (*name, *body))
             .collect::<Vec<_>>();
-        material.extend_from_slice(compiler.name.as_bytes());
-        material.extend_from_slice(compiler.version.as_bytes());
-        for flag in flags {
-            material.extend_from_slice(flag.as_bytes());
-        }
+        let compiler_path = compiler.path.to_string_lossy().into_owned();
+        let material = serde_json::to_vec(&(
+            source_material,
+            &compiler.name,
+            compiler_path,
+            &compiler.version,
+            flags,
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        ))
+        .map_err(|error| {
+            NativeError::CompileFailed(format!("unable to encode native cache key: {error}"))
+        })?;
         let digest = crate::support::sha256_hex(&material);
-        let dir = std::env::temp_dir().join(format!("mncs-native-{}", &digest[..16]));
+        let dir = std::env::temp_dir().join(format!("mncs-native-{digest}"));
         fs::create_dir_all(&dir).map_err(|error| {
             NativeError::CompileFailed(format!("unable to create work directory: {error}"))
         })?;
         let exe = dir.join("mncs-run");
-        let needs_compile = !exe.is_file();
+        let ready = dir.join("mncs-run.ready");
+        let needs_compile = !cache_entry_is_usable(&exe, &ready, &digest);
         let mut paths = Vec::new();
         for (name, body) in sources {
+            if !is_safe_source_name(name) {
+                return Err(NativeError::CompileFailed(format!(
+                    "native source name {name:?} is not a plain file name"
+                )));
+            }
             let path = dir.join(name);
             if needs_compile {
                 fs::write(&path, body.as_bytes()).map_err(|error| {
@@ -187,8 +208,13 @@ impl NativeExecutable {
             }
             paths.push(path);
         }
+        let mut compiled = false;
         if needs_compile {
-            let temporary_exe = dir.join(format!("mncs-run-{}.tmp", std::process::id()));
+            let temporary_id = TEMP_EXECUTABLE_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let temporary_exe = dir.join(format!(
+                "mncs-run-{}-{temporary_id}.tmp",
+                std::process::id()
+            ));
             let mut command = Command::new(&compiler.path);
             command.current_dir(&dir);
             command.args(flags);
@@ -212,24 +238,46 @@ impl NativeExecutable {
                 }
             }
             command.arg("-o").arg(&temporary_exe);
-            let compiled = command.output().map_err(|error| {
+            let compile_output = command.output().map_err(|error| {
+                let _ = fs::remove_file(&temporary_exe);
                 NativeError::ToolchainUnavailable(format!(
                     "{} could not be executed: {error}",
                     compiler.name
                 ))
             })?;
-            if !compiled.status.success() {
+            if !compile_output.status.success() {
+                let _ = fs::remove_file(&temporary_exe);
                 return Err(NativeError::CompileFailed(format!(
                     "{} failed: {}",
                     compiler.name,
-                    String::from_utf8_lossy(&compiled.stderr)
+                    String::from_utf8_lossy(&compile_output.stderr)
                 )));
             }
-            fs::rename(&temporary_exe, &exe).map_err(|error| {
-                NativeError::CompileFailed(format!("unable to publish native executable: {error}"))
-            })?;
+            compiled = true;
+            match fs::rename(&temporary_exe, &exe) {
+                Ok(()) => {}
+                Err(_error) if cache_entry_is_usable(&exe, &ready, &digest) => {
+                    // Another process published the same identity first. The
+                    // destination is atomically complete; discard only our
+                    // unneeded private temporary and reuse the winner.
+                    let _ = fs::remove_file(&temporary_exe);
+                }
+                Err(error) => {
+                    let _ = fs::remove_file(&temporary_exe);
+                    return Err(NativeError::CompileFailed(format!(
+                        "unable to publish native executable: {error}"
+                    )));
+                }
+            }
+            if !cache_entry_is_usable(&exe, &ready, &digest) {
+                publish_cache_marker(&ready, &exe, &digest)?;
+            }
         }
-        Ok(Self { exe })
+        Ok(Self { exe, compiled })
+    }
+
+    pub(crate) fn was_compiled(&self) -> bool {
+        self.compiled
     }
 
     pub(crate) fn run(
@@ -239,6 +287,62 @@ impl NativeExecutable {
     ) -> Result<NativeRun, NativeError> {
         run_executable_full(&self.exe, args, call_file)
     }
+}
+
+fn is_safe_source_name(name: &str) -> bool {
+    let mut components = Path::new(name).components();
+    matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none()
+}
+
+/// The marker is published after the executable rename. This prevents a
+/// process from reusing a partial/stale file and lets Windows reject a
+/// destination that is not a complete entry instead of treating it as a hit.
+fn cache_entry_is_usable(exe: &Path, ready: &Path, digest: &str) -> bool {
+    let Ok(metadata) = fs::metadata(exe) else {
+        return false;
+    };
+    if !metadata.is_file() || metadata.len() == 0 {
+        return false;
+    }
+    let executable_permissions_ok = {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            metadata.permissions().mode() & 0o111 != 0
+        }
+        #[cfg(not(unix))]
+        {
+            true
+        }
+    };
+    executable_permissions_ok
+        && fs::read_to_string(ready)
+            .map(|marker| marker == format!("{digest}:{}", metadata.len()))
+            .unwrap_or(false)
+}
+
+fn publish_cache_marker(ready: &Path, exe: &Path, digest: &str) -> Result<(), NativeError> {
+    let metadata = fs::metadata(exe).map_err(|error| {
+        NativeError::CompileFailed(format!("unable to inspect native executable: {error}"))
+    })?;
+    let marker_id = TEMP_EXECUTABLE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temporary_ready = ready.with_file_name(format!(
+        "mncs-run-ready-{}-{marker_id}.tmp",
+        std::process::id()
+    ));
+    fs::write(&temporary_ready, format!("{digest}:{}", metadata.len())).map_err(|error| {
+        NativeError::CompileFailed(format!("unable to write native cache marker: {error}"))
+    })?;
+    if let Err(error) = fs::rename(&temporary_ready, ready) {
+        let _ = fs::remove_file(&temporary_ready);
+        if cache_entry_is_usable(exe, ready, digest) {
+            return Ok(());
+        }
+        return Err(NativeError::CompileFailed(format!(
+            "unable to publish native cache marker: {error}"
+        )));
+    }
+    Ok(())
 }
 
 pub(crate) struct NativeRun {
@@ -355,26 +459,49 @@ pub fn compile_object_and_run_full(
     args: &[String],
     call_file: Option<&Path>,
 ) -> Result<crate::support::NativeRunView, NativeError> {
-    let mut material = object_bytes.to_vec();
-    material.extend_from_slice(driver_source.as_bytes());
-    material.extend_from_slice(linker.name.as_bytes());
-    material.extend_from_slice(linker.version.as_bytes());
+    if !is_safe_source_name(object_name) || !is_safe_source_name(driver_name) {
+        return Err(NativeError::CompileFailed(
+            "native object and driver names must be plain file names".to_owned(),
+        ));
+    }
+    let linker_path = linker.path.to_string_lossy().into_owned();
+    let material = serde_json::to_vec(&(
+        object_name,
+        object_bytes,
+        driver_name,
+        driver_source,
+        &linker.name,
+        linker_path,
+        &linker.version,
+        ["-O0"],
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    ))
+    .map_err(|error| {
+        NativeError::CompileFailed(format!("unable to encode native cache key: {error}"))
+    })?;
     let digest = crate::support::sha256_hex(&material);
-    let dir = std::env::temp_dir().join(format!("mncs-aot-{}", &digest[..16]));
+    let dir = std::env::temp_dir().join(format!("mncs-aot-{digest}"));
     fs::create_dir_all(&dir).map_err(|error| {
         NativeError::CompileFailed(format!("unable to create work directory: {error}"))
     })?;
     let object_path = dir.join(object_name);
     let driver_path = dir.join(driver_name);
     let exe = dir.join("mncs-run");
-    if !exe.is_file() {
+    let ready = dir.join("mncs-run.ready");
+    let mut compiled_new = false;
+    if !cache_entry_is_usable(&exe, &ready, &digest) {
         fs::write(&object_path, object_bytes).map_err(|error| {
             NativeError::CompileFailed(format!("unable to write object: {error}"))
         })?;
         fs::write(&driver_path, driver_source).map_err(|error| {
             NativeError::CompileFailed(format!("unable to write driver: {error}"))
         })?;
-        let temporary_exe = dir.join(format!("mncs-run-{}.tmp", std::process::id()));
+        let temporary_id = TEMP_EXECUTABLE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let temporary_exe = dir.join(format!(
+            "mncs-run-{}-{temporary_id}.tmp",
+            std::process::id()
+        ));
         let compiled = Command::new(&linker.path)
             .current_dir(&dir)
             .arg("-O0")
@@ -384,21 +511,39 @@ pub fn compile_object_and_run_full(
             .arg(object_path.file_name().unwrap_or(object_path.as_os_str()))
             .output()
             .map_err(|error| {
+                let _ = fs::remove_file(&temporary_exe);
                 NativeError::ToolchainUnavailable(format!(
                     "{} could not be executed: {error}",
                     linker.name
                 ))
             })?;
         if !compiled.status.success() {
+            let _ = fs::remove_file(&temporary_exe);
             return Err(NativeError::CompileFailed(format!(
                 "{} link failed: {}",
                 linker.name,
                 String::from_utf8_lossy(&compiled.stderr)
             )));
         }
-        fs::rename(&temporary_exe, &exe).map_err(|error| {
-            NativeError::CompileFailed(format!("unable to publish native executable: {error}"))
-        })?;
+        compiled_new = true;
+        match fs::rename(&temporary_exe, &exe) {
+            Ok(()) => {}
+            Err(_error) if cache_entry_is_usable(&exe, &ready, &digest) => {
+                let _ = fs::remove_file(&temporary_exe);
+            }
+            Err(error) => {
+                let _ = fs::remove_file(&temporary_exe);
+                return Err(NativeError::CompileFailed(format!(
+                    "unable to publish native executable: {error}"
+                )));
+            }
+        }
+        if !cache_entry_is_usable(&exe, &ready, &digest) {
+            publish_cache_marker(&ready, &exe, &digest)?;
+        }
+    }
+    if compiled_new {
+        mncs_model::record_counter("backend_compile");
     }
     match run_executable_full(&exe, args, call_file) {
         Ok(run) => Ok(crate::support::NativeRunView {
@@ -412,5 +557,46 @@ pub fn compile_object_and_run_full(
             arena_hex: None,
         }),
         Err(other) => Err(other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_cache_entry_requires_complete_marked_executable() {
+        let id = TEMP_EXECUTABLE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "mncs-native-cache-test-{}-{id}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("test cache directory");
+        let exe = dir.join("mncs-run");
+        let ready = dir.join("mncs-run.ready");
+        let digest = "test-cache-key";
+        assert!(!cache_entry_is_usable(&exe, &ready, digest));
+        fs::write(&exe, b"partial").expect("partial executable");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&exe, fs::Permissions::from_mode(0o755))
+                .expect("executable permissions");
+        }
+        assert!(!cache_entry_is_usable(&exe, &ready, digest));
+        fs::write(&ready, format!("{digest}:7")).expect("cache marker");
+        assert!(cache_entry_is_usable(&exe, &ready, digest));
+        fs::write(&exe, b"truncated").expect("mutated executable");
+        assert!(!cache_entry_is_usable(&exe, &ready, digest));
+        fs::remove_dir_all(&dir).expect("remove test cache directory");
+    }
+
+    #[test]
+    fn native_cache_rejects_path_aliases_in_source_names() {
+        assert!(is_safe_source_name("module.c"));
+        assert!(!is_safe_source_name(""));
+        assert!(!is_safe_source_name("../module.c"));
+        assert!(!is_safe_source_name("nested/module.c"));
+        assert!(!is_safe_source_name("/tmp/module.c"));
     }
 }

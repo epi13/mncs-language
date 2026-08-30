@@ -133,9 +133,12 @@ impl LlvmStatefulSession<'_> {
                 Ok(executable) => executable,
                 Err(error) => return execution_failure(result, error.status(), error.reason()),
             };
+            let compiled = executable.was_compiled();
             self.executables
                 .insert(request.target.function.clone(), executable);
-            mncs_model::record_counter("backend_compile");
+            if compiled {
+                mncs_model::record_counter("backend_compile");
+            }
         }
         let executable = self
             .executables
@@ -382,6 +385,7 @@ pub fn lower_llvm(
     selected_ssa: CompilerArtifactRef,
     plan: &TargetLoweringPlan,
 ) -> BackendResult {
+    mncs_model::record_counter("backend_lowering");
     if let Err(result) = validate_selected_ssa(ssa, &selected_ssa, "CGL101") {
         return *result;
     }

@@ -102,6 +102,9 @@ impl EvidenceReceipt {
             && !self.fact.trim().is_empty()
             && !self.subject.0.trim().is_empty()
             && !self.validator.0.trim().is_empty()
+            && self.dependencies.iter().all(|(dependency, fingerprint)| {
+                !dependency.0.trim().is_empty() && !fingerprint.trim().is_empty()
+            })
             && self.identity == {
                 let canonical =
                     canonical_json_value(&material).expect("evidence receipt is serializable");
@@ -112,18 +115,25 @@ impl EvidenceReceipt {
             }
     }
 
+    /// Check reuse against every caller-known semantic part of a receipt.
+    /// Fact and outcome are explicit inputs so a valid receipt for a different
+    /// claim cannot be mistaken for the requested evidence.
     pub fn reusable_if(
         &self,
+        fact: &str,
         subject: &SemanticId,
         validator: &SemanticId,
         scope: &BTreeMap<String, String>,
         dependencies: &BTreeMap<SemanticId, String>,
+        outcome: EvidenceReceiptOutcome,
     ) -> bool {
         self.identity_is_valid()
+            && self.fact == fact
             && &self.subject == subject
             && &self.validator == validator
             && &self.scope == scope
             && &self.dependencies == dependencies
+            && self.outcome == outcome
     }
 }
 
@@ -355,13 +365,43 @@ mod tests {
             vec!["subject changes".to_owned()],
         );
         assert!(receipt.identity_is_valid());
-        assert!(receipt.reusable_if(&subject, &validator, &scope, &dependencies));
+        assert!(receipt.reusable_if(
+            "bounded test fact",
+            &subject,
+            &validator,
+            &scope,
+            &dependencies,
+            EvidenceReceiptOutcome::Pass,
+        ));
 
         let changed_dependencies = BTreeMap::from([(
             SemanticId("mncs:test:dependency".to_owned()),
             String::from("changed"),
         )]);
-        assert!(!receipt.reusable_if(&subject, &validator, &scope, &changed_dependencies));
+        assert!(!receipt.reusable_if(
+            "bounded test fact",
+            &subject,
+            &validator,
+            &scope,
+            &changed_dependencies,
+            EvidenceReceiptOutcome::Pass,
+        ));
+        assert!(!receipt.reusable_if(
+            "different fact",
+            &subject,
+            &validator,
+            &scope,
+            &dependencies,
+            EvidenceReceiptOutcome::Pass,
+        ));
+        assert!(!receipt.reusable_if(
+            "bounded test fact",
+            &subject,
+            &validator,
+            &scope,
+            &dependencies,
+            EvidenceReceiptOutcome::Unknown,
+        ));
     }
 
     #[test]

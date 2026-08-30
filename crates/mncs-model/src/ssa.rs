@@ -363,8 +363,23 @@ impl SsaModule {
         Ok(sha256_hex(self.canonical_json()?.as_bytes()))
     }
 
+    /// The module identity binds the semantic program and the exact HIR
+    /// fingerprint used to produce this SSA artifact. The full SSA
+    /// fingerprint remains the content boundary for executable reuse.
+    pub fn identity_is_valid(&self) -> bool {
+        !self.hir_fingerprint.is_empty()
+            && self.identity == ssa_module_identity(&self.semantic_identity, &self.hir_fingerprint)
+    }
+
     pub fn validate(&self) -> SsaValidationReport {
         let mut errors = Vec::new();
+        if self.schema_version != SSA_SCHEMA_VERSION {
+            errors.push(diagnostic(
+                "SSA000",
+                "schema_version",
+                "unsupported SSA schema version",
+            ));
+        }
         let mut function_ids = BTreeSet::new();
         let semantic_function_ids = self
             .functions
@@ -868,10 +883,7 @@ impl Program {
         }
         trace_timing("ssa-functions", started);
         let hir_fingerprint = ir.fingerprint().expect("HIR is serializable");
-        let identity = SemanticId(format!(
-            "mncs:0.4:ssa:module:{}",
-            sha256_hex(format!("{}:{}", semantic_identity, hir_fingerprint).as_bytes())
-        ));
+        let identity = ssa_module_identity(&semantic_identity, &hir_fingerprint);
         let record_types = self
             .record_types
             .iter()
@@ -2267,6 +2279,13 @@ fn ssa_identity(kind: &str, subject: &SemanticId, ordinal: usize) -> SemanticId 
     SemanticId(format!(
         "mncs:0.4:ssa:{kind}:{}",
         sha256_hex(format!("{subject}:{ordinal}").as_bytes())
+    ))
+}
+
+fn ssa_module_identity(semantic_identity: &SemanticId, hir_fingerprint: &str) -> SemanticId {
+    SemanticId(format!(
+        "mncs:0.4:ssa:module:{}",
+        sha256_hex(format!("{}:{}", semantic_identity, hir_fingerprint).as_bytes())
     ))
 }
 
