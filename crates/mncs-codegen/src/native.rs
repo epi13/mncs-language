@@ -136,75 +136,8 @@ pub fn compile_and_run_with_call_file_full(
     args: &[String],
     call_file: Option<&Path>,
 ) -> Result<(crate::support::NativeRunView, String), NativeError> {
-    let mut material = sources
-        .iter()
-        .flat_map(|(name, body)| format!("{name}\n{body}").into_bytes())
-        .collect::<Vec<_>>();
-    material.extend_from_slice(compiler.name.as_bytes());
-    material.extend_from_slice(compiler.version.as_bytes());
-    for flag in flags {
-        material.extend_from_slice(flag.as_bytes());
-    }
-    let digest = crate::support::sha256_hex(&material);
-    let dir = std::env::temp_dir().join(format!("mncs-native-{}", &digest[..16]));
-    fs::create_dir_all(&dir).map_err(|error| {
-        NativeError::CompileFailed(format!("unable to create work directory: {error}"))
-    })?;
-    let exe = dir.join("mncs-run");
-    let needs_compile = !exe.is_file();
-    let mut paths = Vec::new();
-    for (name, body) in sources {
-        let path = dir.join(name);
-        if needs_compile {
-            fs::write(&path, body.as_bytes()).map_err(|error| {
-                NativeError::CompileFailed(format!("unable to write {name}: {error}"))
-            })?;
-        }
-        paths.push(path);
-    }
-    if needs_compile {
-        let temporary_exe = dir.join(format!("mncs-run-{}.tmp", std::process::id()));
-        let mut command = Command::new(&compiler.path);
-        command.current_dir(&dir);
-        command.args(flags);
-        for path in &paths {
-            match path.extension().and_then(|ext| ext.to_str()) {
-                Some("ll") => {
-                    command
-                        .arg("-x")
-                        .arg("ir")
-                        .arg(path.file_name().unwrap_or(path.as_os_str()));
-                }
-                Some("c") => {
-                    command
-                        .arg("-x")
-                        .arg("c")
-                        .arg(path.file_name().unwrap_or(path.as_os_str()));
-                }
-                _ => {
-                    command.arg(path.file_name().unwrap_or(path.as_os_str()));
-                }
-            }
-        }
-        command.arg("-o").arg(&temporary_exe);
-        let compiled = command.output().map_err(|error| {
-            NativeError::ToolchainUnavailable(format!(
-                "{} could not be executed: {error}",
-                compiler.name
-            ))
-        })?;
-        if !compiled.status.success() {
-            return Err(NativeError::CompileFailed(format!(
-                "{} failed: {}",
-                compiler.name,
-                String::from_utf8_lossy(&compiled.stderr)
-            )));
-        }
-        fs::rename(&temporary_exe, &exe).map_err(|error| {
-            NativeError::CompileFailed(format!("unable to publish native executable: {error}"))
-        })?;
-    }
-    let run = run_executable_full(&exe, args, call_file)?;
+    let executable = NativeExecutable::compile_or_reuse(sources, compiler, flags)?;
+    let run = executable.run(args, call_file)?;
     Ok((
         crate::support::NativeRunView {
             status: run.status,
@@ -213,6 +146,99 @@ pub fn compile_and_run_with_call_file_full(
         },
         compiler.summary(),
     ))
+}
+
+/// A compiled native realization retained by a stateful backend session.
+/// Execution remains a separate child process because the native protocol is
+/// intentionally request-scoped and outside the MNCS semantic trust boundary.
+pub(crate) struct NativeExecutable {
+    exe: PathBuf,
+}
+
+impl NativeExecutable {
+    pub(crate) fn compile_or_reuse(
+        sources: &[(&str, &str)],
+        compiler: &ToolchainIdentity,
+        flags: &[&str],
+    ) -> Result<Self, NativeError> {
+        let mut material = sources
+            .iter()
+            .flat_map(|(name, body)| format!("{name}\n{body}").into_bytes())
+            .collect::<Vec<_>>();
+        material.extend_from_slice(compiler.name.as_bytes());
+        material.extend_from_slice(compiler.version.as_bytes());
+        for flag in flags {
+            material.extend_from_slice(flag.as_bytes());
+        }
+        let digest = crate::support::sha256_hex(&material);
+        let dir = std::env::temp_dir().join(format!("mncs-native-{}", &digest[..16]));
+        fs::create_dir_all(&dir).map_err(|error| {
+            NativeError::CompileFailed(format!("unable to create work directory: {error}"))
+        })?;
+        let exe = dir.join("mncs-run");
+        let needs_compile = !exe.is_file();
+        let mut paths = Vec::new();
+        for (name, body) in sources {
+            let path = dir.join(name);
+            if needs_compile {
+                fs::write(&path, body.as_bytes()).map_err(|error| {
+                    NativeError::CompileFailed(format!("unable to write {name}: {error}"))
+                })?;
+            }
+            paths.push(path);
+        }
+        if needs_compile {
+            let temporary_exe = dir.join(format!("mncs-run-{}.tmp", std::process::id()));
+            let mut command = Command::new(&compiler.path);
+            command.current_dir(&dir);
+            command.args(flags);
+            for path in &paths {
+                match path.extension().and_then(|ext| ext.to_str()) {
+                    Some("ll") => {
+                        command
+                            .arg("-x")
+                            .arg("ir")
+                            .arg(path.file_name().unwrap_or(path.as_os_str()));
+                    }
+                    Some("c") => {
+                        command
+                            .arg("-x")
+                            .arg("c")
+                            .arg(path.file_name().unwrap_or(path.as_os_str()));
+                    }
+                    _ => {
+                        command.arg(path.file_name().unwrap_or(path.as_os_str()));
+                    }
+                }
+            }
+            command.arg("-o").arg(&temporary_exe);
+            let compiled = command.output().map_err(|error| {
+                NativeError::ToolchainUnavailable(format!(
+                    "{} could not be executed: {error}",
+                    compiler.name
+                ))
+            })?;
+            if !compiled.status.success() {
+                return Err(NativeError::CompileFailed(format!(
+                    "{} failed: {}",
+                    compiler.name,
+                    String::from_utf8_lossy(&compiled.stderr)
+                )));
+            }
+            fs::rename(&temporary_exe, &exe).map_err(|error| {
+                NativeError::CompileFailed(format!("unable to publish native executable: {error}"))
+            })?;
+        }
+        Ok(Self { exe })
+    }
+
+    pub(crate) fn run(
+        &self,
+        args: &[String],
+        call_file: Option<&Path>,
+    ) -> Result<NativeRun, NativeError> {
+        run_executable_full(&self.exe, args, call_file)
+    }
 }
 
 pub(crate) struct NativeRun {

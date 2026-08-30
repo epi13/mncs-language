@@ -14,10 +14,10 @@ use crate::execution::{
 };
 use crate::identity::{function_id, program_id};
 use crate::{
-    execute_with_policy, BodyType, ExecutionCorpus, ExecutionFailure, ExecutionResult,
-    ExecutionStatus, ExecutionSubject, ExecutionValue, IntegerType, IrType, Program, SemanticId,
-    SsaBlock, SsaFunction, SsaInstruction, SsaInstructionKind, SsaModule, SsaTerminator,
-    MAX_EXECUTION_BUDGET,
+    execute_with_policy, BodyType, EvidenceReceipt, EvidenceReceiptOutcome, ExecutionCorpus,
+    ExecutionFailure, ExecutionResult, ExecutionStatus, ExecutionSubject, ExecutionValue,
+    IntegerType, IrType, Program, SemanticId, SsaBlock, SsaFunction, SsaInstruction,
+    SsaInstructionKind, SsaModule, SsaTerminator, MAX_EXECUTION_BUDGET,
 };
 
 pub const SSA_EXECUTION_RESULT_SCHEMA_VERSION: &str = "0.1";
@@ -161,7 +161,7 @@ pub fn execute_ssa_module(
     module: &SsaModule,
     request: &crate::ExecutionRequest,
 ) -> SsaExecutionResult {
-    execute_ssa_module_with_validation(program, module, request, true, None)
+    execute_ssa_module_with_validation(program, module, request, true, None, None, None)
 }
 
 /// Interpret an SSA module after its immutable program/module validation has
@@ -174,25 +174,27 @@ pub fn execute_ssa_module_prevalidated(
     module: &SsaModule,
     request: &crate::ExecutionRequest,
 ) -> SsaExecutionResult {
-    execute_ssa_module_with_validation(program, module, request, false, None)
+    execute_ssa_module_with_validation(program, module, request, false, None, None, None)
 }
 
 /// Reusable immutable execution preparation for a bounded stateful session.
 /// The program and SSA validation, plus each function's block index, are
 /// performed once; request schema, target, argument, and step-budget checks
 /// continue to run at every transition.
-pub struct SsaExecutionSession<'a> {
-    program: &'a Program,
-    module: &'a SsaModule,
+pub struct SsaExecutionSession {
     block_indices: BTreeMap<SemanticId, BTreeMap<SemanticId, usize>>,
+    program_identity: SemanticId,
+    module_fingerprint: Option<String>,
+    validation_receipt: EvidenceReceipt,
 }
 
-impl<'a> SsaExecutionSession<'a> {
-    pub fn new(program: &'a Program, module: &'a SsaModule) -> Result<Self, String> {
+impl SsaExecutionSession {
+    pub fn new(program: &Program, module: &SsaModule) -> Result<Self, String> {
         if module.schema_version != crate::SSA_SCHEMA_VERSION {
             return Err("unsupported SSA schema version".to_owned());
         }
-        if module.semantic_identity != program_id(&program.module) {
+        let program_identity = program_id(&program.module);
+        if module.semantic_identity != program_identity {
             return Err("SSA semantic program identity does not match program".to_owned());
         }
         if !program.validate().valid {
@@ -216,20 +218,97 @@ impl<'a> SsaExecutionSession<'a> {
                 )
             })
             .collect();
+        let module_fingerprint = module.fingerprint().ok();
+        let validation_receipt = EvidenceReceipt::new(
+            "SSA artifact validates against semantic program",
+            module.identity.clone(),
+            SemanticId("mncs:validator:ssa-execution-session:0.1".to_owned()),
+            BTreeMap::from([
+                ("ssa_schema".to_owned(), module.schema_version.clone()),
+                (
+                    "execution_contract".to_owned(),
+                    SSA_EXECUTION_RESULT_SCHEMA_VERSION.to_owned(),
+                ),
+            ]),
+            BTreeMap::from([
+                (
+                    program_identity.clone(),
+                    program.content_fingerprint().unwrap_or_default(),
+                ),
+                (
+                    module.identity.clone(),
+                    module_fingerprint.clone().unwrap_or_default(),
+                ),
+            ]),
+            Vec::new(),
+            EvidenceReceiptOutcome::Pass,
+            vec![
+                "semantic program identity changes".to_owned(),
+                "SSA identity or content changes".to_owned(),
+                "validator or execution contract changes".to_owned(),
+            ],
+        );
         Ok(Self {
-            program,
-            module,
             block_indices,
+            program_identity,
+            module_fingerprint,
+            validation_receipt,
         })
     }
 
-    pub fn execute(&self, request: &crate::ExecutionRequest) -> SsaExecutionResult {
+    pub fn validation_receipt(&self) -> &EvidenceReceipt {
+        &self.validation_receipt
+    }
+
+    pub fn execute(
+        &self,
+        program: &Program,
+        module: &SsaModule,
+        request: &crate::ExecutionRequest,
+    ) -> SsaExecutionResult {
         execute_ssa_module_with_validation(
-            self.program,
-            self.module,
+            program,
+            module,
             request,
             false,
             Some(&self.block_indices),
+            Some((&self.program_identity, &self.module_fingerprint)),
+            None,
+        )
+    }
+
+    /// Execute a stateful transition while transferring ownership of its
+    /// logical arguments into the evaluator. This is equivalent to `execute`
+    /// but avoids deep-cloning a large immutable checkpoint merely to validate
+    /// and normalize it at the backend boundary.
+    pub fn execute_owned(
+        &self,
+        program: &Program,
+        module: &SsaModule,
+        request: crate::ExecutionRequest,
+    ) -> SsaExecutionResult {
+        let crate::ExecutionRequest {
+            schema_version,
+            target,
+            arguments,
+            step_budget,
+            policy,
+        } = request;
+        let request = crate::ExecutionRequest {
+            schema_version,
+            target,
+            arguments: Vec::new(),
+            step_budget,
+            policy,
+        };
+        execute_ssa_module_with_validation(
+            program,
+            module,
+            &request,
+            false,
+            Some(&self.block_indices),
+            Some((&self.program_identity, &self.module_fingerprint)),
+            Some(arguments),
         )
     }
 }
@@ -240,6 +319,8 @@ fn execute_ssa_module_with_validation(
     request: &crate::ExecutionRequest,
     validate_artifact: bool,
     block_cache: Option<&BTreeMap<SemanticId, BTreeMap<SemanticId, usize>>>,
+    cached_identity: Option<(&SemanticId, &Option<String>)>,
+    owned_arguments: Option<Vec<ExecutionValue>>,
 ) -> SsaExecutionResult {
     if request.schema_version != crate::EXECUTION_REQUEST_SCHEMA_VERSION {
         return SsaExecutionResult::invalid(
@@ -309,14 +390,19 @@ fn execute_ssa_module_with_validation(
             "execution target SSA function does not exist",
         );
     };
+    let (program_identity, module_fingerprint) = cached_identity
+        .map(|(program_identity, module_fingerprint)| {
+            (program_identity.clone(), module_fingerprint.clone())
+        })
+        .unwrap_or_else(|| (program_id(&program.module), module.fingerprint().ok()));
     let mut result = SsaExecutionResult {
         schema_version: SSA_EXECUTION_RESULT_SCHEMA_VERSION.to_owned(),
         status: ExecutionStatus::InvalidRequest,
         target: request.target.clone(),
-        semantic_program_identity: Some(program_id(&program.module)),
+        semantic_program_identity: Some(program_identity),
         semantic_function_identity: Some(semantic_function),
         ssa_module_identity: Some(module.identity.clone()),
-        ssa_module_fingerprint: module.fingerprint().ok(),
+        ssa_module_fingerprint: module_fingerprint,
         hir_fingerprint: Some(module.hir_fingerprint.clone()),
         returned: Vec::new(),
         steps: 0,
@@ -325,7 +411,9 @@ fn execute_ssa_module_with_validation(
         trace_truncated: false,
         effects: Vec::new(),
     };
-    let Some(mut values) = initialize_inputs(program, function, request, &mut result) else {
+    let Some(mut values) =
+        initialize_inputs(program, function, request, &mut result, owned_arguments)
+    else {
         return result;
     };
     let local_block_indices = if block_cache.is_none() {
@@ -381,6 +469,8 @@ fn execute_ssa_module_with_validation(
                 &mut values,
                 &mut result,
                 request,
+                block_cache,
+                cached_identity,
             ) {
                 return result;
             }
@@ -396,32 +486,43 @@ fn execute_ssa_module_with_validation(
         trace_block(&mut result, block, "terminator");
         match &block.terminator {
             SsaTerminator::Return { values: returned } => {
-                let Some(returned) = returned
-                    .iter()
-                    .map(|value| values.get(value).cloned())
-                    .collect::<Option<Vec<_>>>()
-                else {
+                let mut returned_values = Vec::with_capacity(returned.len());
+                for value in returned {
+                    let returned_value = if returned
+                        .iter()
+                        .filter(|candidate| *candidate == value)
+                        .count()
+                        == 1
+                    {
+                        values.remove(value)
+                    } else {
+                        values.get(value).cloned()
+                    };
+                    let Some(returned_value) = returned_value else {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            block.semantic_identity.clone(),
+                            "return referenced an unavailable value",
+                        );
+                        return result;
+                    };
+                    returned_values.push(returned_value);
+                }
+                if returned_values.len() != returned.len() {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
                         block.semantic_identity.clone(),
                         "return referenced an unavailable value",
                     );
                     return result;
-                };
-                result.returned = returned;
+                }
+                result.returned = returned_values;
                 result.status = ExecutionStatus::Returned;
                 return result;
             }
             SsaTerminator::Branch { target, arguments } => {
-                let incoming = values.clone();
-                if !assign_block_arguments(
-                    function,
-                    block_indices,
-                    target,
-                    arguments,
-                    &incoming,
-                    &mut values,
-                ) {
+                if !assign_block_arguments(function, block_indices, target, arguments, &mut values)
+                {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
                         block.semantic_identity.clone(),
@@ -451,15 +552,8 @@ fn execute_ssa_module_with_validation(
                 } else {
                     (else_target, else_arguments)
                 };
-                let incoming = values.clone();
-                if !assign_block_arguments(
-                    function,
-                    block_indices,
-                    target,
-                    arguments,
-                    &incoming,
-                    &mut values,
-                ) {
+                if !assign_block_arguments(function, block_indices, target, arguments, &mut values)
+                {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
                         block.semantic_identity.clone(),
@@ -578,6 +672,7 @@ pub fn compare_body_and_ssa(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_instruction(
     program: &Program,
     module: &SsaModule,
@@ -585,6 +680,8 @@ fn execute_instruction(
     values: &mut BTreeMap<SemanticId, ExecutionValue>,
     result: &mut SsaExecutionResult,
     request: &crate::ExecutionRequest,
+    block_cache: Option<&BTreeMap<SemanticId, BTreeMap<SemanticId, usize>>>,
+    cached_identity: Option<(&SemanticId, &Option<String>)>,
 ) -> bool {
     match &instruction.kind {
         SsaInstructionKind::Constant { value, ty } => {
@@ -637,7 +734,7 @@ fn execute_instruction(
                 ExecutionValue::Record {
                     type_identity: type_identity.clone(),
                     name,
-                    fields,
+                    fields: fields.into(),
                 },
             );
         }
@@ -914,7 +1011,7 @@ fn execute_instruction(
             values.insert(
                 output.identity.clone(),
                 ExecutionValue::Sequence {
-                    values: element_values,
+                    values: element_values.into(),
                 },
             );
         }
@@ -945,7 +1042,9 @@ fn execute_instruction(
             }
             values.insert(
                 output.identity.clone(),
-                ExecutionValue::Vector { values: collected },
+                ExecutionValue::Vector {
+                    values: collected.into(),
+                },
             );
         }
         SsaInstructionKind::VectorSplat { lanes, .. } => {
@@ -966,7 +1065,7 @@ fn execute_instruction(
             values.insert(
                 output.identity.clone(),
                 ExecutionValue::Vector {
-                    values: vec![value; *lanes as usize],
+                    values: vec![value; *lanes as usize].into(),
                 },
             );
         }
@@ -1053,12 +1152,14 @@ fn execute_instruction(
                 );
                 return true;
             }
-            let mut updated = source.clone();
+            let mut updated = source.as_ref().clone();
             updated[index as usize] = element;
             if let Some(output) = instruction.outputs.first() {
                 values.insert(
                     output.identity.clone(),
-                    ExecutionValue::Vector { values: updated },
+                    ExecutionValue::Vector {
+                        values: updated.into(),
+                    },
                 );
             }
         }
@@ -1093,7 +1194,9 @@ fn execute_instruction(
             if let Some(output) = instruction.outputs.first() {
                 values.insert(
                     output.identity.clone(),
-                    ExecutionValue::Vector { values: produced },
+                    ExecutionValue::Vector {
+                        values: produced.into(),
+                    },
                 );
             }
         }
@@ -1121,7 +1224,12 @@ fn execute_instruction(
                 return true;
             };
             if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), ExecutionValue::Mask { lanes });
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Mask {
+                        lanes: lanes.into(),
+                    },
+                );
             }
         }
         SsaInstructionKind::MaskBinary { operator, .. } => {
@@ -1133,7 +1241,7 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let lanes = left
+            let lanes: Vec<bool> = left
                 .iter()
                 .zip(right)
                 .map(|(left, right)| match operator.as_str() {
@@ -1143,7 +1251,12 @@ fn execute_instruction(
                 })
                 .collect();
             if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), ExecutionValue::Mask { lanes });
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Mask {
+                        lanes: lanes.into(),
+                    },
+                );
             }
         }
         SsaInstructionKind::MaskNot { .. } => {
@@ -1161,7 +1274,7 @@ fn execute_instruction(
                 values.insert(
                     output.identity.clone(),
                     ExecutionValue::Mask {
-                        lanes: lanes.iter().map(|lane| !lane).collect(),
+                        lanes: lanes.iter().map(|lane| !lane).collect::<Vec<_>>().into(),
                     },
                 );
             }
@@ -1324,11 +1437,13 @@ fn execute_instruction(
                             false_lanes[index].clone()
                         }
                     })
-                    .collect();
+                    .collect::<Vec<_>>();
                 if let Some(output) = instruction.outputs.first() {
                     values.insert(
                         output.identity.clone(),
-                        ExecutionValue::Vector { values: selected },
+                        ExecutionValue::Vector {
+                            values: selected.into(),
+                        },
                     );
                 }
                 return false;
@@ -1424,12 +1539,14 @@ fn execute_instruction(
                 }
                 return true;
             }
-            let mut updated = source;
+            let mut updated = source.as_ref().clone();
             updated[index as usize] = element;
             if let Some(output) = instruction.outputs.first() {
                 values.insert(
                     output.identity.clone(),
-                    ExecutionValue::Sequence { values: updated },
+                    ExecutionValue::Sequence {
+                        values: updated.into(),
+                    },
                 );
             }
         }
@@ -1518,7 +1635,7 @@ fn execute_instruction(
                 values.insert(
                     output.identity.clone(),
                     ExecutionValue::Sequence {
-                        values: source[start as usize..end as usize].to_vec(),
+                        values: source[start as usize..end as usize].to_vec().into(),
                     },
                 );
             }
@@ -1552,7 +1669,7 @@ fn execute_instruction(
                         type_identity: type_identity.clone(),
                         variant_identity: variant_identity.clone(),
                         discriminant: *discriminant,
-                        payload,
+                        payload: payload.into(),
                     },
                 );
             }
@@ -1701,7 +1818,15 @@ fn execute_instruction(
                 step_budget: remaining,
                 policy: request.policy.clone(),
             };
-            let nested = execute_ssa_module(program, module, &nested_request);
+            let nested = execute_ssa_module_with_validation(
+                program,
+                module,
+                &nested_request,
+                false,
+                block_cache,
+                cached_identity,
+                None,
+            );
             let trace_offset = result.steps;
             result.steps = result.steps.saturating_add(nested.steps);
             result.effects.extend(nested.effects.clone());
@@ -1801,8 +1926,12 @@ fn initialize_inputs(
     function: &SsaFunction,
     request: &crate::ExecutionRequest,
     result: &mut SsaExecutionResult,
+    owned_arguments: Option<Vec<ExecutionValue>>,
 ) -> Option<BTreeMap<SemanticId, ExecutionValue>> {
-    if function.inputs.len() != request.arguments.len() {
+    let argument_count = owned_arguments
+        .as_ref()
+        .map_or(request.arguments.len(), Vec::len);
+    if function.inputs.len() != argument_count {
         result.fail(
             ExecutionStatus::InvalidRequest,
             None,
@@ -1810,8 +1939,10 @@ fn initialize_inputs(
         );
         return None;
     }
+    let mut owned_arguments =
+        owned_arguments.map(|arguments| arguments.into_iter().map(Some).collect::<Vec<_>>());
     let mut values = BTreeMap::new();
-    for (input, argument) in function.inputs.iter().zip(&request.arguments) {
+    for (index, input) in function.inputs.iter().enumerate() {
         let Some(ty) = ssa_input_type(program, &input.ty) else {
             result.fail(
                 ExecutionStatus::Unsupported,
@@ -1820,38 +1951,100 @@ fn initialize_inputs(
             );
             return None;
         };
-        if !value_matches_type(argument, &ty) {
-            result.fail(
-                ExecutionStatus::InvalidRequest,
-                Some(input.identity.clone()),
-                "argument does not match SSA input type",
-            );
-            return None;
-        }
-        if let ExecutionValue::Finite {
-            type_identity,
-            variant_identity,
-            discriminant,
-            ..
-        } = argument
-        {
-            if !crate::execution::valid_finite_value(
-                program,
-                type_identity,
-                variant_identity,
-                *discriminant,
-            ) {
+        if owned_arguments.is_some() {
+            let argument = owned_arguments
+                .as_ref()
+                .and_then(|arguments| arguments.get(index).and_then(Option::as_ref))?;
+            if !value_matches_type(argument, &ty) {
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     Some(input.identity.clone()),
-                    "finite argument has an invalid variant/discriminant",
+                    "argument does not match SSA input type",
                 );
                 return None;
             }
+            if let ExecutionValue::Finite {
+                type_identity,
+                variant_identity,
+                discriminant,
+                ..
+            } = argument
+            {
+                if !crate::execution::valid_finite_value(
+                    program,
+                    type_identity,
+                    variant_identity,
+                    *discriminant,
+                ) {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(input.identity.clone()),
+                        "finite argument has an invalid variant/discriminant",
+                    );
+                    return None;
+                }
+            }
+        } else {
+            let argument = request.arguments.get(index)?;
+            if !value_matches_type(argument, &ty) {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(input.identity.clone()),
+                    "argument does not match SSA input type",
+                );
+                return None;
+            }
+            if let ExecutionValue::Finite {
+                type_identity,
+                variant_identity,
+                discriminant,
+                ..
+            } = argument
+            {
+                if !crate::execution::valid_finite_value(
+                    program,
+                    type_identity,
+                    variant_identity,
+                    *discriminant,
+                ) {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(input.identity.clone()),
+                        "finite argument has an invalid variant/discriminant",
+                    );
+                    return None;
+                }
+            }
         }
-        values.insert(input.identity.clone(), normalize_value(argument, &ty)?);
+        let normalized = if owned_arguments.is_some() {
+            normalize_value_owned(owned_arguments.as_mut()?.get_mut(index)?.take(), &ty)?
+        } else {
+            let argument = request.arguments.get(index)?;
+            normalize_value(argument, &ty)?
+        };
+        values.insert(input.identity.clone(), normalized);
     }
     Some(values)
+}
+
+fn normalize_value_owned(value: Option<ExecutionValue>, ty: &BodyType) -> Option<ExecutionValue> {
+    let value = value?;
+    match (&value, ty) {
+        (ExecutionValue::Finite { type_identity, .. }, BodyType::Finite { identity, .. })
+            if type_identity == identity =>
+        {
+            Some(value)
+        }
+        (ExecutionValue::Record { type_identity, .. }, BodyType::Record { identity, .. })
+            if type_identity == identity =>
+        {
+            Some(value)
+        }
+        (ExecutionValue::Record { name, .. }, BodyType::Named(named)) if name == named => {
+            Some(value)
+        }
+        _ => normalize_value(&value, ty),
+    }
 }
 
 fn assign_block_arguments(
@@ -1859,8 +2052,7 @@ fn assign_block_arguments(
     block_indices: &BTreeMap<SemanticId, usize>,
     target: &SemanticId,
     arguments: &[SemanticId],
-    values: &BTreeMap<SemanticId, ExecutionValue>,
-    destination: &mut BTreeMap<SemanticId, ExecutionValue>,
+    values: &mut BTreeMap<SemanticId, ExecutionValue>,
 ) -> bool {
     let Some(block_index) = block_indices.get(target).copied() else {
         return false;
@@ -1879,7 +2071,7 @@ fn assign_block_arguments(
         return false;
     };
     for (parameter, value) in block.parameters.iter().zip(incoming) {
-        destination.insert(parameter.identity.clone(), value);
+        values.insert(parameter.identity.clone(), value);
     }
     true
 }
@@ -2150,10 +2342,12 @@ fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionVal
             },
         ) if values.len() == *length as usize => {
             let mut normalized = Vec::with_capacity(values.len());
-            for value in values {
+            for value in values.iter() {
                 normalized.push(normalize_value(value, element)?);
             }
-            Some(ExecutionValue::Sequence { values: normalized })
+            Some(ExecutionValue::Sequence {
+                values: normalized.into(),
+            })
         }
         (
             ExecutionValue::Sequence { values },
@@ -2163,19 +2357,23 @@ fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionVal
             },
         ) if values.len() <= *capacity as usize => {
             let mut normalized = Vec::with_capacity(values.len());
-            for value in values {
+            for value in values.iter() {
                 normalized.push(normalize_value(value, element)?);
             }
-            Some(ExecutionValue::Sequence { values: normalized })
+            Some(ExecutionValue::Sequence {
+                values: normalized.into(),
+            })
         }
         (ExecutionValue::Vector { values }, BodyType::Vector { element, lanes })
             if values.len() == *lanes as usize =>
         {
             let mut normalized = Vec::with_capacity(values.len());
-            for value in values {
+            for value in values.iter() {
                 normalized.push(normalize_value(value, element)?);
             }
-            Some(ExecutionValue::Vector { values: normalized })
+            Some(ExecutionValue::Vector {
+                values: normalized.into(),
+            })
         }
         (ExecutionValue::Mask { lanes: bits }, BodyType::Mask { lanes })
             if bits.len() == *lanes as usize =>

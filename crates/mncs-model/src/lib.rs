@@ -11,6 +11,7 @@ mod cfg;
 mod compiler;
 mod compiler_architecture;
 mod core;
+mod cost;
 mod delta;
 mod evidence;
 mod execution;
@@ -73,20 +74,26 @@ pub use core::{
     EvidenceStatus, FailureMode, FiniteType, FiniteVariant, Function, GenericSpecializationRecord,
     ParseError, Program, RecordField, RecordType, Value, SUPPORTED_SCHEMA_VERSION,
 };
+pub use cost::{
+    cost_report, record_counter, record_stage, reset_cost_report, CostReport,
+    COST_REPORT_SCHEMA_VERSION,
+};
 pub use delta::{AuthorityDelta, EvidenceDelta, FailureChange, SemanticChangeSet, SemanticDelta};
 pub use evidence::{
-    EvidenceFreshness, EvidenceManifest, EvidenceRecord, EvidenceState, EvidenceStatusReport,
+    EvidenceFreshness, EvidenceManifest, EvidenceReceipt, EvidenceReceiptOutcome, EvidenceRecord,
+    EvidenceState, EvidenceStatusReport, EVIDENCE_RECEIPT_SCHEMA_VERSION,
 };
 pub use execution::{
     compare as compare_execution, compare_stateful_results, execute, execute_stateful_case,
-    execute_with_policy, execution_corpus_schema_supported, ComparisonStatus,
+    execute_stateful_case_owned, execute_stateful_case_with_checkpoint, execute_with_policy,
+    execution_corpus_schema_supported, stateful_prefix_identity, ComparisonStatus,
     EffectExecutionPolicy, ExecutionCase, ExecutionComparison, ExecutionCorpus,
     ExecutionEffectEvent, ExecutionFailure, ExecutionPolicy, ExecutionProperty, ExecutionRequest,
     ExecutionResult, ExecutionStatus, ExecutionSubject, ExecutionTarget, ExecutionTraceEntry,
     ExecutionValue, ExpectedEffectObservation, StatefulArgument, StatefulCallResult,
-    StatefulExecutionCase, StatefulExecutionComparison, StatefulExecutionMismatch,
-    StatefulExecutionResult, StatefulExecutionStep, StatefulStepObservation,
-    EXECUTION_COMPARISON_SCHEMA_VERSION, EXECUTION_CORPUS_SCHEMA_VERSION,
+    StatefulExecutionCase, StatefulExecutionCheckpoint, StatefulExecutionComparison,
+    StatefulExecutionMismatch, StatefulExecutionResult, StatefulExecutionStep,
+    StatefulStepObservation, EXECUTION_COMPARISON_SCHEMA_VERSION, EXECUTION_CORPUS_SCHEMA_VERSION,
     EXECUTION_CORPUS_SCHEMA_VERSION_0_2, EXECUTION_CORPUS_SCHEMA_VERSION_0_3,
     EXECUTION_REQUEST_SCHEMA_VERSION, EXECUTION_RESULT_SCHEMA_VERSION, MAX_EXECUTION_BUDGET,
     MAX_STATEFUL_CALLS, STATEFUL_EXECUTION_COMPARISON_SCHEMA_VERSION,

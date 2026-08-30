@@ -17,7 +17,7 @@ repository = "https://github.com/epi13/mncs-language"
 rust-version = "1.85"
 
 [workspace.dependencies]
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 thiserror = "2"
 sha2 = "0.10"

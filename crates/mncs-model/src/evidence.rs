@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::canonical::{canonical_evidence, sha256_hex};
+use crate::canonical::{canonical_evidence, canonical_json_value, sha256_hex};
 use crate::graph::GraphError;
 use crate::identity::{assumption_id, contract_id, evidence_id, function_id, SemanticId};
 use crate::{EvidenceClaim, EvidenceStatus, Function, Program, SemanticIdentities};
@@ -21,6 +21,110 @@ pub enum EvidenceState {
     Current,
     Stale,
     Unknown,
+}
+
+/// An immutable, identity-bound answer to one validation question.
+///
+/// A receipt is reusable only when its exact subject, validator, scope, and
+/// dependency fingerprints still match. It records bounded evidence; it does
+/// not turn an empirical observation into a proof or promote UNKNOWN.
+pub const EVIDENCE_RECEIPT_SCHEMA_VERSION: &str = "0.1";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EvidenceReceiptOutcome {
+    Pass,
+    Fail,
+    Unknown,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvidenceReceipt {
+    pub schema_version: String,
+    pub identity: SemanticId,
+    pub fact: String,
+    pub subject: SemanticId,
+    pub validator: SemanticId,
+    pub scope: BTreeMap<String, String>,
+    pub dependencies: BTreeMap<SemanticId, String>,
+    pub assumptions: Vec<SemanticId>,
+    pub outcome: EvidenceReceiptOutcome,
+    pub invalidation_triggers: Vec<String>,
+}
+
+impl EvidenceReceipt {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        fact: impl Into<String>,
+        subject: SemanticId,
+        validator: SemanticId,
+        mut scope: BTreeMap<String, String>,
+        dependencies: BTreeMap<SemanticId, String>,
+        mut assumptions: Vec<SemanticId>,
+        outcome: EvidenceReceiptOutcome,
+        mut invalidation_triggers: Vec<String>,
+    ) -> Self {
+        scope.retain(|key, value| !key.trim().is_empty() && !value.trim().is_empty());
+        assumptions.sort();
+        assumptions.dedup();
+        invalidation_triggers.sort();
+        invalidation_triggers.dedup();
+        let mut receipt = Self {
+            schema_version: EVIDENCE_RECEIPT_SCHEMA_VERSION.to_owned(),
+            identity: SemanticId(String::new()),
+            fact: fact.into(),
+            subject,
+            validator,
+            scope,
+            dependencies,
+            assumptions,
+            outcome,
+            invalidation_triggers,
+        };
+        receipt.seal();
+        receipt
+    }
+
+    pub fn seal(&mut self) {
+        self.identity = SemanticId(String::new());
+        let canonical = canonical_json_value(self).expect("evidence receipt is serializable");
+        self.identity = SemanticId(format!(
+            "mncs:evidence:receipt:{}",
+            sha256_hex(canonical.as_bytes())
+        ));
+    }
+
+    pub fn identity_is_valid(&self) -> bool {
+        let mut material = self.clone();
+        material.identity = SemanticId(String::new());
+        self.schema_version == EVIDENCE_RECEIPT_SCHEMA_VERSION
+            && !self.fact.trim().is_empty()
+            && !self.subject.0.trim().is_empty()
+            && !self.validator.0.trim().is_empty()
+            && self.identity == {
+                let canonical =
+                    canonical_json_value(&material).expect("evidence receipt is serializable");
+                SemanticId(format!(
+                    "mncs:evidence:receipt:{}",
+                    sha256_hex(canonical.as_bytes())
+                ))
+            }
+    }
+
+    pub fn reusable_if(
+        &self,
+        subject: &SemanticId,
+        validator: &SemanticId,
+        scope: &BTreeMap<String, String>,
+        dependencies: &BTreeMap<SemanticId, String>,
+    ) -> bool {
+        self.identity_is_valid()
+            && &self.subject == subject
+            && &self.validator == validator
+            && &self.scope == scope
+            && &self.dependencies == dependencies
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -205,7 +309,10 @@ fn record_for_claim(
 #[cfg(test)]
 mod tests {
     use crate::validation::tests::valid_program;
-    use crate::{EvidenceFreshness, EvidenceState};
+    use crate::{
+        EvidenceFreshness, EvidenceReceipt, EvidenceReceiptOutcome, EvidenceState, SemanticId,
+    };
+    use std::collections::BTreeMap;
 
     #[test]
     fn manifest_binds_subject_property_and_assumption_dependencies() {
@@ -226,5 +333,50 @@ mod tests {
         let report = saved.assess_against(&after).expect("assessment");
         assert_eq!(report[0].state, EvidenceState::Stale);
         assert!(!report[0].invalidated_by.is_empty());
+    }
+
+    #[test]
+    fn receipt_reuse_requires_exact_subject_validator_scope_and_dependencies() {
+        let subject = SemanticId("mncs:test:subject".to_owned());
+        let validator = SemanticId("mncs:test:validator:0.1".to_owned());
+        let scope = BTreeMap::from([(String::from("contract"), String::from("0.1"))]);
+        let dependencies = BTreeMap::from([(
+            SemanticId("mncs:test:dependency".to_owned()),
+            String::from("abc"),
+        )]);
+        let receipt = EvidenceReceipt::new(
+            "bounded test fact",
+            subject.clone(),
+            validator.clone(),
+            scope.clone(),
+            dependencies.clone(),
+            Vec::new(),
+            EvidenceReceiptOutcome::Pass,
+            vec!["subject changes".to_owned()],
+        );
+        assert!(receipt.identity_is_valid());
+        assert!(receipt.reusable_if(&subject, &validator, &scope, &dependencies));
+
+        let changed_dependencies = BTreeMap::from([(
+            SemanticId("mncs:test:dependency".to_owned()),
+            String::from("changed"),
+        )]);
+        assert!(!receipt.reusable_if(&subject, &validator, &scope, &changed_dependencies));
+    }
+
+    #[test]
+    fn receipt_identity_tampering_fails_closed() {
+        let mut receipt = EvidenceReceipt::new(
+            "bounded test fact",
+            SemanticId("mncs:test:subject".to_owned()),
+            SemanticId("mncs:test:validator:0.1".to_owned()),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            Vec::new(),
+            EvidenceReceiptOutcome::Unknown,
+            Vec::new(),
+        );
+        receipt.fact = "different fact".to_owned();
+        assert!(!receipt.identity_is_valid());
     }
 }

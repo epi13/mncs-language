@@ -17,6 +17,7 @@ use mncs_model::{
 use crate::composite::SlotWidth;
 use crate::native::{
     argv_from_request, compile_and_run_with_call_file_full, probe_clang, probe_gcc,
+    NativeExecutable, ToolchainIdentity,
 };
 use crate::scalar::{
     c_type, lower_to_scalar, ScalarFunction, ScalarInst, ScalarModule, ScalarTerm, ScalarTy,
@@ -34,6 +35,124 @@ pub const C11_FORMAT: &str = "text/x-c; mncs-c11-0.1";
 pub const C11_ARTIFACT_KIND: &str = "c11_translation_unit";
 
 pub struct C11Adapter;
+
+/// Stateful C11 preparation retains the generated module, selected compiler,
+/// and one compiled executable per language-owned function contract. Calls
+/// still run in isolated child processes through the canonical call-file
+/// protocol; only preparation and compilation are reused.
+pub struct C11StatefulSession<'a> {
+    artifact: &'a mncs_model::BackendArtifact,
+    compiler: ToolchainIdentity,
+    source: String,
+    executables: BTreeMap<String, NativeExecutable>,
+}
+
+pub fn prepare_stateful_session<'a>(
+    artifact: &'a mncs_model::BackendArtifact,
+) -> Result<C11StatefulSession<'a>, String> {
+    crate::support::backend_matches_identity(artifact, &c11_backend(), C11_ARTIFACT_KIND)?;
+    let compiler = probe_clang()
+        .or_else(probe_gcc)
+        .ok_or_else(|| "unavailable toolchain: neither clang nor gcc is present".to_owned())?;
+    let bytes = artifact.bytes()?;
+    mncs_model::record_counter("artifact_decode");
+    Ok(C11StatefulSession {
+        artifact,
+        compiler,
+        source: String::from_utf8_lossy(&bytes).into_owned(),
+        executables: BTreeMap::new(),
+    })
+}
+
+impl C11StatefulSession<'_> {
+    pub fn execute(&mut self, request: &ExecutionRequest) -> BackendExecutionResult {
+        let mut result = empty_execution(self.artifact, request);
+        let Some(contract) = self
+            .artifact
+            .function_value_contracts
+            .get(&request.target.function)
+        else {
+            return execution_failure(
+                result,
+                ExecutionStatus::InvalidRequest,
+                "C11 execution requires a language-owned function value contract",
+            );
+        };
+        let driver = c_driver(
+            &request.target.function,
+            &contract.inputs,
+            contract.outputs.first(),
+        );
+        let call_blob = match crate::support::build_call_file(
+            &request.arguments,
+            &contract.inputs,
+            contract.outputs.first(),
+            &self.artifact.composite_value_contracts,
+        ) {
+            Ok(blob) => blob,
+            Err(reason) => {
+                return execution_failure(result, ExecutionStatus::InvalidRequest, reason);
+            }
+        };
+        let call_path = call_blob.as_ref().map(|bytes| {
+            let digest = crate::support::sha256_hex(bytes);
+            let path = std::env::temp_dir().join(format!("mncs-call-{digest}.bin"));
+            let _ = std::fs::write(&path, bytes);
+            path
+        });
+        let argv = match &call_blob {
+            Some(_) => Vec::new(),
+            None => match argv_from_request(request) {
+                Ok(argv) => argv,
+                Err(reason) => {
+                    return execution_failure(result, ExecutionStatus::Unsupported, reason)
+                }
+            },
+        };
+        if !self.executables.contains_key(&request.target.function) {
+            let executable = match NativeExecutable::compile_or_reuse(
+                &[
+                    ("module.c", self.source.as_str()),
+                    ("driver.c", driver.as_str()),
+                ],
+                &self.compiler,
+                &["-std=c11", "-O0", "-Wall"],
+            ) {
+                Ok(executable) => executable,
+                Err(error) => return execution_failure(result, error.status(), error.reason()),
+            };
+            self.executables
+                .insert(request.target.function.clone(), executable);
+            mncs_model::record_counter("backend_compile");
+        }
+        let executable = self
+            .executables
+            .get(&request.target.function)
+            .expect("C11 executable inserted above");
+        match executable.run(&argv, call_path.as_deref()) {
+            Ok(run) => {
+                result.status = run.status;
+                result.steps = 1;
+                match crate::support::decode_native_observation(
+                    contract.outputs.first(),
+                    run.status,
+                    run.value,
+                    run.arena_hex.as_deref(),
+                    &self.artifact.composite_value_contracts,
+                ) {
+                    Ok(returned) => {
+                        result.returned = returned;
+                        result
+                    }
+                    Err(reason) => {
+                        execution_failure(result, ExecutionStatus::InvalidRequest, reason)
+                    }
+                }
+            }
+            Err(error) => execution_failure(result, error.status(), error.reason()),
+        }
+    }
+}
 
 pub fn c11_backend() -> BackendIdentity {
     BackendIdentity::new(C11_BACKEND_NAME, C11_BACKEND_VERSION)

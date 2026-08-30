@@ -228,7 +228,10 @@ pub fn pack_mask(lanes: &[bool]) -> u64 {
 
 pub fn unpack_mask(bits: u64, lanes: u32) -> mncs_model::ExecutionValue {
     mncs_model::ExecutionValue::Mask {
-        lanes: (0..lanes).map(|index| ((bits >> index) & 1) == 1).collect(),
+        lanes: (0..lanes)
+            .map(|index| ((bits >> index) & 1) == 1)
+            .collect::<Vec<_>>()
+            .into(),
     }
 }
 
@@ -712,7 +715,7 @@ impl<'a> ArenaReader<'a> {
                 Ok(Value::Record {
                     type_identity: type_identity.clone(),
                     name: name.clone(),
-                    fields: decoded,
+                    fields: decoded.into(),
                 })
             }
             Contract::Finite {
@@ -737,7 +740,7 @@ impl<'a> ArenaReader<'a> {
                     type_identity: type_identity.clone(),
                     variant_identity: variant_identity.clone(),
                     discriminant,
-                    payload,
+                    payload: payload.into(),
                 })
             }
         }
@@ -787,7 +790,7 @@ impl<'a> ArenaReader<'a> {
                 type_identity: type_identity.clone(),
                 variant_identity: variant_identity.clone(),
                 discriminant,
-                payload: Vec::new(),
+                payload: Vec::new().into(),
             });
         }
         if let Some(contract @ Contract::Record { .. }) =
@@ -860,7 +863,9 @@ impl<'a> ArenaReader<'a> {
         for index in 0..length {
             values.push(self.decode_field(root + u64::from(index) * 8, element)?);
         }
-        Ok(mncs_model::ExecutionValue::Sequence { values })
+        Ok(mncs_model::ExecutionValue::Sequence {
+            values: values.into(),
+        })
     }
 }
 
@@ -906,7 +911,7 @@ mod codec_tests {
                         type_identity: sid("T:Status"),
                         variant_identity: sid("V:FAIL"),
                         discriminant: 1,
-                        payload: vec![],
+                        payload: vec![].into(),
                     },
                 ),
                 (
@@ -915,10 +920,11 @@ mod codec_tests {
                         type_identity: sid("T:Status"),
                         variant_identity: sid("V:FAIL"),
                         discriminant: 1,
-                        payload: vec![],
+                        payload: vec![].into(),
                     },
                 ),
-            ],
+            ]
+            .into(),
         };
         let mut writer = ArenaWriter::new(registry);
         let boundary = writer.encode_argument(&value).expect("encodes");
@@ -979,11 +985,11 @@ mod codec_tests {
         let mncs_model::ExecutionValue::Record { fields, .. } = decoded else {
             panic!("decodes to a record");
         };
-        for (_name, field) in fields {
+        for (_name, field) in fields.as_ref() {
             let mncs_model::ExecutionValue::Finite { discriminant, .. } = field else {
                 panic!("field decodes to a finite");
             };
-            assert_eq!(discriminant, 1);
+            assert_eq!(*discriminant, 1);
         }
     }
 
@@ -1000,7 +1006,8 @@ mod codec_tests {
                 ExecutionValue::Byte { value: 0 },
                 ExecutionValue::Byte { value: 4 },
                 ExecutionValue::Byte { value: 0 },
-            ],
+            ]
+            .into(),
         };
         let mut writer = ArenaWriter::new(BTreeMap::new());
         let boundary = writer
@@ -1077,7 +1084,8 @@ mod codec_tests {
                     value: 7,
                     ty: u64_ty,
                 },
-            ],
+            ]
+            .into(),
         };
         let mut writer = ArenaWriter::new(BTreeMap::new());
         let boundary = writer

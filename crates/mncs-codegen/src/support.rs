@@ -953,7 +953,7 @@ mod driver_tests {
         );
         let packed = crate::composite::pack_mask(&[true, false, false, true]);
         let mask_value = ExecutionValue::Mask {
-            lanes: vec![true, false, false, true],
+            lanes: vec![true, false, false, true].into(),
         };
         assert!(value_uses_call_file(&mask_value));
         let blob = build_call_file(

@@ -2731,6 +2731,7 @@ pub fn prepare_stateful_session<'a>(
     )
     .map_err(|reason| reason.to_owned())?;
     let bytes = artifact.bytes().map_err(|reason| reason.to_owned())?;
+    mncs_model::record_counter("artifact_decode");
     let payload: CraneliftPayload = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid Cranelift payload: {error}"))?;
     let names = function_names(&payload.program, &payload.ssa);

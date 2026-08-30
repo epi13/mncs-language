@@ -8,8 +8,8 @@ use std::{
 
 use mncs_codegen::{
     backend_adapter, backend_capabilities, backend_family_matrix, backend_names,
-    compare_body_ssa_and_backend, execute_backend, execute_backend_stateful, lower_selected_ssa,
-    portable_wasm_plan, selected_ssa_ref, target_for_backend, target_is_portable_wasm,
+    compare_body_ssa_and_backend, execute_backend, lower_selected_ssa, portable_wasm_plan,
+    selected_ssa_ref, target_for_backend, target_is_portable_wasm, BackendStatefulSession,
 };
 use mncs_compiler::{
     native_node_profile, reference_compiler_architecture, ModuleResolution, ModuleResolver,
@@ -44,6 +44,7 @@ const FROZEN_REPLICATION_SUMMARY_SCHEMA_VERSION: &str = "0.1";
 const LANGUAGE_EXPERIMENT_INTERPRETATION: &str = mncs_model::LANGUAGE_EXPERIMENT_INTERPRETATION;
 
 fn trace_timing(stage: &str, started: Instant) {
+    mncs_model::record_stage(stage, started.elapsed());
     if env::var_os("MNCS_TIMINGS").is_some() {
         eprintln!(
             "mncs-timing stage={} elapsed_ms={}",
@@ -814,6 +815,9 @@ where
                     return ExitCode::from(2);
                 }
             };
+            if action == "run" {
+                mncs_model::reset_cost_report();
+            }
             let prepared = match prepare_experiment(&options, action == "plan") {
                 Ok(prepared) => prepared,
                 Err(code) => return code,
@@ -891,13 +895,14 @@ where
                     experiment_case_observation(case_, observation)
                 })
                 .collect::<Vec<_>>();
+            let mut stateful_session = BackendStatefulSession::new(&artifact);
+            let stateful_executions =
+                stateful_session.execute_cases(&corpus.name, &corpus.stateful_cases);
             let stateful_observations = corpus
                 .stateful_cases
                 .iter()
-                .map(|case_| {
-                    let execution = execute_backend_stateful(&artifact, &corpus.name, case_);
-                    stateful_case_observation(case_, execution)
-                })
+                .zip(stateful_executions)
+                .map(|(case_, execution)| stateful_case_observation(case_, execution))
                 .collect::<Vec<_>>();
             if baseline_path.is_some() && output_dir.is_none() {
                 eprintln!("error: experiment execute --baseline requires --output-dir");
@@ -1550,14 +1555,15 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         })
         .collect();
     trace_timing("cli-case-observations", started);
+    let mut stateful_session = BackendStatefulSession::new(&artifact);
+    let stateful_executions =
+        stateful_session.execute_cases(&prepared.corpus.name, &prepared.corpus.stateful_cases);
     let stateful_cases = prepared
         .corpus
         .stateful_cases
         .iter()
-        .map(|case_| {
-            let execution = execute_backend_stateful(&artifact, &prepared.corpus.name, case_);
-            stateful_case_observation(case_, execution)
-        })
+        .zip(stateful_executions)
+        .map(|(case_, execution)| stateful_case_observation(case_, execution))
         .collect::<Vec<_>>();
     trace_timing("cli-stateful-case-observations", started);
     let mut unresolved = Vec::new();
@@ -2038,6 +2044,10 @@ fn write_experiment_outputs(
         &result.family_reference(),
     )?;
     write_pretty_json(output_dir.join("result.json"), result)?;
+    write_pretty_json(
+        output_dir.join("cost-report.json"),
+        &mncs_model::cost_report(),
+    )?;
     let bytes = result.artifact.bytes().map_err(std::io::Error::other)?;
     fs::write(
         output_dir.join(format!("artifact.{}", result.artifact.artifact_kind)),

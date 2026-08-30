@@ -51,6 +51,7 @@ impl Program {
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
+    crate::record_counter("canonical_hash");
     let digest = Sha256::digest(bytes);
     let mut hex = String::with_capacity(digest.len() * 2);
     for byte in digest {
@@ -62,6 +63,7 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 pub(crate) fn canonical_json_value<T: serde::Serialize>(
     value: &T,
 ) -> Result<String, CanonicalError> {
+    crate::record_counter("serialization");
     Ok(serde_json::to_string(value)?)
 }
 

@@ -1246,6 +1246,7 @@ impl BackendArtifact {
     }
 
     pub fn identity_is_valid(&self) -> bool {
+        crate::record_counter("artifact_hash");
         self.backend.identity_is_valid()
             && self.input.identity_is_valid()
             && self.target.identity_is_valid()

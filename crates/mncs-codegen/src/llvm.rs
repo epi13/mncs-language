@@ -16,7 +16,7 @@ use mncs_model::{
 
 use crate::native::{
     argv_from_request, compile_and_run_with_call_file_full, host_matches_triple, host_triple,
-    probe_clang, probe_llc,
+    probe_clang, probe_llc, NativeExecutable, ToolchainIdentity,
 };
 use crate::scalar::{
     abi_bits, llvm_type, lower_to_scalar, ScalarBlock, ScalarFunction, ScalarInst, ScalarModule,
@@ -38,6 +38,133 @@ pub const LLVM_DEFAULT_DATALAYOUT: &str =
     "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128";
 
 pub struct LlvmAdapter;
+
+/// Stateful LLVM preparation retains the generated IR, selected clang
+/// toolchain, and one linked executable per language-owned function contract.
+/// Each transition remains an isolated native child-process observation.
+pub struct LlvmStatefulSession<'a> {
+    artifact: &'a mncs_model::BackendArtifact,
+    compiler: ToolchainIdentity,
+    ir: String,
+    executables: BTreeMap<String, NativeExecutable>,
+}
+
+pub fn prepare_stateful_session<'a>(
+    artifact: &'a mncs_model::BackendArtifact,
+) -> Result<LlvmStatefulSession<'a>, String> {
+    crate::support::backend_matches_identity(artifact, &llvm_backend(), LLVM_ARTIFACT_KIND)?;
+    let triple = artifact
+        .target
+        .facts
+        .get("triple")
+        .map_or(LLVM_DEFAULT_TRIPLE, String::as_str);
+    if !host_matches_triple(triple) {
+        return Err(format!(
+            "LLVM artifact triple {triple} does not match host {}",
+            host_triple()
+        ));
+    }
+    let compiler =
+        probe_clang().ok_or_else(|| "unavailable toolchain: clang is not present".to_owned())?;
+    let bytes = artifact.bytes()?;
+    mncs_model::record_counter("artifact_decode");
+    Ok(LlvmStatefulSession {
+        artifact,
+        compiler,
+        ir: String::from_utf8_lossy(&bytes).into_owned(),
+        executables: BTreeMap::new(),
+    })
+}
+
+impl LlvmStatefulSession<'_> {
+    pub fn execute(&mut self, request: &ExecutionRequest) -> BackendExecutionResult {
+        let mut result = empty_execution(self.artifact, request);
+        let Some(contract) = self
+            .artifact
+            .function_value_contracts
+            .get(&request.target.function)
+        else {
+            return execution_failure(
+                result,
+                ExecutionStatus::InvalidRequest,
+                "LLVM execution requires a language-owned function value contract",
+            );
+        };
+        let driver = llvm_driver(
+            &request.target.function,
+            &contract.inputs,
+            contract.outputs.first(),
+        );
+        let call_blob = match crate::support::build_call_file(
+            &request.arguments,
+            &contract.inputs,
+            contract.outputs.first(),
+            &self.artifact.composite_value_contracts,
+        ) {
+            Ok(blob) => blob,
+            Err(reason) => {
+                return execution_failure(result, ExecutionStatus::InvalidRequest, reason);
+            }
+        };
+        let call_path = call_blob.as_ref().map(|bytes| {
+            let digest = crate::support::sha256_hex(bytes);
+            let path = std::env::temp_dir().join(format!("mncs-call-{digest}.bin"));
+            let _ = std::fs::write(&path, bytes);
+            path
+        });
+        let args = match &call_blob {
+            Some(_) => Vec::new(),
+            None => match argv_from_request(request) {
+                Ok(args) => args,
+                Err(reason) => {
+                    return execution_failure(result, ExecutionStatus::Unsupported, reason)
+                }
+            },
+        };
+        if !self.executables.contains_key(&request.target.function) {
+            let executable = match NativeExecutable::compile_or_reuse(
+                &[
+                    ("module.ll", self.ir.as_str()),
+                    ("driver.c", driver.as_str()),
+                ],
+                &self.compiler,
+                &["-Wno-override-module", "-O0", "-no-pie"],
+            ) {
+                Ok(executable) => executable,
+                Err(error) => return execution_failure(result, error.status(), error.reason()),
+            };
+            self.executables
+                .insert(request.target.function.clone(), executable);
+            mncs_model::record_counter("backend_compile");
+        }
+        let executable = self
+            .executables
+            .get(&request.target.function)
+            .expect("LLVM executable inserted above");
+        match executable.run(&args, call_path.as_deref()) {
+            Ok(run) => {
+                result.status = run.status;
+                result.steps = 1;
+                match crate::support::decode_native_observation(
+                    contract.outputs.first(),
+                    run.status,
+                    run.value,
+                    run.arena_hex.as_deref(),
+                    &self.artifact.composite_value_contracts,
+                ) {
+                    Ok(returned) => {
+                        result.returned = returned;
+                        result
+                    }
+                    Err(reason) => {
+                        execution_failure(result, ExecutionStatus::InvalidRequest, reason)
+                    }
+                }
+            }
+            Err(error) => execution_failure(result, error.status(), error.reason()),
+        }
+    }
+}
 
 pub fn llvm_backend() -> BackendIdentity {
     BackendIdentity::new(LLVM_BACKEND_NAME, LLVM_BACKEND_VERSION)

@@ -24,6 +24,7 @@ use crate::{
 pub const SSA_SCHEMA_VERSION: &str = "0.4";
 
 fn trace_timing(stage: &str, started: Instant) {
+    crate::record_stage(stage, started.elapsed());
     if std::env::var_os("MNCS_TIMINGS").is_some() {
         eprintln!(
             "mncs-timing stage={} elapsed_ms={}",
@@ -774,6 +775,7 @@ pub struct SsaTransformationDecision {
 
 impl Program {
     pub fn lower_to_ssa(&self) -> Result<SsaModule, SsaError> {
+        crate::record_counter("ssa_build");
         let started = Instant::now();
         let report = self.validate();
         if !report.valid {
@@ -789,6 +791,7 @@ impl Program {
     /// semantic program. Compiler drivers use this to avoid lowering HIR a
     /// second time merely because they also need the SSA emission.
     pub fn lower_to_ssa_from_ir(&self, ir: &HighLevelIr) -> Result<SsaModule, SsaError> {
+        crate::record_counter("ssa_build");
         let started = Instant::now();
         let report = self.validate();
         if !report.valid {
