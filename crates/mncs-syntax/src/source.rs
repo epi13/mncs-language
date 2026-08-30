@@ -3653,6 +3653,46 @@ fn infer_source_profile(text: &str) -> &'static str {
     }
 }
 
+/// Extract the declared module name for resolver discovery.
+///
+/// This is intentionally a cheap discovery helper, not a second parser or
+/// semantic resolver. The full parser remains authoritative after a source
+/// envelope is selected. Versioned library files may be requested through
+/// their unversioned import spelling (`mncs.core.status` resolves the source
+/// declaring `mncs.core.status.v1`).
+pub fn declared_module_name(text: &str) -> Option<String> {
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("module ") {
+            let name = rest.trim_end();
+            let name = name.strip_suffix(';').unwrap_or(name).trim();
+            if !name.is_empty() {
+                return Some(name.to_owned());
+            }
+        }
+    }
+    None
+}
+
+/// Whether a discovered source declaration can satisfy an import request.
+///
+/// The resolver may omit a trailing numeric version segment because the
+/// source-profile import surface uses the stable unversioned module path.
+pub fn module_names_compatible(requested: &str, declared: &str) -> bool {
+    if requested == declared {
+        return true;
+    }
+    fn without_version(name: &str) -> Option<&str> {
+        let (head, tail) = name.rsplit_once('.')?;
+        let digits = tail.strip_prefix('v')?;
+        if digits.is_empty() || !digits.chars().all(|value| value.is_ascii_digit()) {
+            return None;
+        }
+        Some(head)
+    }
+    without_version(declared) == Some(requested) || without_version(requested) == Some(declared)
+}
+
 fn fingerprint<T: Serialize>(value: &T) -> String {
     let bytes = serde_json::to_vec(value).expect("source artifact is serializable");
     let digest = Sha256::digest(bytes);
@@ -3698,6 +3738,22 @@ mod tests {
         assert_eq!(ast.functions[0].inputs[0].value_type.text, "i64");
         let span = ast.functions[0].body.returned_value.span();
         assert_eq!(&fixture().text[span.start..span.end], "value");
+    }
+
+    #[test]
+    fn resolver_discovery_accepts_only_matching_versioned_module_names() {
+        assert_eq!(
+            declared_module_name("// note\nmodule mncs.core.status.v1;\n"),
+            Some("mncs.core.status.v1".to_owned())
+        );
+        assert!(module_names_compatible(
+            "mncs.core.status",
+            "mncs.core.status.v1"
+        ));
+        assert!(!module_names_compatible(
+            "mncs.core.identity",
+            "mncs.forge.identity.v1"
+        ));
     }
 
     #[test]

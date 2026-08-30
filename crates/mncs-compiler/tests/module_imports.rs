@@ -805,6 +805,32 @@ fn profile_09_qualified_type_identities_survive_duplicate_record_names() {
 }
 
 #[test]
+fn profile_09_canonicalizes_imported_nominal_record_fields() {
+    let resolver = MapResolver::default().with("lib.dep", &duplicate_record_module("lib.dep"));
+    let program = elaborate(
+        &resolver,
+        "mncs 0.9;\nmodule app.nested_records;\nuse lib.dep as dep;\nrecord Wrapper { value: dep.Box }\nfn wrap(value: dep.Box) -> (result: Wrapper) { return Wrapper { value: value }; }\nfn unwrap(value: Wrapper) -> (result: i64) { return value.value.value; }\n",
+    )
+    .expect("imported nominal record fields elaborate");
+
+    let box_identity = mncs_model::record_type_id("lib.dep", "Box", &[("value", "i64")]);
+    let wrapper = program
+        .record_types
+        .iter()
+        .find(|record| record.name == "Wrapper")
+        .expect("wrapper record");
+    assert_eq!(wrapper.fields[0].field_type, box_identity.0);
+    assert_eq!(
+        wrapper.identity,
+        mncs_model::record_type_id(
+            "app.nested_records",
+            "Wrapper",
+            &[("value", &box_identity.0)]
+        )
+    );
+}
+
+#[test]
 fn profile_09_qualified_finite_identities_survive_duplicate_names() {
     let module = |name: &str| {
         format!(

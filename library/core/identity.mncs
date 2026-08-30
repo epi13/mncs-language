@@ -1,0 +1,62 @@
+mncs 0.10;
+
+// mncs.core.identity — bounded opaque digest values.
+//
+// A digest is a logical 32-byte value. This module deliberately does not
+// claim to implement a cryptographic primitive: digest production is an
+// explicit host/capability boundary, while equality, zero detection, and
+// ordering remain portable MNCS operations. Content-addressed applications
+// can therefore keep identity material in MNCS without smuggling a host
+// pointer, string encoding, or hash implementation into their semantics.
+module mncs.core.identity.v1;
+
+record Digest32 { bytes: [byte; 32] }
+record OrderState { decided: i64, before: i64 }
+
+fn zero_bytes() -> (result: [byte; 32]) {
+    return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+}
+
+fn make(bytes: [byte; 32]) -> (result: Digest32) {
+    return Digest32 { bytes: bytes };
+}
+
+fn zero() -> (result: Digest32) {
+    return make(zero_bytes());
+}
+
+fn equal(left: Digest32, right: Digest32) -> (result: bool) {
+    let left_bytes: [byte; 32] = left.bytes;
+    let right_bytes: [byte; 32] = right.bytes;
+    iterate i over left_bytes carrying same: bool = true {
+        next same = same && left_bytes[i] == right_bytes[i];
+    }
+    return same;
+}
+
+fn is_zero(value: Digest32) -> (result: bool) {
+    let bytes: [byte; 32] = value.bytes;
+    iterate i over bytes carrying zero: bool = true {
+        next zero = zero && bytes[i] == 0;
+    }
+    return zero;
+}
+
+// Lexicographic ordering is the canonical byte ordering for digest keys.
+// The carried state records the first differing byte, so a later byte cannot
+// reverse the result. This stays bounded and allocation-free.
+fn less(left: Digest32, right: Digest32) -> (result: bool) {
+    let left_bytes: [byte; 32] = left.bytes;
+    let right_bytes: [byte; 32] = right.bytes;
+    let initial: OrderState = OrderState { decided: 0, before: 0 };
+    iterate i over left_bytes carrying state: OrderState = initial {
+        let different: i64 = (left_bytes[i] != right_bytes[i]) as i64;
+        let first: i64 = (state.decided == 0) as i64 *% different;
+        next state = OrderState {
+            decided: state.decided +% different,
+            before: state.before +% first *% (left_bytes[i] < right_bytes[i]) as i64
+        };
+    }
+    return state.decided > 0 && state.before > 0;
+}

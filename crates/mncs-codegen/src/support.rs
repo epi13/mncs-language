@@ -128,18 +128,17 @@ pub(crate) fn composite_value_contracts(
 ) -> BTreeMap<String, BackendValueContract> {
     let mut composites = BTreeMap::new();
     for record in &program.record_types {
-        composites.insert(
-            record.name.clone(),
-            BackendValueContract::Record {
-                type_identity: record.identity.clone(),
-                name: record.name.clone(),
-                fields: record
-                    .fields
-                    .iter()
-                    .map(|field| (field.name.clone(), field.field_type.clone()))
-                    .collect(),
-            },
-        );
+        let contract = BackendValueContract::Record {
+            type_identity: record.identity.clone(),
+            name: record.name.clone(),
+            fields: record
+                .fields
+                .iter()
+                .map(|field| (field.name.clone(), field.field_type.clone()))
+                .collect(),
+        };
+        composites.insert(record.name.clone(), contract.clone());
+        composites.insert(record.identity.to_string(), contract);
     }
     for finite in &program.finite_types {
         // Include every declared finite type: payload-free ones are needed as
@@ -158,18 +157,17 @@ pub(crate) fn composite_value_contracts(
                 )
             })
             .collect();
-        composites.insert(
-            finite.name.clone(),
-            BackendValueContract::Finite {
-                type_identity: finite.identity.clone(),
-                variants: finite
-                    .variants
-                    .iter()
-                    .map(|variant| (variant.discriminant, variant.identity.clone()))
-                    .collect(),
-                payloads,
-            },
-        );
+        let contract = BackendValueContract::Finite {
+            type_identity: finite.identity.clone(),
+            variants: finite
+                .variants
+                .iter()
+                .map(|variant| (variant.discriminant, variant.identity.clone()))
+                .collect(),
+            payloads,
+        };
+        composites.insert(finite.name.clone(), contract.clone());
+        composites.insert(finite.identity.to_string(), contract);
     }
     composites
 }
@@ -180,7 +178,7 @@ pub(crate) fn value_contract_for(program: &Program, name: &str) -> BackendValueC
     if let Some(record_type) = program
         .record_types
         .iter()
-        .find(|record| record.name == name)
+        .find(|record| record.name == name || record.identity.0 == name)
     {
         return BackendValueContract::Record {
             type_identity: record_type.identity.clone(),
@@ -195,7 +193,7 @@ pub(crate) fn value_contract_for(program: &Program, name: &str) -> BackendValueC
     if let Some(finite_type) = program
         .finite_types
         .iter()
-        .find(|finite_type| finite_type.name == name)
+        .find(|finite_type| finite_type.name == name || finite_type.identity.0 == name)
     {
         // A type is boxed when ANY variant carries a payload;
         // every variant then gets a layout entry (maybe empty).
@@ -908,6 +906,40 @@ int main(int argc, char **argv) {{
 #[cfg(test)]
 mod driver_tests {
     use super::*;
+    use mncs_model::{FiniteType, FiniteVariant};
+
+    #[test]
+    fn full_semantic_finite_identity_resolves_to_a_finite_contract() {
+        let identity = mncs_model::SemanticId("mncs:0.2:finite-type:example::Status".to_owned());
+        let program = Program {
+            schema_version: mncs_model::SUPPORTED_SCHEMA_VERSION.to_owned(),
+            module: "example".to_owned(),
+            dependencies: Vec::new(),
+            finite_types: vec![FiniteType {
+                identity: identity.clone(),
+                name: "Status".to_owned(),
+                variants: vec![FiniteVariant {
+                    identity: mncs_model::SemanticId(
+                        "mncs:0.2:finite-variant:example::Status::Pass".to_owned(),
+                    ),
+                    name: "Pass".to_owned(),
+                    discriminant: 0,
+                    payload: Vec::new(),
+                }],
+            }],
+            record_types: Vec::new(),
+            assumptions: Vec::new(),
+            binding_table: None,
+            functions: Vec::new(),
+            generic_specializations: Vec::new(),
+        };
+
+        assert!(matches!(
+            value_contract_for(&program, identity.as_str()),
+            BackendValueContract::Finite { .. }
+        ));
+        assert!(composite_value_contracts(&program).contains_key(identity.as_str()));
+    }
 
     #[test]
     fn cell_runtime_driver_defines_the_canonical_symbols() {

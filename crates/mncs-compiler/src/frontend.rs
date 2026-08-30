@@ -1559,9 +1559,16 @@ fn elaborate_linked_module(
                 ));
                 continue;
             }
+            let field_type = profile_type(
+                &field.value_type.text,
+                field.value_type.span,
+                &finite_types_by_name,
+                &provisional_record_types,
+                &mut diagnostics,
+            );
             fields.push(RecordField {
                 name: field.name.text.clone(),
-                field_type: field.value_type.text.clone(),
+                field_type: canonical_value_type(&field.value_type.text, &field_type),
             });
         }
         fields.sort_by(|left, right| left.name.cmp(&right.name));
@@ -6402,6 +6409,28 @@ fn profile_type(
             name: record_type.name.clone(),
         };
     }
+    // Record fields and signatures are canonicalized to their declaring
+    // nominal identity after linking. Keep the type resolver symmetric with
+    // that representation so a later field projection can rehydrate the
+    // same nominal type instead of treating the identity as an unknown name.
+    if let Some(finite_type) = finite_types
+        .values()
+        .find(|candidate| candidate.identity.0 == name)
+    {
+        return BodyType::Finite {
+            identity: finite_type.identity.clone(),
+            name: finite_type.name.clone(),
+        };
+    }
+    if let Some(record_type) = record_types
+        .values()
+        .find(|candidate| candidate.identity.0 == name)
+    {
+        return BodyType::Record {
+            identity: record_type.identity.clone(),
+            name: record_type.name.clone(),
+        };
+    }
     let parametric = BodyType::from_semantic_name(name);
     if matches!(parametric, BodyType::Mask { .. })
         || matches!(
@@ -6564,10 +6593,20 @@ fn profile_sequence_type(
         }
         mncs_model::SequenceBound::Exact(length)
     };
-    if finite_types.get(element_text).is_some() || record_types.get(element_text).is_some() {
+    let finite = finite_types.get(element_text).or_else(|| {
+        finite_types
+            .values()
+            .find(|candidate| candidate.identity.0 == element_text)
+    });
+    let record = record_types.get(element_text).or_else(|| {
+        record_types
+            .values()
+            .find(|candidate| candidate.identity.0 == element_text)
+    });
+    if finite.is_some() || record.is_some() {
         // Nominal elements resolve through profile_type on a fresh diagnostic
         // budget; reuse the direct maps to keep this helper side-effect free.
-        if let Some(finite) = finite_types.get(element_text) {
+        if let Some(finite) = finite {
             return Some(BodyType::Sequence {
                 element: Box::new(BodyType::Finite {
                     identity: finite.identity.clone(),
@@ -6576,7 +6615,7 @@ fn profile_sequence_type(
                 bound,
             });
         }
-        let record = record_types.get(element_text)?;
+        let record = record?;
         return Some(BodyType::Sequence {
             element: Box::new(BodyType::Record {
                 identity: record.identity.clone(),
