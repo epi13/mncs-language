@@ -71,7 +71,8 @@ Promotion is a policy decision, not a side effect of successful generation. A ca
 
 ## Micro-debugging
 
-The recursive model is intended to avoid depending exclusively on enormous Clang, LLVM, Joern, or whole-program reports. The semantic graph should let the Forge ask bounded questions such as:
+The recursive model is intended to avoid depending exclusively on enormous compiler, graph-analysis,
+or whole-program reports. The semantic graph should let the Forge ask bounded questions such as:
 
 ```text
 Why did property transfer.conservation fail?

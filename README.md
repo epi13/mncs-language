@@ -141,7 +141,7 @@ calls/capabilities, completion modes, and obligations remain visible in semantic
 artifacts. The typed corpus checks expected status/value, a backend-specific step ceiling, and the
 absence of unexpected effects. See [Source Profile 0.4](docs/source-profile-0.4.md) and [RFC
 0043](rfcs/0043-machine-native-source-profile-0.4-bounded-iteration.md). The exact local commands,
-fingerprints, Joern comparison, compatibility checks, and scoped non-claims are recorded in the
+fingerprints, structural comparison, compatibility checks, and scoped non-claims are recorded in the
 [Profile 0.4 development evidence](docs/development-evidence/source-profile-0.4-bounded-iteration-cre3-2026-08.md).
 
 `experiment execute BACKEND_ARTIFACT CORPUS` executes an already frozen artifact without recompiling it, which is the narrow runtime boundary for Fabric packaging. Execution corpus 0.3 also supports bounded stateful traces: named calls pass logical returned values through `previous_result` references, retaining a digest for every transition and a complete final observation. Adding `--baseline RESULT --output-dir DIR` turns the same boundary into an identity-bound replication: it fails closed on any corpus, artifact, or baseline identity mismatch and seals a replicated experiment result with fresh bounded observations. `experiment inspect RESULT` verifies all content identities before reporting the bounded observation. See [the language experiment contract](docs/language-experiment-contract.md) and [backend adapter specification](spec/backend-adapters.md).
