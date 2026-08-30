@@ -5,7 +5,10 @@
 //! bounded identity trace, and returns explicit results for unsupported or
 //! resource-bounded cases.
 
-use std::collections::BTreeMap;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +27,10 @@ pub const EXECUTION_CORPUS_SCHEMA_VERSION_0_3: &str = "0.3";
 pub const EXECUTION_COMPARISON_SCHEMA_VERSION: &str = "0.1";
 pub const STATEFUL_EXECUTION_SCHEMA_VERSION: &str = "0.1";
 pub const STATEFUL_EXECUTION_COMPARISON_SCHEMA_VERSION: &str = "0.1";
-pub const MAX_EXECUTION_BUDGET: u64 = 1_000_000;
+/// Maximum bounded reference work for one request. Large aggregate model
+/// finals may legitimately cross one million SSA instructions; the bound is
+/// still finite and is surfaced as `BudgetExhausted` when exceeded.
+pub const MAX_EXECUTION_BUDGET: u64 = 8_000_000;
 pub const MAX_STATEFUL_CALLS: u32 = 4096;
 const MAX_TRACE_ENTRIES: usize = 256;
 
@@ -62,7 +68,7 @@ pub enum ExecutionValue {
         /// Absent/empty for payload-free variants; the serialized form of
         /// payload-free values is unchanged.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        payload: Vec<(String, ExecutionValue)>,
+        payload: Arc<Vec<(String, ExecutionValue)>>,
     },
     /// A logical record value.  Fields are kept in canonical (sorted) name
     /// order; this is the *logical* value model — no physical layout, offset,
@@ -70,7 +76,7 @@ pub enum ExecutionValue {
     Record {
         type_identity: SemanticId,
         name: String,
-        fields: Vec<(String, ExecutionValue)>,
+        fields: Arc<Vec<(String, ExecutionValue)>>,
     },
     /// A byte-oriented logical value (Profile 0.7). The domain is 0..=255;
     /// no host pointer or storage shape participates in meaning.
@@ -80,16 +86,16 @@ pub enum ExecutionValue {
     /// A bounded sequence's logical value: exactly its ordered element
     /// values. Length facts come from the type, not from the value.
     Sequence {
-        values: Vec<ExecutionValue>,
+        values: Arc<Vec<ExecutionValue>>,
     },
     /// Logical vector lanes. No storage/register representation participates
     /// in this reference value.
     Vector {
-        values: Vec<ExecutionValue>,
+        values: Arc<Vec<ExecutionValue>>,
     },
     /// Logical lane predicates. Backends may realize these as packed bits.
     Mask {
-        lanes: Vec<bool>,
+        lanes: Arc<Vec<bool>>,
     },
 }
 
@@ -378,6 +384,139 @@ impl StatefulExecutionResult {
     }
 }
 
+/// An in-process checkpoint for a validated stateful prefix. The checkpoint
+/// is deliberately opaque to backend adapters: its prefix identity covers the
+/// corpus name, case bounds, and exact step definitions, while the backend
+/// session that stores it must additionally bind it to an artifact identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatefulExecutionCheckpoint {
+    schema_version: String,
+    prefix_identity: SemanticId,
+    next_step_index: usize,
+    previous: BTreeMap<String, Vec<ExecutionValue>>,
+    observations: Vec<StatefulStepObservation>,
+    returned: Vec<ExecutionValue>,
+    steps: u64,
+    calls: u32,
+    program_identity: Option<SemanticId>,
+    program_fingerprint: Option<String>,
+    checkpoint_identity: SemanticId,
+}
+
+impl StatefulExecutionCheckpoint {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        corpus_name: &str,
+        case: &StatefulExecutionCase,
+        next_step_index: usize,
+        previous: BTreeMap<String, Vec<ExecutionValue>>,
+        observations: Vec<StatefulStepObservation>,
+        returned: Vec<ExecutionValue>,
+        steps: u64,
+        calls: u32,
+        program_identity: Option<SemanticId>,
+        program_fingerprint: Option<String>,
+    ) -> Self {
+        let mut checkpoint = Self {
+            schema_version: STATEFUL_EXECUTION_SCHEMA_VERSION.to_owned(),
+            prefix_identity: stateful_prefix_identity(corpus_name, case, next_step_index),
+            next_step_index,
+            previous,
+            observations,
+            returned,
+            steps,
+            calls,
+            program_identity,
+            program_fingerprint,
+            checkpoint_identity: SemanticId(String::new()),
+        };
+        checkpoint.seal();
+        checkpoint
+    }
+
+    fn seal(&mut self) {
+        self.checkpoint_identity = SemanticId(String::new());
+        let material = (
+            &self.schema_version,
+            &self.prefix_identity,
+            self.next_step_index,
+            &self.previous,
+            &self.observations,
+            &self.returned,
+            self.steps,
+            self.calls,
+            &self.program_identity,
+            &self.program_fingerprint,
+        );
+        let canonical = canonical_json_value(&material).expect("checkpoint is serializable");
+        self.checkpoint_identity = SemanticId(format!(
+            "mncs:language:stateful-checkpoint:{}",
+            sha256_hex(canonical.as_bytes())
+        ));
+    }
+
+    pub fn next_step_index(&self) -> usize {
+        self.next_step_index
+    }
+
+    pub fn identity_is_valid_for(&self, corpus_name: &str, case: &StatefulExecutionCase) -> bool {
+        let prefix_step_ids = case.steps[..self.next_step_index]
+            .iter()
+            .map(|step| step.id.as_str())
+            .collect::<BTreeSet<_>>();
+        self.schema_version == STATEFUL_EXECUTION_SCHEMA_VERSION
+            && self.next_step_index <= case.steps.len()
+            && self.prefix_identity
+                == stateful_prefix_identity(corpus_name, case, self.next_step_index)
+            && self.observations.len() == self.next_step_index
+            && self.calls == self.next_step_index as u32
+            && self.checkpoint_identity == {
+                let mut copy = self.clone();
+                copy.seal();
+                copy.checkpoint_identity
+            }
+            && case.steps[self.next_step_index..].iter().all(|step| {
+                step.arguments.iter().all(|argument| match argument {
+                    StatefulArgument::Literal(_) => true,
+                    StatefulArgument::PreviousResult {
+                        step_id,
+                        result_index,
+                    } => {
+                        !prefix_step_ids.contains(step_id.as_str())
+                            || self
+                                .previous
+                                .get(step_id)
+                                .and_then(|values| values.get(*result_index as usize))
+                                .is_some()
+                    }
+                })
+            })
+    }
+}
+
+/// Stable identity for an executable stateful prefix. Expected observations
+/// are included in the step definitions, so a checkpoint cannot silently
+/// cross an observation-policy or bound change.
+pub fn stateful_prefix_identity(
+    corpus_name: &str,
+    case: &StatefulExecutionCase,
+    next_step_index: usize,
+) -> SemanticId {
+    let end = next_step_index.min(case.steps.len());
+    let material = (
+        STATEFUL_EXECUTION_SCHEMA_VERSION,
+        corpus_name,
+        case.maximum_calls,
+        case.maximum_total_steps,
+        &case.steps[..end],
+    );
+    let canonical = canonical_json_value(&material).expect("stateful prefix is serializable");
+    SemanticId(format!(
+        "mncs:language:stateful-prefix:{}",
+        sha256_hex(canonical.as_bytes())
+    ))
+}
+
 /// Execute a bounded sequence while retaining only logical returned values.
 /// The closure is the backend boundary; all sequencing, reference resolution,
 /// bounds, and trace identity remain language-owned.
@@ -389,6 +528,62 @@ pub fn execute_stateful_case<F>(
 where
     F: FnMut(&ExecutionRequest) -> StatefulCallResult,
 {
+    execute_stateful_case_owned(corpus_name, case, |request| execute(&request))
+}
+
+/// Owned-request variant for backend sessions. The request is constructed by
+/// the language-owned runner and transferred into the session, so large
+/// immutable checkpoint values are not deep-cloned at the call boundary.
+pub fn execute_stateful_case_owned<F>(
+    corpus_name: &str,
+    case: &StatefulExecutionCase,
+    mut execute: F,
+) -> StatefulExecutionResult
+where
+    F: FnMut(ExecutionRequest) -> StatefulCallResult,
+{
+    let mut checkpoints = Vec::new();
+    execute_stateful_case_inner(corpus_name, case, &mut execute, None, &[], &mut checkpoints)
+}
+
+/// Execute a stateful trace from an identity-checked prefix checkpoint and
+/// optionally capture selected successful prefixes for later sibling traces.
+/// Checkpoints never bypass per-step request execution after the selected
+/// prefix, and an invalid checkpoint fails closed as an invalid request.
+pub fn execute_stateful_case_with_checkpoint<F>(
+    corpus_name: &str,
+    case: &StatefulExecutionCase,
+    checkpoint: Option<&StatefulExecutionCheckpoint>,
+    checkpoint_indices: &[usize],
+    mut execute: F,
+) -> (StatefulExecutionResult, Vec<StatefulExecutionCheckpoint>)
+where
+    F: FnMut(ExecutionRequest) -> StatefulCallResult,
+{
+    let mut checkpoints = Vec::new();
+    let result = execute_stateful_case_inner(
+        corpus_name,
+        case,
+        &mut execute,
+        checkpoint,
+        checkpoint_indices,
+        &mut checkpoints,
+    );
+    (result, checkpoints)
+}
+
+fn execute_stateful_case_inner<F>(
+    corpus_name: &str,
+    case: &StatefulExecutionCase,
+    execute: &mut F,
+    checkpoint: Option<&StatefulExecutionCheckpoint>,
+    checkpoint_indices: &[usize],
+    captured_checkpoints: &mut Vec<StatefulExecutionCheckpoint>,
+) -> StatefulExecutionResult
+where
+    F: FnMut(ExecutionRequest) -> StatefulCallResult,
+{
+    crate::record_counter("stateful_trace");
     let corpus_identity = canonical_json_value(&(corpus_name, case))
         .map(|json| sha256_hex(json.as_bytes()))
         .unwrap_or_default();
@@ -418,28 +613,86 @@ where
         return result;
     }
 
-    let mut previous = BTreeMap::<String, Vec<ExecutionValue>>::new();
-    for (index, step) in case.steps.iter().enumerate() {
-        let arguments = step
-            .arguments
-            .iter()
-            .map(|argument| match argument {
-                StatefulArgument::Literal(value) => Ok(value.clone()),
-                StatefulArgument::PreviousResult {
-                    step_id,
-                    result_index,
-                } => previous
-                    .get(step_id)
-                    .and_then(|values| values.get(*result_index as usize))
-                    .cloned()
-                    .ok_or_else(|| {
-                        format!(
-                            "stateful step {:?} references unavailable result {} from {:?}",
-                            step.id, result_index, step_id
-                        )
-                    }),
-            })
-            .collect::<Result<Vec<_>, _>>();
+    let start_index = checkpoint.map_or(0, StatefulExecutionCheckpoint::next_step_index);
+    if checkpoint.is_some_and(|checkpoint| !checkpoint.identity_is_valid_for(corpus_name, case)) {
+        result.failure = Some(ExecutionFailure {
+            identity: None,
+            reason: "stateful prefix checkpoint identity or retained references are invalid"
+                .to_owned(),
+        });
+        result.seal();
+        return result;
+    }
+    if let Some(checkpoint) = checkpoint {
+        result.status = ExecutionStatus::Returned;
+        result.observations = checkpoint.observations.clone();
+        result.returned = checkpoint.returned.clone();
+        result.steps = checkpoint.steps;
+        result.calls = checkpoint.calls;
+        result.program_identity = checkpoint.program_identity.clone();
+        result.program_fingerprint = checkpoint.program_fingerprint.clone();
+    }
+    let mut remaining_references = BTreeMap::<String, u32>::new();
+    for step in &case.steps[start_index..] {
+        for argument in &step.arguments {
+            if let StatefulArgument::PreviousResult { step_id, .. } = argument {
+                *remaining_references.entry(step_id.clone()).or_default() += 1;
+            }
+        }
+    }
+    let mut previous = checkpoint
+        .map(|checkpoint| checkpoint.previous.clone())
+        .unwrap_or_default();
+    for (index, step) in case.steps.iter().enumerate().skip(start_index) {
+        crate::record_counter("stateful_call");
+        let arguments = (|| {
+            let mut arguments = Vec::with_capacity(step.arguments.len());
+            for argument in &step.arguments {
+                let value = match argument {
+                    StatefulArgument::Literal(value) => value.clone(),
+                    StatefulArgument::PreviousResult {
+                        step_id,
+                        result_index,
+                    } => {
+                        let remaining = remaining_references
+                            .get_mut(step_id)
+                            .expect("validated stateful reference count");
+                        *remaining = remaining.saturating_sub(1);
+                        if *remaining == 0 {
+                            let mut values = previous.remove(step_id).ok_or_else(|| {
+                                format!(
+                                    "stateful step {:?} references unavailable result {} from {:?}",
+                                    step.id, result_index, step_id
+                                )
+                            })?;
+                            values
+                                .get(*result_index as usize)
+                                .is_some()
+                                .then(|| values.swap_remove(*result_index as usize))
+                                .ok_or_else(|| {
+                                    format!(
+                                        "stateful step {:?} references unavailable result {} from {:?}",
+                                        step.id, result_index, step_id
+                                    )
+                                })?
+                        } else {
+                            previous
+                                .get(step_id)
+                                .and_then(|values| values.get(*result_index as usize))
+                                .cloned()
+                                .ok_or_else(|| {
+                                    format!(
+                                        "stateful step {:?} references unavailable result {} from {:?}",
+                                        step.id, result_index, step_id
+                                    )
+                                })?
+                        }
+                    }
+                };
+                arguments.push(value);
+            }
+            Ok::<Vec<ExecutionValue>, String>(arguments)
+        })();
         let arguments = match arguments {
             Ok(arguments) => arguments,
             Err(reason) => {
@@ -458,7 +711,7 @@ where
             step_budget: step.step_budget,
             policy: step.policy.clone(),
         };
-        let call = execute(&request);
+        let call = execute(request);
         result.calls += 1;
         result.steps = match result.steps.checked_add(call.steps) {
             Some(steps) => steps,
@@ -481,12 +734,16 @@ where
             .transpose()
             .unwrap_or(None);
         let terminal = call.status != ExecutionStatus::Returned || index + 1 == case.steps.len();
+        let checkpoint_returned = checkpoint_indices
+            .binary_search(&(index + 1))
+            .is_ok()
+            .then(|| call.returned.clone());
+        let retain_returned = terminal || step.observe_returned || step.expected.is_some();
         result.observations.push(StatefulStepObservation {
             step_id: step.id.clone(),
             target: step.target.clone(),
             status: call.status,
-            returned: (terminal || step.observe_returned || step.expected.is_some())
-                .then_some(call.returned.clone()),
+            returned: retain_returned.then(|| call.returned.clone()),
             returned_digest,
             steps: call.steps,
             effects: call.effects,
@@ -497,7 +754,6 @@ where
             result.failure = call.failure;
             break;
         }
-        previous.insert(step.id.clone(), call.returned.clone());
         if let Some(maximum) = case.maximum_total_steps {
             if result.steps > maximum {
                 result.status = ExecutionStatus::BudgetExhausted;
@@ -511,8 +767,35 @@ where
                 break;
             }
         }
-        result.returned = call.returned;
+        if terminal {
+            result.returned = call.returned;
+        } else if remaining_references
+            .get(&step.id)
+            .copied()
+            .unwrap_or_default()
+            > 0
+        {
+            previous.insert(step.id.clone(), call.returned);
+        }
         result.status = ExecutionStatus::Returned;
+        if let Some(returned) = checkpoint_returned {
+            let mut checkpoint_previous = previous.clone();
+            checkpoint_previous
+                .entry(step.id.clone())
+                .or_insert_with(|| returned.clone());
+            captured_checkpoints.push(StatefulExecutionCheckpoint::new(
+                corpus_name,
+                case,
+                index + 1,
+                checkpoint_previous,
+                result.observations.clone(),
+                returned,
+                result.steps,
+                result.calls,
+                result.program_identity.clone(),
+                result.program_fingerprint.clone(),
+            ));
+        }
     }
     if result.calls > case.maximum_calls {
         result.status = ExecutionStatus::BudgetExhausted;
@@ -1034,7 +1317,7 @@ fn execute_operation(
                 ExecutionValue::Record {
                     type_identity: type_identity.clone(),
                     name: output.ty.semantic_name(),
-                    fields,
+                    fields: fields.into(),
                 },
             );
         }
@@ -1309,7 +1592,7 @@ fn execute_operation(
             values.insert(
                 operation.results[0].id.clone(),
                 ExecutionValue::Sequence {
-                    values: element_values,
+                    values: element_values.into(),
                 },
             );
         }
@@ -1332,7 +1615,9 @@ fn execute_operation(
             }
             values.insert(
                 operation.results[0].id.clone(),
-                ExecutionValue::Vector { values: vector },
+                ExecutionValue::Vector {
+                    values: vector.into(),
+                },
             );
         }
         BodyOperationKind::VectorSplat { lanes, .. } => {
@@ -1350,7 +1635,7 @@ fn execute_operation(
             values.insert(
                 operation.results[0].id.clone(),
                 ExecutionValue::Vector {
-                    values: vec![value; *lanes as usize],
+                    values: vec![value; *lanes as usize].into(),
                 },
             );
         }
@@ -1438,11 +1723,13 @@ fn execute_operation(
                 );
                 return Some(result.clone());
             }
-            let mut updated = source.clone();
+            let mut updated = source.as_ref().clone();
             updated[index as usize] = element;
             values.insert(
                 operation.results[0].id.clone(),
-                ExecutionValue::Vector { values: updated },
+                ExecutionValue::Vector {
+                    values: updated.into(),
+                },
             );
         }
         BodyOperationKind::VectorBinary {
@@ -1471,7 +1758,9 @@ fn execute_operation(
             };
             values.insert(
                 operation.results[0].id.clone(),
-                ExecutionValue::Vector { values: produced },
+                ExecutionValue::Vector {
+                    values: produced.into(),
+                },
             );
         }
         BodyOperationKind::VectorCompare {
@@ -1497,7 +1786,9 @@ fn execute_operation(
             };
             values.insert(
                 operation.results[0].id.clone(),
-                ExecutionValue::Mask { lanes },
+                ExecutionValue::Mask {
+                    lanes: lanes.into(),
+                },
             );
         }
         BodyOperationKind::MaskBinary { operator, .. } => {
@@ -1517,7 +1808,8 @@ fn execute_operation(
                     "or" => *left || *right,
                     _ => *left != *right,
                 })
-                .collect();
+                .collect::<Vec<_>>()
+                .into();
             values.insert(
                 operation.results[0].id.clone(),
                 ExecutionValue::Mask { lanes },
@@ -1537,7 +1829,7 @@ fn execute_operation(
             values.insert(
                 operation.results[0].id.clone(),
                 ExecutionValue::Mask {
-                    lanes: lanes.iter().map(|lane| !lane).collect(),
+                    lanes: lanes.iter().map(|lane| !lane).collect::<Vec<_>>().into(),
                 },
             );
         }
@@ -1638,7 +1930,8 @@ fn execute_operation(
                             false_lanes[index].clone()
                         }
                     })
-                    .collect();
+                    .collect::<Vec<_>>()
+                    .into();
                 values.insert(
                     operation.results[0].id.clone(),
                     ExecutionValue::Vector { values: selected },
@@ -1736,7 +2029,9 @@ fn execute_operation(
             updated[index as usize] = element;
             values.insert(
                 operation.results[0].id.clone(),
-                ExecutionValue::Sequence { values: updated },
+                ExecutionValue::Sequence {
+                    values: updated.into(),
+                },
             );
         }
         BodyOperationKind::SequenceProject { bound: _, evidence } => {
@@ -1873,7 +2168,7 @@ fn execute_operation(
             values.insert(
                 operation.results[0].id.clone(),
                 ExecutionValue::Sequence {
-                    values: source[start as usize..end as usize].to_vec(),
+                    values: source[start as usize..end as usize].to_vec().into(),
                 },
             );
         }
@@ -1910,7 +2205,7 @@ fn execute_operation(
                     type_identity: type_identity.clone(),
                     variant_identity: variant_identity.clone(),
                     discriminant: *discriminant,
-                    payload,
+                    payload: payload.into(),
                 },
             );
         }
@@ -2426,10 +2721,12 @@ fn normalize_value(
             if values.len() == *lanes as usize =>
         {
             let mut normalized = Vec::with_capacity(values.len());
-            for value in values {
+            for value in values.iter() {
                 normalized.push(normalize_value(program, value, element)?);
             }
-            Some(ExecutionValue::Vector { values: normalized })
+            Some(ExecutionValue::Vector {
+                values: normalized.into(),
+            })
         }
         (ExecutionValue::Mask { lanes: bits }, BodyType::Mask { lanes })
             if bits.len() == *lanes as usize =>
@@ -2451,7 +2748,9 @@ fn normalize_sequence(
     for value in values {
         normalized.push(normalize_value(program, value, element_type)?);
     }
-    Some(ExecutionValue::Sequence { values: normalized })
+    Some(ExecutionValue::Sequence {
+        values: normalized.into(),
+    })
 }
 
 pub(crate) fn valid_finite_value(
@@ -3311,5 +3610,103 @@ mod tests {
         assert!(!called);
         assert!(result.failure.is_some());
         assert!(result.identity_is_valid());
+    }
+
+    #[test]
+    fn stateful_prefix_checkpoint_reuses_only_the_verified_prefix() {
+        let integer = |value| ExecutionValue::Integer {
+            value,
+            ty: IntegerType {
+                bits: 64,
+                signed: true,
+            },
+        };
+        let previous = |step_id: &str| StatefulArgument::PreviousResult {
+            step_id: step_id.to_owned(),
+            result_index: 0,
+        };
+        let step =
+            |id: &str, function: &str, arguments: Vec<StatefulArgument>| StatefulExecutionStep {
+                id: id.to_owned(),
+                target: ExecutionTarget {
+                    module: "m".to_owned(),
+                    function: function.to_owned(),
+                },
+                arguments,
+                step_budget: 4,
+                policy: ExecutionPolicy::default(),
+                expected: None,
+                expected_status: Some(ExecutionStatus::Returned),
+                observe_returned: false,
+            };
+        let case = StatefulExecutionCase {
+            id: "checkpointed-sequence".to_owned(),
+            steps: vec![
+                step("init", "init", Vec::new()),
+                step("next", "next", vec![previous("init")]),
+                step("finish", "finish", vec![previous("next")]),
+            ],
+            maximum_calls: 3,
+            maximum_total_steps: Some(12),
+            expected_final: None,
+            expected_final_status: Some(ExecutionStatus::Returned),
+        };
+        let mut first_requests = 0;
+        let (_first, checkpoints) =
+            execute_stateful_case_with_checkpoint("test-corpus", &case, None, &[1], |request| {
+                first_requests += 1;
+                let value = request
+                    .arguments
+                    .first()
+                    .and_then(|value| match value {
+                        ExecutionValue::Integer { value, .. } => Some(*value + 1),
+                        _ => None,
+                    })
+                    .unwrap_or(1);
+                StatefulCallResult {
+                    status: ExecutionStatus::Returned,
+                    returned: vec![integer(value)],
+                    steps: 1,
+                    effects: Vec::new(),
+                    failure: None,
+                    program_identity: Some(SemanticId("program".to_owned())),
+                    program_fingerprint: Some("fingerprint".to_owned()),
+                }
+            });
+        assert_eq!(first_requests, 3);
+        assert_eq!(checkpoints.len(), 1);
+        assert!(checkpoints[0].identity_is_valid_for("test-corpus", &case));
+
+        let mut resumed_requests = 0;
+        let (resumed, no_checkpoints) = execute_stateful_case_with_checkpoint(
+            "test-corpus",
+            &case,
+            checkpoints.first(),
+            &[],
+            |request| {
+                resumed_requests += 1;
+                let value = request
+                    .arguments
+                    .first()
+                    .and_then(|value| match value {
+                        ExecutionValue::Integer { value, .. } => Some(*value + 1),
+                        _ => None,
+                    })
+                    .unwrap_or(1);
+                StatefulCallResult {
+                    status: ExecutionStatus::Returned,
+                    returned: vec![integer(value)],
+                    steps: 1,
+                    effects: Vec::new(),
+                    failure: None,
+                    program_identity: Some(SemanticId("program".to_owned())),
+                    program_fingerprint: Some("fingerprint".to_owned()),
+                }
+            },
+        );
+        assert_eq!(resumed_requests, 2);
+        assert!(no_checkpoints.is_empty());
+        assert_eq!(resumed.returned, vec![integer(3)]);
+        assert!(resumed.identity_is_valid());
     }
 }

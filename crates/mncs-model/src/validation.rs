@@ -33,6 +33,7 @@ pub struct Diagnostic {
 
 impl Program {
     pub fn validate(&self) -> ValidationReport {
+        crate::record_counter("semantic_validation");
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
 

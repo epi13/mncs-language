@@ -43,6 +43,7 @@ pub const REFERENCE_COMPILER_NAME: &str = "mncs-reference-compiler";
 pub const REFERENCE_PIPELINE_NAME: &str = "mncs-source-semantic-hir-ssa";
 
 fn trace_timing(stage: &str, started: Instant) {
+    mncs_model::record_stage(stage, started.elapsed());
     if std::env::var_os("MNCS_TIMINGS").is_some() {
         eprintln!(
             "mncs-timing stage={} elapsed_ms={}",

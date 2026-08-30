@@ -19,6 +19,7 @@ use crate::{
 pub const HIGH_LEVEL_IR_SCHEMA_VERSION: &str = "0.4";
 
 fn trace_timing(stage: &str, started: Instant) {
+    crate::record_stage(stage, started.elapsed());
     if std::env::var_os("MNCS_TIMINGS").is_some() {
         eprintln!(
             "mncs-timing stage={} elapsed_ms={}",
@@ -403,6 +404,7 @@ impl HighLevelIr {
 
 impl Program {
     pub fn lower_to_ir(&self) -> Result<HighLevelIr, IrError> {
+        crate::record_counter("hir_build");
         let started = Instant::now();
         let report = self.validate();
         if !report.valid {

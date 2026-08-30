@@ -27,6 +27,7 @@ use mncs_syntax::{
 use serde::Serialize;
 
 fn trace_timing(stage: &str, started: Instant) {
+    mncs_model::record_stage(stage, started.elapsed());
     if std::env::var_os("MNCS_TIMINGS").is_some() {
         eprintln!(
             "mncs-timing stage={} elapsed_ms={}",
@@ -118,6 +119,7 @@ impl ReferenceCompiler {
             ast,
             diagnostics,
         } = parse(&envelope);
+        mncs_model::record_counter("source_parse");
         trace_timing("parse", started);
         let mut artifacts = vec![
             CompilerArtifactRef::new(

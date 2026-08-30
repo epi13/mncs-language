@@ -240,6 +240,7 @@ pub fn encode_module(module: &WasmModule) -> Vec<u8> {
 }
 
 pub fn decode_module(bytes: &[u8]) -> Result<WasmModule, WasmTrap> {
+    mncs_model::record_counter("artifact_decode");
     if bytes.len() < 8 || bytes[..4] != WASM_MAGIC || bytes[4..8] != WASM_VERSION {
         return Err(trap(
             ExecutionStatus::InvalidRequest,
@@ -1145,7 +1146,7 @@ fn write_marshal(
             })?;
             let payload = match value {
                 ExecutionValue::Finite { payload, .. } => payload.clone(),
-                _ => Vec::new(),
+                _ => Vec::new().into(),
             };
             if variant.fields.len() != payload.len() {
                 return Err(trap(
@@ -1388,7 +1389,7 @@ fn read_slot(runtime: &Runtime, ty: &MarshalTy, address: i64) -> Result<Executio
                 type_identity: type_identity.clone(),
                 variant_identity,
                 discriminant,
-                payload: Vec::new(),
+                payload: Vec::new().into(),
             })
         }
         MarshalTy::BoxedFinite(_) | MarshalTy::Record(_) => {
@@ -1433,7 +1434,7 @@ fn read_marshal(
                 type_identity: layout.type_identity.clone(),
                 variant_identity: variant.variant_identity.clone(),
                 discriminant: tag,
-                payload,
+                payload: payload.into(),
             })
         }
         MarshalTy::Record(layout) => {
@@ -1445,7 +1446,7 @@ fn read_marshal(
             Ok(ExecutionValue::Record {
                 type_identity: layout.type_identity.clone(),
                 name: layout.name.clone(),
-                fields: values,
+                fields: values.into(),
             })
         }
         MarshalTy::Sequence { element, length } => {
@@ -1488,7 +1489,9 @@ fn read_byte_view(
             value: i128::from(runtime.load(address + i64::from(index), 1)? as u8),
         });
     }
-    Ok(ExecutionValue::Sequence { values })
+    Ok(ExecutionValue::Sequence {
+        values: values.into(),
+    })
 }
 
 fn read_sequence_cell(
@@ -1502,7 +1505,9 @@ fn read_sequence_cell(
         let slot = address + i64::from(index) * 8;
         values.push(read_slot(runtime, element, slot)?);
     }
-    Ok(ExecutionValue::Sequence { values })
+    Ok(ExecutionValue::Sequence {
+        values: values.into(),
+    })
 }
 
 fn read_vector_cell(
@@ -1520,7 +1525,9 @@ fn read_vector_cell(
             ty: element,
         });
     }
-    Ok(ExecutionValue::Vector { values })
+    Ok(ExecutionValue::Vector {
+        values: values.into(),
+    })
 }
 
 /// Execute an export with logical composite marshaling. Composite arguments
@@ -1588,7 +1595,7 @@ pub fn execute_function_typed(
                     type_identity: type_identity.clone(),
                     variant_identity,
                     discriminant,
-                    payload: Vec::new(),
+                    payload: Vec::new().into(),
                 }
             }
             MarshalTy::BoxedFinite(_) | MarshalTy::Record(_) => read_marshal(&runtime, ty, *raw)?,
