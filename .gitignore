@@ -1,7 +1,7 @@
 /target/
 .mncs-forge/
-forge/evidence/
-forge/generated/
+integration/forge/evidence/
+integration/forge/generated/
 .DS_Store
 *.swp
 *.swo

@@ -73,7 +73,7 @@ resolution provenance.
 
 | File | Module | Contents |
 | --- | --- | --- |
-| `core/status.mncs` | `mncs.core.status.v1` | `Status { PASS, FAIL, UNKNOWN }`, dominance join (`dominate`), pair/four-way combination over bounded evidence, decidedness predicate, dominance test |
+| `core/status.mncs` | `mncs.core.status.v1` | `Status { PASS, FAIL, UNKNOWN }`, dominance join (`dominate`), pair/four-way combination, bounded `StatusSummary`/`summarize8`, decidedness predicate, dominance test |
 | `core/identity.mncs` | `mncs.core.identity.v1` (Profile 0.10) | bounded 32-byte opaque digest values with portable equality, zero, and lexicographic ordering; digest production stays an explicit host boundary |
 | `core/lineage.mncs` | `mncs.core.lineage.v1` (Profile 0.10) | total root/successor/conflict classification for adjacent digest identities |
 | `core/logic.mncs` | `mncs.core.logic.v1` | total boolean algebra: `bool_not/and/or/implies/xor` |
@@ -108,6 +108,12 @@ closure. Source Profile 0.9 adds qualified and aliased routes plus an
 inspectable `SemanticBindingTable`; see `docs/source-profile-0.9.md`.
 `core/result.mncs` additionally requires the Profile 0.6 payload-sum surface;
 see `docs/source-profile-0.6.md`.
+
+Forge-specific configuration, candidate fixtures, and its protocol adapter live
+under `integration/forge/`. They are consumer integration assets, not part of
+the language or standard-library authority surface. The adapter can request
+language-owned artifacts and observations, but it does not own lifecycle,
+selection, persistence, promotion, or assurance semantics.
 
 ## Contracts and honesty properties
 

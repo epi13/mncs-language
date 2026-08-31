@@ -167,6 +167,41 @@ fn wasm_executes_core_status_record_parameter() {
 }
 
 #[test]
+fn status_summary_exposes_bounded_counts_and_conflict() {
+    let output = binary()
+        .env("MNCS_LIBRARY_PATH", library(""))
+        .args([
+            "execute",
+            &library("core/status.mncs"),
+            &example("execution/library-core-status-summary-request.json"),
+        ])
+        .output()
+        .expect("run status summary");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let result: Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|error| panic!("status summary JSON ({stderr}): {error}"));
+
+    assert_eq!(output.status.code(), Some(0), "{stderr}: {result:#}");
+    assert_eq!(result["status"], "returned");
+    let fields = result["returned"][0]["record"]["fields"]
+        .as_array()
+        .expect("summary record fields");
+    let by_name = fields
+        .iter()
+        .map(|field| (field[0].as_str().expect("field name"), &field[1]))
+        .collect::<std::collections::HashMap<_, _>>();
+    assert_eq!(
+        by_name["status"]["finite"]["variant_identity"],
+        "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL"
+    );
+    assert_eq!(by_name["pass_count"]["integer"]["value"], 1);
+    assert_eq!(by_name["fail_count"]["integer"]["value"], 1);
+    assert_eq!(by_name["unknown_count"]["integer"]["value"], 1);
+    assert_eq!(by_name["observed_count"]["integer"]["value"], 3);
+    assert_eq!(by_name["valid"]["boolean"]["value"], true);
+}
+
+#[test]
 fn json_cursor_preserves_bounded_validity_across_executable_backends() {
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_library_experiment(

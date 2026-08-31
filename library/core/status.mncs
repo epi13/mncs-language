@@ -1,4 +1,4 @@
-mncs 0.5;
+mncs 0.7;
 
 // mncs.core.status — authoritative MNCS status/evidence-dominance lattice.
 //
@@ -11,14 +11,27 @@ mncs 0.5;
 // or delete FAIL. There is intentionally no function here that maps UNKNOWN to
 // PASS under any input.
 //
-// Until module linking lands (RFC 0014), consumers bind to this module by
-// identity-bound differential agreement: their local helpers must agree with
-// these operations over the bounded corpora under examples/library-core.
+// Consumers bind to this module by identity-bound agreement. Application
+// control planes may carry the returned summary as evidence, but this module
+// does not decide authority, promotion, or evaluator independence.
 module mncs.core.status.v1;
 
 enum Status { PASS, FAIL, UNKNOWN }
 
 record StatusPair { left: Status, right: Status }
+
+// A bounded fold result for evidence envelopes. The counts make conflict
+// visible instead of reducing a mixed envelope to one apparently authoritative
+// status. `valid` is false when the caller's declared active count is outside
+// the fixed eight-slot envelope; unused slots are never treated as PASS.
+record StatusSummary {
+    status: Status,
+    pass_count: i64,
+    fail_count: i64,
+    unknown_count: i64,
+    observed_count: i64,
+    valid: bool
+}
 
 // Lattice join. Total over the 3x3 finite domain.
 fn dominate(left: Status, right: Status) -> (result: Status) {
@@ -46,6 +59,55 @@ fn dominate4(first: Status, second: Status, third: Status, fourth: Status) -> (r
     let left: Status = dominate(first, second);
     let right: Status = dominate(third, fourth);
     return dominate(left, right);
+}
+
+fn summary_step(current: StatusSummary, observed: Status, include: bool) -> (result: StatusSummary) {
+    if include {
+        let combined: Status = dominate(current.status, observed);
+        return match observed {
+            PASS => StatusSummary {
+                ..current,
+                status: combined,
+                pass_count: current.pass_count +% 1,
+                observed_count: current.observed_count +% 1
+            },
+            FAIL => StatusSummary {
+                ..current,
+                status: combined,
+                fail_count: current.fail_count +% 1,
+                observed_count: current.observed_count +% 1
+            },
+            UNKNOWN => StatusSummary {
+                ..current,
+                status: combined,
+                unknown_count: current.unknown_count +% 1,
+                observed_count: current.observed_count +% 1
+            },
+        };
+    }
+    return current;
+}
+
+// Reusable bounded status aggregation for control-plane envelopes and other
+// consumers that need counts and conflict visibility in addition to the
+// lattice join. The active prefix is explicit and bounded by the array shape.
+fn summarize8(statuses: [Status; 8], count: byte) -> (result: StatusSummary) {
+    let initial: StatusSummary = StatusSummary {
+        status: Status.UNKNOWN,
+        pass_count: 0,
+        fail_count: 0,
+        unknown_count: 0,
+        observed_count: 0,
+        valid: true
+    };
+    iterate i over statuses carrying summary: StatusSummary = initial {
+        let include: bool = (i as i64) < (count as i64);
+        next summary = summary_step(summary, statuses[i], include);
+    }
+    if (count as i64) > 8 {
+        return StatusSummary { ..summary, valid: false };
+    }
+    return summary;
 }
 
 // A decided status is settled truth: PASS or FAIL. UNKNOWN is undecided by

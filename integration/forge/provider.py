@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Bounded MNCS Language Provider Protocol 0.1 adapter for Forge development."""
+"""Forge consumer adapter for the MNCS Language Provider Protocol 0.1.
+
+This normal host process exposes language-owned checks to Forge. It is not a
+language runtime, compiler authority, lifecycle engine, evaluator, or promotion
+service.
+"""
 
 from __future__ import annotations
 

@@ -327,8 +327,10 @@ The IR command emits a deterministic, inspectable projection with state regions,
 
 ## Forge development harness
 
-`mncs-forge.toml` configures the installed MNCS Forge Provider Protocol adapter in
-`tools/mncs_language_forge_provider.py`. Its bounded development workflows exercise Rust quality,
+`integration/forge/mncs-forge.toml` is an explicit consumer-integration fixture for the installed
+MNCS Forge Provider Protocol. Its adapter lives at `integration/forge/provider.py`; it is a normal
+host-process boundary, not part of MNCS language semantics or a Forge lifecycle implementation.
+Its bounded development workflows exercise Rust quality,
 semantic fixtures, HIR trace integrity, SSA integrity, evidence freshness, bounded body execution,
 independent SSA execution, and the bounded-sum/bounded-range lowering-consistency studies. Forge records are
 development evidence only: local provider execution is not sandboxed, process success alone is not
