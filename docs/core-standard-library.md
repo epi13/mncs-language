@@ -74,6 +74,14 @@ reporting, and an overflow-safe quotient/remainder path. Layout consumers use
 this module as their arithmetic authority and add only consumer-specific cap
 projection.
 
+`mncs.core.lineage.v1` is the corresponding small vocabulary for
+content-addressed parent relationships. It classifies a zero-parent root, an
+adjacent successor whose parent matches the previous identity, and a conflict.
+The module is total and identity-only; it does not infer authority, custody, or
+promotion from a valid link. Forge uses it when projecting epoch and candidate
+history so that adjacent-lineage semantics are shared rather than restated in
+an application host.
+
 `mncs.core` should avoid:
 
 - filesystem, network, clock, process, randomness, environment, or credential authority;

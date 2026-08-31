@@ -1,0 +1,30 @@
+mncs 0.10;
+
+// mncs.core.lineage — total parent/child relations for bounded identities.
+//
+// A zero parent denotes a root. Every other relationship is valid only when
+// the declared parent equals the immediately preceding identity. This small
+// vocabulary is useful to content-addressed applications without introducing
+// strings, maps, mutation, or host authority into their lineage semantics.
+module mncs.core.lineage.v1;
+
+use mncs.core.identity as idlib;
+
+enum Relation { Root, Successor, Conflict }
+
+fn classify(parent: idlib.Digest32, previous: idlib.Digest32) -> (result: Relation) {
+    if idlib.is_zero(previous) {
+        if idlib.is_zero(parent) { return Relation.Root; }
+        return Relation.Conflict;
+    }
+    if idlib.equal(parent, previous) { return Relation.Successor; }
+    return Relation.Conflict;
+}
+
+fn valid_root_or_successor(parent: idlib.Digest32, previous: idlib.Digest32) -> (result: bool) {
+    return match classify(parent, previous) {
+        Root => true,
+        Successor => true,
+        Conflict => false,
+    };
+}

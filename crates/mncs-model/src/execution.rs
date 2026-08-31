@@ -2654,7 +2654,10 @@ fn value_matches_named_type(program: &Program, value: &ExecutionValue, name: &st
             _ => false,
         };
     }
-    let derived = BodyType::from_semantic_name(name);
+    // Record fields may contain bounded sequences of nominal records. Resolve
+    // the sequence element through the linked program so ABI validation does
+    // not leave `HistoryEvent` as an opaque Named type.
+    let derived = BodyType::from_program(program, name);
     if !matches!(derived, BodyType::Named(_)) {
         return value_matches_type(program, value, &derived);
     }
@@ -3412,6 +3415,37 @@ fn subject(program: &Program, target: &Option<ExecutionTarget>) -> ExecutionSubj
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RecordType;
+
+    #[test]
+    fn abi_validation_resolves_nominal_records_inside_bounded_sequences() {
+        let point_identity = SemanticId("mncs:0.2:record-type:test::Point::".to_owned());
+        let program = Program {
+            schema_version: "0.1".to_owned(),
+            module: "test".to_owned(),
+            dependencies: Vec::new(),
+            finite_types: Vec::new(),
+            record_types: vec![RecordType {
+                identity: point_identity.clone(),
+                name: "Point".to_owned(),
+                fields: Vec::new(),
+            }],
+            assumptions: Vec::new(),
+            binding_table: None,
+            functions: Vec::new(),
+            generic_specializations: Vec::new(),
+        };
+        let point = || ExecutionValue::Record {
+            type_identity: point_identity.clone(),
+            name: "Point".to_owned(),
+            fields: Arc::new(Vec::new()),
+        };
+        let value = ExecutionValue::Sequence {
+            values: Arc::new(vec![point(), point()]),
+        };
+
+        assert!(value_matches_named_type(&program, &value, "[Point; 2]"));
+    }
 
     #[test]
     fn arc_backed_aggregate_values_preserve_json_round_trip_and_equality() {
