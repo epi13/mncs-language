@@ -2,6 +2,29 @@
 
 This document describes the initial conceptual layers. Their exact implementation remains experimental.
 
+## MNCS Language / Forge integration boundary
+
+The language repository owns MNCS semantics, compiler artifacts, reusable
+standard-library modules, and language-owned experiment meaning. MNCS Forge is
+the consumer control plane: it owns candidate search, lifecycle, evidence
+collection, selection, freeze/evaluation policy, and persistence. Fabric owns
+distributed execution and transport; Commons owns generic cross-system record
+shapes. A Forge result may carry a language-produced artifact or observation,
+but it does not become language authority, independent evaluation, promotion,
+or conformance merely by being recorded.
+
+The checked-in Forge development fixture is deliberately named as an
+integration surface: `integration/forge/mncs-forge.toml` and
+`integration/forge/provider.py`. The provider is a normal host-process adapter
+for the Forge protocol, not a second compiler or a language runtime. Its
+language-owned checks may report semantic validation, HIR/SSA provenance,
+bounded execution, and lowering consistency; Forge remains responsible for
+orchestrating and disclosing those observations.
+
+The reusable `mncs.core.status.v1` module owns the status lattice and bounded
+summary vocabulary. Consumers bind to its identities and may carry summaries
+as evidence, while authority and promotion decisions stay outside the module.
+
 ## Layer 1: source representation
 
 The eventual surface language should expose contracts, effects, capabilities, assumptions, failure behavior, refinement boundaries, and machine-intent operations without requiring users to author low-level IR. No grammar has been selected.
