@@ -11,7 +11,7 @@ same helpers ad hoc.
 ```text
 library/
   core/         foundational total operations (status lattice, boolean algebra,
-                ordering/selection; bounded sequences; byte, mask, vector, and
+                ordering/selection; bounded lineage; bounded sequences; byte, mask, vector, and
                 weighted-partition primitives; namespace-pressure fixtures)
   std/          portable abstractions over core — encoding.v1, JSON/text
                 cursor modules, and ansi.v1 provide bounded data and events
@@ -75,6 +75,7 @@ resolution provenance.
 | --- | --- | --- |
 | `core/status.mncs` | `mncs.core.status.v1` | `Status { PASS, FAIL, UNKNOWN }`, dominance join (`dominate`), pair/four-way combination over bounded evidence, decidedness predicate, dominance test |
 | `core/identity.mncs` | `mncs.core.identity.v1` (Profile 0.10) | bounded 32-byte opaque digest values with portable equality, zero, and lexicographic ordering; digest production stays an explicit host boundary |
+| `core/lineage.mncs` | `mncs.core.lineage.v1` (Profile 0.10) | total root/successor/conflict classification for adjacent digest identities |
 | `core/logic.mncs` | `mncs.core.logic.v1` | total boolean algebra: `bool_not/and/or/implies/xor` |
 | `core/ordering.mncs` | `mncs.core.ordering.v1` | comparison-only `min/max/clamp` for i32/i64 (no arithmetic, hence no overflow obligations) |
 | `core/bounds.mncs` | `mncs.core.bounds.v1` (Profile 0.5) | comparison-only `clamp_i64`, intentionally overlapping `ordering` to pressure namespace qualification |
