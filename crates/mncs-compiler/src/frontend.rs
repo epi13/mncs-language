@@ -1297,7 +1297,7 @@ fn canonicalize_function_types(function: &mut Function, module: &ImportedModule)
     {
         let ty = body_type_from_name(module, &value.value_type);
         value.value_type = match ty {
-            BodyType::Sequence { .. } => canonical_value_type(&value.value_type, &ty),
+            BodyType::Sequence { .. } => canonical_imported_sequence_type(&value.value_type, &ty),
             BodyType::Finite { identity, .. } | BodyType::Record { identity, .. } => identity.0,
             _ => value.value_type.clone(),
         };
@@ -6578,7 +6578,7 @@ fn canonical_value_type(source: &str, ty: &BodyType) -> String {
                 .unwrap_or_else(|| element.semantic_name());
             format!(
                 "[{}; {}]",
-                canonical_sequence_element_type(&inner_source, element),
+                canonical_value_type(&inner_source, element),
                 bound.canonical_text()
             )
         }
@@ -6589,6 +6589,25 @@ fn canonical_value_type(source: &str, ty: &BodyType) -> String {
         }
         _ => source.to_owned(),
     }
+}
+
+fn canonical_imported_sequence_type(source: &str, ty: &BodyType) -> String {
+    let BodyType::Sequence { element, bound } = ty else {
+        return canonical_value_type(source, ty);
+    };
+    let inner_source = source
+        .strip_prefix('[')
+        .and_then(|text| text.strip_suffix(']'))
+        .and_then(|inner| {
+            let separator = inner.rfind(';')?;
+            Some(inner[..separator].trim().to_owned())
+        })
+        .unwrap_or_else(|| element.semantic_name());
+    format!(
+        "[{}; {}]",
+        canonical_sequence_element_type(&inner_source, element),
+        bound.canonical_text()
+    )
 }
 
 fn canonical_sequence_element_type(source: &str, ty: &BodyType) -> String {
