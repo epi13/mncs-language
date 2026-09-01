@@ -1265,6 +1265,27 @@ fn body_type_from_name(module: &ImportedModule, name: &str) -> BodyType {
             name: record_type.name.clone(),
         };
     }
+    // Imported function signatures retain source-level bounded-sequence
+    // spellings such as `[Status; 8]`. Resolve the element against the
+    // declaring module's nominal namespace so a linked sequence has the same
+    // identity-bearing type as the corresponding local sequence. Without
+    // this, an imported `[Status; N]` is rehydrated as `Named("Status")` and
+    // valid calls fail closed as a type mismatch.
+    let finite_types = module
+        .program
+        .finite_types
+        .iter()
+        .map(|finite| (finite.name.clone(), finite.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let record_types = module
+        .program
+        .record_types
+        .iter()
+        .map(|record| (record.name.clone(), record.clone()))
+        .collect::<BTreeMap<_, _>>();
+    if let Some(sequence) = profile_sequence_type(name, &finite_types, &record_types) {
+        return sequence;
+    }
     BodyType::from_semantic_name(name)
 }
 
@@ -1275,10 +1296,7 @@ fn canonicalize_function_types(function: &mut Function, module: &ImportedModule)
         .chain(function.outputs.iter_mut())
     {
         let ty = body_type_from_name(module, &value.value_type);
-        value.value_type = match ty {
-            BodyType::Finite { identity, .. } | BodyType::Record { identity, .. } => identity.0,
-            _ => value.value_type.clone(),
-        };
+        value.value_type = canonical_value_type(&value.value_type, &ty);
     }
 }
 
@@ -6560,11 +6578,7 @@ fn canonical_value_type(source: &str, ty: &BodyType) -> String {
                 bound.canonical_text()
             )
         }
-        BodyType::Finite { identity, .. } | BodyType::Record { identity, .. }
-            if source.contains('.') =>
-        {
-            identity.0.clone()
-        }
+        BodyType::Finite { identity, .. } | BodyType::Record { identity, .. } => identity.0.clone(),
         _ => source.to_owned(),
     }
 }

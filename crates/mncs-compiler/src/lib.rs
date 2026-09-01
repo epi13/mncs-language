@@ -1344,6 +1344,90 @@ mod tests {
     }
 
     #[test]
+    fn imported_bounded_sequences_retain_nominal_element_identity() {
+        struct StatusResolver;
+
+        impl ModuleResolver for StatusResolver {
+            fn resolve(&self, module: &str) -> Option<SourceEnvelope> {
+                (module == "mncs.core.status.v1").then(|| {
+                    SourceEnvelope::inline(
+                        SourceArtifactKind::Program,
+                        "mncs.core.status.v1",
+                        include_str!(concat!(
+                            env!("CARGO_MANIFEST_DIR"),
+                            "/../../library/core/status.mncs"
+                        )),
+                    )
+                })
+            }
+        }
+
+        let source = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "examples.imported_status_sequence",
+            "mncs 0.9; module examples.imported_status_sequence; use mncs.core.status.v1; fn summarize(statuses: [Status; 8], count: byte) -> (result: StatusSummary) { return summarize8(statuses, count); }",
+        );
+        let front_end =
+            ReferenceCompiler::default().front_end_with_resolver(source, &StatusResolver);
+        assert!(front_end.is_valid(), "{:#?}", front_end.diagnostics);
+        let program = front_end.program.expect("linked program");
+        let function = program
+            .functions
+            .iter()
+            .find(|function| function.name == "summarize")
+            .expect("local wrapper");
+        let status = program
+            .finite_types
+            .iter()
+            .find(|finite| finite.name == "Status")
+            .expect("imported Status");
+        let parameter = &function.body.as_ref().expect("executable body").parameters[0].ty;
+        assert!(matches!(
+            parameter,
+            mncs_model::BodyType::Sequence {
+                element,
+                bound: mncs_model::SequenceBound::Exact(8),
+            } if matches!(
+                element.as_ref(),
+                mncs_model::BodyType::Finite { identity, .. } if identity == &status.identity
+            )
+        ));
+    }
+
+    #[test]
+    fn imported_bounded_sequences_with_unknown_elements_fail_closed() {
+        struct StatusResolver;
+
+        impl ModuleResolver for StatusResolver {
+            fn resolve(&self, module: &str) -> Option<SourceEnvelope> {
+                (module == "mncs.core.status.v1").then(|| {
+                    SourceEnvelope::inline(
+                        SourceArtifactKind::Program,
+                        "mncs.core.status.v1",
+                        include_str!(concat!(
+                            env!("CARGO_MANIFEST_DIR"),
+                            "/../../library/core/status.mncs"
+                        )),
+                    )
+                })
+            }
+        }
+
+        let source = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "examples.invalid_imported_status_sequence",
+            "mncs 0.9; module examples.invalid_imported_status_sequence; use mncs.core.status.v1; fn summarize(statuses: [MissingStatus; 8], count: byte) -> (result: StatusSummary) { return summarize8(statuses, count); }",
+        );
+        let front_end =
+            ReferenceCompiler::default().front_end_with_resolver(source, &StatusResolver);
+        assert!(!front_end.is_valid());
+        assert!(front_end
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "MNE133"));
+    }
+
+    #[test]
     fn source_profile_04_executes_minimum_and_maximum_accepted_bounds() {
         let compiler = ReferenceCompiler::default();
         for bound in [1, mncs_model::SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND] {
