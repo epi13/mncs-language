@@ -43,6 +43,12 @@ Profiles 0.1–0.5 remain as originally summarized below. Programs can express m
 
 Executable stages: source envelope → CST/AST → semantic program → HIR → SSA → selected SSA → `TargetLoweringPlan` → backend adapter → `BackendArtifact` + evidence. Transformations are identity-bound. Profile 0.9 also publishes the semantic binding substrate from the same elaboration that feeds body, HIR, SSA, and execution; Profile 0.10 adds explicit type/Nat parameters and deterministic monomorphization on the same path. Generic templates are rejected at the lowering boundary, and concrete SSA is checked for unresolved generic types, parameterized bounds, and invalid specialization provenance. Experimental: evidence-gated no-overflow elision, translation validators, backend promises. Missing: general memory/layout, unrestricted loops, proof kernel, and soundness beyond the bounded explicit-polymorphism tranche.
 
+The module-linking path also preserves nominal element identities in imported
+bounded-sequence signatures (for example, `[Status; 8]`), so a real consumer
+can call an imported sequence-typed function without identity drift. This was
+pressured by the first MNCS-native query kernel in `mncs-language-service` and
+is recorded in [`docs/development-evidence/mncs-native-service-query-2026-08.md`](docs/development-evidence/mncs-native-service-query-2026-08.md).
+
 ### Backends
 
 | Realization | Exists | Local execute | External tools | Status (2026-08) |
