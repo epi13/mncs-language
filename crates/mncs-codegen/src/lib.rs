@@ -25,13 +25,13 @@ use mncs_model::{
     execute_ssa_module, execute_ssa_module_prevalidated,
     execute_stateful_case_with_checkpoint_scoped, execute_with_policy, stateful_prefix_identity,
     ArtifactRepresentation, BackendArtifact, BackendCapabilityManifest, BackendConfiguration,
-    BackendEvidence, BackendIdentity, BackendResult, BackendValueContract, BodyType,
-    CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind, ExecutionCorpus,
-    ExecutionFailure, ExecutionRequest, ExecutionResult, ExecutionStatus, ExecutionTarget,
-    ExecutionValue, IntegerType, Program, SemanticId, SsaExecutionSession, SsaModule,
-    StatefulCallResult, StatefulExecutionCase, StatefulExecutionCheckpoint,
-    StatefulExecutionResult, TargetContractRef, TargetLoweringPlan, TransformationStatus,
-    BACKEND_ARTIFACT_SCHEMA_VERSION, COMPILER_ARTIFACT_SCHEMA_VERSION,
+    BackendEvidence, BackendFunctionValueContract, BackendIdentity, BackendResult,
+    BackendValueContract, BodyType, CompilerArtifactRef, CompilerDiagnostic,
+    CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure, ExecutionRequest, ExecutionResult,
+    ExecutionStatus, ExecutionTarget, ExecutionValue, IntegerType, Program, SemanticId,
+    SsaExecutionSession, SsaModule, StatefulCallResult, StatefulExecutionCase,
+    StatefulExecutionCheckpoint, StatefulExecutionResult, TargetContractRef, TargetLoweringPlan,
+    TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION, COMPILER_ARTIFACT_SCHEMA_VERSION,
     LAYERED_EXECUTION_COMPARISON_INTERPRETATION, PORTABLE_WASM_MVP_BACKEND_NAME,
     PORTABLE_WASM_MVP_BACKEND_VERSION, PORTABLE_WASM_MVP_TARGET, SSA_SCHEMA_VERSION,
 };
@@ -52,6 +52,24 @@ pub const RESEARCH_BYTECODE_ARTIFACT_KIND: &str = "research_bytecode";
 pub const BACKEND_EXECUTION_RESULT_SCHEMA_VERSION: &str = "0.1";
 pub const LAYERED_EXECUTION_COMPARISON_SCHEMA_VERSION: &str = "0.1";
 const MAX_STATEFUL_PREFIX_CHECKPOINTS: usize = 32;
+
+/// Return the language-owned value contracts used by backend artifacts.
+///
+/// External consumers that need to cross the typed execution boundary can
+/// inspect this metadata without reconstructing the compiler's nominal type
+/// graph. Backend lowering and source-level ABI inspection therefore share the
+/// same contract builder.
+pub fn language_owned_value_contracts(
+    program: &Program,
+) -> (
+    BTreeMap<String, BackendFunctionValueContract>,
+    BTreeMap<String, BackendValueContract>,
+) {
+    (
+        support::function_value_contracts(program),
+        support::composite_value_contracts(program),
+    )
+}
 
 fn trace_timing(stage: &str, started: Instant) {
     mncs_model::record_stage(stage, started.elapsed());

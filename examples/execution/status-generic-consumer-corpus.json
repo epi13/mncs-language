@@ -1,0 +1,272 @@
+{
+  "schema_version": "0.1",
+  "name": "status-generic-consumer",
+  "cases": [
+    {
+      "id": "exact-pass-fail",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.status.generic_consumer",
+          "function": "summarize_exact"
+        },
+        "arguments": [
+          {
+            "record": {
+              "type_identity": "mncs:0.2:record-type:examples.status.generic_consumer::ExactEnvelope::statuses%3A%5Bmncs%3A0.2%3Afinite-type%3Amncs.core.status.v1%3A%3AStatus%3B%202%5D%3B",
+              "name": "ExactEnvelope",
+              "fields": [
+                [
+                  "statuses",
+                  {
+                    "sequence": {
+                      "values": [
+                        {
+                          "finite": {
+                            "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+                            "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+                            "discriminant": 0
+                          }
+                        },
+                        {
+                          "finite": {
+                            "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+                            "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+                            "discriminant": 1
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              ]
+            }
+          }
+        ],
+        "step_budget": 100000
+      },
+      "expected": [
+        {
+          "record": {
+            "type_identity": "mncs:0.2:record-type:mncs.core.status.v1::StatusSummary::fail_count%3Ai64%3Bobserved_count%3Ai64%3Bpass_count%3Ai64%3Bstatus%3AStatus%3Bunknown_count%3Ai64%3Bvalid%3Abool%3B",
+            "name": "StatusSummary",
+            "fields": [
+              [
+                "fail_count",
+                {
+                  "integer": {
+                    "value": 1,
+                    "type": { "bits": 64, "signed": true }
+                  }
+                }
+              ],
+              [
+                "observed_count",
+                {
+                  "integer": {
+                    "value": 2,
+                    "type": { "bits": 64, "signed": true }
+                  }
+                }
+              ],
+              [
+                "pass_count",
+                {
+                  "integer": {
+                    "value": 1,
+                    "type": { "bits": 64, "signed": true }
+                  }
+                }
+              ],
+              [
+                "status",
+                {
+                  "finite": {
+                    "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+                    "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+                    "discriminant": 1
+                  }
+                }
+              ],
+              [
+                "unknown_count",
+                {
+                  "integer": {
+                    "value": 0,
+                    "type": { "bits": 64, "signed": true }
+                  }
+                }
+              ],
+              [
+                "valid",
+                {
+                  "boolean": {
+                    "value": true
+                  }
+                }
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "prefix-unknown-boundary",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.status.generic_consumer",
+          "function": "summarize_prefix"
+        },
+        "arguments": [
+          {
+            "record": {
+              "type_identity": "mncs:0.2:record-type:examples.status.generic_consumer::PrefixEnvelope::count%3Abyte%3Bstatuses%3A%5Bmncs%3A0.2%3Afinite-type%3Amncs.core.status.v1%3A%3AStatus%3B%208%5D%3B",
+              "name": "PrefixEnvelope",
+              "fields": [
+                [
+                  "count",
+                  {
+                    "byte": {
+                      "value": 3
+                    }
+                  }
+                ],
+                [
+                  "statuses",
+                  {
+                    "sequence": {
+                      "values": [
+                        {
+                          "finite": {
+                            "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+                            "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+                            "discriminant": 0
+                          }
+                        },
+                        {
+                          "finite": {
+                            "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+                            "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+                            "discriminant": 2
+                          }
+                        },
+                        {
+                          "finite": {
+                            "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+                            "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+                            "discriminant": 1
+                          }
+                        },
+                        {
+                          "finite": {
+                            "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+                            "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+                            "discriminant": 0
+                          }
+                        },
+                        {
+                          "finite": {
+                            "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+                            "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+                            "discriminant": 2
+                          }
+                        },
+                        {
+                          "finite": {
+                            "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+                            "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+                            "discriminant": 2
+                          }
+                        },
+                        {
+                          "finite": {
+                            "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+                            "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+                            "discriminant": 2
+                          }
+                        },
+                        {
+                          "finite": {
+                            "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+                            "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+                            "discriminant": 2
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              ]
+            }
+          }
+        ],
+        "step_budget": 200000
+      },
+      "expected": [
+        {
+          "record": {
+            "type_identity": "mncs:0.2:record-type:mncs.core.status.v1::StatusSummary::fail_count%3Ai64%3Bobserved_count%3Ai64%3Bpass_count%3Ai64%3Bstatus%3AStatus%3Bunknown_count%3Ai64%3Bvalid%3Abool%3B",
+            "name": "StatusSummary",
+            "fields": [
+              [
+                "fail_count",
+                {
+                  "integer": {
+                    "value": 1,
+                    "type": { "bits": 64, "signed": true }
+                  }
+                }
+              ],
+              [
+                "observed_count",
+                {
+                  "integer": {
+                    "value": 3,
+                    "type": { "bits": 64, "signed": true }
+                  }
+                }
+              ],
+              [
+                "pass_count",
+                {
+                  "integer": {
+                    "value": 1,
+                    "type": { "bits": 64, "signed": true }
+                  }
+                }
+              ],
+              [
+                "status",
+                {
+                  "finite": {
+                    "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+                    "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+                    "discriminant": 1
+                  }
+                }
+              ],
+              [
+                "unknown_count",
+                {
+                  "integer": {
+                    "value": 1,
+                    "type": { "bits": 64, "signed": true }
+                  }
+                }
+              ],
+              [
+                "valid",
+                {
+                  "boolean": {
+                    "value": true
+                  }
+                }
+              ]
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

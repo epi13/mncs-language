@@ -262,27 +262,34 @@ pub(crate) fn value_contract_for(program: &Program, name: &str) -> BackendValueC
 pub(crate) fn function_value_contracts(
     program: &Program,
 ) -> BTreeMap<String, BackendFunctionValueContract> {
-    program
-        .functions
-        .iter()
-        .map(|function| {
-            (
-                function.name.clone(),
-                BackendFunctionValueContract {
-                    inputs: function
-                        .inputs
-                        .iter()
-                        .map(|value| value_contract_for(program, &value.value_type))
-                        .collect(),
-                    outputs: function
-                        .outputs
-                        .iter()
-                        .map(|value| value_contract_for(program, &value.value_type))
-                        .collect(),
-                },
-            )
-        })
-        .collect()
+    let mut contracts = BTreeMap::new();
+    for function in &program.functions {
+        let contract = BackendFunctionValueContract {
+            inputs: function
+                .inputs
+                .iter()
+                .map(|value| value_contract_for(program, &value.value_type))
+                .collect(),
+            outputs: function
+                .outputs
+                .iter()
+                .map(|value| value_contract_for(program, &value.value_type))
+                .collect(),
+        };
+
+        // Linked declarations can share a short name with a root-module
+        // entrypoint.  The process boundary addresses an entrypoint by its
+        // exported short name, so the root declaration must own that ABI
+        // slot; otherwise an imported generic declaration can overwrite the
+        // wrapper contract and reject a valid composite request on strict
+        // backends.  Imported-only names remain available as before.
+        if function.home_module.is_none() {
+            contracts.insert(function.name.clone(), contract);
+        } else {
+            contracts.entry(function.name.clone()).or_insert(contract);
+        }
+    }
+    contracts
 }
 
 pub(crate) fn artifact_ref(artifact: &BackendArtifact) -> CompilerArtifactRef {

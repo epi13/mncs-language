@@ -23,6 +23,11 @@ namespace path and the Profile 0.7/0.8 ABI suites.
   and Cranelift. Direct backend callers therefore fail closed too.
 - `[mask<N>; K]` remains invalid as a sequence element (`MNE105`); logical
   `[bool; N]` is separate from mask lanes.
+- Imported generic sequence signatures now retain the declaring module's
+  nominal finite/record element identity through specialization. The backend
+  contract builder also preserves a root-module wrapper contract when an
+  imported generic declaration has the same short name, preventing strict
+  process-boundary backends from rejecting a valid wrapper request.
 
 ## Tests and fixtures
 
@@ -39,6 +44,10 @@ Committed fixtures are:
 - `examples/source/generic-module-consumer.mncs` with
   `examples/execution/generic-module-consumer-corpus.json`;
 - `examples/source/test/generic/lib.mncs` for file-resolved module linking.
+- `examples/source/status-generic-consumer.mncs` with
+  `examples/execution/status-generic-consumer-corpus.json`, which exercises
+  imported `Status` sequences, generic exact/prefix summaries, and the
+  process-boundary contract on all five executable backends.
 
 ## Backend evidence
 

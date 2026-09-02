@@ -108,6 +108,7 @@ fn run_cli() -> ExitCode {
         "compare-execution" => execution_compare_command(args),
         "check-lowering-execution" => lowering_execution_command(args),
         "compile" => compile_command(args),
+        "abi" => abi_command(args),
         "execute-backend" => backend_execution_command(args),
         "check-backend-execution" => backend_compare_command(args),
         "validate-translation" => validate_translation_command(args),
@@ -634,6 +635,85 @@ where
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct LanguageOwnedAbi {
+    schema_version: String,
+    source_artifact_identity: String,
+    module: String,
+    semantic_fingerprint: Option<String>,
+    functions: BTreeMap<String, mncs_model::BackendFunctionValueContract>,
+    composites: BTreeMap<String, mncs_model::BackendValueContract>,
+}
+
+fn abi_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let Some(source_path) = args.next() else {
+        eprintln!("error: abi requires an MNCS source or semantic program path");
+        print_usage();
+        return ExitCode::from(2);
+    };
+    if args.next().is_some() {
+        eprintln!("error: unexpected abi arguments");
+        return ExitCode::from(2);
+    }
+    let source = match read_source(&source_path) {
+        Ok(source) => source,
+        Err(code) => return code,
+    };
+    let envelope = SourceEnvelope::new(
+        SourceArtifactKind::Program,
+        source_path.clone(),
+        SourceOrigin {
+            kind: SourceOriginKind::Path,
+            locator: Some(source_path.clone()),
+        },
+        source,
+    );
+    let compiler = ReferenceCompiler::default();
+    let program = if Path::new(&source_path)
+        .extension()
+        .is_some_and(|extension| extension == "json")
+    {
+        match Program::from_json(&envelope.text) {
+            Ok(program) => program,
+            Err(error) => {
+                eprintln!("error: invalid canonical semantic JSON ABI source: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        let resolver = FileModuleResolver::with_libraries(&source_path);
+        let front_end = compiler.front_end_with_resolver(envelope.clone(), &resolver);
+        let Some(program) = front_end.program.clone().filter(|_| front_end.is_valid()) else {
+            let _ = print_json(&front_end);
+            return ExitCode::FAILURE;
+        };
+        program
+    };
+    let report = program.validate();
+    if !report.valid {
+        let _ = print_json(&report);
+        return ExitCode::FAILURE;
+    }
+    let (functions, composites) = mncs_codegen::language_owned_value_contracts(&program);
+    let abi = LanguageOwnedAbi {
+        schema_version: "0.1".to_owned(),
+        source_artifact_identity: envelope.identity,
+        module: program.module.clone(),
+        semantic_fingerprint: program.content_fingerprint().ok(),
+        functions,
+        composites,
+    };
+    if print_json(&abi) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(2)
     }
 }
 
@@ -3138,6 +3218,7 @@ fn print_usage() {
     eprintln!("  mncs compare-execution <baseline.json> <candidate.json> <corpus.json>");
     eprintln!("  mncs check-lowering-execution <program.json> <corpus.json>");
     eprintln!("  mncs compile <program.json> [--emit semantic,hir,ssa,evidence,target-plan,backend] [--output-dir DIR] [--target TARGET]");
+    eprintln!("  mncs abi <program.mncs|program.json>");
     eprintln!("  mncs execute-backend <program.json> <execution-request.json>");
     eprintln!("  mncs check-backend-execution <program.json> <corpus.json>");
     eprintln!("  mncs validate-translation <kind> <program.json> [corpus.json]");

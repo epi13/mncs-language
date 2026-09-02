@@ -167,6 +167,51 @@ fn wasm_executes_core_status_record_parameter() {
 }
 
 #[test]
+fn imported_generic_status_consumer_agrees_across_executable_backends() {
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_library_experiment(
+            &example("source/status-generic-consumer.mncs"),
+            backend,
+            &example("execution/status-generic-consumer-corpus.json"),
+        );
+        assert_eq!(
+            code,
+            Some(0),
+            "{backend}: generic status consumer exit; {stderr}"
+        );
+        assert_value_agreement(backend, code, &result, &stderr, 2);
+    }
+}
+
+#[test]
+fn abi_command_exposes_the_root_wrapper_contract_for_colliding_imports() {
+    let output = binary()
+        .env("MNCS_LIBRARY_PATH", library(""))
+        .args(["abi", &example("source/status-generic-consumer.mncs")])
+        .output()
+        .expect("run ABI inspection");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let result: Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|error| panic!("ABI JSON ({stderr}): {error}"));
+
+    assert_eq!(output.status.code(), Some(0), "{stderr}: {result:#}");
+    assert_eq!(result["module"], "examples.status.generic_consumer");
+    let prefix_inputs = result["functions"]["summarize_prefix"]["inputs"]
+        .as_array()
+        .expect("root wrapper inputs");
+    assert_eq!(prefix_inputs.len(), 1);
+    assert_eq!(
+        prefix_inputs[0]["record"]["name"], "PrefixEnvelope",
+        "root wrapper must own the colliding short-name ABI slot"
+    );
+    assert!(result["composites"]
+        .as_object()
+        .expect("composite ABI map")
+        .values()
+        .any(|value| value["record"]["name"] == "PrefixEnvelope"));
+}
+
+#[test]
 fn status_summary_exposes_bounded_counts_and_conflict() {
     let output = binary()
         .env("MNCS_LIBRARY_PATH", library(""))

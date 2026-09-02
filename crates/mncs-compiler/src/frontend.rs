@@ -1157,7 +1157,7 @@ fn decode_identity_component(encoded: &str) -> String {
 /// module. Identities stay anchored to the declaring module: a function that
 /// itself arrived through linking keeps its original home namespace.
 fn signature_from_function(module: &ImportedModule, function: &Function) -> FunctionSignature {
-    let body_type = |name: &str| body_type_from_name(module, name);
+    let body_type = |name: &str| body_type_from_name(module, name, &function.generic_params);
     let mut inputs: Vec<BodyType> = function
         .inputs
         .iter()
@@ -1220,7 +1220,11 @@ fn signature_from_function(module: &ImportedModule, function: &Function) -> Func
 /// Resolves a type name against the merged namespace without diagnosing:
 /// dependency programs are valid by the time merging happens, so unknown
 /// names cannot occur here.
-fn body_type_from_name(module: &ImportedModule, name: &str) -> BodyType {
+fn body_type_from_name(
+    module: &ImportedModule,
+    name: &str,
+    generic_params: &[mncs_model::GenericParam],
+) -> BodyType {
     if let Some(finite_type) = module
         .program
         .finite_types
@@ -1283,7 +1287,24 @@ fn body_type_from_name(module: &ImportedModule, name: &str) -> BodyType {
         .iter()
         .map(|record| (record.name.clone(), record.clone()))
         .collect::<BTreeMap<_, _>>();
-    if let Some(sequence) = profile_sequence_type(name, &finite_types, &record_types) {
+    let generic_map = generic_params
+        .iter()
+        .map(|parameter| (parameter.name.clone(), parameter.kind))
+        .collect::<BTreeMap<_, _>>();
+    let mut diagnostics = Vec::new();
+    if let Some(sequence) = profile_sequence_type_with_generics(
+        name,
+        &finite_types,
+        &record_types,
+        &generic_map,
+        &mut diagnostics,
+        SourceSpan {
+            start: 0,
+            end: 0,
+            line: 1,
+            column: 1,
+        },
+    ) {
         return sequence;
     }
     BodyType::from_semantic_name(name)
@@ -1295,7 +1316,7 @@ fn canonicalize_function_types(function: &mut Function, module: &ImportedModule)
         .iter_mut()
         .chain(function.outputs.iter_mut())
     {
-        let ty = body_type_from_name(module, &value.value_type);
+        let ty = body_type_from_name(module, &value.value_type, &function.generic_params);
         value.value_type = match ty {
             BodyType::Sequence { .. } => canonical_imported_sequence_type(&value.value_type, &ty),
             BodyType::Finite { identity, .. } | BodyType::Record { identity, .. } => identity.0,
@@ -6759,12 +6780,20 @@ fn profile_sequence_type_with_generics(
             ));
             return None;
         }
-    } else if let Some(finite) = finite_types.get(element_text) {
+    } else if let Some(finite) = finite_types.get(element_text).or_else(|| {
+        finite_types
+            .values()
+            .find(|candidate| candidate.identity.0 == element_text)
+    }) {
         BodyType::Finite {
             identity: finite.identity.clone(),
             name: finite.name.clone(),
         }
-    } else if let Some(record) = record_types.get(element_text) {
+    } else if let Some(record) = record_types.get(element_text).or_else(|| {
+        record_types
+            .values()
+            .find(|candidate| candidate.identity.0 == element_text)
+    }) {
         BodyType::Record {
             identity: record.identity.clone(),
             name: record.name.clone(),

@@ -69,6 +69,7 @@ fn unqualified() -> (result: i64) {
     let xs: [lib.generic.Point; 2] = [p, p];
     return first<lib.generic.Point, 2>(xs).x;
 }
+
 fn qualified() -> (result: i64) {
     let p: lib.generic.Point = lib.generic.Point { x: 9, y: 10 };
     let xs: [lib.generic.Point; 2] = [p, p];
@@ -112,6 +113,44 @@ fn aliased() -> (result: i64) {
         }
     }
     let ssa = program.lower_to_ssa().expect("specialized program lowers");
+    assert!(ssa.validate_lowering_boundary(&program).valid);
+}
+
+#[test]
+fn profile_010_specializes_imported_generic_over_qualified_nominal_sequence_projection() {
+    let resolver = MapResolver::default().with(
+        "lib.status",
+        r#"
+mncs 0.10;
+module lib.status;
+enum Status { PASS, FAIL, UNKNOWN }
+record Summary { status: Status, observed_count: i64 }
+fn summarize<N: Nat>(statuses: [Status; N]) -> (result: Summary) {
+    return Summary { status: statuses[0], observed_count: 1 };
+}
+"#,
+    );
+    let program = elaborate(
+        &resolver,
+        r#"
+mncs 0.10;
+module app.status;
+use lib.status as s;
+record Input { statuses: [s.Status; 2] }
+fn demo(input: Input) -> (result: s.Summary) {
+    return s.summarize<2>(input.statuses);
+}
+"#,
+    )
+    .expect("imported generic over a nominal sequence elaborates");
+
+    assert!(program
+        .functions
+        .iter()
+        .any(|function| function.name.starts_with("summarize__spec_")));
+    let ssa = program
+        .lower_to_ssa()
+        .expect("imported nominal sequence specialization lowers");
     assert!(ssa.validate_lowering_boundary(&program).valid);
 }
 

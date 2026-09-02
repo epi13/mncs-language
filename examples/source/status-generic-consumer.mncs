@@ -1,0 +1,19 @@
+mncs 0.10;
+
+// Independent executable consumer for the generic status-fold tranche.
+// The record projection keeps the imported nominal sequence on the real
+// cross-module path instead of testing only an in-module generic call.
+module examples.status.generic_consumer;
+
+use mncs.core.status as statlib;
+
+record ExactEnvelope { statuses: [statlib.Status; 2] }
+record PrefixEnvelope { statuses: [statlib.Status; 8], count: byte }
+
+fn summarize_exact(input: ExactEnvelope) -> (result: statlib.StatusSummary) {
+    return statlib.summarize<2>(input.statuses);
+}
+
+fn summarize_prefix(input: PrefixEnvelope) -> (result: statlib.StatusSummary) {
+    return statlib.summarize_prefix<8>(input.statuses, input.count);
+}

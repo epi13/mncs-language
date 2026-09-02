@@ -30,6 +30,13 @@ and a reproducible folding fingerprint. `std/encoding.v1` is the first
 portable `mncs.std` module: canonical big-endian encodings whose decodes
 are total by type and whose round-trip laws are executable MNCS functions.
 
+`core/status.v1` also exposes generic `summarize<N>` and
+`summarize_prefix<N>` folds. The legacy `summarize8` entrypoint delegates to
+the prefix fold, so bounded host envelopes and exact imported sequences share
+one status-summary authority. The checked-in
+`examples/source/status-generic-consumer.mncs` fixture exercises qualified
+imports, nominal sequence identity, and the five executable backend paths.
+
 Realization envelope: reference executors, research bytecode, portable WASM,
 C11, LLVM, and Cranelift realize sequence-typed and view-typed language-level
 signatures through canonical cells and packed view descriptors. Nested
