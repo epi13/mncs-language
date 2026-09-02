@@ -196,9 +196,14 @@ fn abi_command_exposes_the_root_wrapper_contract_for_colliding_imports() {
 
     assert_eq!(output.status.code(), Some(0), "{stderr}: {result:#}");
     assert_eq!(result["module"], "examples.status.generic_consumer");
-    let prefix_inputs = result["functions"]["summarize_prefix"]["inputs"]
-        .as_array()
-        .expect("root wrapper inputs");
+    let function = &result["functions"]["summarize_prefix"];
+    assert_eq!(
+        function["declaring_module"],
+        "examples.status.generic_consumer"
+    );
+    assert!(function["function_identity"].as_str().is_some());
+    assert_eq!(function["name"], "summarize_prefix");
+    let prefix_inputs = function["inputs"].as_array().expect("root wrapper inputs");
     assert_eq!(prefix_inputs.len(), 1);
     assert_eq!(
         prefix_inputs[0]["record"]["name"], "PrefixEnvelope",

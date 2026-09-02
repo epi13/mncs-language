@@ -78,9 +78,13 @@ all five executable backends.
 
 External consumers can inspect the same elaborated contracts with
 `mncs abi <program.mncs|program.json>`. The command emits deterministic
-function and composite value contracts, including canonical nominal identities;
-backend artifact emission uses this same contract builder rather than a second
-consumer-facing type description.
+function and composite value contracts, including canonical nominal identities.
+Each function contract additionally carries its semantic function identity,
+declaring module, and exported name, so consumers can bind an ABI slot to the
+qualified declaration without reconstructing module-linking rules. Root-module
+wrappers retain precedence when linked declarations collide by short name.
+Backend artifact emission uses the same value-contract builder rather than a
+second consumer-facing type description.
 
 ## Compatibility and non-claims
 

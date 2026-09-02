@@ -71,6 +71,62 @@ pub fn language_owned_value_contracts(
     )
 }
 
+/// Language-owned ABI metadata for one exported function.
+///
+/// The value contract describes the transport shape.  The additional
+/// declaration metadata lets a consumer bind that shape to the semantic
+/// function identity without reimplementing module/linking identity rules.
+#[derive(Debug, Clone, Serialize)]
+pub struct LanguageOwnedFunctionAbi {
+    pub function_identity: SemanticId,
+    pub declaring_module: String,
+    pub name: String,
+    pub inputs: Vec<BackendValueContract>,
+    pub outputs: Vec<BackendValueContract>,
+}
+
+/// Return language-owned ABI contracts with qualified declaration identity.
+///
+/// This uses the same root-wrapper precedence as
+/// [`language_owned_value_contracts`]: when a linked declaration collides with
+/// a root-module entrypoint, the root declaration owns the exported short-name
+/// slot.
+pub fn language_owned_abi_contracts(
+    program: &Program,
+) -> (
+    BTreeMap<String, LanguageOwnedFunctionAbi>,
+    BTreeMap<String, BackendValueContract>,
+) {
+    let (value_contracts, composites) = language_owned_value_contracts(program);
+    let mut functions = BTreeMap::new();
+
+    for function in &program.functions {
+        let Some(contract) = value_contracts.get(&function.name) else {
+            continue;
+        };
+        let declaration = LanguageOwnedFunctionAbi {
+            function_identity: mncs_model::function_id(
+                function.identity_namespace(&program.module),
+                &function.name,
+            ),
+            declaring_module: function.identity_namespace(&program.module).to_owned(),
+            name: function.name.clone(),
+            inputs: contract.inputs.clone(),
+            outputs: contract.outputs.clone(),
+        };
+
+        if function.home_module.is_none() {
+            functions.insert(function.name.clone(), declaration);
+        } else {
+            functions
+                .entry(function.name.clone())
+                .or_insert(declaration);
+        }
+    }
+
+    (functions, composites)
+}
+
 fn trace_timing(stage: &str, started: Instant) {
     mncs_model::record_stage(stage, started.elapsed());
     if std::env::var_os("MNCS_TIMINGS").is_some() {

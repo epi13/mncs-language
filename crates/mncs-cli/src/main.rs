@@ -644,7 +644,7 @@ struct LanguageOwnedAbi {
     source_artifact_identity: String,
     module: String,
     semantic_fingerprint: Option<String>,
-    functions: BTreeMap<String, mncs_model::BackendFunctionValueContract>,
+    functions: BTreeMap<String, mncs_codegen::LanguageOwnedFunctionAbi>,
     composites: BTreeMap<String, mncs_model::BackendValueContract>,
 }
 
@@ -701,7 +701,7 @@ where
         let _ = print_json(&report);
         return ExitCode::FAILURE;
     }
-    let (functions, composites) = mncs_codegen::language_owned_value_contracts(&program);
+    let (functions, composites) = mncs_codegen::language_owned_abi_contracts(&program);
     let abi = LanguageOwnedAbi {
         schema_version: "0.1".to_owned(),
         source_artifact_identity: envelope.identity,
