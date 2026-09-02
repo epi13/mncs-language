@@ -24,6 +24,9 @@ orchestrating and disclosing those observations.
 The reusable `mncs.core.status.v1` module owns the status lattice and bounded
 summary vocabulary. Consumers bind to its identities and may carry summaries
 as evidence, while authority and promotion decisions stay outside the module.
+The language-owned `mncs abi` inspection surface exposes the same elaborated
+function/composite value contracts used by backend artifacts, so consumers can
+validate typed entrypoints without recreating nominal type identities.
 
 ## Layer 1: source representation
 

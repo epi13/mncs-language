@@ -38,6 +38,14 @@ value parameters as typed `Nat` arguments. Canonical instantiation arguments
 preserve declared parameter order and retain nominal record/finite identities;
 source-friendly names are not used as a substitute for nominal identity.
 
+Imported generic sequence signatures are resolved against the declaring module's
+finite/record identities before specialization. This keeps a qualified
+imported `[Status; N]` parameter compatible with a caller's identity-bearing
+sequence, including when the caller also exposes a same-named local wrapper.
+Backend value contracts give the root-module wrapper ownership of a colliding
+exported short name, so strict process-boundary backends validate the same
+entrypoint shape as the language-owned call graph.
+
 Specialization is deterministic and fixed-point: each concrete instantiation
 is emitted once, nested concrete generic calls are queued, call sites are
 rewritten to the specialized function, and provenance links the generic
@@ -62,6 +70,17 @@ The same boundary is exercised by research bytecode, portable WASM, C11,
 LLVM IR, and Cranelift. Artifact-only RISC-V/eBPF/PTX paths are outside the
 Profile 0.10 executable-backend claim and continue to report their existing
 capability/refusal states.
+
+The committed `status-generic-consumer` fixture specializes imported
+`mncs.core.status.v1` summaries at exact bounds 2 and 8, including a runtime
+prefix count. Its returned values and typed status expectations are checked on
+all five executable backends.
+
+External consumers can inspect the same elaborated contracts with
+`mncs abi <program.mncs|program.json>`. The command emits deterministic
+function and composite value contracts, including canonical nominal identities;
+backend artifact emission uses this same contract builder rather than a second
+consumer-facing type description.
 
 ## Compatibility and non-claims
 

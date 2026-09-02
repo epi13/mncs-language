@@ -55,6 +55,7 @@ Run the source vertical slice and emit its language-owned study record:
 ```bash
 cargo run -p mncs-cli -- source-study examples/source/identity.mncs --node-id local-source
 cargo run -p mncs-cli -- source-study examples/source/flagship.mncs --node-id local-flagship
+cargo run -p mncs-cli -- abi examples/source/status-generic-consumer.mncs
 cargo run -p mncs-cli -- compile examples/executable/checked-add.mncs.json --target portable-wasm
 cargo run -p mncs-cli -- compile examples/executable/checked-add.mncs.json --target research-bytecode
 cargo run -p mncs-cli -- experiment matrix

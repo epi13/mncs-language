@@ -2993,12 +2993,20 @@ fn body_type_for_function_value(
                     Box::new(BodyType::GenericParam { name: n })
                 }
                 BodyType::Named(n) => {
-                    if let Some(rec) = program.record_types.iter().find(|r| r.name == n) {
+                    if let Some(rec) = program
+                        .record_types
+                        .iter()
+                        .find(|r| r.identity.0 == n || r.name == n)
+                    {
                         Box::new(BodyType::Record {
                             identity: rec.identity.clone(),
                             name: rec.name.clone(),
                         })
-                    } else if let Some(fin) = program.finite_types.iter().find(|f| f.name == n) {
+                    } else if let Some(fin) = program
+                        .finite_types
+                        .iter()
+                        .find(|f| f.identity.0 == n || f.name == n)
+                    {
                         Box::new(BodyType::Finite {
                             identity: fin.identity.clone(),
                             name: fin.name.clone(),
@@ -3038,6 +3046,29 @@ fn body_type_for_function_value(
                 {
                     Box::new(BodyType::GenericParam { name: n })
                 }
+                BodyType::Named(n) => program
+                    .record_types
+                    .iter()
+                    .find(|record| record.identity.0 == n || record.name == n)
+                    .map(|record| {
+                        Box::new(BodyType::Record {
+                            identity: record.identity.clone(),
+                            name: record.name.clone(),
+                        })
+                    })
+                    .or_else(|| {
+                        program
+                            .finite_types
+                            .iter()
+                            .find(|finite| finite.identity.0 == n || finite.name == n)
+                            .map(|finite| {
+                                Box::new(BodyType::Finite {
+                                    identity: finite.identity.clone(),
+                                    name: finite.name.clone(),
+                                })
+                            })
+                    })
+                    .unwrap_or_else(|| Box::new(BodyType::Named(n))),
                 other => Box::new(other),
             };
             return BodyType::Sequence {

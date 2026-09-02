@@ -1,4 +1,4 @@
-mncs 0.7;
+mncs 0.10;
 
 // mncs.core.status — authoritative MNCS status/evidence-dominance lattice.
 //
@@ -23,7 +23,7 @@ record StatusPair { left: Status, right: Status }
 // A bounded fold result for evidence envelopes. The counts make conflict
 // visible instead of reducing a mixed envelope to one apparently authoritative
 // status. `valid` is false when the caller's declared active count is outside
-// the fixed eight-slot envelope; unused slots are never treated as PASS.
+// the fixed envelope; unused slots are never treated as PASS.
 record StatusSummary {
     status: Status,
     pass_count: i64,
@@ -32,6 +32,8 @@ record StatusSummary {
     observed_count: i64,
     valid: bool
 }
+
+record PrefixState { summary: StatusSummary, reached: bool }
 
 // Lattice join. Total over the 3x3 finite domain.
 fn dominate(left: Status, right: Status) -> (result: Status) {
@@ -88,10 +90,10 @@ fn summary_step(current: StatusSummary, observed: Status, include: bool) -> (res
     return current;
 }
 
-// Reusable bounded status aggregation for control-plane envelopes and other
-// consumers that need counts and conflict visibility in addition to the
-// lattice join. The active prefix is explicit and bounded by the array shape.
-fn summarize8(statuses: [Status; 8], count: byte) -> (result: StatusSummary) {
+// Reusable generic status aggregation for exact bounded sequences. The
+// specialization bound is part of the caller's type, so every element is
+// observed exactly once and no placeholder values are required.
+fn summarize<N: Nat>(statuses: [Status; N]) -> (result: StatusSummary) {
     let initial: StatusSummary = StatusSummary {
         status: Status.UNKNOWN,
         pass_count: 0,
@@ -101,13 +103,42 @@ fn summarize8(statuses: [Status; 8], count: byte) -> (result: StatusSummary) {
         valid: true
     };
     iterate i over statuses carrying summary: StatusSummary = initial {
-        let include: bool = (i as i64) < (count as i64);
-        next summary = summary_step(summary, statuses[i], include);
-    }
-    if (count as i64) > 8 {
-        return StatusSummary { ..summary, valid: false };
+        next summary = summary_step(summary, statuses[i], true);
     }
     return summary;
+}
+
+// Generic bounded-prefix aggregation for fixed-capacity process-boundary
+// envelopes. A caller that carries a runtime active count can retain one
+// canonical implementation for every capacity specialization.
+fn summarize_prefix<N: Nat>(statuses: [Status; N], count: byte) -> (result: StatusSummary) {
+    let initial: StatusSummary = StatusSummary {
+        status: Status.UNKNOWN,
+        pass_count: 0,
+        fail_count: 0,
+        unknown_count: 0,
+        observed_count: 0,
+        valid: true
+    };
+    let prefix: PrefixState = PrefixState { summary: initial, reached: count == 0 };
+    iterate i over statuses carrying current: PrefixState = prefix {
+        let include: bool = (i as i64) < (count as i64);
+        let summary: StatusSummary = summary_step(current.summary, statuses[i], include);
+        next current = PrefixState {
+            summary: summary,
+            reached: current.reached || ((i as i64) +% 1) == (count as i64)
+        };
+    }
+    if current.reached {
+        return current.summary;
+    }
+    return StatusSummary { ..current.summary, valid: false };
+}
+
+// Compatibility entrypoint retained for consumers of the original eight-slot
+// envelope. Its semantics are delegated to the generic bounded-prefix form.
+fn summarize8(statuses: [Status; 8], count: byte) -> (result: StatusSummary) {
+    return summarize_prefix<8>(statuses, count);
 }
 
 // A decided status is settled truth: PASS or FAIL. UNKNOWN is undecided by
