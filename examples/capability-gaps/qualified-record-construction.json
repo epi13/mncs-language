@@ -1,0 +1,31 @@
+{
+  "artifact_kind": "mncs.capability_gap",
+  "contract_revision": "0.1",
+  "gap_id": "commons.mesh/qualified-record-construction",
+  "producer": "commons-mesh-pressure",
+  "compiler_identity": null,
+  "source_revision": null,
+  "source_artifact": "commons.mesh.lattice_check",
+  "source_location": "<local-path>/lattice_check.mncs",
+  "requested_semantics": "construct an imported record value through a Profile 0.9 alias route",
+  "obstruction": "typing",
+  "active_profile": "0.10",
+  "backends": [
+    "mncs-research-bytecode",
+    "portable-wasm"
+  ],
+  "closest_supported_semantics": "scalar-argument lattice join via status.dominate/2",
+  "reproducer": "status.StatusPair { left: left, right: right } via `use ... as status`",
+  "protected_properties": [
+    "FAIL dominates UNKNOWN dominates PASS"
+  ],
+  "approximation_prohibited": true,
+  "evidence_requirements": [
+    "parser/semantic acceptance of the reproducer"
+  ],
+  "status": "FAIL",
+  "unresolved_fields": [
+    "exact resource cost of cross-module iteration"
+  ],
+  "identity": "mncs:0.2:capability-gap:e2ac5125d915242e2c1ebddfd4b4a2bfe5a0f3fa03ff2d1d42938ffcf386dc7e"
+}
