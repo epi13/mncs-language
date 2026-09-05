@@ -10,7 +10,7 @@ use mncs_codegen::{
     backend_adapter, backend_capabilities, backend_family_matrix, backend_names,
     compare_body_ssa_and_backend, execute_backend, lower_selected_ssa, portable_wasm_plan,
     selected_ssa_ref, target_for_backend, target_is_portable_wasm, target_is_ptx64,
-    BackendStatefulSession,
+    BackendExecutionSession, BackendStatefulSession,
 };
 use mncs_compiler::{
     native_node_profile, reference_compiler_architecture, ModuleResolution, ModuleResolver,
@@ -994,11 +994,13 @@ where
                 Ok(corpus) => corpus,
                 Err(code) => return code,
             };
+            // Issue #108: decode and validate the artifact once for the corpus.
+            let backend_session = BackendExecutionSession::new(&artifact);
             let observations = corpus
                 .cases
                 .iter()
                 .map(|case_| {
-                    let observation = execute_backend(&artifact, &case_.request);
+                    let observation = backend_session.execute(&case_.request);
                     experiment_case_observation(case_, observation)
                 })
                 .collect::<Vec<_>>();
@@ -1653,12 +1655,14 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         .is_none()
         .then(|| validate_backend_lowering(&prepared.program, ssa, &artifact, &definition.corpus));
     trace_timing("cli-translation-validation", &started, &mut stage_started);
+    // Issue #108: decode and validate the artifact once for the corpus.
+    let backend_session = BackendExecutionSession::new(&artifact);
     let cases = prepared
         .corpus
         .cases
         .iter()
         .map(|case_| {
-            let observation = execute_backend(&artifact, &case_.request);
+            let observation = backend_session.execute(&case_.request);
             experiment_case_observation(case_, observation)
         })
         .collect();
