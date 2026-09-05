@@ -92,9 +92,13 @@ impl ExternalTargetSpec {
             code: "CGX401",
             message: "unavailable toolchain: llc is not present on this host".to_owned(),
         })?;
+        // The work directory is unique per process: concurrent compilations of
+        // the same program and target (parallel test threads, parallel CLI
+        // invocations) must never share module.ll/module.o.
         let dir = std::env::temp_dir().join(format!(
-            "mncs-external-{}",
-            &crate::support::sha256_hex(format!("{}{ir}", self.triple).as_bytes())[..16]
+            "mncs-external-{}-{}",
+            &crate::support::sha256_hex(format!("{}{ir}", self.triple).as_bytes())[..16],
+            std::process::id()
         ));
         std::fs::create_dir_all(&dir).map_err(|error| RealizeError {
             code: "CGX402",
@@ -153,6 +157,9 @@ impl ExternalTargetSpec {
             code: "CGX402",
             message: format!("unable to read produced artifact: {error}"),
         })?;
+        // Best-effort cleanup: the directory is unique to this process, so
+        // removing it cannot disturb a concurrent compilation.
+        let _ = std::fs::remove_dir_all(&dir);
         Ok((bytes, llc.summary()))
     }
 
