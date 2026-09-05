@@ -1,0 +1,31 @@
+{
+  "artifact_kind": "mncs.capability_gap",
+  "contract_revision": "0.1",
+  "gap_id": "commons.mesh/embeddable-execution",
+  "producer": "commons-mesh-pressure",
+  "compiler_identity": null,
+  "source_revision": null,
+  "source_artifact": "mncs experiment run/execute surface",
+  "source_location": "<local-path>/main.rs",
+  "requested_semantics": "compile an MNCS semantic function once, then decide many bounded host batches against the compiled artifact",
+  "obstruction": "runtime",
+  "active_profile": "0.10",
+  "backends": [
+    "mncs-portable-wasm-mvp",
+    "mncs-research-bytecode"
+  ],
+  "closest_supported_semantics": "per-batch `experiment run` with bounded corpora (correct, ~8s per batch)",
+  "reproducer": "per-sync-batch `experiment run` costs ~8s dominated by rebuild; `experiment execute` refuses substituted corpora by design; no .mncs to program.json emission exists",
+  "protected_properties": [
+    "frozen replication refuses substituted inputs"
+  ],
+  "approximation_prohibited": true,
+  "evidence_requirements": [
+    "timed per-batch runs over the mesh named corpus on both backends"
+  ],
+  "status": "FAIL",
+  "unresolved_fields": [
+    "persistent execution service or program.json emission design"
+  ],
+  "identity": "mncs:0.2:capability-gap:6e9b55bd409080f455fbc59f3e76c6fd020b41df118cbf1eba6288bcf37a7a01"
+}
