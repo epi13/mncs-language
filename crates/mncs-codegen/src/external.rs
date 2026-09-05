@@ -9,6 +9,7 @@
 //! exist or fabricating an execution claim.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use mncs_model::{
     BackendArtifact, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
@@ -85,6 +86,15 @@ impl ExternalTargetSpec {
         BackendIdentity::new(self.backend_name, self.backend_version)
     }
 
+    /// Process-wide monotonic nonce: together with the process id it makes
+    /// every work directory unique per compilation invocation, including
+    /// concurrent compilations in separate threads of the same process.
+    /// Thread IDs are deliberately not used (portability and stability).
+    fn invocation_nonce() -> u64 {
+        static NEXT_NONCE: AtomicU64 = AtomicU64::new(0);
+        NEXT_NONCE.fetch_add(1, Ordering::Relaxed)
+    }
+
     /// Invoke the system `llc` against the shared LLVM lowering output.
     /// Returns the genuine target artifact bytes plus the toolchain identity.
     fn realize(&self, ir: &str) -> Result<(Vec<u8>, String), RealizeError> {
@@ -92,13 +102,15 @@ impl ExternalTargetSpec {
             code: "CGX401",
             message: "unavailable toolchain: llc is not present on this host".to_owned(),
         })?;
-        // The work directory is unique per process: concurrent compilations of
-        // the same program and target (parallel test threads, parallel CLI
-        // invocations) must never share module.ll/module.o.
+        // The work directory is unique per compilation invocation: concurrent
+        // compilations of the same program and target, whether in separate
+        // processes or separate threads of one process, must never share
+        // module.ll/module.o, and cleanup must never remove a live directory.
         let dir = std::env::temp_dir().join(format!(
-            "mncs-external-{}-{}",
+            "mncs-external-{}-{}-{}",
             &crate::support::sha256_hex(format!("{}{ir}", self.triple).as_bytes())[..16],
-            std::process::id()
+            std::process::id(),
+            Self::invocation_nonce()
         ));
         std::fs::create_dir_all(&dir).map_err(|error| RealizeError {
             code: "CGX402",
@@ -157,8 +169,8 @@ impl ExternalTargetSpec {
             code: "CGX402",
             message: format!("unable to read produced artifact: {error}"),
         })?;
-        // Best-effort cleanup: the directory is unique to this process, so
-        // removing it cannot disturb a concurrent compilation.
+        // Best-effort cleanup: the directory is unique to this invocation,
+        // so removing it cannot disturb a concurrent compilation.
         let _ = std::fs::remove_dir_all(&dir);
         Ok((bytes, llc.summary()))
     }
@@ -759,5 +771,109 @@ impl BackendAdapter for ExternalAdapter {
             ),
         });
         result
+    }
+}
+
+#[cfg(test)]
+mod concurrency_tests {
+    //! Adversarial concurrency proof for external realizations.
+    //!
+    //! The work-directory identity must be unique per compilation invocation:
+    //! many same-IR/same-target realizations launched concurrently, in many
+    //! threads of one process and across repeated stress rounds, must never
+    //! collide on files, lose artifacts to cleanup races, or leak work
+    //! directories. Every thread asserts byte-identical outputs.
+
+    use std::collections::HashSet;
+
+    use super::{RealizeError, RISCV32_SPEC};
+
+    /// Minimal IR accepted by `llc -mtriple=riscv32 -mattr=+m -filetype=obj`.
+    const PROBE_IR: &str = "define i32 @probe_min(i32 %a, i32 %b) {\nentry:\n  %c = icmp sgt i32 %a, %b\n  %m = select i1 %c, i32 %b, i32 %a\n  ret i32 %m\n}\n";
+
+    const THREADS: usize = 16;
+    const ROUNDS: usize = 5;
+
+    fn own_work_dirs() -> HashSet<String> {
+        let prefix = "mncs-external-";
+        let ours = format!("-{}-", std::process::id());
+        let mut found = HashSet::new();
+        let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+            return found;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with(prefix) && name.contains(&ours) {
+                found.insert(name);
+            }
+        }
+        found
+    }
+
+    fn realize_or_toolchain_error() -> Result<(Vec<u8>, String), RealizeError> {
+        RISCV32_SPEC.realize(PROBE_IR)
+    }
+
+    #[test]
+    fn concurrent_same_ir_realizations_never_collide() {
+        let before = own_work_dirs();
+        let first = match realize_or_toolchain_error() {
+            Ok((bytes, _)) => Some(bytes),
+            Err(error) => {
+                assert_eq!(
+                    error.code, "CGX401",
+                    "without llc only the structured toolchain error is acceptable"
+                );
+                return;
+            }
+        };
+        let first = first.expect("realize baseline");
+        assert!(!first.is_empty(), "realized artifact must not be empty");
+
+        for _ in 0..ROUNDS {
+            let mut handles = Vec::with_capacity(THREADS);
+            for _ in 0..THREADS {
+                handles.push(std::thread::spawn(|| realize_or_toolchain_error()));
+            }
+            for handle in handles {
+                let (bytes, _) = handle
+                    .join()
+                    .expect("worker thread must not panic")
+                    .expect("concurrent realization must succeed");
+                assert_eq!(
+                    bytes, first,
+                    "concurrent same-IR realizations must be byte-identical"
+                );
+            }
+        }
+
+        let leaked: Vec<String> = own_work_dirs().difference(&before).cloned().collect();
+        assert!(
+            leaked.is_empty(),
+            "no work directories may leak after cleanup: {leaked:?}"
+        );
+    }
+
+    #[test]
+    fn invocation_nonces_are_unique_across_threads() {
+        let mut handles = Vec::with_capacity(THREADS);
+        for _ in 0..THREADS {
+            handles.push(std::thread::spawn(|| {
+                let mut local = Vec::with_capacity(ROUNDS);
+                for _ in 0..ROUNDS {
+                    local.push(super::ExternalTargetSpec::invocation_nonce());
+                }
+                local
+            }));
+        }
+        let mut seen = HashSet::new();
+        for handle in handles {
+            for nonce in handle.join().expect("nonce thread must not panic") {
+                assert!(
+                    seen.insert(nonce),
+                    "invocation nonce duplicated: {nonce}"
+                );
+            }
+        }
     }
 }
