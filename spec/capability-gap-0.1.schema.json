@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mncs:capability-gap:0.1",
+  "title": "MNCS capability-gap artifact v0.1",
+  "description": "Normative shape is the Rust type mncs_model::CapabilityGap plus verify_identity; this schema is a reviewable snapshot for cross-repository producers and consumers.",
+  "type": "object",
+  "required": [
+    "artifact_kind",
+    "contract_revision",
+    "gap_id",
+    "producer",
+    "source_artifact",
+    "source_location",
+    "requested_semantics",
+    "obstruction",
+    "active_profile",
+    "backends",
+    "reproducer",
+    "protected_properties",
+    "approximation_prohibited",
+    "evidence_requirements",
+    "status",
+    "unresolved_fields",
+    "identity"
+  ],
+  "properties": {
+    "artifact_kind": { "const": "mncs.capability_gap" },
+    "contract_revision": { "const": "0.1" },
+    "gap_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "producer": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "compiler_identity": { "type": ["string", "null"] },
+    "source_revision": { "type": ["string", "null"] },
+    "source_artifact": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "source_location": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Redacted: must not contain local directory components."
+    },
+    "requested_semantics": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "obstruction": {
+      "enum": [
+        "parser",
+        "typing",
+        "semantic_validation",
+        "lowering",
+        "runtime",
+        "backend",
+        "library",
+        "verification"
+      ]
+    },
+    "active_profile": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "backends": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "type": "string", "maxLength": 512 }
+    },
+    "closest_supported_semantics": { "type": ["string", "null"] },
+    "reproducer": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "protected_properties": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "type": "string", "maxLength": 512 }
+    },
+    "approximation_prohibited": { "type": "boolean" },
+    "evidence_requirements": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "type": "string", "maxLength": 512 }
+    },
+    "status": { "enum": ["PASS", "FAIL", "UNKNOWN"] },
+    "unresolved_fields": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "type": "string", "maxLength": 512 }
+    },
+    "identity": { "type": "string", "pattern": "^mncs:0\\.2:capability-gap:[0-9a-f]{64}$" }
+  },
+  "additionalProperties": false
+}

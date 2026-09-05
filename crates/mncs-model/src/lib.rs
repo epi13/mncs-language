@@ -7,6 +7,7 @@
 mod bindings;
 mod body;
 mod canonical;
+mod capability_gap;
 mod cfg;
 mod compiler;
 mod compiler_architecture;
@@ -45,6 +46,10 @@ pub use body::{
 };
 pub use canonical::sha256_hex;
 pub use canonical::{CanonicalError, CanonicalForm, CANONICAL_SCHEMA_VERSION};
+pub use capability_gap::{
+    CapabilityGap, CapabilityGapError, GapObstruction, GapStatus, CAPABILITY_GAP_ARTIFACT_KIND,
+    CAPABILITY_GAP_CONTRACT_REVISION,
+};
 pub use cfg::{Cfg, CfgBlock, CFG_SCHEMA_VERSION};
 pub use compiler::{
     ArtifactRepresentation, BackendArtifact, BackendCapabilityManifest, BackendConfiguration,
