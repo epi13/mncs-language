@@ -345,6 +345,23 @@ mod tests {
     }
 
     #[test]
+    fn ptx_entry_annotation_fixture_round_trips() {
+        let raw =
+            include_str!("../../../examples/capability-gaps/ptx-kernel-entry-annotation.json");
+        let gap: CapabilityGap = serde_json::from_str(raw).expect("fixture parses");
+        assert!(gap.verify_identity().is_ok());
+        assert_eq!(gap.gap_id, "codegen.ptx/kernel-entry-annotation");
+        assert_eq!(gap.obstruction, GapObstruction::SemanticValidation);
+        assert_eq!(gap.status, GapStatus::Fail);
+        assert_eq!(
+            gap.identity.as_str(),
+            "mncs:0.2:capability-gap:64190003217333be8d407aa25f90048e6fffd7d239736a023ce6b403d53bc352"
+        );
+        // Local paths never survive redaction.
+        assert!(!gap.source_location.contains("/home/"));
+    }
+
+    #[test]
     fn bounds_fail_closed() {
         assert!(mesh_gap().verify_identity().is_ok());
         assert_eq!(

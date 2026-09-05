@@ -1,0 +1,30 @@
+{
+  "artifact_kind": "mncs.capability_gap",
+  "contract_revision": "0.1",
+  "gap_id": "codegen.ptx/kernel-entry-annotation",
+  "producer": "backend-conformance-pressure",
+  "compiler_identity": null,
+  "source_revision": null,
+  "source_artifact": "mncs-ptx64 kernel entry selection",
+  "source_location": "<local-path>/main.rs",
+  "requested_semantics": "declare an MNCS export launchable as a PTX kernel from MNCS source",
+  "obstruction": "semantic_validation",
+  "active_profile": "research-0.1",
+  "backends": [
+    "mncs-ptx64"
+  ],
+  "closest_supported_semantics": "--entry NAME compiler flag with ptx_kernel calling convention (explicit, outside source)",
+  "reproducer": "--entry bounded_min selects .entry emission; no source annotation exists",
+  "protected_properties": [
+    "explicit selection only: no export becomes launchable by default"
+  ],
+  "approximation_prohibited": true,
+  "evidence_requirements": [
+    "source-profile syntax for kernel/export annotation"
+  ],
+  "status": "FAIL",
+  "unresolved_fields": [
+    "profile-owned kernel semantics; eBPF program-type metadata analog"
+  ],
+  "identity": "mncs:0.2:capability-gap:64190003217333be8d407aa25f90048e6fffd7d239736a023ce6b403d53bc352"
+}

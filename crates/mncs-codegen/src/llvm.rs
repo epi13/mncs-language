@@ -529,14 +529,33 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
         }
     }
     out.push('\n');
+    // PTX kernel entries are explicit per-compilation selections carried in
+    // the plan backend options (`ptx-kernel-entries`). Only the NVPTX triple
+    // honors them; every other target lowers all functions as ordinary
+    // callable definitions. Options (not target facts) carry the selection
+    // so the request/plan target identity stays exact.
+    let kernel_entries: std::collections::BTreeSet<String> = plan
+        .backend
+        .as_ref()
+        .and_then(|configuration| configuration.options.get("ptx-kernel-entries"))
+        .map(|list| {
+            list.split(',')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    let ptx_kernel_convention = triple == "nvptx64";
     for function in &module.functions {
-        emit_function(&mut out, function);
+        let kernel = ptx_kernel_convention && kernel_entries.contains(&function.export_name);
+        emit_function(&mut out, function, kernel);
         out.push('\n');
     }
     out
 }
 
-fn emit_function(out: &mut String, function: &ScalarFunction) {
+fn emit_function(out: &mut String, function: &ScalarFunction, kernel_entry: bool) {
     let names = NameMap::new(function);
     let mut split = 0u32;
     let mut params = function
@@ -547,9 +566,14 @@ fn emit_function(out: &mut String, function: &ScalarFunction) {
         .collect::<Vec<_>>();
     params.push("ptr %mncs_status".to_owned());
     params.push("ptr %mncs_value".to_owned());
+    // The PTX kernel calling convention makes llc emit a launchable
+    // `.entry` instead of a callable `.func`. It is only ever applied to
+    // explicitly selected entries on the NVPTX triple.
+    let convention = if kernel_entry { " ptx_kernel" } else { "" };
     let _ = writeln!(
         out,
-        "define void @{}({}) {{",
+        "define{} void @{}({}) {{",
+        convention,
         function.export_name,
         params.join(", ")
     );

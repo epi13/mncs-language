@@ -107,6 +107,56 @@ impl ReferenceCompiler {
         )
     }
 
+    /// Variant of [`Self::request_for_program`] that records one extra
+    /// caller-selected lowering option on the backend configuration before
+    /// the request identity is computed. The identity covers the final
+    /// contents, so post-hoc mutation (which CMP002 rightly rejects) is
+    /// never needed.
+    pub fn request_for_program_with_entry(
+        &self,
+        program: &Program,
+        emit: BTreeSet<ArtifactRepresentation>,
+        target: Option<TargetContractRef>,
+        kernel_entries: &[String],
+    ) -> CompilationRequest {
+        let semantic = program
+            .canonical_form()
+            .expect("a parsed semantic program is canonicalizable");
+        let input = CompilerArtifactRef::new(
+            ArtifactRepresentation::Semantic,
+            semantic.schema_version,
+            semantic.fingerprint,
+        );
+        let (compiler_host, build_host) = native_host_identities();
+        let backend = target.as_ref().and_then(|target| {
+            mncs_codegen::backend_names().into_iter().find_map(|name| {
+                target_for_backend(name)
+                    .filter(|candidate| candidate == target)
+                    .and_then(|_| configuration_for_backend(name))
+            })
+        });
+        let mut backend = backend;
+        if let Some(configuration) = backend.as_mut() {
+            configuration
+                .options
+                .insert("ptx-kernel-entries".to_owned(), kernel_entries.join(","));
+        }
+        CompilationRequest::new(
+            input,
+            SemanticId(REFERENCE_LANGUAGE_PROFILE.to_owned()),
+            emit,
+            self.identity.clone(),
+            compiler_host,
+            build_host,
+            target,
+            None,
+            self.pipeline.clone(),
+            Vec::new(),
+            None,
+            backend,
+        )
+    }
+
     pub fn request_for_program_with_backend(
         &self,
         program: &Program,
