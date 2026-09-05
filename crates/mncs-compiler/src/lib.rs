@@ -91,6 +91,72 @@ impl ReferenceCompiler {
                     .and_then(|_| configuration_for_backend(name))
             })
         });
+        self.request_with_backend_option(
+            emit,
+            target,
+            input,
+            compiler_host,
+            build_host,
+            backend,
+            None,
+        )
+    }
+
+    /// Variant of [`Self::request_for_program`] that records one extra
+    /// caller-selected lowering option on the backend configuration before
+    /// the request identity is computed. The identity covers the final
+    /// contents, so post-hoc mutation (which CMP002 rightly rejects) is
+    /// never needed.
+    pub fn request_for_program_with_entry(
+        &self,
+        program: &Program,
+        emit: BTreeSet<ArtifactRepresentation>,
+        target: Option<TargetContractRef>,
+        kernel_entries: &[String],
+    ) -> CompilationRequest {
+        let semantic = program
+            .canonical_form()
+            .expect("a parsed semantic program is canonicalizable");
+        let input = CompilerArtifactRef::new(
+            ArtifactRepresentation::Semantic,
+            semantic.schema_version,
+            semantic.fingerprint,
+        );
+        let (compiler_host, build_host) = native_host_identities();
+        let backend = target.as_ref().and_then(|target| {
+            mncs_codegen::backend_names().into_iter().find_map(|name| {
+                target_for_backend(name)
+                    .filter(|candidate| candidate == target)
+                    .and_then(|_| configuration_for_backend(name))
+            })
+        });
+        let entries = kernel_entries.join(",");
+        self.request_with_backend_option(
+            emit,
+            target,
+            input,
+            compiler_host,
+            build_host,
+            backend,
+            Some(("ptx-kernel-entries".to_owned(), entries)),
+        )
+    }
+
+    fn request_with_backend_option(
+        &self,
+        emit: BTreeSet<ArtifactRepresentation>,
+        target: Option<TargetContractRef>,
+        input: CompilerArtifactRef,
+        compiler_host: CompilerHostIdentity,
+        build_host: BuildHostIdentity,
+        mut backend: Option<mncs_model::BackendConfiguration>,
+        extra_option: Option<(String, String)>,
+    ) -> CompilationRequest {
+        if let (Some(configuration), Some((key, value))) =
+            (backend.as_mut(), extra_option)
+        {
+            configuration.options.insert(key, value);
+        }
         CompilationRequest::new(
             input,
             SemanticId(REFERENCE_LANGUAGE_PROFILE.to_owned()),
@@ -347,7 +413,7 @@ impl ReferenceCompiler {
                 if let Some(template) =
                     plan_for_backend(&configuration.backend.name, selected_ssa_ref.clone())
                 {
-                    TargetLoweringPlan::with_explicit_facts(
+                    let plan = TargetLoweringPlan::with_explicit_facts(
                         selected_ssa_ref.clone(),
                         target,
                         Some(configuration.clone()),
@@ -358,7 +424,8 @@ impl ReferenceCompiler {
                         template.linker_requirements,
                         template.promises_consumed,
                         TransformationStatus::Pass,
-                    )
+                    );
+                    plan
                 } else {
                     TargetLoweringPlan::with_unknown_facts(
                         selected_ssa_ref.clone(),

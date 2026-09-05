@@ -19,7 +19,7 @@ use mncs_model::{
 };
 
 use crate::support::{
-    artifact_ref, empty_execution, execution_failure, function_names, unknown,
+    artifact_ref, empty_execution, execution_failure, failed, function_names, unknown,
     validate_realizable_ssa, validate_selected_ssa,
 };
 use crate::{support, BackendAdapter, BackendExecutionResult};
@@ -444,8 +444,11 @@ fn validate_ptx_module(bytes: &[u8], exports: &[String]) -> Result<String, Strin
         return Err("PTX module does not declare 64-bit addressing".to_owned());
     }
     for export in exports {
-        let needle = format!(".visible .func {export}(");
-        if !text.contains(&needle) {
+        // A visible definition is either a callable device function or a
+        // launchable kernel entry; both prove the export is really emitted.
+        let func = format!(".visible .func {export}(");
+        let entry = format!(".visible .entry {export}(");
+        if !text.contains(&func) && !text.contains(&entry) {
             return Err(format!(
                 "PTX module lacks a visible definition for export {export}"
             ));
@@ -575,6 +578,49 @@ pub fn lower_external(
         .iter()
         .map(|function| function.export_name.clone())
         .collect();
+    // Kernel entries are explicit per-compilation selections traveling in the
+    // plan backend options (never in target facts, so the request/plan target
+    // identity stays exact). An entry that names no export of this program is
+    // a caller error, never a silent no-op. Entries only take effect on the
+    // NVPTX triple (see the shared LLVM emitter).
+    let kernel_entries: Vec<String> = if spec.triple == "nvptx64" {
+        plan.backend
+            .as_ref()
+            .and_then(|configuration| configuration.options.get("ptx-kernel-entries"))
+            .map(|list| {
+                list.split(',')
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    if spec.triple == "nvptx64" {
+        let entries = kernel_entries.join(",");
+        let mut unknown = Vec::new();
+        for entry in entries
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        {
+            if !export_names.iter().any(|export| export == entry) {
+                unknown.push(entry.to_owned());
+            }
+        }
+        if !unknown.is_empty() {
+            return failed(vec![CompilerDiagnostic::new(
+                "CGX303",
+                CompilerDiagnosticKind::UnavailableBackendCapability,
+                format!(
+                    "ptx kernel entries name no export of this program: {}",
+                    unknown.join(", ")
+                ),
+            )]);
+        }
+    }
     // The shared LLVM lowering is the source IR for every external target.
     let ir = crate::llvm::emit_llvm_module(&scalar, plan);
     let (bytes, toolchain) = match spec.realize(&ir) {
@@ -599,6 +645,18 @@ pub fn lower_external(
         spec.execution_note.to_owned(),
     ];
     assumptions.extend(plan.assumptions_introduced.clone());
+    let mut execution_applicability = vec![
+        "external llc invocation".to_owned(),
+        "no embedded interpreter for this target".to_owned(),
+    ];
+    if !kernel_entries.is_empty() {
+        // Machine-readable record of the launchable kernel selection: the
+        // named exports are `.entry` points, every other export a `.func`.
+        execution_applicability.push(format!(
+            "launchable ptx kernel entries: {}",
+            kernel_entries.join(", ")
+        ));
+    }
     let artifact = BackendArtifact::new_with_kind(
         spec.backend(),
         selected_ssa.clone(),
@@ -609,10 +667,7 @@ pub fn lower_external(
         export_names,
         assumptions.clone(),
         Vec::new(),
-        vec![
-            "external llc invocation".to_owned(),
-            "no embedded interpreter for this target".to_owned(),
-        ],
+        execution_applicability,
         plan.target.evidence.clone(),
         Vec::new(),
         TransformationStatus::Pass,

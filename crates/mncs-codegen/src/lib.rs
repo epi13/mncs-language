@@ -427,6 +427,13 @@ pub fn target_is_portable_wasm(target: &TargetContractRef) -> bool {
         && !target.evidence.is_empty()
 }
 
+/// Whether a target contract is the external PTX64 target. Kernel entries
+/// (`--entry`) are only meaningful here: no other backend honors them.
+pub fn target_is_ptx64(target: &TargetContractRef) -> bool {
+    target.candidate == external::PTX64_SPEC.target_id
+        && target.facts.get("triple").is_some_and(|triple| triple == "nvptx64")
+}
+
 pub fn research_bytecode_backend() -> BackendIdentity {
     BackendIdentity::new(
         RESEARCH_BYTECODE_BACKEND_NAME,

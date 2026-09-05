@@ -9,7 +9,8 @@ use std::{
 use mncs_codegen::{
     backend_adapter, backend_capabilities, backend_family_matrix, backend_names,
     compare_body_ssa_and_backend, execute_backend, lower_selected_ssa, portable_wasm_plan,
-    selected_ssa_ref, target_for_backend, target_is_portable_wasm, BackendStatefulSession,
+    selected_ssa_ref, target_for_backend, target_is_portable_wasm, target_is_ptx64,
+    BackendStatefulSession,
 };
 use mncs_compiler::{
     native_node_profile, reference_compiler_architecture, ModuleResolution, ModuleResolver,
@@ -598,6 +599,15 @@ struct CompileOptions {
     emit: BTreeSet<ArtifactRepresentation>,
     output_dir: Option<PathBuf>,
     target: Option<TargetContractRef>,
+    kernel_entries: Vec<String>,
+}
+
+fn valid_kernel_entry(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-')
 }
 
 fn compile_command<I>(args: I) -> ExitCode
@@ -617,7 +627,19 @@ where
         Err(code) => return code,
     };
     let compiler = ReferenceCompiler::default();
-    let request = compiler.request_for_program(&program, options.emit, options.target);
+    // Explicit kernel entries are recorded on the backend configuration
+    // before the request identity is computed, so CMP002 sees consistent
+    // contents. `--entry` was already validated against the PTX64 target.
+    let request = if options.kernel_entries.is_empty() {
+        compiler.request_for_program(&program, options.emit, options.target)
+    } else {
+        compiler.request_for_program_with_entry(
+            &program,
+            options.emit,
+            options.target,
+            &options.kernel_entries,
+        )
+    };
     let result = compiler.compile(request, &program);
     if let Some(output_dir) = &options.output_dir {
         if let Err(error) = write_compilation_outputs(output_dir, &result) {
@@ -2212,6 +2234,7 @@ where
     .collect::<BTreeSet<_>>();
     let mut output_dir = None;
     let mut target = None;
+    let mut kernel_entries = Vec::new();
     while let Some(option) = args.next() {
         match option.as_str() {
             "--emit" => {
@@ -2232,6 +2255,17 @@ where
                     .ok_or_else(|| "--target requires a target-contract candidate".to_owned())?;
                 target = Some(unevidenced_target(value));
             }
+            "--entry" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--entry requires an export name".to_owned())?;
+                if !valid_kernel_entry(&value) {
+                    return Err(format!("--entry name is not a valid export name: {value:?}"));
+                }
+                if !kernel_entries.contains(&value) {
+                    kernel_entries.push(value);
+                }
+            }
             other => return Err(format!("unknown compile option {other:?}")),
         }
     }
@@ -2240,6 +2274,13 @@ where
     }
     if emit.contains(&ArtifactRepresentation::BackendArtifact) && target.is_none() {
         return Err("backend emission requires --target".to_owned());
+    }
+    if !kernel_entries.is_empty() {
+        // Kernel entries select launchable PTX kernels; they are meaningless
+        // for any other target and are rejected rather than ignored.
+        if !target.as_ref().is_some_and(target_is_ptx64) {
+            return Err("--entry requires --target mncs-ptx64".to_owned());
+        }
     }
     if target.as_ref().is_some_and(target_is_portable_wasm) {
         emit.insert(ArtifactRepresentation::TargetLoweringPlan);
@@ -2250,6 +2291,7 @@ where
         emit,
         output_dir,
         target,
+        kernel_entries,
     })
 }
 
