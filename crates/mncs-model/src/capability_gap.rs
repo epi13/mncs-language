@@ -332,8 +332,7 @@ mod tests {
 
     #[test]
     fn embeddable_execution_fixture_round_trips() {
-        let raw =
-            include_str!("../../../examples/capability-gaps/embeddable-execution.json");
+        let raw = include_str!("../../../examples/capability-gaps/embeddable-execution.json");
         let gap: CapabilityGap = serde_json::from_str(raw).expect("fixture parses");
         assert!(gap.verify_identity().is_ok());
         assert_eq!(gap.gap_id, "commons.mesh/embeddable-execution");
