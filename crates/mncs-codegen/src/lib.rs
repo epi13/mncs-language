@@ -23,10 +23,10 @@ use std::time::Instant;
 
 use mncs_model::{
     execute_ssa_module, execute_ssa_module_prevalidated,
-    execute_stateful_case_with_checkpoint_scoped, execute_with_policy, stateful_prefix_identity,
-    ArtifactRepresentation, BackendArtifact, BackendCapabilityManifest, BackendConfiguration,
-    BackendEvidence, BackendFunctionValueContract, BackendIdentity, BackendResult,
-    BackendValueContract, BodyType, CompilerArtifactRef, CompilerDiagnostic,
+    execute_stateful_case_with_checkpoint_scoped, stateful_prefix_identity, ArtifactRepresentation,
+    BackendArtifact, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
+    BackendFunctionValueContract, BackendIdentity, BackendResult, BackendValueContract,
+    BodyExecutionSession, BodyType, CompilerArtifactRef, CompilerDiagnostic,
     CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure, ExecutionRequest, ExecutionResult,
     ExecutionStatus, ExecutionTarget, ExecutionValue, IntegerType, Program, SemanticId,
     SsaExecutionSession, SsaModule, StatefulCallResult, StatefulExecutionCase,
@@ -2083,8 +2083,12 @@ pub fn compare_body_ssa_and_backend(
     // one-shot path, so validation semantics never weaken.
     let backend_session = BackendExecutionSession::new(artifact);
     let ssa_session = SsaExecutionSession::new(program, ssa).ok();
+    // Issue #112: the body interpreter shares one validated program across
+    // the corpus instead of re-validating and re-fingerprinting per
+    // (nested) call. Request-specific checks still run every time.
+    let body_session = BodyExecutionSession::new(program);
     for case_ in &corpus.cases {
-        let body = execute_with_policy(program, &case_.request);
+        let body = body_session.execute(&case_.request);
         trace_timing("compare-body", started);
         let ssa_result = ssa_session.as_ref().map_or_else(
             || execute_ssa_module(program, ssa, &case_.request),
@@ -2473,6 +2477,67 @@ mod tests {
                 "{backend}: fallback must equal one-shot"
             );
             assert_ne!(tampered_result.status, ExecutionStatus::Returned);
+        }
+    }
+
+    /// Issue #112: a corpus-shared body session must observe exactly what
+    /// per-call one-shot body execution observes, including across nested
+    /// MNCS calls (which previously re-validated and re-fingerprinted the
+    /// whole program per call). Step budgets stay per-call: exhaustion in
+    /// the session must equal exhaustion one-shot.
+    #[test]
+    fn body_session_matches_one_shot_with_nested_calls() {
+        let envelope = mncs_syntax::SourceEnvelope::inline(
+            mncs_syntax::SourceArtifactKind::Program,
+            "nested-session",
+            "mncs 0.10;\nmodule test.nested;\nfn double(x: i64) -> (result: i64) { return x +% x; }\nfn quadruple(x: i64) -> (result: i64) { return double(x) +% double(x); }\n"
+                .to_owned(),
+        );
+        let parsed = mncs_syntax::parse(&envelope);
+        assert!(
+            parsed.is_valid(),
+            "fixture parses: {:?}",
+            parsed.diagnostics
+        );
+        let program = mncs_compiler::elaborate_program(&parsed.ast.expect("fixture AST"))
+            .expect("fixture elaborates");
+        assert!(program.validate().valid, "fixture validates");
+        let session = BodyExecutionSession::new(&program);
+        let request = |budget| mncs_model::ExecutionRequest {
+            schema_version: mncs_model::EXECUTION_REQUEST_SCHEMA_VERSION.to_owned(),
+            target: mncs_model::ExecutionTarget {
+                module: "test.nested".to_owned(),
+                function: "quadruple".to_owned(),
+            },
+            arguments: vec![mncs_model::ExecutionValue::Integer {
+                value: 21,
+                ty: mncs_model::IntegerType {
+                    bits: 64,
+                    signed: true,
+                },
+            }],
+            step_budget: budget,
+            policy: mncs_model::ExecutionPolicy::default(),
+        };
+        let generous = session.execute(&request(10_000));
+        assert_eq!(generous.status, mncs_model::ExecutionStatus::Returned);
+        assert_eq!(
+            generous.returned,
+            vec![mncs_model::ExecutionValue::Integer {
+                value: 84,
+                ty: mncs_model::IntegerType {
+                    bits: 64,
+                    signed: true,
+                },
+            }]
+        );
+        for budget in [1, 8, 64, 10_000] {
+            let expected = mncs_model::execute_with_policy(&program, &request(budget));
+            assert_eq!(
+                session.execute(&request(budget)),
+                expected,
+                "session must equal one-shot at budget {budget}"
+            );
         }
     }
 

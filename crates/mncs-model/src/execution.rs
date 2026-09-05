@@ -1080,19 +1080,18 @@ impl ExecutionResult {
         result
     }
 
-    fn with_program(request: &ExecutionRequest, program: &Program, function: &Function) -> Self {
-        let program_identity = program
-            .semantic_identities()
-            .objects
-            .into_iter()
-            .find(|record| record.kind == crate::IdentityKind::Program)
-            .map(|record| record.identity);
+    fn with_session(
+        request: &ExecutionRequest,
+        program: &Program,
+        function: &Function,
+        session: &BodyExecutionSession,
+    ) -> Self {
         Self {
             schema_version: EXECUTION_RESULT_SCHEMA_VERSION.to_owned(),
             status: ExecutionStatus::InvalidRequest,
             target: request.target.clone(),
-            program_identity,
-            program_fingerprint: program.content_fingerprint().ok(),
+            program_identity: session.program_identity.clone(),
+            program_fingerprint: session.program_fingerprint.clone(),
             function_identity: Some(function_id(
                 function.identity_namespace(&program.module),
                 &function.name,
@@ -1112,19 +1111,64 @@ impl ExecutionResult {
     }
 }
 
+/// Reusable body-execution preparation for a bounded run over one immutable
+/// program (issue #112). Program validation, identity, and fingerprint are
+/// established once; every (nested) call still runs all request-specific
+/// checks. Results are observationally identical to calling [`execute`]
+/// once per request.
+pub struct BodyExecutionSession<'a> {
+    program: &'a Program,
+    valid: bool,
+    program_identity: Option<SemanticId>,
+    program_fingerprint: Option<String>,
+}
+
+impl<'a> BodyExecutionSession<'a> {
+    pub fn new(program: &'a Program) -> Self {
+        let valid = program.validate().valid;
+        let (program_identity, program_fingerprint) = if valid {
+            (
+                program
+                    .semantic_identities()
+                    .objects
+                    .into_iter()
+                    .find(|record| record.kind == crate::IdentityKind::Program)
+                    .map(|record| record.identity),
+                program.content_fingerprint().ok(),
+            )
+        } else {
+            (None, None)
+        };
+        Self {
+            program,
+            valid,
+            program_identity,
+            program_fingerprint,
+        }
+    }
+
+    /// Execute one request against the validated program. Nested MNCS calls
+    /// share this session's memoized program facts; step budgets, targets,
+    /// and argument checks remain per-call.
+    pub fn execute(&self, request: &ExecutionRequest) -> ExecutionResult {
+        execute_inner(
+            self,
+            request,
+            matches!(request.policy.effects, EffectExecutionPolicy::Record),
+        )
+    }
+}
+
 pub fn execute(program: &Program, request: &ExecutionRequest) -> ExecutionResult {
-    execute_inner(
-        program,
-        request,
-        matches!(request.policy.effects, EffectExecutionPolicy::Record),
-    )
+    BodyExecutionSession::new(program).execute(request)
 }
 
 fn execute_inner(
-    program: &Program,
+    session: &BodyExecutionSession,
     request: &ExecutionRequest,
     record_effects: bool,
 ) -> ExecutionResult {
+    let program = session.program;
     if request.schema_version != EXECUTION_REQUEST_SCHEMA_VERSION {
         return ExecutionResult::invalid(
             request,
@@ -1134,8 +1178,7 @@ fn execute_inner(
             ),
         );
     }
-    let validation = program.validate();
-    if !validation.valid {
+    if !session.valid {
         return ExecutionResult::invalid(request, "program validation failed");
     }
     // The target may name the program's own module or the home module of
@@ -1172,7 +1215,7 @@ fn execute_inner(
         return ExecutionResult::invalid(request, reason);
     }
 
-    let mut result = ExecutionResult::with_program(request, program, function);
+    let mut result = ExecutionResult::with_session(request, program, function, session);
     let mut values = BTreeMap::new();
     for (parameter, argument) in body.parameters.iter().zip(&request.arguments) {
         let Some(argument) = normalize_value(program, argument, &parameter.ty) else {
@@ -1225,7 +1268,7 @@ fn execute_inner(
                 "operation",
             );
             if let Some(stop) = execute_operation(
-                program,
+                session,
                 operation,
                 &identity,
                 &mut values,
@@ -1329,7 +1372,7 @@ fn execute_inner(
 }
 
 fn execute_operation(
-    program: &Program,
+    session: &BodyExecutionSession,
     operation: &BodyOperation,
     identity: &SemanticId,
     values: &mut BTreeMap<String, ExecutionValue>,
@@ -1337,6 +1380,7 @@ fn execute_operation(
     request: &ExecutionRequest,
     record_effects: bool,
 ) -> Option<ExecutionResult> {
+    let program = session.program;
     match &operation.kind {
         BodyOperationKind::Constant { value, ty } => {
             let Some(value) = constant_value(*value, ty) else {
@@ -2412,7 +2456,7 @@ fn execute_operation(
                 step_budget: remaining,
                 policy: request.policy.clone(),
             };
-            let nested = execute_inner(program, &nested_request, record_effects);
+            let nested = execute_inner(session, &nested_request, record_effects);
             let trace_offset = result.steps;
             result.steps = result.steps.saturating_add(nested.steps);
             result.effects.extend(nested.effects.clone());
