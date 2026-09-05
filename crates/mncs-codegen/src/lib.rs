@@ -1824,6 +1824,108 @@ impl<'a> BackendStatefulSession<'a> {
     }
 }
 
+/// Reusable backend preparation for a bounded stateless corpus (issue #108).
+/// Artifact decoding, JSON re-materialization, SSA validation, block indexes,
+/// and WASM module decoding happen at most once per artifact/session.
+/// Every case still executes through the same language-owned bounded runner
+/// with request-specific checks on every call; only immutable artifact-level
+/// preparation is reused. Results are observationally identical to calling
+/// [`execute_backend`] once per case.
+pub struct BackendExecutionSession<'a> {
+    artifact: &'a BackendArtifact,
+    prepared: PreparedStatelessBackend,
+}
+
+enum PreparedStatelessBackend {
+    Wasm(crate::wasm::WasmModule),
+    Research {
+        payload: Box<ResearchBytecodePayload>,
+        session: Box<SsaExecutionSession>,
+    },
+    OneShot,
+}
+
+impl<'a> BackendExecutionSession<'a> {
+    pub fn new(artifact: &'a BackendArtifact) -> Self {
+        let identity_valid = artifact.identity_is_valid();
+        let prepared = if identity_valid
+            && artifact.backend == portable_wasm_backend()
+            && artifact.artifact_kind == PORTABLE_WASM_ARTIFACT_KIND
+        {
+            artifact
+                .bytes()
+                .ok()
+                .and_then(|bytes| {
+                    (bytes.len() >= 8 && bytes[..4] == WASM_MAGIC && bytes[4..8] == WASM_VERSION)
+                        .then(|| decode_module(&bytes).ok())
+                        .flatten()
+                })
+                .map_or(PreparedStatelessBackend::OneShot, |module| {
+                    mncs_model::record_counter("backend_session");
+                    mncs_model::record_counter("reused_stage");
+                    PreparedStatelessBackend::Wasm(module)
+                })
+        } else if identity_valid
+            && artifact.backend == research_bytecode_backend()
+            && artifact.artifact_kind == RESEARCH_BYTECODE_ARTIFACT_KIND
+        {
+            artifact
+                .bytes()
+                .ok()
+                .and_then(|bytes| {
+                    mncs_model::record_counter("artifact_decode");
+                    serde_json::from_slice::<ResearchBytecodePayload>(&bytes)
+                        .ok()
+                        .filter(|payload| payload.schema_version == "0.1")
+                })
+                .and_then(|payload| {
+                    SsaExecutionSession::from_shared(
+                        Arc::clone(&payload.program),
+                        Arc::clone(&payload.ssa),
+                    )
+                    .ok()
+                    .map(|session| (payload, session))
+                })
+                .map_or(PreparedStatelessBackend::OneShot, |(payload, session)| {
+                    mncs_model::record_counter("backend_session");
+                    mncs_model::record_counter("reused_stage");
+                    PreparedStatelessBackend::Research {
+                        payload: Box::new(payload),
+                        session: Box::new(session),
+                    }
+                })
+        } else {
+            PreparedStatelessBackend::OneShot
+        };
+        Self { artifact, prepared }
+    }
+
+    /// True when artifact-level preparation was reused (not per-case one-shot).
+    pub fn reused(&self) -> bool {
+        !matches!(self.prepared, PreparedStatelessBackend::OneShot)
+    }
+
+    pub fn execute(&self, request: &ExecutionRequest) -> BackendExecutionResult {
+        match &self.prepared {
+            PreparedStatelessBackend::Wasm(module) => {
+                mncs_model::record_counter("reused_execution");
+                execute_portable_wasm_decoded(self.artifact, module, request)
+            }
+            PreparedStatelessBackend::Research { payload, session } => {
+                mncs_model::record_counter("reused_execution");
+                execute_research_bytecode_payload(
+                    self.artifact,
+                    payload,
+                    request,
+                    false,
+                    Some(session),
+                )
+            }
+            PreparedStatelessBackend::OneShot => execute_backend(self.artifact, request),
+        }
+    }
+}
+
 fn stateful_call_result(observation: BackendExecutionResult) -> StatefulCallResult {
     StatefulCallResult {
         status: observation.status,
@@ -1975,12 +2077,24 @@ pub fn compare_body_ssa_and_backend(
     let mut mismatches = Vec::new();
     let mut unsupported = false;
     let mut invalid = corpus.cases.is_empty();
+    // Issue #108: immutable artifact-level preparation (payload decoding,
+    // SSA validation, block indexes, WASM module decoding) is built once for
+    // the corpus. Sessions that fail to prepare fall back to the per-case
+    // one-shot path, so validation semantics never weaken.
+    let backend_session = BackendExecutionSession::new(artifact);
+    let ssa_session = SsaExecutionSession::new(program, ssa).ok();
     for case_ in &corpus.cases {
         let body = execute_with_policy(program, &case_.request);
         trace_timing("compare-body", started);
-        let ssa_result = execute_ssa_module(program, ssa, &case_.request);
+        let ssa_result = ssa_session.as_ref().map_or_else(
+            || execute_ssa_module(program, ssa, &case_.request),
+            |session| {
+                mncs_model::record_counter("reused_execution");
+                session.execute(&case_.request)
+            },
+        );
         trace_timing("compare-ssa", started);
-        let backend = execute_backend(artifact, &case_.request);
+        let backend = backend_session.execute(&case_.request);
         trace_timing("compare-backend", started);
         unsupported |= matches!(body.status, ExecutionStatus::Unsupported)
             || matches!(ssa_result.status, ExecutionStatus::Unsupported)
@@ -2303,6 +2417,63 @@ mod tests {
             comparison.status,
             LayeredExecutionStatus::ConsistentOverCorpus
         );
+    }
+
+    /// Issue #108: a corpus-reused session must observe exactly what per-case
+    /// one-shot execution observes, on both executable backends. A tampered
+    /// artifact must fail closed into the one-shot path, never into silent
+    /// reuse of unvalidated material.
+    #[test]
+    fn execution_session_reuse_matches_one_shot_on_both_backends() {
+        let program = program();
+        let ssa = program.lower_to_ssa().unwrap();
+        let selected = selected_ssa_ref(&ssa);
+        for backend in [
+            PORTABLE_WASM_MVP_BACKEND_NAME,
+            RESEARCH_BYTECODE_BACKEND_NAME,
+        ] {
+            let plan = plan_for_backend(backend, selected.clone()).expect("backend plan");
+            let artifact = lower_with_backend(backend, &program, &ssa, selected.clone(), &plan)
+                .artifact
+                .expect("backend artifact");
+            let session = BackendExecutionSession::new(&artifact);
+            assert!(
+                session.reused(),
+                "{backend}: session should reuse preparation"
+            );
+            for (a, b) in [(20, 22), (1, 2), (i128::from(i32::MAX), 1)] {
+                let request = request(a, b);
+                let expected = execute_backend(&artifact, &request);
+                let observed = session.execute(&request);
+                assert_eq!(observed.status, expected.status, "{backend} {a},{b}");
+                assert_eq!(observed.returned, expected.returned, "{backend} {a},{b}");
+                assert_eq!(observed.steps, expected.steps, "{backend} {a},{b}");
+                assert_eq!(
+                    observed.artifact_sha256, expected.artifact_sha256,
+                    "{backend} {a},{b}"
+                );
+            }
+            // Tamper: flip one byte of the artifact payload. Identity no
+            // longer validates, so the session must decline reuse and the
+            // one-shot path must fail closed rather than execute.
+            let mut tampered = artifact.clone();
+            let mut bytes = tampered.bytes().expect("artifact bytes");
+            let mid = bytes.len() / 2;
+            bytes[mid] ^= 0x01;
+            tampered.bytes_hex = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+            let tampered_session = BackendExecutionSession::new(&tampered);
+            assert!(
+                !tampered_session.reused(),
+                "{backend}: tampered artifact must not reuse preparation"
+            );
+            let tampered_result = tampered_session.execute(&request(1, 2));
+            assert_eq!(
+                tampered_result,
+                execute_backend(&tampered, &request(1, 2)),
+                "{backend}: fallback must equal one-shot"
+            );
+            assert_ne!(tampered_result.status, ExecutionStatus::Returned);
+        }
     }
 
     #[test]
