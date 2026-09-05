@@ -4,6 +4,7 @@
 //! representation is a transport format for experiments, not a proposed final
 //! language grammar.
 
+mod authority;
 mod bindings;
 mod body;
 mod canonical;
@@ -32,6 +33,12 @@ mod translation;
 mod validation;
 mod verifier;
 
+pub use authority::{
+    accept_leg, canonical_envelope_bytes, fold_capability, requirement_identity,
+    verify_decision_digest, verify_session_context, Acceptance, AuthorityError, AuthorityVerdict,
+    CapabilityDecision, DecisionStatus, RequirementLeg, SessionBinding, DECISION_DIGEST_ALG,
+    DECISION_SCHEMA, REQUIREMENT_SCHEMA,
+};
 pub use bindings::{
     ResolutionProvenance, SemanticBinding, SemanticBindingKind, SemanticBindingTable,
     SemanticNamespace, SemanticReference, SemanticScope, SEMANTIC_BINDING_SCHEMA_VERSION,
