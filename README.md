@@ -1,6 +1,7 @@
 # MNCS Language Project
 
 [![CI](https://github.com/epi13/mncs-language/actions/workflows/ci.yml/badge.svg)](https://github.com/epi13/mncs-language/actions/workflows/ci.yml)
+![MNCS badge](docs/mncs-badge.svg)
 
 Research and reference implementation for a general-purpose, verification-native programming language built on Machine-Native Complexity Standard (MNCS) principles.
 
@@ -467,6 +468,18 @@ A repeatedly successful non-orthodox technique may eventually graduate from an i
 - **RAVEL** can coordinate recursive, distributed, multi-agent, multi-target, and multi-verifier refinement across machines and trust boundaries.
 
 MNCS must remain applicable to existing languages even if this project never becomes production-ready. The standard therefore does not depend on this language project.
+
+## Family verification
+
+This repository consumes the shared `mncs-actions` family workflow
+(`.github/workflows/mncs-family.yml`) on every push to `main` and every
+pull request. The declared boundary is
+`mncs-language-pressure-boundary`: the compiler pressure-test target
+(`language-pressure-tests`, via `scripts/mncs_language_check.py`) is
+required; the full workspace suite plus clippy/fmt stay in this repo's
+own CI. The aggregate verdict renders the badge above
+(`docs/mncs-badge.svg` plus the machine-readable
+`docs/mncs-badge.json` sidecar) on `main` pushes.
 
 ## Design principles
 
