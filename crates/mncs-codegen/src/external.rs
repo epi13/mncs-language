@@ -888,7 +888,7 @@ mod concurrency_tests {
         for _ in 0..ROUNDS {
             let mut handles = Vec::with_capacity(THREADS);
             for _ in 0..THREADS {
-                handles.push(std::thread::spawn(|| realize_or_toolchain_error()));
+                handles.push(std::thread::spawn(realize_or_toolchain_error));
             }
             for handle in handles {
                 let (bytes, _) = handle
@@ -924,10 +924,7 @@ mod concurrency_tests {
         let mut seen = HashSet::new();
         for handle in handles {
             for nonce in handle.join().expect("nonce thread must not panic") {
-                assert!(
-                    seen.insert(nonce),
-                    "invocation nonce duplicated: {nonce}"
-                );
+                assert!(seen.insert(nonce), "invocation nonce duplicated: {nonce}");
             }
         }
     }

@@ -91,14 +91,19 @@ impl ReferenceCompiler {
                     .and_then(|_| configuration_for_backend(name))
             })
         });
-        self.request_with_backend_option(
-            emit,
-            target,
+        CompilationRequest::new(
             input,
+            SemanticId(REFERENCE_LANGUAGE_PROFILE.to_owned()),
+            emit,
+            self.identity.clone(),
             compiler_host,
             build_host,
-            backend,
+            target,
             None,
+            self.pipeline.clone(),
+            Vec::new(),
+            None,
+            backend,
         )
     }
 
@@ -130,32 +135,11 @@ impl ReferenceCompiler {
                     .and_then(|_| configuration_for_backend(name))
             })
         });
-        let entries = kernel_entries.join(",");
-        self.request_with_backend_option(
-            emit,
-            target,
-            input,
-            compiler_host,
-            build_host,
-            backend,
-            Some(("ptx-kernel-entries".to_owned(), entries)),
-        )
-    }
-
-    fn request_with_backend_option(
-        &self,
-        emit: BTreeSet<ArtifactRepresentation>,
-        target: Option<TargetContractRef>,
-        input: CompilerArtifactRef,
-        compiler_host: CompilerHostIdentity,
-        build_host: BuildHostIdentity,
-        mut backend: Option<mncs_model::BackendConfiguration>,
-        extra_option: Option<(String, String)>,
-    ) -> CompilationRequest {
-        if let (Some(configuration), Some((key, value))) =
-            (backend.as_mut(), extra_option)
-        {
-            configuration.options.insert(key, value);
+        let mut backend = backend;
+        if let Some(configuration) = backend.as_mut() {
+            configuration
+                .options
+                .insert("ptx-kernel-entries".to_owned(), kernel_entries.join(","));
         }
         CompilationRequest::new(
             input,
@@ -413,7 +397,7 @@ impl ReferenceCompiler {
                 if let Some(template) =
                     plan_for_backend(&configuration.backend.name, selected_ssa_ref.clone())
                 {
-                    let plan = TargetLoweringPlan::with_explicit_facts(
+                    TargetLoweringPlan::with_explicit_facts(
                         selected_ssa_ref.clone(),
                         target,
                         Some(configuration.clone()),
@@ -424,8 +408,7 @@ impl ReferenceCompiler {
                         template.linker_requirements,
                         template.promises_consumed,
                         TransformationStatus::Pass,
-                    );
-                    plan
+                    )
                 } else {
                     TargetLoweringPlan::with_unknown_facts(
                         selected_ssa_ref.clone(),

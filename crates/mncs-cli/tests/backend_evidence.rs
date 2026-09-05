@@ -86,7 +86,10 @@ fn external_backends_state_their_execution_boundary() {
         };
         proven += 1;
         assert_eq!(envelope["status"], "PASS", "{target} envelope status");
-        assert_eq!(envelope["exports"], Value::Array(vec!["bounded_min".into()]));
+        assert_eq!(
+            envelope["exports"],
+            Value::Array(vec!["bounded_min".into()])
+        );
         let sha = envelope["bytes_sha256"].as_str().expect("bytes_sha256");
         assert_eq!(sha.len(), 64, "{target} sha256 length");
         let assumptions = envelope["assumptions"]
@@ -142,7 +145,11 @@ fn compile_backend_with_entries(
     for entry in entries {
         command.arg("--entry").arg(entry);
     }
-    let output = command.arg("--output-dir").arg(dir).output().expect("run compile");
+    let output = command
+        .arg("--output-dir")
+        .arg(dir)
+        .output()
+        .expect("run compile");
     if !output.status.success() {
         return None;
     }
@@ -168,8 +175,7 @@ fn envelope_text(envelope: &Value, dir: &std::path::Path) -> String {
 #[test]
 fn ptx_entry_selection_emits_launchable_kernel() {
     let dir = out_dir("ptx-entry");
-    let Some(envelope) = compile_backend_with_entries("mncs-ptx64", &["bounded_min"], &dir)
-    else {
+    let Some(envelope) = compile_backend_with_entries("mncs-ptx64", &["bounded_min"], &dir) else {
         return;
     };
     assert_eq!(envelope["status"], "PASS", "entry compile envelope status");

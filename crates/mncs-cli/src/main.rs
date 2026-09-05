@@ -2260,7 +2260,9 @@ where
                     .next()
                     .ok_or_else(|| "--entry requires an export name".to_owned())?;
                 if !valid_kernel_entry(&value) {
-                    return Err(format!("--entry name is not a valid export name: {value:?}"));
+                    return Err(format!(
+                        "--entry name is not a valid export name: {value:?}"
+                    ));
                 }
                 if !kernel_entries.contains(&value) {
                     kernel_entries.push(value);
