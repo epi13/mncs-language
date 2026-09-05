@@ -60,11 +60,40 @@ fn compile_backend(target: &str, dir: &std::path::Path) -> Option<Value> {
         );
         return None;
     }
+    if !dir.join("backend.json").exists() {
+        assert_structured_refusal(dir, target);
+        return None;
+    }
     let envelope: Value = serde_json::from_str(
         &std::fs::read_to_string(dir.join("backend.json")).expect("backend.json"),
     )
     .expect("backend envelope JSON");
     Some(envelope)
+}
+
+/// Assert the honest structured refusal when no backend artifact was
+/// produced (issue #110). Toolchain absence is Unknown, not failure: the
+/// compiler exits 0 with unresolved obligations and no `backend.json`,
+/// and the refusal lives machine-readably in `result.json` diagnostics
+/// (`CGX401` / `external_tool_failure`). This path must never panic:
+/// absence of `llc` is a finding, not a harness crash.
+fn assert_structured_refusal(dir: &std::path::Path, target: &str) {
+    let result: Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("result.json")).expect("result.json carries the refusal"),
+    )
+    .expect("result JSON");
+    assert_ne!(
+        result["status"], "completed",
+        "{target}: a missing artifact with a Pass status would be a lie"
+    );
+    let diagnostics = result["diagnostics"].as_array().expect("diagnostics array");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "CGX401"
+                && diagnostic["kind"] == "external_tool_failure"),
+        "{target}: refusal must carry structured CGX401/external_tool_failure, got: {diagnostics:?}"
+    );
 }
 
 fn boundary_terms(target: &str) -> &'static str {
@@ -151,6 +180,10 @@ fn compile_backend_with_entries(
         .output()
         .expect("run compile");
     if !output.status.success() {
+        return None;
+    }
+    if !dir.join("backend.json").exists() {
+        assert_structured_refusal(dir, target);
         return None;
     }
     let envelope: Value = serde_json::from_str(
