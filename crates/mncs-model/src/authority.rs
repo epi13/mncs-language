@@ -291,8 +291,8 @@ pub fn verify_session_context(
 /// * Target binding: the distinct non-empty Atlas-authorized targets for a
 ///   need must agree with each other (conflicting authority refuses) and
 ///   with the leg's declared target. A leg that declares no target while
-///   Atlas constrains one stays UNKNOWN; a declared target Atlas never
-///   authorized refuses. `execution.target` conditional evidence counts as
+///   Atlas constrains one refuses (authorized placement cannot be shown);
+///   a declared target Atlas never authorized refuses. `execution.target`
 ///   supplied only when the leg's target is bound to an authorized one.
 /// * Conditional `missing` otherwise counts as supplied only from carried
 ///   leg evidence names.
@@ -327,7 +327,9 @@ pub fn accept_leg(
         if binding.is_empty() {
             binding = fold.binding.clone();
         }
-        // Target authority for this need, order-independent.
+        // Target authority for this need, order-independent. Multiple
+        // authorized targets are placement options, not conflicting
+        // authority: the leg must name one of them.
         let authorized: BTreeSet<&str> = authorized_targets
             .get(need)
             .map(|targets| {
@@ -338,11 +340,10 @@ pub fn accept_leg(
                     .collect()
             })
             .unwrap_or_default();
-        let target_bound = match (authorized.len(), leg.target.is_empty()) {
-            (0, _) => true,
-            (1, false) if authorized.contains(leg.target.as_str()) => true,
-            (1, _) => false,
-            _ => false,
+        let target_bound = match (authorized.is_empty(), leg.target.is_empty()) {
+            (true, _) => true,
+            (false, true) => false,
+            (false, false) => authorized.contains(leg.target.as_str()),
         };
         if !target_bound {
             verdict = verdict.fold(AuthorityVerdict::Refused);
@@ -590,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    fn conflicting_authorized_targets_refuse() {
+    fn multiple_authorized_targets_are_options() {
         let granted = decision("worker.dispatch", DecisionStatus::Granted);
         let mut folds = BTreeMap::new();
         folds.insert(
@@ -605,7 +606,7 @@ mod tests {
                 "mncs:target:cpu-0.1".to_owned(),
             ],
         );
-        let leg = RequirementLeg {
+        let either = RequirementLeg {
             name: "gpu".to_owned(),
             needs: vec!["worker.dispatch".to_owned()],
             backend: "ptx".to_owned(),
@@ -613,7 +614,23 @@ mod tests {
             evidence: Vec::new(),
         };
         assert_eq!(
-            accept_leg(&leg, &folds, "sha256:x", "", &targets).verdict,
+            accept_leg(&either, &folds, "sha256:x", "", &targets).verdict,
+            AuthorityVerdict::Granted
+        );
+        let other = RequirementLeg {
+            target: "mncs:target:cpu-0.1".to_owned(),
+            ..either.clone()
+        };
+        assert_eq!(
+            accept_leg(&other, &folds, "sha256:x", "", &targets).verdict,
+            AuthorityVerdict::Granted
+        );
+        let outside = RequirementLeg {
+            target: "mncs:target:tpu-0.1".to_owned(),
+            ..either.clone()
+        };
+        assert_eq!(
+            accept_leg(&outside, &folds, "sha256:x", "", &targets).verdict,
             AuthorityVerdict::Refused
         );
     }
