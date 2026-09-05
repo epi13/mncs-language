@@ -342,8 +342,11 @@ fn reference_min(dir: &std::path::Path, a: i64, b: i64) -> i64 {
         "step_budget": 100000,
     });
     let request_path = dir.join(format!("request-{a}-{b}.json"));
-    std::fs::write(&request_path, serde_json::to_string(&request).expect("request JSON"))
-        .expect("write request");
+    std::fs::write(
+        &request_path,
+        serde_json::to_string(&request).expect("request JSON"),
+    )
+    .expect("write request");
     let output = binary()
         .args(["execute", &program()])
         .arg(&request_path)
@@ -353,8 +356,7 @@ fn reference_min(dir: &std::path::Path, a: i64, b: i64) -> i64 {
         output.status.success(),
         "reference execution must succeed for ({a}, {b})"
     );
-    let result: Value =
-        serde_json::from_slice(&output.stdout).expect("reference result JSON");
+    let result: Value = serde_json::from_slice(&output.stdout).expect("reference result JSON");
     assert_eq!(result["status"], "returned", "reference must return");
     result["returned"][0]["integer"]["value"]
         .as_i64()
@@ -394,12 +396,7 @@ fn riscv32_qemu_executes_bounded_min() {
         std::fs::write(dir.join(format!("{stem}.s")), &start).expect("write start");
         for (argv, what) in [
             (
-                vec![
-                    "--target=riscv32",
-                    "-march=rv32im",
-                    "-nostdlib",
-                    "-c",
-                ],
+                vec!["--target=riscv32", "-march=rv32im", "-nostdlib", "-c"],
                 "assemble",
             ),
             (
@@ -416,7 +413,10 @@ fn riscv32_qemu_executes_bounded_min() {
             let mut command = std::process::Command::new("clang");
             command.args(&argv);
             if what == "assemble" {
-                command.arg(dir.join(format!("{stem}.s"))).arg("-o").arg(dir.join(format!("{stem}.o")));
+                command
+                    .arg(dir.join(format!("{stem}.s")))
+                    .arg("-o")
+                    .arg(dir.join(format!("{stem}.o")));
             } else {
                 command
                     .arg(dir.join(format!("{stem}.o")))
