@@ -387,8 +387,106 @@ def boolean_operator_cases():
     return cases
 
 
+TEXT_MAP = "mncs.std.text_map.v1"
+CODED16_ID = (
+    "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::"
+    "code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B"
+)
+CODED32_ID = (
+    "mncs:0.2:record-type:mncs.std.text_map.v1::Coded32::"
+    "code%3Ai64%3Bkey%3A%5Bbyte%3B%2032%5D%3Bkey_length%3Au64%3B"
+)
+
+
+def byte(value):
+    return {"byte": {"value": value}}
+
+
+def bytes_fixed(text, width):
+    encoded = [ord(character) for character in text]
+    assert len(encoded) <= width, f"{text!r} exceeds width {width}"
+    return {"sequence": {"values": [byte(b) for b in encoded] + [byte(0)] * (width - len(encoded))}}
+
+
+def u64(value):
+    return {"integer": {"value": value, "type": {"bits": 64, "signed": False}}}
+
+
+def coded16(text, code):
+    return {
+        "record": {
+            "type_identity": CODED16_ID,
+            "name": "Coded16",
+            "fields": [
+                ["code", integer(code)],
+                ["key", bytes_fixed(text, 16)],
+                ["key_length", u64(len(text))],
+            ],
+        }
+    }
+
+
+def coded32(text, code):
+    return {
+        "record": {
+            "type_identity": CODED32_ID,
+            "name": "Coded32",
+            "fields": [
+                ["code", integer(code)],
+                ["key", bytes_fixed(text, 32)],
+                ["key_length", u64(len(text))],
+            ],
+        }
+    }
+
+
+def text_map_cases():
+    table = [coded16("red", 10), coded16("green", 20), coded16("blue", 30)]
+    dup_table = [coded16("red", 10), coded16("red", 20), coded16("blue", 30)]
+    table_arg = lambda rows: {"sequence": {"values": rows}}  # noqa: E731
+    cases = [
+        case("hit-first", TEXT_MAP, "candidate_lookup16",
+             [table_arg(table), bytes_fixed("red", 16), u64(3), integer(-1)], integer(10)),
+        case("hit-middle", TEXT_MAP, "candidate_lookup16",
+             [table_arg(table), bytes_fixed("green", 16), u64(5), integer(-1)], integer(20)),
+        case("hit-last", TEXT_MAP, "candidate_lookup16",
+             [table_arg(table), bytes_fixed("blue", 16), u64(4), integer(-1)], integer(30)),
+        case("miss-fallback", TEXT_MAP, "candidate_lookup16",
+             [table_arg(table), bytes_fixed("yellow", 16), u64(6), integer(-1)], integer(-1)),
+        case("length-mismatch", TEXT_MAP, "candidate_lookup16",
+             [table_arg(table), bytes_fixed("reed", 16), u64(4), integer(-1)], integer(-1)),
+        case("prefix-trap", TEXT_MAP, "candidate_lookup16",
+             [table_arg(table), bytes_fixed("greenhouse", 16), u64(10), integer(-1)], integer(-1)),
+        case("duplicate-last-wins", TEXT_MAP, "candidate_lookup16",
+             [table_arg(dup_table), bytes_fixed("red", 16), u64(3), integer(-1)], integer(20)),
+        case("empty-matches-empty", TEXT_MAP, "candidate_lookup16",
+             [table_arg([coded16("", 10), coded16("green", 20), coded16("blue", 30)]),
+              bytes_fixed("", 16), u64(0), integer(-1)], integer(10)),
+        case("empty-vs-nonempty", TEXT_MAP, "candidate_lookup16",
+             [table_arg(table), bytes_fixed("", 16), u64(0), integer(-1)], integer(-1)),
+        case("oversize-length-fallback", TEXT_MAP, "candidate_lookup16",
+             [table_arg(table), bytes_fixed("red", 16), u64(17), integer(-1)], integer(-1)),
+    ]
+    wide = [coded32("supercalifragilistic", 1), coded32("antidisestablishment", 2)]
+    cases += [
+        case("wide-hit-20", TEXT_MAP, "candidate_lookup32",
+             [table_arg(wide), bytes_fixed("supercalifragilistic", 32), u64(20), integer(-1)],
+             integer(1)),
+        case("wide-hit-19", TEXT_MAP, "candidate_lookup32",
+             [table_arg(wide), bytes_fixed("antidisestablishment", 32), u64(20), integer(-1)],
+             integer(2)),
+        case("wide-miss", TEXT_MAP, "candidate_lookup32",
+             [table_arg(wide), bytes_fixed("red", 32), u64(3), integer(-1)], integer(-1)),
+        case("wide-prefix-trap", TEXT_MAP, "candidate_lookup32",
+             [table_arg(wide), bytes_fixed("supercalifragilisticx", 32), u64(21), integer(-1)],
+             integer(-1)),
+    ]
+    return cases
+
+
 def main():
     emit("library-core-status-corpus.json", status_cases())
+    emit("text-map-corpus.json", text_map_cases())
     emit("library-core-logic-corpus.json", logic_cases())
     emit("library-core-ordering-corpus.json", ordering_cases())
     emit("library-core-ravel-differential-corpus.json", ravel_differential_cases())

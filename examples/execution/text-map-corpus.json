@@ -1,0 +1,7440 @@
+{
+ "schema_version": "0.1",
+ "name": "text-map",
+ "cases": [
+  {
+   "id": "hit-first",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_map.v1",
+     "function": "candidate_lookup16"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 10,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 100
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 3,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 103
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 5,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 30,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 98
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 117
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 4,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 10,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "hit-middle",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_map.v1",
+     "function": "candidate_lookup16"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 10,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 100
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 3,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 103
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 5,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 30,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 98
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 117
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 4,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 103
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 20,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "hit-last",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_map.v1",
+     "function": "candidate_lookup16"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 10,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 100
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 3,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 103
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 5,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 30,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 98
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 117
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 4,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 117
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 30,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "miss-fallback",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_map.v1",
+     "function": "candidate_lookup16"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 10,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 100
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 3,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 103
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 5,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 30,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 98
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 117
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 4,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 121
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 111
+         }
+        },
+        {
+         "byte": {
+          "value": 119
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "length-mismatch",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_map.v1",
+     "function": "candidate_lookup16"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 10,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 100
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 3,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 103
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 5,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 30,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 98
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 117
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 4,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "prefix-trap",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_map.v1",
+     "function": "candidate_lookup16"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 10,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 100
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 3,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 103
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 5,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 30,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 98
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 117
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 4,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 103
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 104
+         }
+        },
+        {
+         "byte": {
+          "value": 111
+         }
+        },
+        {
+         "byte": {
+          "value": 117
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 10,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "duplicate-last-wins",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_map.v1",
+     "function": "candidate_lookup16"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 10,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 100
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 3,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 100
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 3,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 30,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 98
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 117
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 4,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 20,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "empty-matches-empty",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_map.v1",
+     "function": "candidate_lookup16"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 10,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 0,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 103
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 5,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 30,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 98
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 117
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 4,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 10,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "empty-vs-nonempty",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_map.v1",
+     "function": "candidate_lookup16"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 10,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 100
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 3,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 103
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 5,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 30,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 98
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 117
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 4,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "oversize-length-fallback",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_map.v1",
+     "function": "candidate_lookup16"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 10,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 100
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 3,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 103
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 5,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded16::code%3Ai64%3Bkey%3A%5Bbyte%3B%2016%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded16",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 30,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 98
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 117
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 4,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 17,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "wide-hit-20",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_map.v1",
+     "function": "candidate_lookup32"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded32::code%3Ai64%3Bkey%3A%5Bbyte%3B%2032%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded32",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 1,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 117
+                }
+               },
+               {
+                "byte": {
+                 "value": 112
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 99
+                }
+               },
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 102
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 103
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 99
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded32::code%3Ai64%3Bkey%3A%5Bbyte%3B%2032%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded32",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 2,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 100
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 98
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 104
+                }
+               },
+               {
+                "byte": {
+                 "value": 109
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 117
+         }
+        },
+        {
+         "byte": {
+          "value": 112
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 102
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 103
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 116
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 20,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "wide-hit-19",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_map.v1",
+     "function": "candidate_lookup32"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded32::code%3Ai64%3Bkey%3A%5Bbyte%3B%2032%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded32",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 1,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 117
+                }
+               },
+               {
+                "byte": {
+                 "value": 112
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 99
+                }
+               },
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 102
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 103
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 99
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded32::code%3Ai64%3Bkey%3A%5Bbyte%3B%2032%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded32",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 2,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 100
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 98
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 104
+                }
+               },
+               {
+                "byte": {
+                 "value": 109
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 116
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 116
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 104
+         }
+        },
+        {
+         "byte": {
+          "value": 109
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 116
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 20,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "wide-miss",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_map.v1",
+     "function": "candidate_lookup32"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded32::code%3Ai64%3Bkey%3A%5Bbyte%3B%2032%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded32",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 1,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 117
+                }
+               },
+               {
+                "byte": {
+                 "value": 112
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 99
+                }
+               },
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 102
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 103
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 99
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded32::code%3Ai64%3Bkey%3A%5Bbyte%3B%2032%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded32",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 2,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 100
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 98
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 104
+                }
+               },
+               {
+                "byte": {
+                 "value": 109
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "wide-prefix-trap",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_map.v1",
+     "function": "candidate_lookup32"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded32::code%3Ai64%3Bkey%3A%5Bbyte%3B%2032%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded32",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 1,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 117
+                }
+               },
+               {
+                "byte": {
+                 "value": 112
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 99
+                }
+               },
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 102
+                }
+               },
+               {
+                "byte": {
+                 "value": 114
+                }
+               },
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 103
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 99
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        },
+        {
+         "record": {
+          "type_identity": "mncs:0.2:record-type:mncs.std.text_map.v1::Coded32::code%3Ai64%3Bkey%3A%5Bbyte%3B%2032%5D%3Bkey_length%3Au64%3B",
+          "name": "Coded32",
+          "fields": [
+           [
+            "code",
+            {
+             "integer": {
+              "value": 2,
+              "type": {
+               "bits": 64,
+               "signed": true
+              }
+             }
+            }
+           ],
+           [
+            "key",
+            {
+             "sequence": {
+              "values": [
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 100
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 97
+                }
+               },
+               {
+                "byte": {
+                 "value": 98
+                }
+               },
+               {
+                "byte": {
+                 "value": 108
+                }
+               },
+               {
+                "byte": {
+                 "value": 105
+                }
+               },
+               {
+                "byte": {
+                 "value": 115
+                }
+               },
+               {
+                "byte": {
+                 "value": 104
+                }
+               },
+               {
+                "byte": {
+                 "value": 109
+                }
+               },
+               {
+                "byte": {
+                 "value": 101
+                }
+               },
+               {
+                "byte": {
+                 "value": 110
+                }
+               },
+               {
+                "byte": {
+                 "value": 116
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               },
+               {
+                "byte": {
+                 "value": 0
+                }
+               }
+              ]
+             }
+            }
+           ],
+           [
+            "key_length",
+            {
+             "integer": {
+              "value": 20,
+              "type": {
+               "bits": 64,
+               "signed": false
+              }
+             }
+            }
+           ]
+          ]
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 117
+         }
+        },
+        {
+         "byte": {
+          "value": 112
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 102
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 103
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 116
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 120
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 21,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": -1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

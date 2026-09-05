@@ -331,6 +331,20 @@ mod tests {
     }
 
     #[test]
+    fn embeddable_execution_fixture_round_trips() {
+        let raw = include_str!("../../../examples/capability-gaps/embeddable-execution.json");
+        let gap: CapabilityGap = serde_json::from_str(raw).expect("fixture parses");
+        assert!(gap.verify_identity().is_ok());
+        assert_eq!(gap.gap_id, "commons.mesh/embeddable-execution");
+        assert_eq!(gap.obstruction, GapObstruction::Runtime);
+        assert_eq!(gap.status, GapStatus::Fail);
+        assert_eq!(
+            gap.identity.as_str(),
+            "mncs:0.2:capability-gap:6e9b55bd409080f455fbc59f3e76c6fd020b41df118cbf1eba6288bcf37a7a01"
+        );
+    }
+
+    #[test]
     fn bounds_fail_closed() {
         assert!(mesh_gap().verify_identity().is_ok());
         assert_eq!(

@@ -3992,6 +3992,25 @@ impl<'a> BodyBuilder<'a> {
                         };
                         return self.elaborate_expr(&projected, expected, env, diagnostics);
                     }
+                    // A two-segment `alias.Record { ... }` parses as
+                    // FiniteVariant, so a qualified record constructor lands
+                    // here. Retry the joined spelling in the record
+                    // namespace before failing: finite constructors keep
+                    // priority (behavior for valid programs is unchanged),
+                    // and only a previously-rejected spelling can resolve.
+                    let joined = format!("{}.{}", type_name.text, variant.text);
+                    if self.record_types.contains_key(&joined) {
+                        let literal = AstExpr::RecordLiteral {
+                            type_name: SpannedText {
+                                text: joined,
+                                span: *span,
+                            },
+                            base: None,
+                            fields: fields.clone(),
+                            span: *span,
+                        };
+                        return self.elaborate_expr(&literal, expected, env, diagnostics);
+                    }
                     diagnostics.push(elaboration_diagnostic(
                         "MNE123",
                         "finite constructor names an unknown nominal type",

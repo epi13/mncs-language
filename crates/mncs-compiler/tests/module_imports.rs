@@ -1116,6 +1116,118 @@ fn profile_09_local_unqualified_binding_wins_without_hiding_qualified_imports() 
         .any(|binding| binding.declaration == mncs_model::function_id("lib.left", "convert")));
 }
 
+fn shapes_module() -> String {
+    "mncs 0.10;\nmodule lib.shapes;\nrecord Point { x: i64, y: i64 }\nrecord Box { p: Point }\n"
+        .to_owned()
+}
+
+fn other_point_module() -> String {
+    "mncs 0.10;\nmodule lib.other;\nrecord Point { tag: i64 }\n".to_owned()
+}
+
+fn execute_main(program: &mncs_model::Program, module: &str) -> mncs_model::ExecutionResult {
+    let request = mncs_model::ExecutionRequest {
+        schema_version: mncs_model::EXECUTION_REQUEST_SCHEMA_VERSION.to_owned(),
+        target: mncs_model::ExecutionTarget {
+            module: module.to_owned(),
+            function: "main".to_owned(),
+        },
+        arguments: Vec::new(),
+        step_budget: 256,
+        policy: mncs_model::ExecutionPolicy::default(),
+    };
+    mncs_model::execute(program, &request)
+}
+
+fn integer_returned(result: &mncs_model::ExecutionResult) -> i128 {
+    assert_eq!(result.status, mncs_model::ExecutionStatus::Returned);
+    assert_eq!(result.returned.len(), 1);
+    match &result.returned[0] {
+        mncs_model::ExecutionValue::Integer { value, .. } => *value,
+        other => panic!("expected integer return, got {other:?}"),
+    }
+}
+
+/// A two-segment `alias.Record { ... }` parses as a finite-variant
+/// constructor; elaboration must retry the joined spelling in the record
+/// namespace (P-COMMONS-03). The constructed value executes and the
+/// binding carries qualified provenance with the declaring identity.
+#[test]
+fn profile_10_qualified_record_construction_executes() {
+    let resolver = MapResolver::default()
+        .with("lib.shapes", &shapes_module())
+        .with("lib.other", &other_point_module());
+    let source = "mncs 0.10;\nmodule app.qualified_record;\nuse lib.shapes as shapes;\nfn main() -> (result: i64) {\n    let made: shapes.Point = shapes.Point { x: 1, y: 2 };\n    return made.x + made.y;\n}\n";
+    let root = resolver.envelope("root", source.to_owned());
+    let front_end = ReferenceCompiler::default().front_end_with_resolver(root, &resolver);
+    assert!(front_end.is_valid(), "{:#?}", front_end.diagnostics);
+    let expected_identity =
+        mncs_model::record_type_id("lib.shapes", "Point", &[("x", "i64"), ("y", "i64")]);
+    assert!(
+        front_end
+            .name_resolutions
+            .resolutions
+            .iter()
+            .any(
+                |resolution| resolution.declaration_identity.as_ref() == Some(&expected_identity)
+                    && resolution.provenance == Some(mncs_model::ResolutionProvenance::Aliased)
+            ),
+        "aliased record-type resolution missing: {:#?}",
+        front_end.name_resolutions
+    );
+    let program = front_end.program.expect("program");
+    assert_eq!(
+        integer_returned(&execute_main(&program, "app.qualified_record")),
+        3
+    );
+}
+
+/// Colliding short record names in two imported modules stay distinct:
+/// each alias route constructs its own declaring identity.
+#[test]
+fn profile_10_qualified_record_construction_disambiguates_colliding_names() {
+    let resolver = MapResolver::default()
+        .with("lib.shapes", &shapes_module())
+        .with("lib.other", &other_point_module());
+    let source = "mncs 0.10;\nmodule app.colliding;\nuse lib.shapes as shapes;\nuse lib.other as other;\nfn main() -> (result: i64) {\n    let first: shapes.Point = shapes.Point { x: 10, y: 20 };\n    let second: other.Point = other.Point { tag: 7 };\n    return first.x + first.y + second.tag;\n}\n";
+    let program = elaborate(&resolver, source).expect("colliding routes elaborate");
+    assert_eq!(
+        integer_returned(&execute_main(&program, "app.colliding")),
+        37
+    );
+}
+
+/// Qualified construction nests: a record field holding another
+/// qualified record elaborates and executes.
+#[test]
+fn profile_10_qualified_record_construction_nests() {
+    let resolver = MapResolver::default().with("lib.shapes", &shapes_module());
+    let source = "mncs 0.10;\nmodule app.nested;\nuse lib.shapes as shapes;\nfn main() -> (result: i64) {\n    let made: shapes.Box = shapes.Box { p: shapes.Point { x: 4, y: 5 } };\n    return made.p.x + made.p.y;\n}\n";
+    let program = elaborate(&resolver, source).expect("nested construction elaborates");
+    assert_eq!(integer_returned(&execute_main(&program, "app.nested")), 9);
+}
+
+/// Unknown qualified records still fail closed, and finite payload
+/// construction keeps priority over the record fallback.
+#[test]
+fn profile_10_qualified_record_misses_fail_closed() {
+    let resolver = MapResolver::default().with("lib.shapes", &shapes_module());
+    let unknown = elaborate(
+        &resolver,
+        "mncs 0.10;\nmodule app.miss;\nuse lib.shapes as shapes;\nfn main() -> (result: i64) {\n    let made: shapes.Point = shapes.Nope { x: 1 };\n    return made.x;\n}\n",
+    )
+    .expect_err("unknown qualified record still fails");
+    assert!(
+        unknown.contains(&"MNE123".to_owned()),
+        "expected MNE123, got {unknown:?}"
+    );
+    let finite_first = elaborate(
+        &resolver,
+        "mncs 0.10;\nmodule app.finite;\nenum Sig { Yes { v: i64 }, No }\nfn main() -> (result: i64) {\n    let made: Sig = Sig.Yes { v: 7 };\n    return match made { Sig.Yes { v } => v, Sig.No => 0 };\n}\n",
+    );
+    assert!(finite_first.is_ok(), "{finite_first:?}");
+}
+
 #[test]
 fn profile_09_transitive_visibility_keeps_the_declaring_identity() {
     let resolver = MapResolver::default()
