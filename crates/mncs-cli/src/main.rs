@@ -114,6 +114,7 @@ fn run_cli() -> ExitCode {
         "abi" => abi_command(args),
         "execute-backend" => backend_execution_command(args),
         "check-backend-execution" => backend_compare_command(args),
+        "conformance" => conformance_command(args),
         "validate-translation" => validate_translation_command(args),
         "compiler-architecture" => {
             if args.next().is_some() {
@@ -154,6 +155,10 @@ fn run_cli() -> ExitCode {
         }
         "--help" | "-h" | "help" => {
             print_usage();
+            ExitCode::SUCCESS
+        }
+        "--version" | "-V" => {
+            println!("mncs {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
         other => {
@@ -2522,6 +2527,182 @@ where
     }
 }
 
+/// Contract-derived conformance: discover executable contract clauses,
+/// generate deterministic cases, execute on the reference executor and each
+/// requested backend, and emit an `mncs.conformance-report/1` evidence
+/// document. Exit status is SUCCESS only when no case failed; UNKNOWN and
+/// UNSUPPORTED outcomes are reported honestly in the document, never as
+/// failures and never as passes.
+fn conformance_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let Some(program_path) = args.next() else {
+        eprintln!("error: conformance requires a program path");
+        print_usage();
+        return ExitCode::from(2);
+    };
+    let mut options = mncs_conformance::ConformanceOptions {
+        backends: vec![
+            "mncs-portable-wasm-mvp".to_owned(),
+            "mncs-research-bytecode".to_owned(),
+        ],
+        ..Default::default()
+    };
+    let mut output_path: Option<PathBuf> = None;
+    let mut corpus_path: Option<PathBuf> = None;
+    let mut attach_path: Option<PathBuf> = None;
+    let mut rest = args.peekable();
+    while let Some(flag) = rest.next() {
+        let value =
+            |name: &str, rest: &mut dyn Iterator<Item = String>| -> Result<String, ExitCode> {
+                rest.next().ok_or_else(|| {
+                    eprintln!("error: conformance {name} requires a value");
+                    ExitCode::from(2)
+                })
+            };
+        match flag.as_str() {
+            "--seed" => {
+                let text = match value("--seed", &mut rest) {
+                    Ok(text) => text,
+                    Err(code) => return code,
+                };
+                match text.parse::<u64>() {
+                    Ok(seed) => options.seed = seed,
+                    Err(_) => {
+                        eprintln!("error: conformance --seed requires a u64");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
+            "--cases" => {
+                let text = match value("--cases", &mut rest) {
+                    Ok(text) => text,
+                    Err(code) => return code,
+                };
+                match text.parse::<usize>() {
+                    Ok(count) if count > 0 && count <= 512 => {
+                        options.cases_per_predicate = count;
+                    }
+                    _ => {
+                        eprintln!("error: conformance --cases requires 1..=512");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
+            "--backends" => {
+                let text = match value("--backends", &mut rest) {
+                    Ok(text) => text,
+                    Err(code) => return code,
+                };
+                options.backends = text
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|entry| !entry.is_empty())
+                    .map(ToOwned::to_owned)
+                    .collect();
+                if options.backends.is_empty() {
+                    eprintln!("error: conformance --backends requires at least one backend");
+                    return ExitCode::from(2);
+                }
+            }
+            "--step-budget" => {
+                let text = match value("--step-budget", &mut rest) {
+                    Ok(text) => text,
+                    Err(code) => return code,
+                };
+                match text.parse::<u64>() {
+                    Ok(budget) if budget > 0 => options.step_budget = budget,
+                    _ => {
+                        eprintln!("error: conformance --step-budget requires a positive u64");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
+            "--predicate" => {
+                let text = match value("--predicate", &mut rest) {
+                    Ok(text) => text,
+                    Err(code) => return code,
+                };
+                if text.trim().is_empty() {
+                    eprintln!("error: conformance --predicate requires a name");
+                    return ExitCode::from(2);
+                }
+                options.only_predicates.push(text);
+            }
+            "--output" => {
+                let text = match value("--output", &mut rest) {
+                    Ok(text) => text,
+                    Err(code) => return code,
+                };
+                output_path = Some(PathBuf::from(text));
+            }
+            "--emit-corpus" => {
+                let text = match value("--emit-corpus", &mut rest) {
+                    Ok(text) => text,
+                    Err(code) => return code,
+                };
+                corpus_path = Some(PathBuf::from(text));
+            }
+            "--attach-evidence" => {
+                let text = match value("--attach-evidence", &mut rest) {
+                    Ok(text) => text,
+                    Err(code) => return code,
+                };
+                attach_path = Some(PathBuf::from(text));
+            }
+            other => {
+                eprintln!("error: unknown conformance option {other:?}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let program = match read_program_for_execution(&program_path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let validation = program.validate();
+    if !validation.valid {
+        let _ = print_json(&validation);
+        return ExitCode::FAILURE;
+    }
+    let report = mncs_conformance::run_conformance(&program, &options);
+    if let Some(path) = attach_path {
+        let mut evidenced = program.clone();
+        let attached = mncs_conformance::attach_evidence(&mut evidenced, &report);
+        if let Err(error) = write_pretty_json(path.clone(), &evidenced) {
+            eprintln!("error: unable to write evidenced program: {error}");
+            return ExitCode::from(2);
+        }
+        eprintln!(
+            "attached {attached} conformance evidence claims to {}",
+            path.display()
+        );
+    }
+    if let Some(path) = corpus_path {
+        let corpus = report.to_corpus(&program);
+        if let Err(error) = write_pretty_json(path, &corpus) {
+            eprintln!("error: unable to write conformance corpus: {error}");
+            return ExitCode::from(2);
+        }
+    }
+    if let Some(path) = output_path {
+        if let Err(error) = write_pretty_json(path, &report) {
+            eprintln!("error: unable to write conformance report: {error}");
+            return ExitCode::from(2);
+        }
+    }
+    if !print_json(&report) {
+        return ExitCode::from(2);
+    }
+    if report.failed() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
 fn validate_translation_command<I>(args: I) -> ExitCode
 where
     I: IntoIterator<Item = String>,
@@ -3331,6 +3512,7 @@ fn print_usage() {
     eprintln!("  mncs abi <program.mncs|program.json>");
     eprintln!("  mncs execute-backend <program.json> <execution-request.json>");
     eprintln!("  mncs check-backend-execution <program.json> <corpus.json>");
+    eprintln!("  mncs conformance <program.mncs|program.json> [--seed N] [--cases N] [--backends a,b,c] [--step-budget N] [--predicate NAME] [--output FILE] [--emit-corpus FILE] [--attach-evidence PROGRAM.json]");
     eprintln!("  mncs validate-translation <kind> <program.json> [corpus.json]");
     eprintln!("  mncs compiler-architecture");
     eprintln!("  mncs compiler-study <program.json> [--node-id NODE] [--target TARGET] [--family-reference]");

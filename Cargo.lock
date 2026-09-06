@@ -463,6 +463,7 @@ dependencies = [
  "ed25519-dalek",
  "mncs-codegen",
  "mncs-compiler",
+ "mncs-conformance",
  "mncs-model",
  "mncs-syntax",
  "mncs-translation-check",
@@ -500,6 +501,18 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "mncs-conformance"
+version = "0.1.0"
+dependencies = [
+ "mncs-codegen",
+ "mncs-compiler",
+ "mncs-model",
+ "mncs-syntax",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -247,6 +247,9 @@ pub enum TokenKind {
     RequiresKeyword,
     EnsuresKeyword,
     AssumesKeyword,
+    PropertyKeyword,
+    InvariantKeyword,
+    MetamorphicKeyword,
     EffectKeyword,
     CapabilityKeyword,
     AuthorizedKeyword,
@@ -921,6 +924,9 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                 "requires" => TokenKind::RequiresKeyword,
                 "ensures" => TokenKind::EnsuresKeyword,
                 "assumes" => TokenKind::AssumesKeyword,
+                "property" => TokenKind::PropertyKeyword,
+                "invariant" => TokenKind::InvariantKeyword,
+                "metamorphic" => TokenKind::MetamorphicKeyword,
                 "effect" => TokenKind::EffectKeyword,
                 "capability" => TokenKind::CapabilityKeyword,
                 "authorized_by" => TokenKind::AuthorizedKeyword,
@@ -1602,7 +1608,10 @@ impl<'a> Parser<'a> {
                 Some(
                     TokenKind::RequiresKeyword
                     | TokenKind::EnsuresKeyword
-                    | TokenKind::AssumesKeyword,
+                    | TokenKind::AssumesKeyword
+                    | TokenKind::PropertyKeyword
+                    | TokenKind::InvariantKeyword
+                    | TokenKind::MetamorphicKeyword,
                 ) => {
                     let start = self.current_token_index();
                     let kind =
@@ -2386,13 +2395,16 @@ impl<'a> Parser<'a> {
         if segments.len() == 2 {
             // Preserve the long-standing `value.field` parse. Elaboration
             // will reinterpret it as a finite constructor only for a nominal
-            // type, or as a record projection for a lexical value.
-            return Some(AstExpr::FiniteVariant {
+            // type, or as a record projection for a lexical value. Postfix
+            // chaining applies exactly as for any other primary, so record
+            // projections compose with element observation (`rec.items[i]`)
+            // and further projection (`frame.nodes[0].id`).
+            return Some(self.project_chain(AstExpr::FiniteVariant {
                 type_name: segments[0].clone(),
                 variant: segments[1].clone(),
                 fields: Vec::new(),
                 span: path_span,
-            });
+            }));
         }
         if segments.len() >= 3 {
             return Some(AstExpr::QualifiedPath {

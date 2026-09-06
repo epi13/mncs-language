@@ -1,0 +1,340 @@
+mncs 0.9;
+
+// mncs.core.image — bounded grayscale images and deterministic pixel ops.
+//
+// An image is a flat `[byte; 64]` buffer: an 8x8 grayscale frame in row-major
+// order (`index = row * 8 + col`). The 8x8 bound is a deliberate search-space
+// control: every operation is a total bounded fold a conformance backend can
+// execute exactly, and larger frames compose as tiles outside this module.
+//
+// This module is BOTH the renderer and the pixel substrate for the observer:
+// `render_rect`/`render_rect_outline` produce frames, `sobel_magnitude` and
+// `threshold` begin observation, and `mirror_horizontal`/`rotate90_cw` supply
+// the geometric transforms metamorphic contracts quantify over. All pixel
+// arithmetic crosses into u64 explicitly; out-of-bounds reads observe 0 and
+// out-of-bounds writes keep the image unchanged, so every function is total.
+//
+// Realization envelope: reference executors, research bytecode, portable
+// WASM, C11, LLVM, and Cranelift realize these operations through canonical
+// cells. Integer division appears only by nonzero literals.
+//
+// The module ships its own executable laws (`law_*` predicates bound by
+// `property`/`metamorphic` clauses): uniform-image, involution, rotation,
+// and renderer-area properties `mncs conformance` executes directly.
+module mncs.core.image.v1;
+
+use mncs.core.contracts.v1;
+
+fn image_index(row: u64, col: u64) -> (result: u64) {
+    return (row *% 8) +% col;
+}
+
+fn in_bounds(row: u64, col: u64) -> (result: bool) {
+    return (row < 8) && (col < 8);
+}
+
+// Total read: out-of-bounds coordinates observe 0 (documented zero padding).
+fn get_pixel(img: [byte; 64], row: u64, col: u64) -> (result: byte) {
+    if in_bounds(row, col) {
+        return img[image_index(row, col)];
+    }
+    return 0;
+}
+
+// Total write: out-of-bounds coordinates keep the image unchanged.
+fn set_pixel(img: [byte; 64], row: u64, col: u64, value: byte) -> (result: [byte; 64]) {
+    if in_bounds(row, col) {
+        return replace(img, image_index(row, col), value);
+    }
+    return img;
+}
+
+fn blank(value: byte) -> (result: [byte; 64]) {
+    let base: [byte; 64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    iterate i over base carrying img: [byte; 64] = base {
+        next img = replace(img, i, value);
+    }
+    return img;
+}
+
+fn image_equal(a: [byte; 64], b: [byte; 64]) -> (result: bool) {
+    iterate i over a carrying same: bool = true {
+        next same = same && (a[i] == b[i]);
+    }
+    return same;
+}
+
+fn count_equal(img: [byte; 64], value: byte) -> (result: u64) {
+    iterate i over img carrying hits: u64 = 0 {
+        next hits = hits + ((img[i] == value) as u64);
+    }
+    return hits;
+}
+
+fn is_uniform(img: [byte; 64]) -> (result: bool) {
+    return count_equal(img, img[0]) == 64;
+}
+
+// ---- Renderer: semantic description -> pixels ----
+
+// Filled rectangle over [x0, x1) x [y0, y1), clipped to the 8x8 frame.
+fn render_rect(x0: u64, y0: u64, x1: u64, y1: u64, fg: byte, bg: byte) -> (result: [byte; 64])
+    property law_render_rect_area
+{
+    let base: [byte; 64] = blank(bg);
+    iterate i over base carrying img: [byte; 64] = base {
+        let row: u64 = i / 8;
+        let col: u64 = i % 8;
+        let inside: bool = (col >= x0) && (col < x1) && (row >= y0) && (row < y1);
+        next img = replace(img, i, select(inside, fg, bg));
+    }
+    return img;
+}
+
+// One-pixel outline of the same rectangle: edge pixels observe fg, the rest bg.
+fn render_rect_outline(x0: u64, y0: u64, x1: u64, y1: u64, fg: byte, bg: byte) -> (result: [byte; 64])
+    property law_render_outline_count
+{
+    let base: [byte; 64] = blank(bg);
+    iterate i over base carrying img: [byte; 64] = base {
+        let row: u64 = i / 8;
+        let col: u64 = i % 8;
+        let inside: bool = (col >= x0) && (col < x1) && (row >= y0) && (row < y1);
+        let border: bool = (col == x0) || (col +% 1 == x1) || (row == y0) || (row +% 1 == y1);
+        next img = replace(img, i, select(inside && border, fg, bg));
+    }
+    return img;
+}
+
+// ---- Geometric transforms (metamorphic subjects) ----
+
+fn mirror_horizontal(img: [byte; 64]) -> (result: [byte; 64])
+    metamorphic law_mirror_involution
+{
+    iterate i over img carrying out: [byte; 64] = img {
+        let row: u64 = i / 8;
+        let col: u64 = i % 8;
+        next out = replace(out, i, img[image_index(row, 7 - col)]);
+    }
+    return out;
+}
+
+// Clockwise quarter turn: out[row][col] = img[7 - col][row].
+fn rotate90_cw(img: [byte; 64]) -> (result: [byte; 64])
+    metamorphic law_rotate4_identity
+{
+    iterate i over img carrying out: [byte; 64] = img {
+        let row: u64 = i / 8;
+        let col: u64 = i % 8;
+        next out = replace(out, i, img[image_index(7 - col, row)]);
+    }
+    return out;
+}
+
+// ---- Point operations (backend-differential subjects) ----
+
+fn invert(img: [byte; 64]) -> (result: [byte; 64])
+    metamorphic law_invert_involution
+{
+    iterate i over img carrying out: [byte; 64] = img {
+        let v: u64 = img[i] as u64;
+        let inv: u64 = (255 as u64) - v;
+        next out = replace(out, i, (inv as byte));
+    }
+    return out;
+}
+
+// Saturating brighten: overflow pins at 255 instead of wrapping.
+fn brighten(img: [byte; 64], delta: u64) -> (result: [byte; 64])
+    property law_brighten_zero
+{
+    iterate i over img carrying out: [byte; 64] = img {
+        let raised: u64 = (img[i] as u64) +% delta;
+        let saturated: u64 = select(raised < (img[i] as u64), 255, raised);
+        let capped: u64 = select(saturated > 255, 255, saturated);
+        next out = replace(out, i, (capped as byte));
+    }
+    return out;
+}
+
+// ---- Gradients: L1 Sobel with replicated borders ----
+
+fn clamp_row(row: u64, up: bool) -> (result: u64) {
+    if up {
+        if row == 0 {
+            return 0;
+        }
+        return row - 1;
+    }
+    if row == 7 {
+        return 7;
+    }
+    return row + 1;
+}
+
+fn clamp_col(col: u64, left: bool) -> (result: u64) {
+    if left {
+        if col == 0 {
+            return 0;
+        }
+        return col - 1;
+    }
+    if col == 7 {
+        return 7;
+    }
+    return col + 1;
+}
+
+fn sample_replicate(img: [byte; 64], row: u64, col: u64) -> (result: u64) {
+    return get_pixel(img, row, col) as u64;
+}
+
+fn abs_diff_mag(pos: u64, neg: u64) -> (result: u64) {
+    if pos >= neg {
+        return pos - neg;
+    }
+    return neg - pos;
+}
+
+// L1 x-gradient magnitude at one pixel (Sobel kernel, borders replicated).
+fn grad_x_mag(img: [byte; 64], row: u64, col: u64) -> (result: u64) {
+    let ru: u64 = clamp_row(row, true);
+    let rd: u64 = clamp_row(row, false);
+    let cl: u64 = clamp_col(col, true);
+    let cr: u64 = clamp_col(col, false);
+    let pos: u64 = sample_replicate(img, ru, cr) +% (sample_replicate(img, row, cr) +% sample_replicate(img, row, cr)) +% sample_replicate(img, rd, cr);
+    let neg: u64 = sample_replicate(img, ru, cl) +% (sample_replicate(img, row, cl) +% sample_replicate(img, row, cl)) +% sample_replicate(img, rd, cl);
+    return abs_diff_mag(pos, neg);
+}
+
+// L1 y-gradient magnitude at one pixel (Sobel kernel, borders replicated).
+fn grad_y_mag(img: [byte; 64], row: u64, col: u64) -> (result: u64) {
+    let ru: u64 = clamp_row(row, true);
+    let rd: u64 = clamp_row(row, false);
+    let cl: u64 = clamp_col(col, true);
+    let cr: u64 = clamp_col(col, false);
+    let pos: u64 = sample_replicate(img, rd, cl) +% (sample_replicate(img, rd, col) +% sample_replicate(img, rd, col)) +% sample_replicate(img, rd, cr);
+    let neg: u64 = sample_replicate(img, ru, cl) +% (sample_replicate(img, ru, col) +% sample_replicate(img, ru, col)) +% sample_replicate(img, ru, cr);
+    return abs_diff_mag(pos, neg);
+}
+
+// Coarse orientation bin: 0 when |gx| dominates, 1 otherwise. Two bins are
+// what unsigned L1 magnitudes can decide honestly; finer bins would need
+// signed gradient signs this substrate does not keep.
+fn grad_orientation(gx: u64, gy: u64) -> (result: u64) {
+    if gx >= gy {
+        return 0;
+    }
+    return 1;
+}
+
+fn edge_magnitude(img: [byte; 64], row: u64, col: u64) -> (result: u64) {
+    let gx: u64 = grad_x_mag(img, row, col);
+    let gy: u64 = grad_y_mag(img, row, col);
+    return gx +% gy;
+}
+
+fn sobel_magnitude(img: [byte; 64]) -> (result: [byte; 64])
+    property law_uniform_no_edges
+{
+    iterate i over img carrying out: [byte; 64] = img {
+        let row: u64 = i / 8;
+        let col: u64 = i % 8;
+        let mag: u64 = edge_magnitude(img, row, col);
+        let capped: u64 = select(mag > 255, 255, mag);
+        next out = replace(out, i, (capped as byte));
+    }
+    return out;
+}
+
+// Binary edge mask: 255 where magnitude >= level, else 0.
+fn threshold(img: [byte; 64], level: byte) -> (result: [byte; 64])
+    property law_threshold_splits
+{
+    iterate i over img carrying out: [byte; 64] = img {
+        next out = replace(out, i, select(img[i] >= level, 255, 0));
+    }
+    return out;
+}
+
+fn count_above(img: [byte; 64], level: byte) -> (result: u64) {
+    iterate i over img carrying hits: u64 = 0 {
+        next hits = hits + ((img[i] >= level) as u64);
+    }
+    return hits;
+}
+
+// 3x3 mean with replicated borders: uniform images stay uniform exactly,
+// which the blur-preserves-uniform contract checks.
+fn box_blur3(img: [byte; 64]) -> (result: [byte; 64])
+    property law_blur_preserves_uniform
+{
+    iterate i over img carrying out: [byte; 64] = img {
+        let row: u64 = i / 8;
+        let col: u64 = i % 8;
+        let ru: u64 = clamp_row(row, true);
+        let rd: u64 = clamp_row(row, false);
+        let cl: u64 = clamp_col(col, true);
+        let cr: u64 = clamp_col(col, false);
+        let total: u64 = sample_replicate(img, ru, cl) +% sample_replicate(img, ru, col) +% sample_replicate(img, ru, cr) +% sample_replicate(img, row, cl) +% sample_replicate(img, row, col) +% sample_replicate(img, row, cr) +% sample_replicate(img, rd, cl) +% sample_replicate(img, rd, col) +% sample_replicate(img, rd, cr);
+        next out = replace(out, i, ((total / 9) as byte));
+    }
+    return out;
+}
+
+// ---- Executable laws: uniform images, involutions, renderer areas ----
+
+fn sample_frame(v: byte) -> (result: [byte; 64]) {
+    return render_rect(1, 1, 6, 6, v, 0);
+}
+
+fn law_invert_involution(v: byte) -> (result: bool) {
+    let frame: [byte; 64] = sample_frame(v);
+    return image_equal(invert(invert(frame)), frame);
+}
+
+fn law_mirror_involution(v: byte) -> (result: bool) {
+    let frame: [byte; 64] = sample_frame(v);
+    return image_equal(mirror_horizontal(mirror_horizontal(frame)), frame);
+}
+
+fn law_rotate4_identity(v: byte) -> (result: bool) {
+    let frame: [byte; 64] = sample_frame(v);
+    let twice: [byte; 64] = rotate90_cw(rotate90_cw(frame));
+    let fourth: [byte; 64] = rotate90_cw(rotate90_cw(twice));
+    return image_equal(fourth, frame);
+}
+
+fn law_blur_preserves_uniform(shade: byte) -> (result: bool) {
+    let flat: [byte; 64] = blank(shade);
+    return image_equal(box_blur3(flat), flat);
+}
+
+fn law_brighten_zero(v: byte) -> (result: bool) {
+    let frame: [byte; 64] = sample_frame(v);
+    return image_equal(brighten(frame, 0), frame);
+}
+
+fn law_uniform_no_edges(shade: byte, level: byte) -> (result: bool) {
+    let flat: [byte; 64] = blank(shade);
+    return implies((level as u64) > 0, count_above(sobel_magnitude(flat), level) == 0);
+}
+
+fn law_render_rect_area(fg: byte, bg: byte) -> (result: bool) {
+    let frame: [byte; 64] = render_rect(1, 1, 6, 6, fg, bg);
+    let area_ok: bool = (count_equal(frame, fg) == 25) && (count_equal(frame, bg) == 39);
+    return implies((fg as u64) != (bg as u64), area_ok);
+}
+
+fn law_render_outline_count(fg: byte, bg: byte) -> (result: bool) {
+    let frame: [byte; 64] = render_rect_outline(1, 1, 6, 5, fg, bg);
+    return implies((fg as u64) != (bg as u64), count_equal(frame, fg) == 14);
+}
+
+fn law_threshold_splits(v: byte, level: byte) -> (result: bool) {
+    let flat: [byte; 64] = blank(v);
+    let mask: [byte; 64] = threshold(flat, level);
+    let all_high: bool = implies((v as u64) >= (level as u64), count_equal(mask, 255) == 64);
+    let all_low: bool = implies((v as u64) < (level as u64), count_equal(mask, 0) == 64);
+    return all_high && all_low;
+}

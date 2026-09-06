@@ -96,6 +96,9 @@ resolution provenance.
 | `core/bytes.mncs` | `mncs.core.bytes.v1` (Profile 0.7) | byte bitwise/shift/order, folding fingerprint, nibble split, ASCII classifiers, wrapping checksum |
 | `core/numeric.mncs` | `mncs.core.numeric.v1` (Profile 0.8) | wrapping 4-lane sum/mean/centroid and L2-squared; vector kernels live in `vector.v1` |
 | `core/random.mncs` | `mncs.core.random.v1` (Profile 0.6) | deterministic MMIX LCG streams, bounded draws, domain-separated split/derive (no statistical-independence claim) |
+| `core/contracts.mncs` | `mncs.core.contracts.v1` (Profile 0.7) | executable-contract vocabulary: `implies`/`iff` combinators, `abs_diff`/`within_tolerance` for u64/i64/byte with explicit wrapping and documented boundary behavior |
+| `core/image.mncs` | `mncs.core.image.v1` (Profile 0.8) | bounded 8x8 grayscale frames: total pixel access, filled/outline rectangle renderer, mirror/rotate90 transforms, invert/saturating-brighten, L1 Sobel gradients with replicated borders, threshold, 3x3 mean blur |
+| `core/vision.mncs` | `mncs.core.vision.v1` (Profile 0.9) | visual observer pipeline: thresholded edge samples, greedy 8-neighbour segments, deduped corner Points, bounding contour with explicit closedness estimate, confidence-scored rectangle/line/blob candidates, persistent scene graph with stable-id tracking, compact frame deltas |
 | `core/version.mncs` | `mncs.core.version.v1` (Profile 0.6) | version triples, envelopes, pre-1.0 breaking rule |
 | `core/vector.mncs` | `mncs.core.vector.v1` (Profile 0.8) | wrapping dot product, masked positive sum, functional lane replacement, and vector-typed reduce/double exports |
 | `core/mask.mncs` | `mncs.core.mask.v1` (Profile 0.8) | bounded any/all/none kernels plus mask-typed `any_of`/`all_of`/`none_of`/`and4`/`or4`/`xor4`/`not4`/`identity4` exports |

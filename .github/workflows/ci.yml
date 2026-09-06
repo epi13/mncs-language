@@ -74,6 +74,57 @@ jobs:
             echo "invalid example was unexpectedly accepted" >&2
             exit 1
           fi
+      - name: Exercise semantic conformance
+        shell: bash
+        env:
+          MNCS_LIBRARY_PATH: ${{ github.workspace }}/library
+        run: |
+          set -euo pipefail
+          # Arithmetic contracts pass on every executable backend; the mutant
+          # must be rejected (nonzero exit with observed failures).
+          cargo run -p mncs-cli -- conformance examples/source/semantic/arithmetic_contracts.mncs \
+            --cases 8 \
+            --backends mncs-portable-wasm-mvp,mncs-research-bytecode,mncs-c11,mncs-llvm-ir,mncs-cranelift \
+            --output /tmp/mncs-conformance-arithmetic.json > /dev/null
+          jq -e '.summary.fail == 0 and .summary.pass > 0' /tmp/mncs-conformance-arithmetic.json
+          if cargo run -p mncs-cli -- conformance examples/source/semantic/arithmetic_contracts_mutant.mncs \
+            --cases 4 --backends mncs-portable-wasm-mvp > /dev/null; then
+            echo "mutant implementation was unexpectedly accepted" >&2
+            exit 1
+          fi
+          # Emitted corpora re-execute under the pre-existing experiment path.
+          # Conformance evidence is attached first: the claims discharge the
+          # compilation contract-evidence-bound obligations, so the run on the
+          # evidenced program reaches PASS honestly (bare source stays UNKNOWN).
+          cargo run -p mncs-cli -- conformance examples/source/semantic/arithmetic_contracts.mncs \
+            --cases 8 --backends mncs-portable-wasm-mvp \
+            --attach-evidence /tmp/mncs-conformance-evidenced.json > /dev/null
+          cargo run -p mncs-cli -- experiment run /tmp/mncs-conformance-evidenced.json \
+            --backend mncs-portable-wasm-mvp \
+            --corpus examples/execution/semantic-arithmetic-corpus.json \
+            --output-dir /tmp/mncs-conformance-corpus
+          jq -e '.status == "PASS"' /tmp/mncs-conformance-corpus/result.json
+      - name: Exercise image and vision semantic laws (release)
+        shell: bash
+        env:
+          MNCS_LIBRARY_PATH: ${{ github.workspace }}/library
+        run: |
+          set -euo pipefail
+          cargo build --release -p mncs-cli
+          # The full observer matrix (about 2 min release) has no dev test:
+          # the observer pipeline stays too step-heavy for `cargo test`.
+          # Image laws run in both gates (about a minute dev, faster here).
+          # Neither suite could complete at all before the executor
+          # identity-cache fix, which removed per-call full-module
+          # re-fingerprinting from nested SSA execution.
+          timeout 1200s ./target/release/mncs conformance library/core/image.mncs \
+            --cases 3 --backends mncs-portable-wasm-mvp,mncs-research-bytecode \
+            --step-budget 200000 --output /tmp/mncs-conformance-image.json > /dev/null
+          jq -e '.summary.fail == 0 and .summary.pass > 0' /tmp/mncs-conformance-image.json
+          timeout 1200s ./target/release/mncs conformance library/core/vision.mncs \
+            --cases 4 --backends mncs-portable-wasm-mvp,mncs-research-bytecode \
+            --step-budget 8000000 --output /tmp/mncs-conformance-vision.json > /dev/null
+          jq -e '.summary.fail == 0 and .summary.pass > 0' /tmp/mncs-conformance-vision.json
       - name: Run source syntax tournament
         run: >-
           cargo run -p mncs-cli -- syntax-tournament

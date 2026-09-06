@@ -1,0 +1,2230 @@
+{
+  "schema_version": "0.1",
+  "name": "examples.semantic.arithmetic-conformance-seed13857381793344343619",
+  "cases": [
+    {
+      "id": "prop_add_commutes-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_commutes-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_commutes-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -1,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_commutes-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_commutes-c004",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 1,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_commutes-c005",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775806,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_commutes-c006",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_commutes-c007",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -1,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c004",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 1,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c005",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775806,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c006",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c007",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_zero_identity-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_zero_identity"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_zero_identity-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_zero_identity"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_zero_identity-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_zero_identity"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -1,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_zero_identity-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_zero_identity"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_zero_identity-c004",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_zero_identity"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 1,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_zero_identity-c005",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_zero_identity"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775806,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_zero_identity-c006",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_zero_identity"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_zero_identity-c007",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_zero_identity"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -2186805479234459170,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_commutes-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_commutes-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_commutes-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -1,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_commutes-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_commutes-c004",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 1,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_commutes-c005",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775806,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_commutes-c006",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_commutes-c007",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_commutes"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_distributes_over_add-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_distributes_over_add"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_distributes_over_add-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_distributes_over_add"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_distributes_over_add-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_distributes_over_add"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -1,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_distributes_over_add-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_distributes_over_add"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_distributes_over_add-c004",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_distributes_over_add"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 1,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_distributes_over_add-c005",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_distributes_over_add"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775806,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_distributes_over_add-c006",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_distributes_over_add"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_mul_distributes_over_add-c007",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_mul_distributes_over_add"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -1,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c004",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 1,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c005",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775806,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c006",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_add_sub_roundtrip-c007",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_add_sub_roundtrip"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": -9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_sub_self_zero-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_sub_self_zero"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775808,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_sub_self_zero-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_sub_self_zero"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_sub_self_zero-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_sub_self_zero"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -1,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_sub_self_zero-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_sub_self_zero"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_sub_self_zero-c004",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_sub_self_zero"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 1,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_sub_self_zero-c005",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_sub_self_zero"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775806,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_sub_self_zero-c006",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_sub_self_zero"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 9223372036854775807,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "prop_sub_self_zero-c007",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.semantic.arithmetic",
+          "function": "prop_sub_self_zero"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": -2186805479234459170,
+              "type": {
+                "bits": 64,
+                "signed": true
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    }
+  ]
+}

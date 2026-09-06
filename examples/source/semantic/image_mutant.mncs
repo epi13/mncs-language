@@ -1,0 +1,24 @@
+mncs 0.9;
+
+// TEST-ONLY MUTANT: `shift_broken` adds one (mod 256) instead of inverting.
+// It is not an involution, so the mirrored law must reject it. Never used
+// as an implementation; only as mutation-sensitivity evidence.
+module examples.semantic.image_mutant;
+
+use mncs.core.image.v1;
+
+fn shift_broken(img: [byte; 64]) -> (result: [byte; 64])
+    metamorphic law_mutant_shift
+{
+    iterate i over img carrying out: [byte; 64] = img {
+        let v: u64 = img[i] as u64;
+        let bumped: u64 = select(v >= 255, 0, v + 1);
+        next out = replace(out, i, (bumped as byte));
+    }
+    return out;
+}
+
+fn law_mutant_shift(v: byte) -> (result: bool) {
+    let frame: [byte; 64] = render_rect(1, 1, 6, 6, v, 0);
+    return image_equal(shift_broken(shift_broken(frame)), frame);
+}

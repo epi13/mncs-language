@@ -98,3 +98,31 @@ Agreement over these finite cases is empirical evidence, not a proof of the
 language or of all backend realizations. The current scalar consumer passes on
 research bytecode and the portable WASM MVP; unsupported or unresolved backend
 envelopes remain explicit rather than being promoted to `PASS`.
+
+## Executable contract bindings (2026-09 addition)
+
+Profile 0.9 additionally accepts three executable contract clause kinds on
+function signatures: `property`, `invariant`, and `metamorphic`. Each names a
+same-program predicate function returning exactly one `bool`:
+
+```mncs
+fn add(a: i64, b: i64) -> (result: i64)
+    property prop_add_sub_roundtrip
+{
+    return a +% b;
+}
+```
+
+The binding is validated at elaboration: a clause under profile 0.9 naming an
+unknown function is `MNE231`; naming a function that does not return `bool`
+is `MNE233`; using these kinds below profile 0.9 is `MNE230`. Legacy
+`requires`/`ensures`/`assumes` names stay unchecked. Predicates compose
+library functions through the 0.9 namespace substrate, which is why the
+capability is gated here rather than earlier. Full semantics, authoring
+rules, and the `mncs conformance` pipeline live in
+[spec/executable-contracts.md](../spec/executable-contracts.md).
+
+Related fixes in the same tranche: two-segment `value.field` parses now
+accept postfix chains (`rec.items[i]`, `frame.nodes[0].id`), which contract
+predicates over record-held sequences depend on
+(`crates/mncs-compiler/tests/projection_chains.rs`).

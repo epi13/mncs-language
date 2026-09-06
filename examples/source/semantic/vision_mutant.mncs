@@ -1,0 +1,35 @@
+mncs 0.9;
+
+// TEST-ONLY MUTANT: `track_broken` reassigns a fresh identity on every frame
+// instead of keeping stable ids, so the frame-delta law must reject it.
+// Never used as an implementation; only as mutation-sensitivity evidence.
+module examples.semantic.vision_mutant;
+
+use mncs.core.image.v1;
+use mncs.core.vision.v1;
+use mncs.core.contracts.v1;
+
+fn track_broken(prev: SceneGraph, curr: SceneGraph) -> (result: SceneGraph)
+    property law_mutant_track
+{
+    if curr.count == 0 {
+        return curr;
+    }
+    let seen: SceneNode = curr.nodes[0];
+    let fresh: SceneNode = SceneNode { id: seen.id +% 100, kind: seen.kind, left: seen.left, top: seen.top, width: seen.width, height: seen.height, confidence: seen.confidence, parent: 0, has_parent: false };
+    let base: [SceneNode; 8] = curr.nodes;
+    let placed: [SceneNode; 8] = replace(base, 0, fresh);
+    return SceneGraph { nodes: placed, count: curr.count, frame: curr.frame };
+}
+
+fn law_mutant_track(level: byte) -> (result: bool) {
+    let a: [byte; 64] = render_rect_outline(1, 1, 6, 5, 255, 0);
+    let b: [byte; 64] = render_rect_outline(2, 1, 7, 5, 255, 0);
+    let ga: SceneGraph = observe(a, level, 0);
+    let gb: SceneGraph = observe(b, level, 1);
+    let tracked: SceneGraph = track_broken(ga, gb);
+    let d: SceneDelta = scene_delta(ga, tracked);
+    let premise: bool = ((level as u64) > 0) && (ga.count == 1) && (gb.count == 1);
+    let kept: SceneNode = tracked.nodes[0];
+    return implies(premise, (kept.id == 0) && (d.moved == 1));
+}

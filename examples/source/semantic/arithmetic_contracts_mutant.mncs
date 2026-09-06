@@ -1,0 +1,37 @@
+mncs 0.9;
+
+// TEST-ONLY MUTANT: deliberately wrong `add` (off by one). The semantic test
+// system must reject this program: its contract predicates observe the lie.
+// Never used as an implementation; only as mutation-sensitivity evidence.
+module examples.semantic.arithmetic_mutant;
+
+fn add(a: i64, b: i64) -> (result: i64)
+    property prop_add_sub_roundtrip
+    property prop_add_zero_identity
+    metamorphic prop_add_commutes
+{
+    return (a +% b) +% 1;
+}
+
+fn sub(a: i64, b: i64) -> (result: i64)
+    property prop_add_sub_roundtrip
+    property prop_sub_self_zero
+{
+    return a -% b;
+}
+
+fn prop_add_sub_roundtrip(x: i64, y: i64) -> (result: bool) {
+    return sub(add(x, y), y) == x;
+}
+
+fn prop_add_zero_identity(x: i64) -> (result: bool) {
+    return add(x, 0) == x;
+}
+
+fn prop_add_commutes(x: i64, y: i64) -> (result: bool) {
+    return add(x, y) == add(y, x);
+}
+
+fn prop_sub_self_zero(x: i64) -> (result: bool) {
+    return sub(x, x) == 0;
+}
