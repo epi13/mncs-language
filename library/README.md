@@ -107,6 +107,7 @@ resolution provenance.
 | `core/proof_term.mncs` | `mncs.core.proof_term.v1` (Profile 0.10) | RFC 0007 tranche 0.1 vocabulary: flat topological `[Cell; 16]` buffers, `TermTag` (universes, Pi/Lambda/Apply, Nat family with closed `Plus`, `Eq`/`Refl`), unique-binder variables, descriptor kind codes |
 | `core/proof_check.mncs` | `mncs.core.proof_check.v1` (Profile 0.10) | the MNCS-native proof kernel: single forward pass deciding well-formedness, universes, typing, and closed definitional equality to `PASS`/`FAIL`/`UNKNOWN`; dependent application, dependent motives, and open terms stay `UNKNOWN`, never `PASS` |
 | `family/rfc_status.mncs` | `mncs.family.rfc_status.v1` (Profile 0.10) | MNCS-native RFC status gates: `gate_experimental`/`gate_implemented` over criterion tallies plus evidence flags, and `transition_allowed` (upgrades need `PASS`, downgrades always pass); the RFC 0007 tally executes here |
+| `family/journal.mncs` | `mncs.family.journal.v1` (Profile 0.10) | MNCS-native Journal admission policy: bounded 16-kind event vocabulary, `gate_admit` over evidence tallies, `admission_decision` (duplicates and model-only claims rejected), stepwise `trust_transition` with legacy quarantine, lineage-delegated `chain_ok`, constantly-false `model_may_admit`, and the `may_render_public` redaction guard |
 
 ## Current module boundary
 
