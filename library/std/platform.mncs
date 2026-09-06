@@ -1,0 +1,349 @@
+mncs 0.6;
+
+// mncs.std.platform — portable finite-domain platform vocabulary.
+//
+// Reusable capability-matching primitives for any MNCS software that must
+// decide whether a machine can execute a workload: operating system,
+// architecture, libc, init system, accelerator, execution mode, version
+// envelopes, and resource bounds. Total, effect-free, and backend-agnostic.
+//
+// Convention note: `version_satisfies(envelope, bound, candidate)` reads
+// the bound as a lower floor — AtLeast holds when the candidate is at or
+// after the bound. This differs positionally from
+// `mncs.core.version.v1::satisfies`, whose checked-in corpus pins
+// first-arg >= second-arg; the two agree on Any/Exact and differ on the
+// directed envelopes, so call sites must not swap them blindly. Flagged
+// as language pressure for upstream clarification, not changed here: the
+// family corpus is green and its callers depend on its exact shape.
+//
+// Boundary (explicit host escape, no safe MNCS surface yet):
+// - unbounded text handling: the host classifies strings such as
+//   "x86_64" or "glibc 2.43" into these enums before calling in. MNCS
+//   never observes the raw strings, so a new platform string can never
+//   silently reinterpret an existing arm;
+// - process execution, filesystem discovery, and hashing stay host-side;
+// - ROCm/Metal requirement selection is future work: workers report the
+//   accelerator they have, but requirement selection today covers CUDA,
+//   eBPF, WASM, and PTX only. A workload needing ROCm/Metal selection
+//   must not encode it as CUDA.
+//
+// Realization envelope: profile 0.6 surface only (enums, records, match,
+// strict boolean operators), so every executable backend can realize it.
+module mncs.std.platform.v1;
+
+// Observed worker facts. Unknown is an honest observation, never a
+// wildcard: it satisfies no concrete requirement.
+enum Os { Linux, Windows, MacOs, Unknown }
+
+enum Arch { X86_64, Aarch64, Riscv64, X86, Arm32, Unknown }
+
+enum Libc { Gnu, Musl, WasiC, WinCrt, Unknown }
+
+enum Init { Systemd, OpenRC, SysV, Launchd, WinService, Unknown }
+
+enum Accel { None, Cuda, Rocm, Metal, Unknown }
+
+enum ExecMode { Native, Emulated }
+
+// Workload requirements. Any is the explicit wildcard: only requirements
+// say "any", observations never do.
+enum ReqOs { Any, Linux, Windows, MacOs }
+
+enum ReqArch { Any, X86_64, Aarch64, Riscv64, X86, Arm32 }
+
+enum ReqLibc { Any, Gnu, Musl, WasiC, WinCrt }
+
+record Version { major: i32, minor: i32, patch: i32 }
+
+enum Ordering { Before, Same, After }
+
+enum Envelope { Any, Exact, AtLeast, CompatibleMinor }
+
+record WorkerEnv {
+    os: Os,
+    arch: Arch,
+    libc: Libc,
+    init: Init,
+    accel: Accel,
+    exec: ExecMode,
+    cuda_major: i32,
+    cuda_minor: i32,
+    has_ebpf: bool,
+    has_wasm: bool,
+    has_ptx: bool,
+    mem_mib: i64,
+    cpu_count: i32,
+    emulates_req_arch: bool
+}
+
+record WorkloadReq {
+    os: ReqOs,
+    arch: ReqArch,
+    libc: ReqLibc,
+    require_cuda: bool,
+    cuda_major: i32,
+    cuda_minor: i32,
+    require_ebpf: bool,
+    require_wasm: bool,
+    require_ptx: bool,
+    allow_emulation: bool,
+    min_mem_mib: i64,
+    min_cpu_count: i32
+}
+
+fn make_version(major: i32, minor: i32, patch: i32) -> (result: Version) {
+    return Version { major: major, minor: minor, patch: patch };
+}
+
+fn compare(left: Version, right: Version) -> (result: Ordering) {
+    if left.major < right.major {
+        return Ordering.Before;
+    }
+    if left.major > right.major {
+        return Ordering.After;
+    }
+    if left.minor < right.minor {
+        return Ordering.Before;
+    }
+    if left.minor > right.minor {
+        return Ordering.After;
+    }
+    if left.patch < right.patch {
+        return Ordering.Before;
+    }
+    if left.patch > right.patch {
+        return Ordering.After;
+    }
+    return Ordering.Same;
+}
+
+fn order_satisfies(envelope: Envelope, order: Ordering, majors_agree: bool) -> (result: bool) {
+    return match envelope {
+        Any => true,
+        Exact => match order {
+            Same => true,
+            Before => false,
+            After => false,
+        },
+        AtLeast => match order {
+            Same => true,
+            After => true,
+            Before => false,
+        },
+        CompatibleMinor => match order {
+            Same => true,
+            After => majors_agree,
+            Before => false,
+        },
+    };
+}
+
+fn version_satisfies(envelope: Envelope, bound: Version, candidate: Version) -> (result: bool) {
+    // Order is candidate-relative-to-bound: a candidate at or after the
+    // bound compares Same or After, which is what AtLeast accepts.
+    let order: Ordering = compare(candidate, bound);
+    let majors_agree: bool = bound.major == candidate.major;
+    return order_satisfies(envelope, order, majors_agree);
+}
+
+fn os_satisfies(req: ReqOs, got: Os) -> (result: bool) {
+    return match req {
+        Any => true,
+        Linux => match got {
+            Linux => true,
+            Windows => false,
+            MacOs => false,
+            Unknown => false,
+        },
+        Windows => match got {
+            Windows => true,
+            Linux => false,
+            MacOs => false,
+            Unknown => false,
+        },
+        MacOs => match got {
+            MacOs => true,
+            Linux => false,
+            Windows => false,
+            Unknown => false,
+        },
+    };
+}
+
+fn arch_matches(req: ReqArch, got: Arch) -> (result: bool) {
+    return match req {
+        Any => true,
+        X86_64 => match got {
+            X86_64 => true,
+            Aarch64 => false,
+            Riscv64 => false,
+            X86 => false,
+            Arm32 => false,
+            Unknown => false,
+        },
+        Aarch64 => match got {
+            Aarch64 => true,
+            X86_64 => false,
+            Riscv64 => false,
+            X86 => false,
+            Arm32 => false,
+            Unknown => false,
+        },
+        Riscv64 => match got {
+            Riscv64 => true,
+            X86_64 => false,
+            Aarch64 => false,
+            X86 => false,
+            Arm32 => false,
+            Unknown => false,
+        },
+        X86 => match got {
+            X86 => true,
+            X86_64 => false,
+            Aarch64 => false,
+            Riscv64 => false,
+            Arm32 => false,
+            Unknown => false,
+        },
+        Arm32 => match got {
+            Arm32 => true,
+            X86_64 => false,
+            Aarch64 => false,
+            Riscv64 => false,
+            X86 => false,
+            Unknown => false,
+        },
+    };
+}
+
+// Architecture selection with an explicit emulation path. A native match
+// always satisfies. A mismatch satisfies only when the workload permits
+// emulation, the worker measurably offers it for the requested arch, and
+// the offered execution is marked emulated. Names never participate.
+fn arch_satisfies(req: ReqArch, got: Arch, allow_emulation: bool, emulates_req_arch: bool, exec: ExecMode) -> (result: bool) {
+    if arch_matches(req, got) {
+        return match exec {
+            Native => true,
+            Emulated => allow_emulation,
+        };
+    }
+    if allow_emulation && emulates_req_arch {
+        return match exec {
+            Native => false,
+            Emulated => true,
+        };
+    }
+    return false;
+}
+
+fn libc_satisfies(req: ReqLibc, got: Libc) -> (result: bool) {
+    return match req {
+        Any => true,
+        Gnu => match got {
+            Gnu => true,
+            Musl => false,
+            WasiC => false,
+            WinCrt => false,
+            Unknown => false,
+        },
+        Musl => match got {
+            Musl => true,
+            Gnu => false,
+            WasiC => false,
+            WinCrt => false,
+            Unknown => false,
+        },
+        WasiC => match got {
+            WasiC => true,
+            Gnu => false,
+            Musl => false,
+            WinCrt => false,
+            Unknown => false,
+        },
+        WinCrt => match got {
+            WinCrt => true,
+            Gnu => false,
+            Musl => false,
+            WasiC => false,
+            Unknown => false,
+        },
+    };
+}
+
+// CUDA selection is a versioned floor, not a presence bit: the worker
+// accelerator must be CUDA and its compute capability at or after the
+// required floor. A workload with no CUDA requirement always satisfies.
+fn cuda_satisfies(require: bool, req_major: i32, req_minor: i32, got: Accel, got_major: i32, got_minor: i32) -> (result: bool) {
+    if require {
+        return match got {
+            Cuda => version_satisfies(Envelope.AtLeast, Version { major: req_major, minor: req_minor, patch: 0 }, Version { major: got_major, minor: got_minor, patch: 0 }),
+            None => false,
+            Rocm => false,
+            Metal => false,
+            Unknown => false,
+        };
+    }
+    return true;
+}
+
+fn resources_satisfy(min_mem_mib: i64, min_cpu_count: i32, got_mem_mib: i64, got_cpu_count: i32) -> (result: bool) {
+    return min_mem_mib <= got_mem_mib && min_cpu_count <= got_cpu_count;
+}
+
+// Optional-feature selection: a workload that does not require the
+// feature always satisfies; one that does needs the worker to have it.
+fn flag_satisfies(require: bool, got: bool) -> (result: bool) {
+    if require {
+        return got;
+    }
+    return true;
+}
+
+// Full environment eligibility: every required dimension must hold.
+// Optional and preferred capabilities are ranking inputs and never
+// participate here; they cannot promote an ineligible worker.
+fn env_satisfies(req: WorkloadReq, env: WorkerEnv) -> (result: bool) {
+    let os_ok: bool = os_satisfies(req.os, env.os);
+    let arch_ok: bool = arch_satisfies(req.arch, env.arch, req.allow_emulation, env.emulates_req_arch, env.exec);
+    let libc_ok: bool = libc_satisfies(req.libc, env.libc);
+    let cuda_ok: bool = cuda_satisfies(req.require_cuda, req.cuda_major, req.cuda_minor, env.accel, env.cuda_major, env.cuda_minor);
+    let ebpf_ok: bool = flag_satisfies(req.require_ebpf, env.has_ebpf);
+    let wasm_ok: bool = flag_satisfies(req.require_wasm, env.has_wasm);
+    let ptx_ok: bool = flag_satisfies(req.require_ptx, env.has_ptx);
+    let res_ok: bool = resources_satisfy(req.min_mem_mib, req.min_cpu_count, env.mem_mib, env.cpu_count);
+    return os_ok && arch_ok && libc_ok && cuda_ok && ebpf_ok && wasm_ok && ptx_ok && res_ok;
+}
+
+// Experiment entrypoints so source-level call semantics stay in the
+// executed path rather than merely present in the module.
+fn candidate_os(req: ReqOs, got: Os) -> (result: bool) {
+    return os_satisfies(req, got);
+}
+
+fn candidate_arch(req: ReqArch, got: Arch, allow_emulation: bool, emulates_req_arch: bool, exec: ExecMode) -> (result: bool) {
+    return arch_satisfies(req, got, allow_emulation, emulates_req_arch, exec);
+}
+
+fn candidate_libc(req: ReqLibc, got: Libc) -> (result: bool) {
+    return libc_satisfies(req, got);
+}
+
+fn candidate_cuda(require: bool, req_major: i32, req_minor: i32, got: Accel, got_major: i32, got_minor: i32) -> (result: bool) {
+    return cuda_satisfies(require, req_major, req_minor, got, got_major, got_minor);
+}
+
+fn candidate_resources(min_mem_mib: i64, min_cpu_count: i32, got_mem_mib: i64, got_cpu_count: i32) -> (result: bool) {
+    return resources_satisfy(min_mem_mib, min_cpu_count, got_mem_mib, got_cpu_count);
+}
+
+fn candidate_version(envelope: Envelope, bound_major: i32, bound_minor: i32, bound_patch: i32, got_major: i32, got_minor: i32, got_patch: i32) -> (result: bool) {
+    return version_satisfies(envelope, Version { major: bound_major, minor: bound_minor, patch: bound_patch }, Version { major: got_major, minor: got_minor, patch: got_patch });
+}
+
+fn candidate_flag(require: bool, got: bool) -> (result: bool) {
+    return flag_satisfies(require, got);
+}
+
+fn candidate_env(req: WorkloadReq, env: WorkerEnv) -> (result: bool) {
+    return env_satisfies(req, env);
+}

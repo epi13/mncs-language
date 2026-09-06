@@ -1,0 +1,2630 @@
+{
+ "schema_version": "0.1",
+ "name": "platform-capability",
+ "cases": [
+  {
+   "id": "os-linux-linux",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_os"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqOs",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqOs::Linux",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Os",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Os::Linux",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "os-linux-windows",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_os"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqOs",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqOs::Linux",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Os",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Os::Windows",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "os-windows-windows",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_os"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqOs",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqOs::Windows",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Os",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Os::Windows",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "os-windows-linux",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_os"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqOs",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqOs::Windows",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Os",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Os::Linux",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "os-macos-macos",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_os"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqOs",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqOs::MacOs",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Os",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Os::MacOs",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "os-linux-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_os"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqOs",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqOs::Linux",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Os",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Os::Unknown",
+       "discriminant": 3
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "os-windows-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_os"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqOs",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqOs::Windows",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Os",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Os::Unknown",
+       "discriminant": 3
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "os-any-linux",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_os"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqOs",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqOs::Any",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Os",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Os::Linux",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "os-any-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_os"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqOs",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqOs::Any",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Os",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Os::Unknown",
+       "discriminant": 3
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "arch-x86-native",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_arch"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqArch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqArch::X86_64",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Arch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Arch::X86_64",
+       "discriminant": 0
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ExecMode",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ExecMode::Native",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "arch-x86-mismatch",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_arch"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqArch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqArch::X86_64",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Arch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Arch::Aarch64",
+       "discriminant": 1
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ExecMode",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ExecMode::Native",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "arch-arm-native",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_arch"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqArch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqArch::Aarch64",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Arch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Arch::Aarch64",
+       "discriminant": 1
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ExecMode",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ExecMode::Native",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "arch-riscv-native",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_arch"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqArch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqArch::Riscv64",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Arch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Arch::Riscv64",
+       "discriminant": 2
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ExecMode",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ExecMode::Native",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "arch-riscv-emulated",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_arch"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqArch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqArch::Riscv64",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Arch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Arch::X86_64",
+       "discriminant": 0
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ExecMode",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ExecMode::Emulated",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "arch-riscv-emul-forbidden",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_arch"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqArch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqArch::Riscv64",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Arch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Arch::X86_64",
+       "discriminant": 0
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ExecMode",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ExecMode::Emulated",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "arch-riscv-emul-unoffered",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_arch"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqArch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqArch::Riscv64",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Arch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Arch::X86_64",
+       "discriminant": 0
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ExecMode",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ExecMode::Emulated",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "arch-riscv-emul-native-exec",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_arch"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqArch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqArch::Riscv64",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Arch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Arch::X86_64",
+       "discriminant": 0
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ExecMode",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ExecMode::Native",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "arch-native-emul-without-allow",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_arch"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqArch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqArch::X86_64",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Arch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Arch::X86_64",
+       "discriminant": 0
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ExecMode",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ExecMode::Emulated",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "arch-native-emul-with-allow",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_arch"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqArch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqArch::X86_64",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Arch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Arch::X86_64",
+       "discriminant": 0
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ExecMode",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ExecMode::Emulated",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "arch-x86-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_arch"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqArch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqArch::X86_64",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Arch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Arch::Unknown",
+       "discriminant": 5
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ExecMode",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ExecMode::Native",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "arch-any-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_arch"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqArch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqArch::Any",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Arch",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Arch::Unknown",
+       "discriminant": 5
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ExecMode",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ExecMode::Native",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "libc-gnu-gnu",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_libc"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqLibc",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqLibc::Gnu",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Libc",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Libc::Gnu",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "libc-gnu-musl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_libc"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqLibc",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqLibc::Gnu",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Libc",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Libc::Musl",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "libc-musl-musl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_libc"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqLibc",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqLibc::Musl",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Libc",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Libc::Musl",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "libc-musl-gnu",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_libc"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqLibc",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqLibc::Musl",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Libc",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Libc::Gnu",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "libc-gnu-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_libc"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqLibc",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqLibc::Gnu",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Libc",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Libc::Unknown",
+       "discriminant": 4
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "libc-any-musl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_libc"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqLibc",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqLibc::Any",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Libc",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Libc::Musl",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "libc-any-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_libc"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::ReqLibc",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::ReqLibc::Any",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Libc",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Libc::Unknown",
+       "discriminant": 4
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "cuda-unrequired",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_cuda"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Accel",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Accel::Unknown",
+       "discriminant": 4
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "cuda-floor-met",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_cuda"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Accel",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Accel::Cuda",
+       "discriminant": 1
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "cuda-floor-exceeded",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_cuda"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Accel",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Accel::Cuda",
+       "discriminant": 1
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "cuda-floor-missed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_cuda"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Accel",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Accel::Cuda",
+       "discriminant": 1
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "cuda-absent",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_cuda"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Accel",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Accel::None",
+       "discriminant": 0
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "cuda-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_cuda"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Accel",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Accel::Unknown",
+       "discriminant": 4
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "cuda-wrong-accel",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_cuda"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Accel",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Accel::Rocm",
+       "discriminant": 2
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "resources-met",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_resources"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 4096,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 8192,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "resources-mem-missed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_resources"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 4096,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2048,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "resources-cpu-missed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_resources"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 4096,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 8192,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "resources-zero-floor",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_resources"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "version-any",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_version"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Envelope",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Envelope::Any",
+       "discriminant": 0
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 9,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 9,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 9,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "version-exact-same",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_version"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Envelope",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Envelope::Exact",
+       "discriminant": 1
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "version-exact-diff",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_version"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Envelope",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Envelope::Exact",
+       "discriminant": 1
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "version-atleast-after",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_version"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Envelope",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Envelope::AtLeast",
+       "discriminant": 2
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "version-atleast-before",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_version"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Envelope",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Envelope::AtLeast",
+       "discriminant": 2
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "version-compat-same-major",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_version"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Envelope",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Envelope::CompatibleMinor",
+       "discriminant": 3
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "version-compat-diff-major",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_version"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Envelope",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Envelope::CompatibleMinor",
+       "discriminant": 3
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "version-compat-before",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_version"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.std.platform.v1::Envelope",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.std.platform.v1::Envelope::CompatibleMinor",
+       "discriminant": 3
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 32,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "flag-unrequired-absent",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_flag"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "flag-unrequired-present",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_flag"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "flag-required-present",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_flag"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "flag-required-absent",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.platform.v1",
+     "function": "candidate_flag"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  }
+ ]
+}
