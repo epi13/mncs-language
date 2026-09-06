@@ -662,6 +662,63 @@ impl SsaModule {
             },
         }
     }
+
+    /// Proof-gated variant of the no-overflow elision experiment (RFC 0007).
+    ///
+    /// In addition to the exact current verifier PASS, this entry point
+    /// requires a proof binding that names the same obligation, carries the
+    /// current kernel version, records a `Pass` outcome, and matches the
+    /// supplied dependency fingerprints exactly. The proof identity is
+    /// recorded in the transformation record, so the consumed formal evidence
+    /// is explicit instead of an ad-hoc certificate claim. Any mismatch
+    /// withholds the transformation.
+    pub fn attempt_no_overflow_elision_with_proof(
+        &self,
+        operation: &SemanticId,
+        obligation: &SemanticId,
+        evidence: &[VerifierResult],
+        binding: &crate::ProofBinding,
+        dependency_fingerprints: &std::collections::BTreeMap<SemanticId, String>,
+    ) -> SsaTransformationDecision {
+        let proof_ok = binding.reusable_if(
+            &binding.proof,
+            crate::PROOF_KERNEL_ID,
+            obligation,
+            &binding.assumptions,
+            dependency_fingerprints,
+            crate::ProofVerdict::Pass,
+        );
+        let mut decision = self.attempt_no_overflow_elision(operation, obligation, evidence);
+        if !proof_ok {
+            decision.permitted = false;
+            decision.reason =
+                "missing exact RFC 0007 proof binding conservatively withholds the transformation"
+                    .to_owned();
+            decision.record.backend_promises_permitted.clear();
+            decision
+                .record
+                .backend_promises_withheld
+                .push("no-overflow".to_owned());
+            decision.record.evidence_consumed.clear();
+            return decision;
+        }
+        if decision.permitted {
+            decision
+                .record
+                .evidence_consumed
+                .push(binding.proof.clone());
+            decision.reason = format!(
+                "exact current verifier PASS plus proof {} permits the bounded transformation",
+                binding.proof.0
+            );
+        } else {
+            decision.reason = format!(
+                "{}; proof {} alone does not replace the required verifier PASS",
+                decision.reason, binding.proof.0
+            );
+        }
+        decision
+    }
 }
 
 fn check_ir_type(

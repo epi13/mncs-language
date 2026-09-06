@@ -1,0 +1,15 @@
+mncs 0.6;
+
+// RFC 0007 flagship demonstration: a checked constant addition.
+//
+// The `+` operator carries Checked intent, so compilation generates a real
+// `integer-overflow` obligation with status UNKNOWN. The accompanying proof
+// artifact (Plus 2 3 = 5 in the kernel Nat fragment, witnessed by Refl)
+// discharges it through the kernel, and the compiler consumes the resulting
+// binding. See docs/rfc-0007-demo.md.
+module examples.proof_demo;
+
+fn add_small() -> (result: i64) {
+    let total: i64 = 2 + 3;
+    return total;
+}
