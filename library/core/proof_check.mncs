@@ -1,0 +1,558 @@
+mncs 0.10;
+
+// mncs.core.proof_check.v1 — the MNCS-native RFC 0007 proof kernel (tranche 0.1).
+//
+// A single forward pass over a topological `[Cell; 16]` buffer decides
+// well-formedness, universe constraints, typing, and closed-fragment
+// definitional equality. Every rule is fail-closed: violations are FAIL,
+// unsupported structure is UNKNOWN, and UNKNOWN never upgrades to PASS.
+//
+// Deliberate tranche boundaries (UNKNOWN, never PASS):
+// dependent application (needs substitution), NatElim over Succ-literals or
+// stuck scrutinees, dependent motives, open proof terms, and structurally
+// distinct but equal rebuilt terms. See docs/rfc-0007-evidence.md.
+module mncs.core.proof_check.v1;
+
+use mncs.core.status.v1 as status;
+use mncs.core.proof_term.v1 as pterm;
+
+record Triple { kind: i64, first: i64, second: i64 }
+
+// Forward-pass memo. rep* holds the canonical representative structure,
+// tt* the type descriptor triple, nval the closed Nat literal value
+// (-1 when not a literal), mentions whether a variable occurs (0/1).
+record Memo {
+    mentions: [i64; 16],
+    nval: [i64; 16],
+    rep: [i64; 16],
+    rr0: [i64; 16],
+    rr1: [i64; 16],
+    rr2: [i64; 16],
+    rr3: [i64; 16],
+    rtag: [i64; 16],
+    status_code: i64,
+    tt0: [i64; 16],
+    tt1: [i64; 16],
+    tt2: [i64; 16]
+}
+
+fn to_status(code: i64) -> (result: status.Status) {
+    if code == 0 {
+        return status.Status.PASS;
+    }
+    if code == 1 {
+        return status.Status.FAIL;
+    }
+    return status.Status.UNKNOWN;
+}
+
+fn to_code(value: status.Status) -> (result: i64) {
+    return match value {
+        PASS => 0,
+        FAIL => 1,
+        UNKNOWN => 2,
+    };
+}
+
+// Lattice join on codes. Dominance can only weaken: FAIL dominates UNKNOWN
+// dominates PASS, and no path here maps UNKNOWN to PASS.
+fn join(first: i64, second: i64) -> (result: i64) {
+    return to_code(status.dominate(to_status(first), to_status(second)));
+}
+
+// Clamped, gated lookup. The index is always safe to dereference; the value
+// is trusted only when ok holds.
+fn at16(xs: [i64; 16], raw: i64, ok: bool, fallback: i64) -> (result: i64) {
+    let clamped: i64 = select(raw < 0, 0, select(raw > 15, 15, raw));
+    let index: u64 = clamped as u64;
+    return select(ok, xs[index], fallback);
+}
+
+// A child reference is usable only inside the active prefix and strictly
+// below its parent, which keeps every lookup acyclic by construction.
+fn ref_ok(child: i64, parent: i64, total: i64) -> (result: bool) {
+    return child >= 0 && child < parent && child < total;
+}
+
+// Canonical meaning of a type cell as a descriptor triple:
+// Nat -> (2,0,0); Universe(l) -> (1,l,0); Pi(d,c) -> (3,rep d,rep c);
+// Eq(T,_,_) -> (4,rep T,0); anything else is not a type.
+fn denote(tag: i64, r0: i64, r1: i64) -> (result: Triple) {
+    if tag == 6 {
+        return Triple { kind: 2, first: 0, second: 0 };
+    }
+    if tag == 1 {
+        return Triple { kind: 1, first: r0, second: 0 };
+    }
+    if tag == 3 {
+        return Triple { kind: 3, first: r0, second: r1 };
+    }
+    if tag == 11 {
+        return Triple { kind: 4, first: r0, second: 0 };
+    }
+    return Triple { kind: 0, first: 0, second: 0 };
+}
+
+fn store_rep(state: Memo, index: u64, tag: i64, r0: i64, r1: i64, r2: i64, r3: i64, rep: i64, nval: i64, mentions: i64) -> (result: Memo) {
+    return Memo {
+        mentions: replace(state.mentions, index, mentions),
+        nval: replace(state.nval, index, nval),
+        rep: replace(state.rep, index, rep),
+        rr0: replace(state.rr0, index, r0),
+        rr1: replace(state.rr1, index, r1),
+        rr2: replace(state.rr2, index, r2),
+        rr3: replace(state.rr3, index, r3),
+        rtag: replace(state.rtag, index, tag),
+        status_code: state.status_code,
+        tt0: state.tt0,
+        tt1: state.tt1,
+        tt2: state.tt2
+    };
+}
+
+fn store_type(state: Memo, index: u64, t0: i64, t1: i64, t2: i64, local: i64) -> (result: Memo) {
+    return Memo {
+        mentions: state.mentions,
+        nval: state.nval,
+        rep: state.rep,
+        rr0: state.rr0,
+        rr1: state.rr1,
+        rr2: state.rr2,
+        rr3: state.rr3,
+        rtag: state.rtag,
+        status_code: join(state.status_code, local),
+        tt0: replace(state.tt0, index, t0),
+        tt1: replace(state.tt1, index, t1),
+        tt2: replace(state.tt2, index, t2)
+    };
+}
+
+fn adv_universe(state: Memo, cell: pterm.Cell, index: u64, at: i64) -> (result: Memo) {
+    let level: i64 = cell.arg0;
+    let ceiling: i64 = pterm.max_universe();
+    let in_range: bool = level >= 0 && level <= ceiling;
+    let has_type: bool = in_range && level < ceiling;
+    let local: i64 = select(in_range, select(has_type, 0, 1), 1);
+    let stored: Memo = store_rep(state, index, 1, level, 0, 0, 0, at, 0 - 1, 0);
+    return store_type(stored, index, select(has_type, 1, 0), select(has_type, level +% 1, 0), 0, local);
+}
+
+fn adv_nat(state: Memo, index: u64, at: i64) -> (result: Memo) {
+    let stored: Memo = store_rep(state, index, 6, 0, 0, 0, 0, at, 0 - 1, 0);
+    return store_type(stored, index, 1, 0, 0, 0);
+}
+
+fn adv_zero(state: Memo, index: u64, at: i64) -> (result: Memo) {
+    let stored: Memo = store_rep(state, index, 7, 0, 0, 0, 0, at, 0, 0);
+    return store_type(stored, index, 2, 0, 0, 0);
+}
+
+fn adv_var(state: Memo, cell: pterm.Cell, total: i64, index: u64, at: i64) -> (result: Memo) {
+    let target: i64 = cell.arg0;
+    let ok: bool = ref_ok(target, at, total);
+    let kinds: [i64; 16] = state.rtag;
+    let firsts: [i64; 16] = state.rr0;
+    let binder_tag: i64 = at16(kinds, target, ok, 0);
+    let bound: bool = binder_tag == 3 || binder_tag == 4;
+    let domain: i64 = at16(firsts, target, ok && bound, 0);
+    let dtags: [i64; 16] = state.rtag;
+    let dfirsts: [i64; 16] = state.rr0;
+    let dseconds: [i64; 16] = state.rr1;
+    let found: bool = ok && bound;
+    let denotation: Triple = denote(at16(dtags, domain, found, 0), at16(dfirsts, domain, found, 0), at16(dseconds, domain, found, 0));
+    let usable: bool = denotation.kind != 0;
+    let local: i64 = select(ok, select(bound, select(usable, 0, 1), 1), 1);
+    let stored: Memo = store_rep(state, index, 2, select(ok, target, 0), 0, 0, 0, at, 0 - 1, 1);
+    return store_type(stored, index, select(found && usable, denotation.kind, 0), select(found && usable, denotation.first, 0), select(found && usable, denotation.second, 0), local);
+}
+
+fn adv_pi(state: Memo, cell: pterm.Cell, total: i64, index: u64, at: i64) -> (result: Memo) {
+    let domain: i64 = cell.arg0;
+    let codomain: i64 = cell.arg1;
+    let ok_domain: bool = ref_ok(domain, at, total);
+    let ok_codomain: bool = ref_ok(codomain, at, total);
+    let kinds: [i64; 16] = state.tt0;
+    let levels: [i64; 16] = state.tt1;
+    let domain_kind: i64 = at16(kinds, domain, ok_domain, 0);
+    let domain_level: i64 = at16(levels, domain, ok_domain, 0);
+    let codomain_kind: i64 = at16(kinds, codomain, ok_codomain, 0);
+    let codomain_level: i64 = at16(levels, codomain, ok_codomain, 0);
+    let well_typed: bool = ok_domain && ok_codomain && domain_kind == 1 && codomain_kind == 1;
+    let joined: i64 = select(domain_level > codomain_level, domain_level, codomain_level);
+    let over_ceiling: bool = joined > pterm.max_universe();
+    let local: i64 = select(well_typed, select(over_ceiling, 1, 0), 1);
+    let reps: [i64; 16] = state.rep;
+    let mentions_all: [i64; 16] = state.mentions;
+    let domain_rep: i64 = at16(reps, domain, ok_domain, at);
+    let codomain_rep: i64 = at16(reps, codomain, ok_codomain, at);
+    let mentioned: i64 = select(at16(mentions_all, domain, ok_domain, 0) +% at16(mentions_all, codomain, ok_codomain, 0) > 0, 1, 0);
+    let stored: Memo = store_rep(state, index, 3, domain_rep, codomain_rep, 0, 0, at, 0 - 1, mentioned);
+    let settled: bool = local == 0;
+    return store_type(stored, index, select(settled, 1, 0), select(settled, joined, 0), 0, local);
+}
+
+fn adv_lambda(state: Memo, cell: pterm.Cell, total: i64, index: u64, at: i64) -> (result: Memo) {
+    let domain: i64 = cell.arg0;
+    let body: i64 = cell.arg1;
+    let claim: i64 = cell.arg2;
+    let ok_domain: bool = ref_ok(domain, at, total);
+    let ok_body: bool = ref_ok(body, at, total);
+    let ok_claim: bool = ref_ok(claim, at, total);
+    let kinds: [i64; 16] = state.tt0;
+    let domain_is_type: bool = at16(kinds, domain, ok_domain, 0) == 1;
+    let tags: [i64; 16] = state.rtag;
+    let firsts: [i64; 16] = state.rr0;
+    let seconds: [i64; 16] = state.rr1;
+    let claim_is_pi: bool = at16(tags, claim, ok_claim, 0) == 3;
+    let claim_domain: i64 = at16(firsts, claim, ok_claim && claim_is_pi, 0);
+    let claim_codomain: i64 = at16(seconds, claim, ok_claim && claim_is_pi, 0);
+    let reps: [i64; 16] = state.rep;
+    let domain_rep: i64 = at16(reps, domain, ok_domain, at);
+    let domain_matches: bool = claim_domain == domain_rep;
+    let body_kinds: [i64; 16] = state.tt0;
+    let body_firsts: [i64; 16] = state.tt1;
+    let body_seconds: [i64; 16] = state.tt2;
+    let actual_kind: i64 = at16(body_kinds, body, ok_body, 0);
+    let actual_first: i64 = at16(body_firsts, body, ok_body, 0);
+    let actual_second: i64 = at16(body_seconds, body, ok_body, 0);
+    let settled_claim: bool = ok_claim && claim_is_pi;
+    let cod_tag: i64 = at16(tags, claim_codomain, settled_claim, 0);
+    let cod_first: i64 = at16(firsts, claim_codomain, settled_claim, 0);
+    let cod_second: i64 = at16(seconds, claim_codomain, settled_claim, 0);
+    let claimed: Triple = denote(cod_tag, cod_first, cod_second);
+    let codomain_matches: bool = actual_kind == claimed.kind && actual_first == claimed.first && actual_second == claimed.second;
+    let refs_ok: bool = ok_domain && ok_body && ok_claim;
+    let local: i64 = select(refs_ok, select(domain_is_type, select(claim_is_pi, select(domain_matches, select(codomain_matches, 0, 1), 1), 1), 1), 1);
+    let body_rep: i64 = at16(reps, body, ok_body, at);
+    let mentions_all: [i64; 16] = state.mentions;
+    let mentioned: i64 = at16(mentions_all, body, ok_body, 0);
+    let stored: Memo = store_rep(state, index, 4, domain_rep, body_rep, 0, 0, at, 0 - 1, mentioned);
+    let settled: bool = local == 0;
+    return store_type(stored, index, select(settled, 3, 0), select(settled, claim_domain, 0), select(settled, claim_codomain, 0), local);
+}
+
+fn adv_apply(state: Memo, cell: pterm.Cell, total: i64, index: u64, at: i64) -> (result: Memo) {
+    let fun: i64 = cell.arg0;
+    let arg: i64 = cell.arg1;
+    let ok_fun: bool = ref_ok(fun, at, total);
+    let ok_arg: bool = ref_ok(arg, at, total);
+    let kinds: [i64; 16] = state.tt0;
+    let firsts: [i64; 16] = state.tt1;
+    let seconds: [i64; 16] = state.tt2;
+    let fun_kind: i64 = at16(kinds, fun, ok_fun, 0);
+    let domain: i64 = at16(firsts, fun, ok_fun, 0);
+    let codomain: i64 = at16(seconds, fun, ok_fun, 0);
+    let is_pi: bool = fun_kind == 3;
+    let usable: bool = ok_fun && is_pi;
+    let tags: [i64; 16] = state.rtag;
+    let rep_firsts: [i64; 16] = state.rr0;
+    let rep_seconds: [i64; 16] = state.rr1;
+    let dom_tag: i64 = at16(tags, domain, usable, 0);
+    let dom_first: i64 = at16(rep_firsts, domain, usable, 0);
+    let dom_second: i64 = at16(rep_seconds, domain, usable, 0);
+    let required: Triple = denote(dom_tag, dom_first, dom_second);
+    let arg_kind: i64 = at16(kinds, arg, ok_arg, 0);
+    let arg_first: i64 = at16(firsts, arg, ok_arg, 0);
+    let arg_second: i64 = at16(seconds, arg, ok_arg, 0);
+    let arg_matches: bool = arg_kind == required.kind && arg_first == required.first && arg_second == required.second;
+    let mentions_all: [i64; 16] = state.mentions;
+    let dependent: bool = at16(mentions_all, codomain, usable, 0) > 0;
+    let applicable: bool = ok_fun && ok_arg && is_pi && arg_matches;
+    let local: i64 = select(applicable, select(dependent, 2, 0), 1);
+    let cod_tag: i64 = at16(tags, codomain, usable, 0);
+    let cod_first: i64 = at16(rep_firsts, codomain, usable, 0);
+    let cod_second: i64 = at16(rep_seconds, codomain, usable, 0);
+    let produced: Triple = denote(cod_tag, cod_first, cod_second);
+    let settled: bool = local == 0;
+    let reps: [i64; 16] = state.rep;
+    let fun_rep: i64 = at16(reps, fun, ok_fun, at);
+    let arg_rep: i64 = at16(reps, arg, ok_arg, at);
+    let mentioned: i64 = select(at16(mentions_all, fun, ok_fun, 0) +% at16(mentions_all, arg, ok_arg, 0) > 0, 1, 0);
+    let stored: Memo = store_rep(state, index, 5, fun_rep, arg_rep, 0, 0, at, 0 - 1, mentioned);
+    return store_type(stored, index, select(settled, produced.kind, 0), select(settled, produced.first, 0), select(settled, produced.second, 0), local);
+}
+
+fn adv_succ(state: Memo, cell: pterm.Cell, total: i64, index: u64, at: i64) -> (result: Memo) {
+    let pred: i64 = cell.arg0;
+    let ok: bool = ref_ok(pred, at, total);
+    let kinds: [i64; 16] = state.tt0;
+    let is_nat: bool = at16(kinds, pred, ok, 0) == 2;
+    let local: i64 = select(ok, select(is_nat, 0, 1), 1);
+    let reps: [i64; 16] = state.rep;
+    let values: [i64; 16] = state.nval;
+    let mentions_all: [i64; 16] = state.mentions;
+    let pred_rep: i64 = at16(reps, pred, ok, at);
+    let pred_value: i64 = at16(values, pred, ok, 0 - 1);
+    let value: i64 = select(ok && is_nat, select(pred_value >= 0, pred_value +% 1, 0 - 1), 0 - 1);
+    let mentioned: i64 = at16(mentions_all, pred, ok, 0);
+    let stored: Memo = store_rep(state, index, 8, pred_rep, 0, 0, 0, at, value, mentioned);
+    return store_type(stored, index, select(local == 0, 2, 0), 0, 0, local);
+}
+
+fn adv_plus(state: Memo, cell: pterm.Cell, total: i64, index: u64, at: i64) -> (result: Memo) {
+    let left: i64 = cell.arg0;
+    let right: i64 = cell.arg1;
+    let ok_left: bool = ref_ok(left, at, total);
+    let ok_right: bool = ref_ok(right, at, total);
+    let kinds: [i64; 16] = state.tt0;
+    let both_nat: bool = at16(kinds, left, ok_left, 0) == 2 && at16(kinds, right, ok_right, 0) == 2;
+    let local: i64 = select(ok_left && ok_right, select(both_nat, 0, 1), 1);
+    let reps: [i64; 16] = state.rep;
+    let values: [i64; 16] = state.nval;
+    let mentions_all: [i64; 16] = state.mentions;
+    let left_rep: i64 = at16(reps, left, ok_left, at);
+    let right_rep: i64 = at16(reps, right, ok_right, at);
+    let left_value: i64 = at16(values, left, ok_left, 0 - 1);
+    let right_value: i64 = at16(values, right, ok_right, 0 - 1);
+    let closed: bool = left_value >= 0 && right_value >= 0;
+    let value: i64 = select(ok_left && ok_right && both_nat, select(closed, left_value +% right_value, 0 - 1), 0 - 1);
+    let mentioned: i64 = select(at16(mentions_all, left, ok_left, 0) +% at16(mentions_all, right, ok_right, 0) > 0, 1, 0);
+    let stored: Memo = store_rep(state, index, 9, left_rep, right_rep, 0, 0, at, value, mentioned);
+    return store_type(stored, index, select(local == 0, 2, 0), 0, 0, local);
+}
+
+fn adv_nat_elim(state: Memo, cell: pterm.Cell, total: i64, index: u64, at: i64) -> (result: Memo) {
+    let motive: i64 = cell.arg0;
+    let zero_case: i64 = cell.arg1;
+    let succ_case: i64 = cell.arg2;
+    let target: i64 = cell.arg3;
+    let ok_motive: bool = ref_ok(motive, at, total);
+    let ok_zero: bool = ref_ok(zero_case, at, total);
+    let ok_succ: bool = ref_ok(succ_case, at, total);
+    let ok_target: bool = ref_ok(target, at, total);
+    let kinds: [i64; 16] = state.tt0;
+    let firsts: [i64; 16] = state.tt1;
+    let seconds: [i64; 16] = state.tt2;
+    let motive_is_pi: bool = at16(kinds, motive, ok_motive, 0) == 3;
+    let motive_ok: bool = ok_motive && motive_is_pi;
+    let motive_domain: i64 = at16(firsts, motive, motive_ok, 0);
+    let motive_codomain: i64 = at16(seconds, motive, motive_ok, 0);
+    let tags: [i64; 16] = state.rtag;
+    let rep_firsts: [i64; 16] = state.rr0;
+    let rep_seconds: [i64; 16] = state.rr1;
+    let dom_denotation: Triple = denote(at16(tags, motive_domain, motive_ok, 0), at16(rep_firsts, motive_domain, motive_ok, 0), at16(rep_seconds, motive_domain, motive_ok, 0));
+    let cod_denotation: Triple = denote(at16(tags, motive_codomain, motive_ok, 0), at16(rep_firsts, motive_codomain, motive_ok, 0), at16(rep_seconds, motive_codomain, motive_ok, 0));
+    let domain_is_nat: bool = dom_denotation.kind == 2;
+    let codomain_is_universe: bool = cod_denotation.kind == 1;
+    let motive_well_formed: bool = motive_ok && domain_is_nat && codomain_is_universe;
+    let mentions_all: [i64; 16] = state.mentions;
+    let dependent: bool = at16(mentions_all, motive_codomain, motive_well_formed, 0) > 0;
+    let zero_kind: i64 = at16(kinds, zero_case, ok_zero, 0);
+    let zero_first: i64 = at16(firsts, zero_case, ok_zero, 0);
+    let zero_second: i64 = at16(seconds, zero_case, ok_zero, 0);
+    let zero_matches: bool = zero_kind == cod_denotation.kind && zero_first == cod_denotation.first && zero_second == cod_denotation.second;
+    let succ_is_pi: bool = at16(kinds, succ_case, ok_succ, 0) == 3;
+    let succ_domain: i64 = at16(firsts, succ_case, ok_succ, 0);
+    let succ_codomain: i64 = at16(seconds, succ_case, ok_succ, 0);
+    let succ_dom_denotation: Triple = denote(at16(tags, succ_domain, ok_succ && succ_is_pi, 0), at16(rep_firsts, succ_domain, ok_succ && succ_is_pi, 0), at16(rep_seconds, succ_domain, ok_succ && succ_is_pi, 0));
+    let succ_cod_denotation: Triple = denote(at16(tags, succ_codomain, ok_succ && succ_is_pi, 0), at16(rep_firsts, succ_codomain, ok_succ && succ_is_pi, 0), at16(rep_seconds, succ_codomain, ok_succ && succ_is_pi, 0));
+    let succ_matches: bool = succ_is_pi && succ_dom_denotation.kind == 2 && succ_cod_denotation.kind == cod_denotation.kind && succ_cod_denotation.first == cod_denotation.first && succ_cod_denotation.second == cod_denotation.second;
+    let target_is_nat: bool = at16(kinds, target, ok_target, 0) == 2;
+    let refs_ok: bool = ok_motive && ok_zero && ok_succ && ok_target;
+    let branches_ok: bool = motive_well_formed && zero_matches && succ_matches && target_is_nat;
+    let values: [i64; 16] = state.nval;
+    let target_value: i64 = at16(values, target, ok_target, 0 - 1);
+    let is_zero_case: bool = target_value == 0;
+    let local: i64 = select(refs_ok, select(motive_well_formed, select(dependent, 2, select(branches_ok, select(is_zero_case, 0, 2), 1)), 1), 1);
+    let reps: [i64; 16] = state.rep;
+    let motive_rep: i64 = at16(reps, motive, ok_motive, at);
+    let zero_rep: i64 = at16(reps, zero_case, ok_zero, at);
+    let succ_rep: i64 = at16(reps, succ_case, ok_succ, at);
+    let target_rep: i64 = at16(reps, target, ok_target, at);
+    let settled: bool = local == 0;
+    let stored: Memo = store_rep(state, index, 10, select(settled, zero_rep, motive_rep), select(settled, 0, zero_rep), select(settled, 0, succ_rep), select(settled, 0, target_rep), select(settled, zero_rep, at), select(settled, at16(values, zero_case, ok_zero, 0 - 1), 0 - 1), select(settled, at16(mentions_all, zero_case, ok_zero, 0), 0));
+    return store_type(stored, index, select(settled, zero_kind, 0), select(settled, zero_first, 0), select(settled, zero_second, 0), local);
+}
+
+fn adv_eq(state: Memo, cell: pterm.Cell, total: i64, index: u64, at: i64) -> (result: Memo) {
+    let carrier: i64 = cell.arg0;
+    let left: i64 = cell.arg1;
+    let right: i64 = cell.arg2;
+    let ok_carrier: bool = ref_ok(carrier, at, total);
+    let ok_left: bool = ref_ok(left, at, total);
+    let ok_right: bool = ref_ok(right, at, total);
+    let kinds: [i64; 16] = state.tt0;
+    let levels: [i64; 16] = state.tt1;
+    let carrier_is_type: bool = at16(kinds, carrier, ok_carrier, 0) == 1;
+    let carrier_level: i64 = at16(levels, carrier, ok_carrier, 0);
+    let reps: [i64; 16] = state.rep;
+    let carrier_rep: i64 = at16(reps, carrier, ok_carrier, at);
+    let tags: [i64; 16] = state.rtag;
+    let rep_firsts: [i64; 16] = state.rr0;
+    let rep_seconds: [i64; 16] = state.rr1;
+    let required: Triple = denote(at16(tags, carrier_rep, ok_carrier, 0), at16(rep_firsts, carrier_rep, ok_carrier, 0), at16(rep_seconds, carrier_rep, ok_carrier, 0));
+    let firsts: [i64; 16] = state.tt1;
+    let seconds: [i64; 16] = state.tt2;
+    let left_kind: i64 = at16(kinds, left, ok_left, 0);
+    let left_first: i64 = at16(firsts, left, ok_left, 0);
+    let left_second: i64 = at16(seconds, left, ok_left, 0);
+    let right_kind: i64 = at16(kinds, right, ok_right, 0);
+    let right_first: i64 = at16(firsts, right, ok_right, 0);
+    let right_second: i64 = at16(seconds, right, ok_right, 0);
+    let sides_typed: bool = left_kind == required.kind && left_first == required.first && left_second == required.second && right_kind == required.kind && right_first == required.first && right_second == required.second;
+    let refs_ok: bool = ok_carrier && ok_left && ok_right;
+    let local: i64 = select(refs_ok, select(carrier_is_type, select(sides_typed, 0, 1), 1), 1);
+    let left_rep: i64 = at16(reps, left, ok_left, at);
+    let right_rep: i64 = at16(reps, right, ok_right, at);
+    let mentions_all: [i64; 16] = state.mentions;
+    let mentioned: i64 = select(at16(mentions_all, left, ok_left, 0) +% at16(mentions_all, right, ok_right, 0) > 0, 1, 0);
+    let stored: Memo = store_rep(state, index, 11, carrier_rep, left_rep, right_rep, 0, at, 0 - 1, mentioned);
+    let settled: bool = local == 0;
+    return store_type(stored, index, select(settled, 1, 0), select(settled, carrier_level, 0), 0, local);
+}
+
+fn adv_refl(state: Memo, cell: pterm.Cell, total: i64, index: u64, at: i64) -> (result: Memo) {
+    let witness: i64 = cell.arg0;
+    let claim: i64 = cell.arg1;
+    let ok_witness: bool = ref_ok(witness, at, total);
+    let ok_claim: bool = ref_ok(claim, at, total);
+    let tags: [i64; 16] = state.rtag;
+    let claim_is_eq: bool = at16(tags, claim, ok_claim, 0) == 11;
+    let local: i64 = select(ok_witness && ok_claim, select(claim_is_eq, 0, 1), 1);
+    let reps: [i64; 16] = state.rep;
+    let witness_rep: i64 = at16(reps, witness, ok_witness, at);
+    let claim_rep: i64 = at16(reps, claim, ok_claim, at);
+    let mentions_all: [i64; 16] = state.mentions;
+    let mentioned: i64 = select(at16(mentions_all, witness, ok_witness, 0) +% at16(mentions_all, claim, ok_claim, 0) > 0, 1, 0);
+    let stored: Memo = store_rep(state, index, 12, witness_rep, claim_rep, 0, 0, at, 0 - 1, mentioned);
+    return store_type(stored, index, 0, 0, 0, local);
+}
+
+fn adv_unsupported(state: Memo, index: u64, at: i64) -> (result: Memo) {
+    let stored: Memo = store_rep(state, index, 0, 0, 0, 0, 0, at, 0 - 1, 0);
+    return store_type(stored, index, 0, 0, 0, 2);
+}
+
+fn initial() -> (result: Memo) {
+    return Memo {
+        mentions: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        nval: [0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1],
+        rep: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        rr0: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        rr1: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        rr2: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        rr3: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        rtag: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        status_code: 0,
+        tt0: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        tt1: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        tt2: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    };
+}
+
+fn advance(state: Memo, cells: [pterm.Cell; 16], total: i64, index: u64) -> (result: Memo) {
+    let at: i64 = index as i64;
+    let cell: pterm.Cell = cells[index];
+    let code: i64 = pterm.tag_code(cell.tag);
+    if code == 1 {
+        return adv_universe(state, cell, index, at);
+    }
+    if code == 2 {
+        return adv_var(state, cell, total, index, at);
+    }
+    if code == 3 {
+        return adv_pi(state, cell, total, index, at);
+    }
+    if code == 4 {
+        return adv_lambda(state, cell, total, index, at);
+    }
+    if code == 5 {
+        return adv_apply(state, cell, total, index, at);
+    }
+    if code == 6 {
+        return adv_nat(state, index, at);
+    }
+    if code == 7 {
+        return adv_zero(state, index, at);
+    }
+    if code == 8 {
+        return adv_succ(state, cell, total, index, at);
+    }
+    if code == 9 {
+        return adv_plus(state, cell, total, index, at);
+    }
+    if code == 10 {
+        return adv_nat_elim(state, cell, total, index, at);
+    }
+    if code == 11 {
+        return adv_eq(state, cell, total, index, at);
+    }
+    if code == 12 {
+        return adv_refl(state, cell, total, index, at);
+    }
+    return adv_unsupported(state, index, at);
+}
+
+fn run_pass(cells: [pterm.Cell; 16], total: i64) -> (result: Memo) {
+    iterate i over cells carrying state: Memo = initial() {
+        let at: i64 = i as i64;
+        let include: bool = at < total;
+        let advanced: Memo = advance(state, cells, total, i);
+        next state = select(include, advanced, state);
+    }
+    return state;
+}
+
+// The claim check: proof must inhabit the proposition denoted by prop.
+// Refl proofs are verified against their Eq proposition (sides definitionally
+// equal to the witness, witness typed by the carrier); every other proof
+// term must synthesize exactly the denoted descriptor. Open proof terms and
+// out-of-range claims fail closed.
+fn check_proof(cells: [pterm.Cell; 16], count: byte, proof: byte, prop: byte) -> (result: status.Status) {
+    let total: i64 = count as i64;
+    let proof_index: i64 = proof as i64;
+    let prop_index: i64 = prop as i64;
+    let final: Memo = run_pass(cells, total);
+    let ok_proof: bool = proof_index >= 0 && proof_index < total;
+    let ok_prop: bool = prop_index >= 0 && prop_index < total;
+    let indices_ok: bool = ok_proof && ok_prop;
+    let reps: [i64; 16] = final.rep;
+    let tags: [i64; 16] = final.rtag;
+    let firsts: [i64; 16] = final.rr0;
+    let seconds: [i64; 16] = final.rr1;
+    let thirds: [i64; 16] = final.rr2;
+    let prop_rep: i64 = at16(reps, prop_index, ok_prop, 0);
+    let prop_denotation: Triple = denote(at16(tags, prop_rep, ok_prop, 0), at16(firsts, prop_rep, ok_prop, 0), at16(seconds, prop_rep, ok_prop, 0));
+    let prop_is_type: bool = prop_denotation.kind != 0;
+    let kinds: [i64; 16] = final.tt0;
+    let type_firsts: [i64; 16] = final.tt1;
+    let type_seconds: [i64; 16] = final.tt2;
+    let proof_kind: i64 = at16(kinds, proof_index, ok_proof, 0);
+    let proof_first: i64 = at16(type_firsts, proof_index, ok_proof, 0);
+    let proof_second: i64 = at16(type_seconds, proof_index, ok_proof, 0);
+    let proof_tag: i64 = at16(tags, at16(reps, proof_index, ok_proof, 0), ok_proof, 0);
+    let is_refl: bool = proof_tag == 12;
+    let mentions_all: [i64; 16] = final.mentions;
+    let values: [i64; 16] = final.nval;
+    let witness: i64 = at16(firsts, at16(reps, proof_index, ok_proof, 0), ok_proof, 0);
+    let equation: i64 = at16(seconds, at16(reps, proof_index, ok_proof, 0), ok_proof, 0);
+    let eq_carrier: i64 = at16(firsts, equation, ok_prop && is_refl, 0);
+    let eq_left: i64 = at16(seconds, equation, ok_prop && is_refl, 0);
+    let eq_right: i64 = at16(thirds, equation, ok_prop && is_refl, 0);
+    let witness_rep: i64 = at16(reps, witness, ok_proof && is_refl, 0);
+    let left_rep: i64 = at16(reps, eq_left, ok_prop && is_refl, 0);
+    let right_rep: i64 = at16(reps, eq_right, ok_prop && is_refl, 0);
+    let witness_value: i64 = at16(values, witness, ok_proof && is_refl, 0 - 1);
+    let left_value: i64 = at16(values, eq_left, ok_prop && is_refl, 0 - 1);
+    let right_value: i64 = at16(values, eq_right, ok_prop && is_refl, 0 - 1);
+    let left_matches: bool = left_rep == witness_rep || (left_value >= 0 && witness_value >= 0 && left_value == witness_value);
+    let right_matches: bool = right_rep == witness_rep || (right_value >= 0 && witness_value >= 0 && right_value == witness_value);
+    let equation_is_claimed: bool = equation == prop_rep;
+    let witness_kind: i64 = at16(kinds, witness, ok_proof && is_refl, 0);
+    let witness_first: i64 = at16(type_firsts, witness, ok_proof && is_refl, 0);
+    let witness_second: i64 = at16(type_seconds, witness, ok_proof && is_refl, 0);
+    let carrier_denotation: Triple = denote(at16(tags, eq_carrier, ok_prop && is_refl, 0), at16(firsts, eq_carrier, ok_prop && is_refl, 0), at16(seconds, eq_carrier, ok_prop && is_refl, 0));
+    let witness_typed: bool = witness_kind == carrier_denotation.kind && witness_first == carrier_denotation.first && witness_second == carrier_denotation.second;
+    let refl_holds: bool = equation_is_claimed && left_matches && right_matches && witness_typed;
+    let descriptor_matches: bool = proof_kind == prop_denotation.kind && proof_first == prop_denotation.first && proof_second == prop_denotation.second;
+    let claim_holds: bool = select(is_refl, refl_holds, descriptor_matches);
+    let open: bool = at16(mentions_all, proof_index, ok_proof, 0) > 0;
+    let verdict: i64 = join(final.status_code, select(indices_ok, 0, 1));
+    let typed: i64 = join(verdict, select(prop_is_type, 0, 1));
+    let claimed: i64 = join(typed, select(claim_holds, 0, 1));
+    return to_status(join(claimed, select(open, 2, 0)));
+}
+
+fn check_proof_code(cells: [pterm.Cell; 16], count: byte, proof: byte, prop: byte) -> (result: i64) {
+    return to_code(check_proof(cells, count, proof, prop));
+}

@@ -1,0 +1,740 @@
+{
+ "schema_version": "0.1",
+ "name": "rfc-status",
+ "cases": [
+  {
+   "id": "exp-0007-tally",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.rfc_status.v1",
+     "function": "check_rfc0007_experimental"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+      "discriminant": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "impl-0007-tally",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.rfc_status.v1",
+     "function": "check_rfc0007_implemented"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "exp-no-evidence",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.rfc_status.v1",
+     "function": "gate_experimental"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.rfc_status.v1::CriterionTally::evidence_ok%3Abool%3Bexcused%3Ai64%3Bpartial%3Ai64%3Brequired%3Ai64%3Bsatisfied%3Ai64%3B",
+       "name": "CriterionTally",
+       "fields": [
+        [
+         "evidence_ok",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "excused",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "partial",
+         {
+          "integer": {
+           "value": 4,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "required",
+         {
+          "integer": {
+           "value": 20,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "satisfied",
+         {
+          "integer": {
+           "value": 15,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "exp-incomplete",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.rfc_status.v1",
+     "function": "gate_experimental"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.rfc_status.v1::CriterionTally::evidence_ok%3Abool%3Bexcused%3Ai64%3Bpartial%3Ai64%3Brequired%3Ai64%3Bsatisfied%3Ai64%3B",
+       "name": "CriterionTally",
+       "fields": [
+        [
+         "evidence_ok",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "excused",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "partial",
+         {
+          "integer": {
+           "value": 4,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "required",
+         {
+          "integer": {
+           "value": 20,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "satisfied",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "exp-overcount",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.rfc_status.v1",
+     "function": "gate_experimental"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.rfc_status.v1::CriterionTally::evidence_ok%3Abool%3Bexcused%3Ai64%3Bpartial%3Ai64%3Brequired%3Ai64%3Bsatisfied%3Ai64%3B",
+       "name": "CriterionTally",
+       "fields": [
+        [
+         "evidence_ok",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "excused",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "partial",
+         {
+          "integer": {
+           "value": 6,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "required",
+         {
+          "integer": {
+           "value": 20,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "satisfied",
+         {
+          "integer": {
+           "value": 15,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "impl-full",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.rfc_status.v1",
+     "function": "gate_implemented"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.rfc_status.v1::CriterionTally::evidence_ok%3Abool%3Bexcused%3Ai64%3Bpartial%3Ai64%3Brequired%3Ai64%3Bsatisfied%3Ai64%3B",
+       "name": "CriterionTally",
+       "fields": [
+        [
+         "evidence_ok",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "excused",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "partial",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "required",
+         {
+          "integer": {
+           "value": 5,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "satisfied",
+         {
+          "integer": {
+           "value": 5,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+      "discriminant": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "impl-partial",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.rfc_status.v1",
+     "function": "gate_implemented"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.rfc_status.v1::CriterionTally::evidence_ok%3Abool%3Bexcused%3Ai64%3Bpartial%3Ai64%3Brequired%3Ai64%3Bsatisfied%3Ai64%3B",
+       "name": "CriterionTally",
+       "fields": [
+        [
+         "evidence_ok",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "excused",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "partial",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "required",
+         {
+          "integer": {
+           "value": 5,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "satisfied",
+         {
+          "integer": {
+           "value": 4,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "impl-excused",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.rfc_status.v1",
+     "function": "gate_implemented"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.rfc_status.v1::CriterionTally::evidence_ok%3Abool%3Bexcused%3Ai64%3Bpartial%3Ai64%3Brequired%3Ai64%3Bsatisfied%3Ai64%3B",
+       "name": "CriterionTally",
+       "fields": [
+        [
+         "evidence_ok",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "excused",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "partial",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "required",
+         {
+          "integer": {
+           "value": 5,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "satisfied",
+         {
+          "integer": {
+           "value": 4,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "trans-upgrade-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.rfc_status.v1",
+     "function": "transition_allowed"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.rfc_status.v1::ImplState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.rfc_status.v1::ImplState::Partial",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.rfc_status.v1::ImplState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.rfc_status.v1::ImplState::Experimental",
+       "discriminant": 4
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "trans-upgrade-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.rfc_status.v1",
+     "function": "transition_allowed"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.rfc_status.v1::ImplState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.rfc_status.v1::ImplState::Partial",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.rfc_status.v1::ImplState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.rfc_status.v1::ImplState::Experimental",
+       "discriminant": 4
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "trans-downgrade",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.rfc_status.v1",
+     "function": "transition_allowed"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.rfc_status.v1::ImplState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.rfc_status.v1::ImplState::Experimental",
+       "discriminant": 4
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.rfc_status.v1::ImplState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.rfc_status.v1::ImplState::Substrate",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+       "discriminant": 1
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "trans-same",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.rfc_status.v1",
+     "function": "transition_allowed"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.rfc_status.v1::ImplState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.rfc_status.v1::ImplState::Bounded",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.rfc_status.v1::ImplState",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.rfc_status.v1::ImplState::Bounded",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  }
+ ]
+}

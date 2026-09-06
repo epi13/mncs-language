@@ -483,6 +483,12 @@ pub struct BackendPromiseCertificate {
     pub verifier: SemanticId,
     pub method: String,
     pub dependencies: Vec<SemanticId>,
+    /// Optional RFC 0007 proof binding that independently covers the constant
+    /// computation behind this certificate. The grant still requires the
+    /// exact range recheck; the proof adds an independent kernel-checked
+    /// computation identity instead of replacing the check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proof_identity: Option<SemanticId>,
 }
 
 impl BackendPromiseCertificate {
@@ -507,9 +513,28 @@ impl BackendPromiseCertificate {
             verifier,
             method: method.into(),
             dependencies,
+            proof_identity: None,
         };
         certificate.identity = certificate.expected_identity();
         certificate
+    }
+
+    /// Attach an RFC 0007 proof binding to this certificate. The binding is
+    /// accepted only when it names this certificate's obligation, carries the
+    /// current kernel version, and records a `Pass` outcome; anything else
+    /// leaves the certificate unchanged. Attaching reseals the identity so a
+    /// proof-bound certificate is never interchangeable with an unbound one.
+    pub fn with_proof_binding(&self, binding: &crate::ProofBinding) -> Option<Self> {
+        if binding.obligation != self.obligation
+            || binding.kernel != crate::PROOF_KERNEL_ID
+            || binding.outcome != crate::ProofVerdict::Pass
+        {
+            return None;
+        }
+        let mut bound = self.clone();
+        bound.proof_identity = Some(binding.proof.clone());
+        bound.identity = bound.expected_identity();
+        Some(bound)
     }
 
     pub fn identity_is_valid(&self) -> bool {
@@ -528,6 +553,7 @@ impl BackendPromiseCertificate {
             &self.verifier,
             &self.method,
             &self.dependencies,
+            &self.proof_identity,
         );
         let json = serde_json::to_string(&material).expect("promise certificate is serializable");
         SemanticId(format!(

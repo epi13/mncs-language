@@ -4,6 +4,7 @@
 //! representation is a transport format for experiments, not a proposed final
 //! language grammar.
 
+mod authority;
 mod bindings;
 mod body;
 mod canonical;
@@ -23,6 +24,7 @@ mod identity;
 mod ir;
 mod machine_intent;
 mod obligations;
+mod proof_kernel;
 mod provenance;
 mod refinement;
 mod representation;
@@ -32,6 +34,15 @@ mod translation;
 mod validation;
 mod verifier;
 
+pub use authority::{
+    accept_leg, canonical_envelope_bytes, check_issuance_binding, confirm_execution,
+    evidence_standing, fold_capability, issuance_signed_bytes, requirement_identity,
+    satisfied_by_attested_evidence, verify_decision_digest, verify_session_context, Acceptance,
+    AuthorityError, AuthorityVerdict, CapabilityDecision, DecisionStatus, EvidenceStanding,
+    EvidenceTerms, IssuerBinding, ParsedIssuance, ProofClass, RequirementLeg, SessionBinding,
+    DECISION_DIGEST_ALG, DECISION_SCHEMA, EVIDENCE_SCHEMA, ISSUANCE_SIGNATURE_ALG,
+    REQUIREMENT_SCHEMA,
+};
 pub use bindings::{
     ResolutionProvenance, SemanticBinding, SemanticBindingKind, SemanticBindingTable,
     SemanticNamespace, SemanticReference, SemanticScope, SEMANTIC_BINDING_SCHEMA_VERSION,
@@ -138,6 +149,12 @@ pub use machine_intent::{
 };
 pub use obligations::{
     generate_machine_intent_obligations, ObligationGeneration, ObligationRecord,
+    OBLIGATION_SCHEMA_VERSION,
+};
+pub use proof_kernel::{
+    kernel_backed_range_result, parse_proof_corpus, reference_check, ProofArtifact, ProofBinding,
+    ProofCell, ProofCorpusCase, ProofTag, ProofVerdict, PROOF_ARTIFACT_SCHEMA_VERSION,
+    PROOF_BUFFER_CAPACITY, PROOF_KERNEL_ID, PROOF_MAX_UNIVERSE,
 };
 pub use provenance::{
     evidence_is_current, Realization, RealizationError, RealizationSelection, TargetIdentity,

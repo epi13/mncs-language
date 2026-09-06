@@ -322,3 +322,132 @@ fn external_backends_agree_on_the_value_contract() {
         );
     }
 }
+
+fn have_tool(name: &str) -> bool {
+    std::process::Command::new(name)
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn reference_min(dir: &std::path::Path, a: i64, b: i64) -> i64 {
+    let request = serde_json::json!({
+        "schema_version": "0.1",
+        "target": {"module": "examples.concepts", "function": "bounded_min"},
+        "arguments": [
+            {"integer": {"value": a, "type": {"bits": 32, "signed": true}}},
+            {"integer": {"value": b, "type": {"bits": 32, "signed": true}}},
+        ],
+        "step_budget": 100000,
+    });
+    let request_path = dir.join(format!("request-{a}-{b}.json"));
+    std::fs::write(
+        &request_path,
+        serde_json::to_string(&request).expect("request JSON"),
+    )
+    .expect("write request");
+    let output = binary()
+        .args(["execute", &program()])
+        .arg(&request_path)
+        .output()
+        .expect("run reference execute");
+    assert!(
+        output.status.success(),
+        "reference execution must succeed for ({a}, {b})"
+    );
+    let result: Value = serde_json::from_slice(&output.stdout).expect("reference result JSON");
+    assert_eq!(result["status"], "returned", "reference must return");
+    result["returned"][0]["integer"]["value"]
+        .as_i64()
+        .expect("reference integer result")
+}
+
+/// Real RV32 execution: the MNCS riscv32 backend object, freestanding-linked
+/// with a minimal `_start` (no libc), run under qemu-riscv32, compared case
+/// by case against the MNCS reference executor. Toolchain absence is
+/// Unknown, never failure: each missing piece skips honestly.
+#[test]
+fn riscv32_qemu_executes_bounded_min() {
+    for tool in ["clang", "qemu-riscv32"] {
+        if !have_tool(tool) {
+            eprintln!("SKIP-BUT-STRUCTURED: {tool} is not installed; no RISC-V emulator run");
+            return;
+        }
+    }
+    let dir = out_dir("riscv32-qemu");
+    let Some(envelope) = compile_backend("mncs-riscv32", &dir) else {
+        return;
+    };
+    assert_eq!(envelope["status"], "PASS", "riscv32 envelope status");
+    let hex = envelope["bytes_hex"].as_str().expect("bytes_hex");
+    assert_eq!(hex.len() % 2, 0, "bytes_hex must decode");
+    let object: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("hex digit"))
+        .collect();
+    std::fs::write(dir.join("bounded_min.o"), &object).expect("write object");
+
+    for (a, b) in [(200i64, 77i64), (17, 42), (5, 5)] {
+        let start = format!(
+            "    .globl _start\n    .text\n_start:\n    addi sp, sp, -32\n    mv s0, sp\n    li a0, {a}\n    li a1, {b}\n    mv a2, s0\n    mv a3, s0\n    call bounded_min\n    mv t0, a0\n    li a7, 93\n    mv a0, t0\n    ecall\n"
+        );
+        let stem = format!("start-{a}-{b}");
+        std::fs::write(dir.join(format!("{stem}.s")), &start).expect("write start");
+        for (argv, what) in [
+            (
+                vec!["--target=riscv32", "-march=rv32im", "-nostdlib", "-c"],
+                "assemble",
+            ),
+            (
+                vec![
+                    "--target=riscv32",
+                    "-march=rv32im",
+                    "-nostdlib",
+                    "-fuse-ld=lld",
+                    "-Wl,--entry,_start",
+                ],
+                "link",
+            ),
+        ] {
+            let mut command = std::process::Command::new("clang");
+            command.args(&argv);
+            if what == "assemble" {
+                command
+                    .arg(dir.join(format!("{stem}.s")))
+                    .arg("-o")
+                    .arg(dir.join(format!("{stem}.o")));
+            } else {
+                command
+                    .arg(dir.join(format!("{stem}.o")))
+                    .arg(dir.join("bounded_min.o"))
+                    .arg("-o")
+                    .arg(dir.join(format!("prog-{stem}")));
+            }
+            let output = command.output().expect("run clang");
+            assert!(
+                output.status.success(),
+                "clang {what} must succeed for ({a}, {b}): {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let observed = std::process::Command::new("qemu-riscv32")
+            .arg(dir.join(format!("prog-{stem}")))
+            .output()
+            .expect("run qemu-riscv32");
+        // The exit code IS the observed value: the freestanding image
+        // returns bounded_min(a, b) via the exit syscall. Signal death
+        // (no code) is the only harness-level failure here.
+        let code = observed.status.code().unwrap_or_else(|| {
+            panic!(
+                "qemu-riscv32 died without an exit code for ({a}, {b}): stderr={}",
+                String::from_utf8_lossy(&observed.stderr)
+            )
+        });
+        let expected = reference_min(&dir, a, b);
+        assert_eq!(
+            code as i64, expected,
+            "qemu-observed bounded_min({a}, {b}) must equal the MNCS reference"
+        );
+    }
+}

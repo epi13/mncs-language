@@ -210,6 +210,18 @@ one automatically generated proof obligation tied to an existing executable or m
 construct. It should include accepted, rejected, and unresolved fixtures before claiming a theorem
 prover or verified compiler.
 
+Tranche 0.1 status: that pilot now exists and stays experimental. The kernel
+itself is MNCS source (`library/core/proof_term.mncs`,
+`library/core/proof_check.mncs`), executed identically on all five backends
+with an independent Rust reference checker in differential agreement
+(`crates/mncs-cli/tests/proof_kernel.rs`); a real compiler-generated
+`integer-overflow` obligation is discharged end to end
+(`docs/rfc-0007-demo.md`). Design stays Draft. Conformance for the full RFC
+set — design and implementation maturity tracked separately with per-criterion
+evidence — lives in `rfcs/conformance-ledger.json`, generated to
+`docs/rfc-conformance.md`; status transitions themselves execute as MNCS in
+`library/family/rfc_status.mncs`. Evidence record: `docs/rfc-0007-evidence.md`.
+
 ## Active cross-cutting track — assurance, evidence, trust, and witnesses
 
 [RFC 0018](rfcs/0018-machine-native-assurance-evidence-trust-witness-semantics.md) extends the initial
