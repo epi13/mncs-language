@@ -1,0 +1,56 @@
+mncs 0.9;
+
+// Arithmetic semantic contracts: the add/subtract relationship and friends.
+//
+// Each operation carries executable `property`/`metamorphic` clauses naming
+// boolean MNCS predicates. `mncs conformance` discovers the bindings,
+// generates deterministic cases, executes the predicates on the reference
+// executor and each requested backend, and records evidence. Wrapping intents
+// (`+%`, `-%`, `*%`) make the group laws total over all i64 inputs.
+module examples.semantic.arithmetic;
+
+fn add(a: i64, b: i64) -> (result: i64)
+    property prop_add_sub_roundtrip
+    property prop_add_zero_identity
+    metamorphic prop_add_commutes
+{
+    return a +% b;
+}
+
+fn sub(a: i64, b: i64) -> (result: i64)
+    property prop_add_sub_roundtrip
+    property prop_sub_self_zero
+{
+    return a -% b;
+}
+
+fn mul(a: i64, b: i64) -> (result: i64)
+    metamorphic prop_mul_commutes
+    property prop_mul_distributes_over_add
+{
+    return a *% b;
+}
+
+fn prop_add_sub_roundtrip(x: i64, y: i64) -> (result: bool) {
+    return sub(add(x, y), y) == x;
+}
+
+fn prop_add_zero_identity(x: i64) -> (result: bool) {
+    return add(x, 0) == x;
+}
+
+fn prop_add_commutes(x: i64, y: i64) -> (result: bool) {
+    return add(x, y) == add(y, x);
+}
+
+fn prop_sub_self_zero(x: i64) -> (result: bool) {
+    return sub(x, x) == 0;
+}
+
+fn prop_mul_commutes(x: i64, y: i64) -> (result: bool) {
+    return mul(x, y) == mul(y, x);
+}
+
+fn prop_mul_distributes_over_add(x: i64, y: i64, z: i64) -> (result: bool) {
+    return mul(x, add(y, z)) == add(mul(x, y), mul(x, z));
+}

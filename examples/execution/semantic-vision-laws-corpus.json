@@ -1,0 +1,1578 @@
+{
+  "schema_version": "0.1",
+  "name": "mncs.core.vision.v1-conformance-seed13857381793344343619",
+  "cases": [
+    {
+      "id": "law_blur_preserves_uniform-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_blur_preserves_uniform"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_blur_preserves_uniform-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_blur_preserves_uniform"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 1
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_blur_preserves_uniform-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_blur_preserves_uniform"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 127
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_blur_preserves_uniform-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_blur_preserves_uniform"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 128
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_brighten_zero-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_brighten_zero"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_brighten_zero-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_brighten_zero"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 1
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_brighten_zero-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_brighten_zero"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 127
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_brighten_zero-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_brighten_zero"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 128
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_invert_involution-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_invert_involution"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_invert_involution-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_invert_involution"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 1
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_invert_involution-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_invert_involution"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 127
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_invert_involution-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_invert_involution"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 128
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_mirror_involution-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_mirror_involution"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_mirror_involution-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_mirror_involution"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 1
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_mirror_involution-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_mirror_involution"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 127
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_mirror_involution-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_mirror_involution"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 128
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_observe_empty-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_observe_empty"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 0
+            }
+          },
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 64,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_observe_empty-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_observe_empty"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 1
+            }
+          },
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 64,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_observe_empty-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_observe_empty"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 127
+            }
+          },
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 64,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_observe_empty-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_observe_empty"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 128
+            }
+          },
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 64,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_rect_roundtrip-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_rect_roundtrip"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_rect_roundtrip-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_rect_roundtrip"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 1
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_rect_roundtrip-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_rect_roundtrip"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 127
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_rect_roundtrip-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_rect_roundtrip"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 128
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_rotate_bbox-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_rotate_bbox"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_rotate_bbox-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_rotate_bbox"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 1
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_rotate_bbox-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_rotate_bbox"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 127
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_rotate_bbox-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_rotate_bbox"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 128
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_render_rect_area-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_render_rect_area"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 0
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_render_rect_area-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_render_rect_area"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 1
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_render_rect_area-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_render_rect_area"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 127
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_render_rect_area-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_render_rect_area"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 128
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_render_outline_count-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_render_outline_count"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 0
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_render_outline_count-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_render_outline_count"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 1
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_render_outline_count-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_render_outline_count"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 127
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_render_outline_count-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_render_outline_count"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 128
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_rotate4_identity-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_rotate4_identity"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_rotate4_identity-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_rotate4_identity"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 1
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_rotate4_identity-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_rotate4_identity"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 127
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_rotate4_identity-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_rotate4_identity"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 128
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_uniform_no_edges-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_uniform_no_edges"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 0
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_uniform_no_edges-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_uniform_no_edges"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 1
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_uniform_no_edges-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_uniform_no_edges"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 127
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_uniform_no_edges-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_uniform_no_edges"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 128
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_threshold_splits-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_threshold_splits"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 0
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_threshold_splits-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_threshold_splits"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 1
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_threshold_splits-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_threshold_splits"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 127
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_threshold_splits-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_threshold_splits"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 128
+            }
+          },
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_track_move-c000",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_track_move"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 0
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_track_move-c001",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_track_move"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 1
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_track_move-c002",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_track_move"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 127
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "law_track_move-c003",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "mncs.core.vision.v1",
+          "function": "law_track_move"
+        },
+        "arguments": [
+          {
+            "byte": {
+              "value": 128
+            }
+          }
+        ],
+        "step_budget": 16384,
+        "policy": {
+          "effects": "unsupported"
+        }
+      },
+      "expected": [
+        {
+          "boolean": {
+            "value": true
+          }
+        }
+      ]
+    }
+  ]
+}

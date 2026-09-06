@@ -2480,6 +2480,9 @@ fn elaborate_function(
                 "requires" => ContractKind::Requires,
                 "ensures" => ContractKind::Ensures,
                 "assumes" => ContractKind::Requires,
+                "property" => ContractKind::Property,
+                "invariant" => ContractKind::Invariant,
+                "metamorphic" => ContractKind::Metamorphic,
                 _ => {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE112",
@@ -2489,6 +2492,47 @@ fn elaborate_function(
                     return None;
                 }
             };
+            // Executable contract bindings name an MNCS predicate function in
+            // the same program. The binding is checked here so a contract is
+            // machine-consumable from elaboration onward: tooling can execute
+            // the predicate directly instead of trusting an opaque string.
+            // Legacy `requires`/`ensures`/`assumes` names stay unchecked.
+            if matches!(
+                kind,
+                ContractKind::Property | ContractKind::Invariant | ContractKind::Metamorphic
+            ) {
+                if !mncs_syntax::profile_at_least(
+                    &ast.language_version.text,
+                    SOURCE_PROFILE_VERSION_0_9,
+                ) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE230",
+                        "executable contract clauses require source profile 0.9 or later",
+                        clause.span,
+                    ));
+                    return None;
+                }
+                match signatures.get(&clause.name.text) {
+                    None => {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE231",
+                            "executable contract clause names an unknown function",
+                            clause.span,
+                        ));
+                        return None;
+                    }
+                    Some(signature) => {
+                        if !matches!(&signature.output, BodyType::Named(name) if name == "bool") {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE233",
+                                "executable contract predicate must return bool",
+                                clause.span,
+                            ));
+                            return None;
+                        }
+                    }
+                }
+            }
             Some(ContractClause {
                 id: clause.name.text.clone(),
                 kind,

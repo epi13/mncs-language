@@ -6,6 +6,7 @@ members = [
     "crates/mncs-translation-check",
     "crates/mncs-cli",
     "crates/mncs-syntax",
+    "crates/mncs-conformance",
 ]
 resolver = "2"
 

@@ -1,0 +1,86 @@
+mncs 0.7;
+
+// mncs.core.contracts — executable semantic-contract vocabulary.
+//
+// These are the reusable, total building blocks that MNCS semantic
+// contracts are written with. A contract predicate is an ordinary boolean
+// MNCS function; these helpers keep its numeric comparisons explicit about
+// tolerance so `mncs conformance` can report exactly what was checked.
+//
+// Every operation here is total, bounded, and effect-free: no allocation,
+// no failure, no host resource. Tolerances are unsigned magnitudes; a
+// negative i64 tolerance never matches (it returns false rather than
+// failing) so callers need not pre-check.
+//
+// Realization envelope: reference executors, research bytecode, portable
+// WASM, C11, LLVM, and Cranelift realize these operations; they use only
+// Profile 0.7 integer/boolean/conversion semantics.
+module mncs.core.contracts.v1;
+
+// Logical implication for preconditions: `implies(requires, ensures)` is
+// false only when the premise holds and the conclusion does not.
+fn implies(premise: bool, conclusion: bool) -> (result: bool) {
+    if premise {
+        return conclusion;
+    }
+    return true;
+}
+
+// Biconditional for exact inverse laws such as decode(encode(x)) == x.
+// Comparisons are integer-only in MNCS, so boolean equivalence is decided
+// by control flow rather than `==`.
+fn iff(left: bool, right: bool) -> (result: bool) {
+    if left {
+        return right;
+    }
+    if right {
+        return false;
+    }
+    return true;
+}
+
+// Unsigned magnitude of the difference between two u64 observations.
+// Subtraction is guarded by comparison, so no underflow obligation survives.
+fn abs_diff_u64(a: u64, b: u64) -> (result: u64) {
+    if a >= b {
+        return a - b;
+    }
+    return b - a;
+}
+
+fn within_tolerance_u64(observed: u64, expected: u64, tolerance: u64) -> (result: bool) {
+    return abs_diff_u64(observed, expected) <= tolerance;
+}
+
+// Wrapping difference between two i64 observations. Wrapping intents keep
+// the subtraction total and explicit; for values whose tolerance interval
+// `[expected - tolerance, expected + tolerance]` does not cross the i64
+// boundary (the entire conformance domain) the result is exact. Intervals
+// that wrap the boundary are a documented caller error, not a silent pass:
+// callers with boundary-crossing domains must split the interval first.
+fn abs_diff_i64(a: i64, b: i64) -> (result: i64) {
+    if a >= b {
+        return a -% b;
+    }
+    return b -% a;
+}
+
+fn within_tolerance_i64(observed: i64, expected: i64, tolerance: i64) -> (result: bool) {
+    if tolerance < 0 {
+        return false;
+    }
+    let lo: i64 = expected -% tolerance;
+    let hi: i64 = expected +% tolerance;
+    return (observed >= lo) && (observed <= hi);
+}
+
+// Byte-pixel tolerance for graphical operations: magnitudes cross into u64
+// explicitly so the direction of every numeric step stays visible.
+fn within_tolerance_byte(observed: byte, expected: byte, tolerance: u64) -> (result: bool) {
+    return within_tolerance_u64(observed as u64, expected as u64, tolerance);
+}
+
+// Exact byte equality as a named contract combinator (zero tolerance).
+fn byte_equal(observed: byte, expected: byte) -> (result: bool) {
+    return within_tolerance_byte(observed, expected, 0);
+}

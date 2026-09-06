@@ -136,6 +136,14 @@ pub enum ContractKind {
     Invariant,
     Preserves,
     Budget,
+    /// An executable boolean predicate over the operation's inputs (and, by
+    /// predicate-body convention, its outputs): the named MNCS function must
+    /// return `true` for every generated conformance case.
+    Property,
+    /// A self-contained boolean predicate expressing a relation across
+    /// operations (round-trip, involution, commutativity): executed directly
+    /// by conformance tooling with generated inputs.
+    Metamorphic,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

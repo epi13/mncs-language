@@ -184,8 +184,19 @@ pub(crate) fn canonical_function(function: &Function) -> JsonValue {
             JsonValue::Array(sorted_effects(&function.effects)),
         ),
         (
+            // Evidence claims are verification annotations *about* the
+            // function, not semantic content *of* it: attaching a claim
+            // (conformance evidence, proof artifact, audit note) must not
+            // rename the function or the program. Erase them from the
+            // canonical identity form the same way binding-table occurrence
+            // coordinates are erased above — claims stay on the live Program
+            // and in evidence stores, they just do not participate in
+            // content fingerprints or semantic identities. Without this,
+            // attaching conformance evidence changes the subject fingerprint
+            // inside the next conformance report, so report identity (and
+            // evidence re-attachment) can never settle.
             "evidence",
-            JsonValue::Array(sorted_evidence(&function.evidence)),
+            JsonValue::Array(Vec::new()),
         ),
         (
             "failure",
@@ -401,35 +412,6 @@ fn sorted_effects(values: &[Effect]) -> Vec<JsonValue> {
     values
 }
 
-fn sorted_evidence(values: &[EvidenceClaim]) -> Vec<JsonValue> {
-    let mut values: Vec<_> = values.iter().map(canonical_evidence).collect();
-    values.sort_by_key(|value| {
-        (
-            value
-                .get("property")
-                .and_then(JsonValue::as_str)
-                .unwrap_or("")
-                .to_owned(),
-            value
-                .get("verifier")
-                .and_then(JsonValue::as_str)
-                .unwrap_or("")
-                .to_owned(),
-            value
-                .get("status")
-                .and_then(JsonValue::as_str)
-                .unwrap_or("")
-                .to_owned(),
-            value
-                .get("artifact")
-                .and_then(JsonValue::as_str)
-                .unwrap_or("")
-                .to_owned(),
-        )
-    });
-    values
-}
-
 fn sorted_strings(values: &[String]) -> JsonValue {
     let mut values = values.to_vec();
     values.sort();
@@ -451,6 +433,8 @@ fn contract_kind_name(value: &ContractKind) -> &'static str {
         ContractKind::Invariant => "invariant",
         ContractKind::Preserves => "preserves",
         ContractKind::Budget => "budget",
+        ContractKind::Property => "property",
+        ContractKind::Metamorphic => "metamorphic",
     }
 }
 

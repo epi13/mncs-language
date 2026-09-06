@@ -1,0 +1,462 @@
+mncs 0.9;
+
+// mncs.core.vision — MNCS-native visual observer: pixels to scene graphs.
+//
+// Pipeline (each layer inspectable MNCS data, never a texture):
+//
+//   pixels ([byte; 64] frame)
+//     -> EdgeSet (thresholded Sobel samples with coarse orientation)
+//     -> SegmentSet (greedily chained 8-neighbour edge segments)
+//     -> CornerSet (deduped segment endpoints as geometry Points)
+//     -> ContourInfo (bounding box + explicit closedness estimate)
+//     -> RectangleCandidate / LineCandidate / BlobCandidate (confidence-scored)
+//     -> SceneGraph (persistent nodes with stable ids)
+//     -> SceneDelta (appeared/disappeared/moved/changed/unchanged + focus)
+//
+// Bounds are explicit everywhere: the edge set covers the whole 8x8 frame
+// (64 samples), with at most 16 segments and 16 corners, and (v1) one
+// dominant scene node per frame. Overflow beyond a bound sets the owner's
+// `truncated` flag instead of failing or silently dropping, so agents can
+// tell saturation apart from absence.
+//
+// v1 scope (honest): the observer recognizes a DOMINANT structure per
+// frame (rectangle, long line, or blob). Multi-object scenes keep only the
+// strongest candidate; the graph capacity (8 nodes) is reserved for later
+// tranches. Closedness is an explicit perimeter-coverage estimate, not a
+// topological proof. Orientation has two bins (|gx| vs |gy| dominance).
+module mncs.core.vision.v1;
+
+use mncs.core.image.v1;
+use mncs.core.geometry.v1;
+use mncs.core.contracts.v1;
+
+record EdgeSample { index: u64, magnitude: u64, orientation: u64 }
+record EdgeSet { samples: [EdgeSample; 64], count: u64, truncated: bool }
+record EdgeSegment { start: u64, end: u64, orientation: u64, strength: u64, length: u64 }
+record SegmentSet { segments: [EdgeSegment; 16], count: u64, truncated: bool }
+record CornerSet { points: [Point; 16], count: u64, truncated: bool }
+
+// ---- Edge samples ----
+
+fn empty_sample() -> (result: EdgeSample) {
+    return EdgeSample { index: 0, magnitude: 0, orientation: 0 };
+}
+
+fn empty_edge_set() -> (result: EdgeSet) {
+    let e: EdgeSample = empty_sample();
+    return EdgeSet { samples: [e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e], count: 0, truncated: false };
+}
+
+fn push_sample_if(set: EdgeSet, sample: EdgeSample, push: bool) -> (result: EdgeSet) {
+    if push {
+        if set.count >= 64 {
+            return EdgeSet { samples: set.samples, count: set.count, truncated: true };
+        }
+        let updated: [EdgeSample; 64] = replace(set.samples, set.count, sample);
+        return EdgeSet { samples: updated, count: set.count + 1, truncated: set.truncated };
+    }
+    return set;
+}
+
+// Deterministic edge primitive: Sobel L1 magnitude at/above threshold,
+// oriented by dominant gradient axis. Inspectable and backend-portable;
+// not a neural detector and not claiming to be one.
+fn detect_edges(img: [byte; 64], level: byte) -> (result: EdgeSet) {
+    let mags: [byte; 64] = sobel_magnitude(img);
+    let cutoff: u64 = level as u64;
+    let seed: EdgeSet = empty_edge_set();
+    iterate i over mags carrying set: EdgeSet = seed {
+        let row: u64 = i / 8;
+        let col: u64 = i % 8;
+        let m: u64 = mags[i] as u64;
+        let sample: EdgeSample = EdgeSample { index: i, magnitude: m, orientation: grad_orientation(grad_x_mag(img, row, col), grad_y_mag(img, row, col)) };
+        next set = push_sample_if(set, sample, m >= cutoff);
+    }
+    return set;
+}
+
+fn edge_count(edges: EdgeSet) -> (result: u64) {
+    return edges.count;
+}
+
+// ---- Edge segments: connected edge grouping ----
+
+// Chebyshev adjacency between pixel indices (8-neighbourhood, distinct).
+fn adjacent(a: u64, b: u64) -> (result: bool) {
+    if a == b {
+        return false;
+    }
+    let dr: u64 = abs_diff_u64(a / 8, b / 8);
+    let dc: u64 = abs_diff_u64(a % 8, b % 8);
+    return (dr <= 1) && (dc <= 1);
+}
+
+fn empty_segment() -> (result: EdgeSegment) {
+    return EdgeSegment { start: 0, end: 0, orientation: 0, strength: 0, length: 0 };
+}
+
+fn empty_segment_set() -> (result: SegmentSet) {
+    let e: EdgeSegment = empty_segment();
+    return SegmentSet { segments: [e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e], count: 0, truncated: false };
+}
+
+fn push_segment(set: SegmentSet, seg: EdgeSegment) -> (result: SegmentSet) {
+        if set.count >= 16 {
+        return SegmentSet { segments: set.segments, count: set.count, truncated: true };
+    }
+        let updated: [EdgeSegment; 16] = replace(set.segments, set.count, seg);
+    return SegmentSet { segments: updated, count: set.count + 1, truncated: set.truncated };
+}
+
+fn fresh_segment(sample: EdgeSample) -> (result: EdgeSegment) {
+    return EdgeSegment { start: sample.index, end: sample.index, orientation: sample.orientation, strength: sample.magnitude, length: 1 };
+}
+
+fn grow_segment(open: EdgeSegment, sample: EdgeSample) -> (result: EdgeSegment) {
+    let stronger: u64 = select(sample.magnitude > open.strength, sample.magnitude, open.strength);
+    return EdgeSegment { start: open.start, end: sample.index, orientation: open.orientation, strength: stronger, length: open.length + 1 };
+}
+
+record ChainState { done: SegmentSet, open: EdgeSegment, has_open: bool }
+
+fn chain_step(state: ChainState, sample: EdgeSample) -> (result: ChainState) {
+    if state.has_open {
+        let open: EdgeSegment = state.open;
+        if adjacent(open.end, sample.index) && (open.orientation == sample.orientation) {
+            return ChainState { done: state.done, open: grow_segment(open, sample), has_open: true };
+        }
+        return ChainState { done: push_segment(state.done, open), open: fresh_segment(sample), has_open: true };
+    }
+    return ChainState { done: state.done, open: fresh_segment(sample), has_open: true };
+}
+
+fn chain_step_guarded(state: ChainState, sample: EdgeSample, i: u64, count: u64) -> (result: ChainState) {
+    if i < count {
+        return chain_step(state, sample);
+    }
+    return state;
+}
+
+// Greedy chaining in scan order: a sample extends the open segment when it
+// is 8-adjacent to the segment end with matching orientation, else the open
+// segment closes and a new one starts. Scan order is deterministic, so the
+// grouping is a pure function of the edge set.
+fn group_segments(edges: EdgeSet) -> (result: SegmentSet) {
+    let seed: ChainState = ChainState { done: empty_segment_set(), open: empty_segment(), has_open: false };
+    iterate i over edges.samples carrying state: ChainState = seed {
+        next state = chain_step_guarded(state, edges.samples[i], i, edges.count);
+    }
+    if state.has_open {
+        return push_segment(state.done, state.open);
+    }
+    return state.done;
+}
+
+// ---- Corners / junctions ----
+
+fn index_to_point(index: u64) -> (result: Point) {
+    return Point { column: (index % 8) as i64, row: (index / 8) as i64 };
+}
+
+fn empty_corner_set() -> (result: CornerSet) {
+    let origin: Point = Point { column: 0, row: 0 };
+    return CornerSet { points: [origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin], count: 0, truncated: false };
+}
+
+fn corner_contains(corners: CornerSet, index: u64) -> (result: bool) {
+    let want: Point = index_to_point(index);
+    iterate i over corners.points carrying hit: bool = false {
+        next hit = hit || ((i < corners.count) && point_equal(corners.points[i], want));
+    }
+    return hit;
+}
+
+fn add_corner_if_new(corners: CornerSet, index: u64) -> (result: CornerSet) {
+    if corner_contains(corners, index) {
+        return corners;
+    }
+        if corners.count >= 16 {
+        return CornerSet { points: corners.points, count: corners.count, truncated: true };
+    }
+        let updated: [Point; 16] = replace(corners.points, corners.count, index_to_point(index));
+    return CornerSet { points: updated, count: corners.count + 1, truncated: corners.truncated };
+}
+
+fn add_segment_corners(corners: CornerSet, seg: EdgeSegment, i: u64, count: u64) -> (result: CornerSet) {
+    if i < count {
+        return add_corner_if_new(add_corner_if_new(corners, seg.start), seg.end);
+    }
+    return corners;
+}
+
+// Corner and junction candidates: deduped segment endpoints. A junction
+// where two segments meet contributes one shared endpoint when the samples
+// coincide; direction changes surface as distinct neighbouring corners.
+fn collect_corners(segs: SegmentSet) -> (result: CornerSet) {
+    let seed: CornerSet = empty_corner_set();
+    iterate i over segs.segments carrying corners: CornerSet = seed {
+        next corners = add_segment_corners(corners, segs.segments[i], i, segs.count);
+    }
+    return corners;
+}
+
+// ---- Contours: bounding box + explicit closedness estimate ----
+
+record ContourInfo { left: u64, top: u64, width: u64, height: u64, closed: bool, corners: u64, edge_pixels: u64 }
+record BoundsAcc { min_col: u64, max_col: u64, min_row: u64, max_row: u64, n: u64 }
+
+fn bounds_seed() -> (result: BoundsAcc) {
+    return BoundsAcc { min_col: 8, max_col: 0, min_row: 8, max_row: 0, n: 0 };
+}
+
+fn bounds_step(acc: BoundsAcc, sample: EdgeSample, i: u64, count: u64) -> (result: BoundsAcc) {
+    if i < count {
+        let col: u64 = sample.index % 8;
+        let row: u64 = sample.index / 8;
+        let lo_c: u64 = select(col < acc.min_col, col, acc.min_col);
+        let hi_c: u64 = select(col > acc.max_col, col, acc.max_col);
+        let lo_r: u64 = select(row < acc.min_row, row, acc.min_row);
+        let hi_r: u64 = select(row > acc.max_row, row, acc.max_row);
+        return BoundsAcc { min_col: lo_c, max_col: hi_c, min_row: lo_r, max_row: hi_r, n: acc.n + 1 };
+    }
+    return acc;
+}
+
+fn empty_contour() -> (result: ContourInfo) {
+    return ContourInfo { left: 0, top: 0, width: 0, height: 0, closed: false, corners: 0, edge_pixels: 0 };
+}
+
+// Closedness estimate (explicit, not topological): for a one-pixel outline
+// of a w-by-h box the expected edge count is 2*(w+h)-4. `closed` holds when
+// at least four corners were found and the observed edge count covers the
+// expectation up to a slack of 4 (gaps from thresholding). If the estimate
+// is wrong the failure is observable: the `closed` bit flips, and the
+// rectangle-round-trip contract pins the reference case.
+fn estimate_closed(edge_pixels: u64, corners: u64, width: u64, height: u64) -> (result: bool) {
+    if corners < 4 {
+        return false;
+    }
+    if (width < 2) || (height < 2) {
+        return false;
+    }
+    let expected: u64 = ((width +% height) *% 2) -% 4;
+    return (edge_pixels +% 4) >= expected;
+}
+
+fn bounding_contour(edges: EdgeSet, corners: CornerSet) -> (result: ContourInfo) {
+    if edges.count == 0 {
+        return empty_contour();
+    }
+    let seed: BoundsAcc = bounds_seed();
+    iterate i over edges.samples carrying acc: BoundsAcc = seed {
+        next acc = bounds_step(acc, edges.samples[i], i, edges.count);
+    }
+    let width: u64 = (acc.max_col - acc.min_col) + 1;
+    let height: u64 = (acc.max_row - acc.min_row) + 1;
+    return ContourInfo { left: acc.min_col, top: acc.min_row, width: width, height: height, closed: estimate_closed(acc.n, corners.count, width, height), corners: corners.count, edge_pixels: acc.n };
+}
+
+// ---- Geometric primitives ----
+
+record RectangleCandidate { left: u64, top: u64, width: u64, height: u64, corners: u64, edge_pixels: u64, confidence: u64 }
+record LineCandidate { start: u64, end: u64, orientation: u64, length: u64, strength: u64 }
+
+// Explicit confidence formula (0..100): 20 per corner capped at 80, plus up
+// to 20 for edge coverage of the expected one-pixel outline perimeter.
+// A perfect rendered rectangle scores 100; the formula is the contract, not
+// a learned weight: thresholds on it are auditable by construction.
+fn rect_confidence(corners: u64, edge_pixels: u64, width: u64, height: u64) -> (result: u64) {
+    if (width < 2) || (height < 2) {
+        return 0;
+    }
+    let corner_part: u64 = select(corners >= 4, 80, corners *% 20);
+    let perimeter: u64 = ((width +% height) *% 2) -% 4;
+    let coverage: u64 = select(perimeter == 0, 0, (edge_pixels *% 20) / perimeter);
+    let capped_cov: u64 = select(coverage > 20, 20, coverage);
+    return corner_part +% capped_cov;
+}
+
+fn fit_rectangle(contour: ContourInfo) -> (result: RectangleCandidate) {
+    return RectangleCandidate { left: contour.left, top: contour.top, width: contour.width, height: contour.height, corners: contour.corners, edge_pixels: contour.edge_pixels, confidence: rect_confidence(contour.corners, contour.edge_pixels, contour.width, contour.height) };
+}
+
+fn longest_segment(segs: SegmentSet) -> (result: LineCandidate) {
+    let seed: LineCandidate = LineCandidate { start: 0, end: 0, orientation: 0, length: 0, strength: 0 };
+    iterate i over segs.segments carrying best: LineCandidate = seed {
+        next best = select_longer_guarded(best, segs.segments[i], i, segs.count);
+    }
+    return best;
+}
+
+fn select_longer_guarded(best: LineCandidate, seg: EdgeSegment, i: u64, count: u64) -> (result: LineCandidate) {
+    if i < count {
+        if seg.length > best.length {
+            return LineCandidate { start: seg.start, end: seg.end, orientation: seg.orientation, length: seg.length, strength: seg.strength };
+        }
+    }
+    return best;
+}
+
+// ---- Persistent scene graph ----
+
+// Node kinds: 0 = rectangle, 1 = line, 2 = blob. Bounds are frame pixels;
+// `parent`/`has_parent` carry containment for later multi-node tranches
+// (v1 observes one dominant node, so has_parent stays false).
+record SceneNode { id: u64, kind: u64, left: u64, top: u64, width: u64, height: u64, confidence: u64, parent: u64, has_parent: bool }
+record SceneGraph { nodes: [SceneNode; 8], count: u64, frame: u64 }
+record SceneDelta { appeared: u64, disappeared: u64, moved: u64, changed: u64, unchanged: u64, has_focus: bool, focus_id: u64, focus_old_left: u64, focus_old_top: u64, focus_new_left: u64, focus_new_top: u64 }
+
+fn empty_node() -> (result: SceneNode) {
+    return SceneNode { id: 0, kind: 2, left: 0, top: 0, width: 0, height: 0, confidence: 0, parent: 0, has_parent: false };
+}
+
+fn empty_scene(frame: u64) -> (result: SceneGraph) {
+    let e: SceneNode = empty_node();
+    return SceneGraph { nodes: [e, e, e, e, e, e, e, e], count: 0, frame: frame };
+}
+
+fn singleton_scene(frame: u64, node: SceneNode) -> (result: SceneGraph) {
+    let e: SceneNode = empty_node();
+    let base: [SceneNode; 8] = [e, e, e, e, e, e, e, e];
+    let placed: [SceneNode; 8] = replace(base, 0, node);
+    return SceneGraph { nodes: placed, count: 1, frame: frame };
+}
+
+// Dominant-structure observer: rectangle when its confidence reaches 50, a
+// long line (length 4+) when no rectangle qualifies, a blob when edges exist
+// but no structure does, else an empty graph. The priority order and the 50
+// / length-4 cutoffs are explicit contract surface: predicates pin them.
+fn observe(img: [byte; 64], level: byte, frame: u64) -> (result: SceneGraph)
+    property law_observe_empty
+    property law_rect_roundtrip
+    metamorphic law_rotate_bbox
+{
+    let edges: EdgeSet = detect_edges(img, level);
+    if edges.count == 0 {
+        return empty_scene(frame);
+    }
+    let segs: SegmentSet = group_segments(edges);
+    let corners: CornerSet = collect_corners(segs);
+    let contour: ContourInfo = bounding_contour(edges, corners);
+    let rect: RectangleCandidate = fit_rectangle(contour);
+    if rect.confidence >= 50 {
+        return singleton_scene(frame, SceneNode { id: 0, kind: 0, left: rect.left, top: rect.top, width: rect.width, height: rect.height, confidence: rect.confidence, parent: 0, has_parent: false });
+    }
+    let line: LineCandidate = longest_segment(segs);
+    if line.length >= 4 {
+        return singleton_scene(frame, SceneNode { id: 0, kind: 1, left: contour.left, top: contour.top, width: contour.width, height: contour.height, confidence: 40, parent: 0, has_parent: false });
+    }
+    return singleton_scene(frame, SceneNode { id: 0, kind: 2, left: contour.left, top: contour.top, width: contour.width, height: contour.height, confidence: 20, parent: 0, has_parent: false });
+}
+
+// Identity tracking across frames: the dominant node keeps its id when the
+// kind matches and the top-left corner moves by at most 2 pixels; otherwise
+// it is a fresh identity continuing the previous id sequence. Uncertainty
+// is explicit: a re-id is a NEW id, never a silent merge.
+fn track(prev: SceneGraph, curr: SceneGraph) -> (result: SceneGraph)
+    property law_track_move
+{
+    if curr.count == 0 {
+        return curr;
+    }
+    if prev.count == 0 {
+        return curr;
+    }
+    let old: SceneNode = prev.nodes[0];
+    let seen: SceneNode = curr.nodes[0];
+    let drift_rows: u64 = abs_diff_u64(old.top, seen.top);
+    let drift_cols: u64 = abs_diff_u64(old.left, seen.left);
+    if (old.kind == seen.kind) && (drift_rows <= 2) && (drift_cols <= 2) {
+        let kept: SceneNode = SceneNode { id: old.id, kind: seen.kind, left: seen.left, top: seen.top, width: seen.width, height: seen.height, confidence: seen.confidence, parent: 0, has_parent: false };
+        let placed: [SceneNode; 8] = replace(curr.nodes, 0, kept);
+        return SceneGraph { nodes: placed, count: curr.count, frame: curr.frame };
+    }
+    let fresh: SceneNode = SceneNode { id: old.id +% 1, kind: seen.kind, left: seen.left, top: seen.top, width: seen.width, height: seen.height, confidence: seen.confidence, parent: 0, has_parent: false };
+    let placed: [SceneNode; 8] = replace(curr.nodes, 0, fresh);
+    return SceneGraph { nodes: placed, count: curr.count, frame: curr.frame };
+}
+
+fn empty_delta() -> (result: SceneDelta) {
+    return SceneDelta { appeared: 0, disappeared: 0, moved: 0, changed: 0, unchanged: 0, has_focus: false, focus_id: 0, focus_old_left: 0, focus_old_top: 0, focus_new_left: 0, focus_new_top: 0 };
+}
+
+// Compact frame delta for agents: counts plus the first moved/changed node
+// as focus (old and new top-left, unsigned: agents difference them). Counts
+// compare dominant nodes by stable id; count changes cover appear/disappear.
+fn scene_delta(prev: SceneGraph, curr: SceneGraph) -> (result: SceneDelta) {
+    if curr.count > prev.count {
+        return SceneDelta { appeared: curr.count - prev.count, disappeared: 0, moved: 0, changed: 0, unchanged: prev.count, has_focus: false, focus_id: 0, focus_old_left: 0, focus_old_top: 0, focus_new_left: 0, focus_new_top: 0 };
+    }
+    if prev.count > curr.count {
+        return SceneDelta { appeared: 0, disappeared: prev.count - curr.count, moved: 0, changed: 0, unchanged: curr.count, has_focus: false, focus_id: 0, focus_old_left: 0, focus_old_top: 0, focus_new_left: 0, focus_new_top: 0 };
+    }
+    if prev.count == 0 {
+        return empty_delta();
+    }
+    let old: SceneNode = prev.nodes[0];
+    let seen: SceneNode = curr.nodes[0];
+    if old.id == seen.id {
+        if (old.left == seen.left) && (old.top == seen.top) && (old.width == seen.width) && (old.height == seen.height) {
+            return SceneDelta { appeared: 0, disappeared: 0, moved: 0, changed: 0, unchanged: 1, has_focus: false, focus_id: 0, focus_old_left: 0, focus_old_top: 0, focus_new_left: 0, focus_new_top: 0 };
+        }
+        if (old.width == seen.width) && (old.height == seen.height) {
+            return SceneDelta { appeared: 0, disappeared: 0, moved: 1, changed: 0, unchanged: 0, has_focus: true, focus_id: seen.id, focus_old_left: old.left, focus_old_top: old.top, focus_new_left: seen.left, focus_new_top: seen.top };
+        }
+        return SceneDelta { appeared: 0, disappeared: 0, moved: 0, changed: 1, unchanged: 0, has_focus: true, focus_id: seen.id, focus_old_left: old.left, focus_old_top: old.top, focus_new_left: seen.left, focus_new_top: seen.top };
+    }
+    return SceneDelta { appeared: 1, disappeared: 1, moved: 0, changed: 0, unchanged: 0, has_focus: true, focus_id: seen.id, focus_old_left: old.left, focus_old_top: old.top, focus_new_left: seen.left, focus_new_top: seen.top };
+}
+
+// ---- Executable observer laws: renderer/observer round trip ----
+
+fn law_observe_empty(level: byte, frame: u64) -> (result: bool) {
+    let g: SceneGraph = observe(blank(0), level, frame);
+    return implies((level as u64) > 0, g.count == 0);
+}
+
+// Renderer/observer round trip: an outlined rectangle must come back as a
+// rectangle candidate near the rendered bounds. Measured Sobel behavior on
+// the reference frame: the 3x3 kernel responds one pixel beyond the outline
+// on every side, so position tolerates 1 and each dimension tolerates 2
+// (one flank pixel per side). Observed reference: rendered (1,1,5,4) is
+// seen as (0,0,7,6); the tolerance brackets that exactly.
+fn law_rect_roundtrip(level: byte) -> (result: bool) {
+    let frame: [byte; 64] = render_rect_outline(1, 1, 6, 5, 255, 0);
+    let g: SceneGraph = observe(frame, level, 7);
+    if g.count == 0 {
+        return false;
+    }
+    let n: SceneNode = g.nodes[0];
+    let placed: bool = within_tolerance_u64(n.left, 1, 1) && within_tolerance_u64(n.top, 1, 1);
+    let sized: bool = within_tolerance_u64(n.width, 5, 2) && within_tolerance_u64(n.height, 4, 2);
+    return implies((level as u64) > 0, (n.kind == 0) && placed && sized);
+}
+
+// Frame delta: a one-pixel move keeps the stable id and reports moved == 1.
+fn law_track_move(level: byte) -> (result: bool) {
+    let a: [byte; 64] = render_rect_outline(1, 1, 6, 5, 255, 0);
+    let b: [byte; 64] = render_rect_outline(2, 1, 7, 5, 255, 0);
+    let ga: SceneGraph = observe(a, level, 0);
+    let gb: SceneGraph = observe(b, level, 1);
+    let tracked: SceneGraph = track(ga, gb);
+    let d: SceneDelta = scene_delta(ga, tracked);
+    let premise: bool = ((level as u64) > 0) && (ga.count == 1) && (gb.count == 1);
+    let kept: SceneNode = tracked.nodes[0];
+    return implies(premise, (kept.id == 0) && (d.moved == 1));
+}
+
+// Rotation relationship: a 5x3 outline observed, rotated 90 degrees,
+// observes back with swapped dimensions (tolerance 2 per dimension: one
+// Sobel flank pixel per side, as pinned by law_rect_roundtrip).
+fn law_rotate_bbox(level: byte) -> (result: bool) {
+    let a: [byte; 64] = render_rect_outline(1, 1, 6, 4, 255, 0);
+    let b: [byte; 64] = rotate90_cw(a);
+    let ga: SceneGraph = observe(a, level, 0);
+    let gb: SceneGraph = observe(b, level, 1);
+    let premise: bool = ((level as u64) > 0) && (ga.count == 1) && (gb.count == 1);
+    let na: SceneNode = ga.nodes[0];
+    let nb: SceneNode = gb.nodes[0];
+    let dims_a: bool = within_tolerance_u64(na.width, 5, 2) && within_tolerance_u64(na.height, 3, 2);
+    let dims_b: bool = within_tolerance_u64(nb.width, 3, 2) && within_tolerance_u64(nb.height, 5, 2);
+    return implies(premise, dims_a && dims_b);
+}

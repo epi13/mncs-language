@@ -17,6 +17,7 @@ mncs-codegen = { path = "../mncs-codegen" }
 mncs-translation-check = { path = "../mncs-translation-check" }
 mncs-model = { path = "../mncs-model" }
 mncs-syntax = { path = "../mncs-syntax" }
+mncs-conformance = { path = "../mncs-conformance" }
 serde.workspace = true
 serde_json.workspace = true
 ed25519-dalek.workspace = true

@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mncs.conformance-report.schema/1",
+  "title": "MNCS semantic conformance report",
+  "description": "Evidence emitted by `mncs conformance`: contract-derived cases executed on the reference executor and requested backends. No wall-clock fields: identical inputs produce identical bytes.",
+  "type": "object",
+  "required": ["schema_version", "generator", "subject_module", "seed", "cases_per_predicate", "worker", "predicates", "summary"],
+  "properties": {
+    "schema_version": {"const": "mncs.conformance-report/1"},
+    "generator": {"type": "string"},
+    "subject_module": {"type": "string"},
+    "subject_fingerprint": {"type": ["string", "null"]},
+    "seed": {"type": "integer", "minimum": 0},
+    "cases_per_predicate": {"type": "integer", "minimum": 1},
+    "worker": {
+      "type": "object",
+      "required": ["host", "os", "arch"],
+      "properties": {
+        "host": {"type": "string"},
+        "os": {"type": "string"},
+        "arch": {"type": "string"}
+      }
+    },
+    "predicates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["operation", "clause", "kind", "predicate", "predicate_identity", "status", "cases"],
+        "properties": {
+          "operation": {"type": "string"},
+          "clause": {"type": "string"},
+          "kind": {"enum": ["property", "invariant", "metamorphic"]},
+          "predicate": {"type": "string"},
+          "predicate_identity": {"type": "string"},
+          "status": {"enum": ["tested", "unsupported", "unknown"]},
+          "reason": {"type": ["string", "null"]},
+          "cases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "arguments", "reference", "determinism_stable", "backends"],
+              "properties": {
+                "id": {"type": "string"},
+                "arguments": {"type": "array"},
+                "reference": {
+                  "type": "object",
+                  "required": ["status", "observed", "verdict"],
+                  "properties": {
+                    "status": {"type": "string"},
+                    "observed": {"type": "array"},
+                    "verdict": {"enum": ["pass", "fail", "unknown", "unsupported"]},
+                    "reason": {"type": ["string", "null"]}
+                  }
+                },
+                "determinism_stable": {"type": "boolean"},
+                "backends": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["backend", "status", "observed", "verdict"],
+                    "properties": {
+                      "backend": {"type": "string"},
+                      "status": {"type": "string"},
+                      "observed": {"type": "array"},
+                      "verdict": {"enum": ["pass", "fail", "unknown", "unsupported"]},
+                      "reason": {"type": ["string", "null"]}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["pass", "fail", "unknown", "unsupported"],
+      "properties": {
+        "pass": {"type": "integer", "minimum": 0},
+        "fail": {"type": "integer", "minimum": 0},
+        "unknown": {"type": "integer", "minimum": 0},
+        "unsupported": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

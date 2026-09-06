@@ -144,6 +144,37 @@ pub struct LoweringExecutionComparison {
     pub mismatches: Vec<LoweringExecutionMismatch>,
 }
 
+/// Resolve the executable identity triple once per entry and hand it back
+/// owned so each frame can re-share references with its nested calls.
+///
+/// Every fresh entry point arrives with `cached_identity == None`, and the
+/// triple costs a full SSA-module serialization plus two hashes to build.
+/// Threading the raw parameter through unchanged meant every nested MNCS
+/// function call rebuilt it inside `module.fingerprint()` — quadratic
+/// validation blowup (full canonical JSON + SHA-256 per call) that made
+/// record-heavy observers with tens of thousands of calls unexecutable.
+/// Callers keep a `None` result honest: identity stays unknown rather than
+/// re-derived per call.
+fn resolve_execution_cache(
+    program: &Program,
+    module: &SsaModule,
+    cached_identity: Option<(&SemanticId, &String, &String)>,
+) -> Option<(SemanticId, String, String)> {
+    if let Some((identity, program_fingerprint, fingerprint)) = cached_identity {
+        return Some((
+            identity.clone(),
+            program_fingerprint.clone(),
+            fingerprint.clone(),
+        ));
+    }
+    let fingerprint = module.fingerprint().ok()?;
+    Some((
+        program_id(&program.module),
+        program.content_fingerprint().ok().unwrap_or_default(),
+        fingerprint,
+    ))
+}
+
 /// Lower the validated program once and independently interpret the resulting
 /// SSA artifact for one request.
 pub fn execute_ssa(program: &Program, request: &crate::ExecutionRequest) -> SsaExecutionResult {
@@ -416,6 +447,17 @@ fn execute_ssa_module_with_validation(
             },
         )
         .unwrap_or_else(|| (program_id(&program.module), module.fingerprint().ok()));
+    // Re-share the resolved identity with nested calls (see
+    // `resolve_execution_cache`): the raw parameter is `None` on every fresh
+    // entry point, and passing it through unchanged would make every nested
+    // MNCS call re-serialize and re-hash the whole SSA module.
+    let owned_cache = resolve_execution_cache(program, module, cached_identity);
+    let resolved_cache: Option<(&SemanticId, &String, &String)> =
+        owned_cache
+            .as_ref()
+            .map(|(identity, program_fingerprint, fingerprint)| {
+                (identity, program_fingerprint, fingerprint)
+            });
     let mut result = SsaExecutionResult {
         schema_version: SSA_EXECUTION_RESULT_SCHEMA_VERSION.to_owned(),
         status: ExecutionStatus::InvalidRequest,
@@ -491,7 +533,7 @@ fn execute_ssa_module_with_validation(
                 &mut result,
                 request,
                 block_cache,
-                cached_identity,
+                resolved_cache,
             ) {
                 return result;
             }
@@ -1839,13 +1881,23 @@ fn execute_instruction(
                 step_budget: remaining,
                 policy: request.policy.clone(),
             };
+            // Re-share the caller-resolved identity (cheap clone) so the
+            // nested call never re-fingerprints the module. Resolved here,
+            // on the Call path only, to keep every other instruction free
+            // of cache bookkeeping.
+            let owned_nested_cache = resolve_execution_cache(program, module, cached_identity);
+            let nested_cache: Option<(&SemanticId, &String, &String)> = owned_nested_cache
+                .as_ref()
+                .map(|(identity, program_fingerprint, fingerprint)| {
+                    (identity, program_fingerprint, fingerprint)
+                });
             let nested = execute_ssa_module_with_validation(
                 program,
                 module,
                 &nested_request,
                 false,
                 block_cache,
-                cached_identity,
+                nested_cache,
                 None,
             );
             let trace_offset = result.steps;
