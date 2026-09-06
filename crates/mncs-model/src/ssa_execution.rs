@@ -2635,7 +2635,12 @@ mod tests {
         let module_a = program_a.lower_to_ssa().expect("SSA A");
         let mut caller_owned_program = program_a.clone();
         let session = SsaExecutionSession::new(&caller_owned_program, &module_a).expect("session");
-        let validation_count = crate::cost_report().semantic_validation_count;
+        // NOTE: no global cost-counter assertion here. `cost_report()` is a
+        // process-wide static shared by every test thread, so asserting it
+        // is unchanged across these executes only proves the scheduler was
+        // quiet, not that the session skipped validation (CI failed once
+        // with 59 vs 58 from one concurrent validation). The receipt and
+        // determinism assertions below carry the binding property.
 
         // Mutating the caller's copy cannot launder a different program into
         // the receipt-bound session: the session owns its immutable pair.
@@ -2662,10 +2667,6 @@ mod tests {
             }]
         );
         assert_eq!(first, second);
-        assert_eq!(
-            crate::cost_report().semantic_validation_count,
-            validation_count
-        );
 
         let mut program_b = program_a.clone();
         let operation = program_b.functions[0].body.as_mut().expect("body").blocks[0]
