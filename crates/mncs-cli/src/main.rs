@@ -1,3 +1,5 @@
+mod issuance;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs,
@@ -132,6 +134,7 @@ fn run_cli() -> ExitCode {
         "slice" => slice_command(args),
         "evaluate-candidate" => evaluate_candidate_command(args),
         "verify-result" => verify_result_command(args),
+        "verify-issuance" => verify_issuance_command(args),
         "evidence-check" => two_path_command(args, evidence_check),
         "syntax-metrics" => {
             let paths: Vec<String> = args.collect();
@@ -2843,6 +2846,65 @@ fn evaluate_candidate_command(mut args: impl Iterator<Item = String>) -> ExitCod
     }
 }
 
+fn verify_issuance_command(mut args: impl Iterator<Item = String>) -> ExitCode {
+    let Some(envelope_path) = args.next() else {
+        eprintln!("error: verify-issuance requires envelope and trust-roots paths");
+        return ExitCode::from(2);
+    };
+    let Some(trust_path) = args.next() else {
+        eprintln!("error: verify-issuance requires envelope and trust-roots paths");
+        return ExitCode::from(2);
+    };
+    if args.next().is_some() {
+        eprintln!("error: unexpected additional arguments");
+        return ExitCode::from(2);
+    }
+    let envelope_input = match read_source(&envelope_path) {
+        Ok(input) => input,
+        Err(code) => return code,
+    };
+    let trust_input = match read_source(&trust_path) {
+        Ok(input) => input,
+        Err(code) => return code,
+    };
+    let envelope: serde_json::Value = match serde_json::from_str(&envelope_input) {
+        Ok(envelope) => envelope,
+        Err(error) => {
+            eprintln!("error: invalid issuance envelope: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let trust_raw: BTreeMap<String, String> = match serde_json::from_str(&trust_input) {
+        Ok(roots) => roots,
+        Err(error) => {
+            eprintln!("error: invalid trust roots: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut trusted: BTreeMap<String, [u8; 32]> = BTreeMap::new();
+    for (key_id, public_hex) in trust_raw {
+        match issuance::pubkey_from_hex(&public_hex) {
+            Ok(key) => {
+                trusted.insert(key_id, key);
+            }
+            Err(error) => {
+                eprintln!("error: invalid trust root: {error}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    match issuance::verify_envelope_issuance(&envelope, &trusted) {
+        Ok(key_id) => {
+            println!("{{\"key_id\": \"{key_id}\"}}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("error: issuance rejected: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn verify_result_command(mut args: impl Iterator<Item = String>) -> ExitCode {
     let Some(manifest_path) = args.next() else {
         eprintln!("error: verify-result requires manifest, request, and result paths");
@@ -3288,6 +3350,7 @@ fn print_usage() {
     eprintln!("  mncs slice <manifest.json> <semantic-identity>");
     eprintln!("  mncs evaluate-candidate <baseline.json> <proposal.json>");
     eprintln!("  mncs verify-result <manifest.json> <request.json> <result.json>");
+    eprintln!("  mncs verify-issuance <envelope.json> <trust-roots.json>");
     eprintln!("  mncs evidence-check <evidence.json> <current.json>");
     eprintln!("  mncs syntax-metrics <source> [source ...]");
     eprintln!("  mncs syntax-tournament <tournament.json>");

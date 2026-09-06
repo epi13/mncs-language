@@ -34,10 +34,13 @@ mod validation;
 mod verifier;
 
 pub use authority::{
-    accept_leg, canonical_envelope_bytes, fold_capability, requirement_identity,
-    verify_decision_digest, verify_session_context, Acceptance, AuthorityError, AuthorityVerdict,
-    CapabilityDecision, DecisionStatus, RequirementLeg, SessionBinding, DECISION_DIGEST_ALG,
-    DECISION_SCHEMA, REQUIREMENT_SCHEMA,
+    accept_leg, canonical_envelope_bytes, check_issuance_binding, confirm_execution,
+    evidence_standing, fold_capability, issuance_signed_bytes, requirement_identity,
+    satisfied_by_attested_evidence, verify_decision_digest, verify_session_context, Acceptance,
+    AuthorityError, AuthorityVerdict, CapabilityDecision, DecisionStatus, EvidenceStanding,
+    EvidenceTerms, IssuerBinding, ParsedIssuance, ProofClass, RequirementLeg, SessionBinding,
+    DECISION_DIGEST_ALG, DECISION_SCHEMA, EVIDENCE_SCHEMA, ISSUANCE_SIGNATURE_ALG,
+    REQUIREMENT_SCHEMA,
 };
 pub use bindings::{
     ResolutionProvenance, SemanticBinding, SemanticBindingKind, SemanticBindingTable,
