@@ -24,6 +24,7 @@ mod identity;
 mod ir;
 mod machine_intent;
 mod obligations;
+mod proof_kernel;
 mod provenance;
 mod refinement;
 mod representation;
@@ -148,6 +149,12 @@ pub use machine_intent::{
 };
 pub use obligations::{
     generate_machine_intent_obligations, ObligationGeneration, ObligationRecord,
+    OBLIGATION_SCHEMA_VERSION,
+};
+pub use proof_kernel::{
+    kernel_backed_range_result, parse_proof_corpus, reference_check, ProofArtifact, ProofBinding,
+    ProofCell, ProofCorpusCase, ProofTag, ProofVerdict, PROOF_ARTIFACT_SCHEMA_VERSION,
+    PROOF_BUFFER_CAPACITY, PROOF_KERNEL_ID, PROOF_MAX_UNIVERSE,
 };
 pub use provenance::{
     evidence_is_current, Realization, RealizationError, RealizationSelection, TargetIdentity,

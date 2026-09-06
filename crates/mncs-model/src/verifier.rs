@@ -15,6 +15,12 @@ pub const VERIFIER_SCHEMA_VERSION: &str = "0.2";
 #[serde(rename_all = "snake_case")]
 pub enum EvidenceAuthorityClass {
     Verifier,
+    /// A verdict produced by the RFC 0007 proof kernel (MNCS-native checker
+    /// or its independent reference implementation) and bound to an exact
+    /// proof identity, kernel version, obligation, and dependency set. It is
+    /// stronger than a verifier result about the covered computation, and it
+    /// still never covers what the kernel did not check.
+    KernelProof,
     DiagnosticObservation,
     ProposalResult,
     #[default]
@@ -45,6 +51,12 @@ pub enum VerifierMethod {
     IntegerRange,
     Alignment,
     CapabilityConsistency,
+    /// Closed constant computation checked by the RFC 0007 proof kernel,
+    /// conjoined with an exact machine-integer range evaluation. The kernel
+    /// proves computation identity over its Nat fragment; the range fact
+    /// about machine integers comes from the exact evaluation, never from
+    /// the Nat proof alone.
+    KernelProof,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

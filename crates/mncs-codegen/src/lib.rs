@@ -164,6 +164,7 @@ pub use c11::{C11Adapter, C11_ARTIFACT_KIND, C11_BACKEND_NAME};
 pub use cranelift_backend::{CraneliftAdapter, CRANELIFT_ARTIFACT_KIND, CRANELIFT_BACKEND_NAME};
 pub use llvm::{LlvmAdapter, LLVM_ARTIFACT_KIND, LLVM_BACKEND_NAME};
 pub use matrix::{backend_family_matrix, with_experiment_status, BackendFamilyMatrix};
+pub use promises::{integer_no_overflow_promise, LoweringPromise};
 
 pub fn backend_names() -> Vec<&'static str> {
     vec![
