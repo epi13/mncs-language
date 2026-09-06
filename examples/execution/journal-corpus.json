@@ -1,0 +1,2352 @@
+{
+ "schema_version": "0.1",
+ "name": "journal",
+ "cases": [
+  {
+   "id": "gate-full",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "gate_admit"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::EvidenceTally::evidence_ok%3Abool%3Bmissing_refs%3Ai64%3Brequired%3Ai64%3Bsatisfied%3Ai64%3Bstale_refs%3Ai64%3B",
+       "name": "EvidenceTally",
+       "fields": [
+        [
+         "evidence_ok",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "missing_refs",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "required",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "satisfied",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "stale_refs",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+      "discriminant": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "gate-partial",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "gate_admit"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::EvidenceTally::evidence_ok%3Abool%3Bmissing_refs%3Ai64%3Brequired%3Ai64%3Bsatisfied%3Ai64%3Bstale_refs%3Ai64%3B",
+       "name": "EvidenceTally",
+       "fields": [
+        [
+         "evidence_ok",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "missing_refs",
+         {
+          "integer": {
+           "value": 2,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "required",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "satisfied",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "stale_refs",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "gate-claimed-but-missing",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "gate_admit"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::EvidenceTally::evidence_ok%3Abool%3Bmissing_refs%3Ai64%3Brequired%3Ai64%3Bsatisfied%3Ai64%3Bstale_refs%3Ai64%3B",
+       "name": "EvidenceTally",
+       "fields": [
+        [
+         "evidence_ok",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "missing_refs",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "required",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "satisfied",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "stale_refs",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "gate-empty",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "gate_admit"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::EvidenceTally::evidence_ok%3Abool%3Bmissing_refs%3Ai64%3Brequired%3Ai64%3Bsatisfied%3Ai64%3Bstale_refs%3Ai64%3B",
+       "name": "EvidenceTally",
+       "fields": [
+        [
+         "evidence_ok",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "missing_refs",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "required",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "satisfied",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "stale_refs",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "gate-no-claim",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "gate_admit"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::EvidenceTally::evidence_ok%3Abool%3Bmissing_refs%3Ai64%3Brequired%3Ai64%3Bsatisfied%3Ai64%3Bstale_refs%3Ai64%3B",
+       "name": "EvidenceTally",
+       "fields": [
+        [
+         "evidence_ok",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "missing_refs",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "required",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "satisfied",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "stale_refs",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+      "discriminant": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "gate-no-evidence",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "gate_admit"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::EvidenceTally::evidence_ok%3Abool%3Bmissing_refs%3Ai64%3Brequired%3Ai64%3Bsatisfied%3Ai64%3Bstale_refs%3Ai64%3B",
+       "name": "EvidenceTally",
+       "fields": [
+        [
+         "evidence_ok",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "missing_refs",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "required",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "satisfied",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "stale_refs",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "gate-stale",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "gate_admit"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::EvidenceTally::evidence_ok%3Abool%3Bmissing_refs%3Ai64%3Brequired%3Ai64%3Bsatisfied%3Ai64%3Bstale_refs%3Ai64%3B",
+       "name": "EvidenceTally",
+       "fields": [
+        [
+         "evidence_ok",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "missing_refs",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "required",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "satisfied",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "stale_refs",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "gate-overcount",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "gate_admit"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::EvidenceTally::evidence_ok%3Abool%3Bmissing_refs%3Ai64%3Brequired%3Ai64%3Bsatisfied%3Ai64%3Bstale_refs%3Ai64%3B",
+       "name": "EvidenceTally",
+       "fields": [
+        [
+         "evidence_ok",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "missing_refs",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "required",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "satisfied",
+         {
+          "integer": {
+           "value": 4,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "stale_refs",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "gate-negative",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "gate_admit"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::EvidenceTally::evidence_ok%3Abool%3Bmissing_refs%3Ai64%3Brequired%3Ai64%3Bsatisfied%3Ai64%3Bstale_refs%3Ai64%3B",
+       "name": "EvidenceTally",
+       "fields": [
+        [
+         "evidence_ok",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "missing_refs",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "required",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "satisfied",
+         {
+          "integer": {
+           "value": -1,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "stale_refs",
+         {
+          "integer": {
+           "value": 0,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+      "discriminant": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "admit-clean",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "admission_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::AdmissionCase::duplicate_known%3Abool%3Bgate%3AStatus%3Bmodel_only%3Abool%3Bvalidator%3AStatus%3B",
+       "name": "AdmissionCase",
+       "fields": [
+        [
+         "duplicate_known",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "gate",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "model_only",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "validator",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::AdmissionVerdict",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::AdmissionVerdict::Admit",
+      "discriminant": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "reject-validator",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "admission_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::AdmissionCase::duplicate_known%3Abool%3Bgate%3AStatus%3Bmodel_only%3Abool%3Bvalidator%3AStatus%3B",
+       "name": "AdmissionCase",
+       "fields": [
+        [
+         "duplicate_known",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "gate",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "model_only",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "validator",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::AdmissionVerdict",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::AdmissionVerdict::Reject",
+      "discriminant": 2,
+      "payload": [
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "reject-evidence",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "admission_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::AdmissionCase::duplicate_known%3Abool%3Bgate%3AStatus%3Bmodel_only%3Abool%3Bvalidator%3AStatus%3B",
+       "name": "AdmissionCase",
+       "fields": [
+        [
+         "duplicate_known",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "gate",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::FAIL",
+           "discriminant": 1
+          }
+         }
+        ],
+        [
+         "model_only",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "validator",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::AdmissionVerdict",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::AdmissionVerdict::Reject",
+      "discriminant": 2,
+      "payload": [
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 2,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "reject-duplicate",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "admission_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::AdmissionCase::duplicate_known%3Abool%3Bgate%3AStatus%3Bmodel_only%3Abool%3Bvalidator%3AStatus%3B",
+       "name": "AdmissionCase",
+       "fields": [
+        [
+         "duplicate_known",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "gate",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "model_only",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "validator",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::AdmissionVerdict",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::AdmissionVerdict::Reject",
+      "discriminant": 2,
+      "payload": [
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 3,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "reject-model-only",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "admission_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::AdmissionCase::duplicate_known%3Abool%3Bgate%3AStatus%3Bmodel_only%3Abool%3Bvalidator%3AStatus%3B",
+       "name": "AdmissionCase",
+       "fields": [
+        [
+         "duplicate_known",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "gate",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "model_only",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "validator",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::AdmissionVerdict",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::AdmissionVerdict::Reject",
+      "discriminant": 2,
+      "payload": [
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 4,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "hold-unresolved-gate",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "admission_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::AdmissionCase::duplicate_known%3Abool%3Bgate%3AStatus%3Bmodel_only%3Abool%3Bvalidator%3AStatus%3B",
+       "name": "AdmissionCase",
+       "fields": [
+        [
+         "duplicate_known",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "gate",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "model_only",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "validator",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::AdmissionVerdict",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::AdmissionVerdict::Hold",
+      "discriminant": 1,
+      "payload": [
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 5,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "hold-unresolved-validator",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "admission_decision"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::AdmissionCase::duplicate_known%3Abool%3Bgate%3AStatus%3Bmodel_only%3Abool%3Bvalidator%3AStatus%3B",
+       "name": "AdmissionCase",
+       "fields": [
+        [
+         "duplicate_known",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "gate",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "model_only",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "validator",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+           "discriminant": 2
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::AdmissionVerdict",
+      "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::AdmissionVerdict::Hold",
+      "discriminant": 1,
+      "payload": [
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 5,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "trust-first-proof",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "trust_transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustLevel",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustLevel::Observed",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustEvent::LocalProof",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::TrustTransition::accepted%3Abool%3Bfollowing%3ATrustLevel%3Breason%3Ai32%3B",
+      "name": "TrustTransition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustLevel",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustLevel::LocallyProven",
+          "discriminant": 1
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "trust-proof-needs-pass",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "trust_transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustLevel",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustLevel::Observed",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustEvent::LocalProof",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::TrustTransition::accepted%3Abool%3Bfollowing%3ATrustLevel%3Breason%3Ai32%3B",
+      "name": "TrustTransition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustLevel",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustLevel::LocallyProven",
+          "discriminant": 1
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 2,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "trust-skip-level",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "trust_transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustLevel",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustLevel::Observed",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustEvent::IndependentConfirmation",
+       "discriminant": 1
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::TrustTransition::accepted%3Abool%3Bfollowing%3ATrustLevel%3Breason%3Ai32%3B",
+      "name": "TrustTransition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustLevel",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustLevel::Observed",
+          "discriminant": 0
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "trust-quarantine",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "trust_transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustLevel",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustLevel::LegacyUnattested",
+       "discriminant": 4
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustEvent::LocalProof",
+       "discriminant": 0
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::TrustTransition::accepted%3Abool%3Bfollowing%3ATrustLevel%3Breason%3Ai32%3B",
+      "name": "TrustTransition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustLevel",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustLevel::LegacyUnattested",
+          "discriminant": 4
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 3,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "trust-terminal-stays",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "trust_transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustLevel",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustLevel::CommonsPromoted",
+       "discriminant": 3
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustEvent::CommonsPromotion",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::TrustTransition::accepted%3Abool%3Bfollowing%3ATrustLevel%3Breason%3Ai32%3B",
+      "name": "TrustTransition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustLevel",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustLevel::CommonsPromoted",
+          "discriminant": 3
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "trust-commons-step",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "trust_transition"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustLevel",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustLevel::IndependentlyConfirmed",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustEvent",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustEvent::CommonsPromotion",
+       "discriminant": 2
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::TrustTransition::accepted%3Abool%3Bfollowing%3ATrustLevel%3Breason%3Ai32%3B",
+      "name": "TrustTransition",
+      "fields": [
+       [
+        "accepted",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "following",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::TrustLevel",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::TrustLevel::CommonsPromoted",
+          "discriminant": 3
+         }
+        }
+       ],
+       [
+        "reason",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 32,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "chain-genesis",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "check_genesis_link"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "chain-successor",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "check_successor_link"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "chain-reorder",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "check_reorder_link"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "chain-fork",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "check_fork_link"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "model-never-admits",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "check_model_never_admits"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "render-admitted",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "may_render_public"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::Sensitivity::redaction_reviewed%3Abool%3Bsecurity_detail%3Abool%3B",
+       "name": "Sensitivity",
+       "fields": [
+        [
+         "redaction_reviewed",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "security_detail",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "render-unadmitted",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "may_render_public"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::Sensitivity::redaction_reviewed%3Abool%3Bsecurity_detail%3Abool%3B",
+       "name": "Sensitivity",
+       "fields": [
+        [
+         "redaction_reviewed",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "security_detail",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::UNKNOWN",
+       "discriminant": 2
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "render-security-unreviewed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "may_render_public"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::Sensitivity::redaction_reviewed%3Abool%3Bsecurity_detail%3Abool%3B",
+       "name": "Sensitivity",
+       "fields": [
+        [
+         "redaction_reviewed",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "security_detail",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "render-security-reviewed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "may_render_public"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::Sensitivity::redaction_reviewed%3Abool%3Bsecurity_detail%3Abool%3B",
+       "name": "Sensitivity",
+       "fields": [
+        [
+         "redaction_reviewed",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "security_detail",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:mncs.core.status.v1::Status",
+       "variant_identity": "mncs:0.2:finite-variant:mncs.core.status.v1::Status::PASS",
+       "discriminant": 0
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "hint-duplicate",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "model_hint_duplicate"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::ModelOpinion::duplicate_hint%3Abool%3Bjournal_worthy%3Abool%3Brole%3AModelRole%3Bsensitive_hint%3Abool%3B",
+       "name": "ModelOpinion",
+       "fields": [
+        [
+         "duplicate_hint",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "journal_worthy",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "role",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::ModelRole",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::ModelRole::DuplicateDetector",
+           "discriminant": 3
+          }
+         }
+        ],
+        [
+         "sensitive_hint",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "hint-worthy",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "model_hint_worthy"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::ModelOpinion::duplicate_hint%3Abool%3Bjournal_worthy%3Abool%3Brole%3AModelRole%3Bsensitive_hint%3Abool%3B",
+       "name": "ModelOpinion",
+       "fields": [
+        [
+         "duplicate_hint",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "journal_worthy",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "role",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::ModelRole",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::ModelRole::Classifier",
+           "discriminant": 0
+          }
+         }
+        ],
+        [
+         "sensitive_hint",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "hint-sensitive",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "model_hint_sensitive"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::ModelOpinion::duplicate_hint%3Abool%3Bjournal_worthy%3Abool%3Brole%3AModelRole%3Bsensitive_hint%3Abool%3B",
+       "name": "ModelOpinion",
+       "fields": [
+        [
+         "duplicate_hint",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "journal_worthy",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "role",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::ModelRole",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::ModelRole::Redactor",
+           "discriminant": 4
+          }
+         }
+        ],
+        [
+         "sensitive_hint",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "model-narrator-no-admit",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.family.journal.v1",
+     "function": "model_may_admit"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:mncs.family.journal.v1::ModelOpinion::duplicate_hint%3Abool%3Bjournal_worthy%3Abool%3Brole%3AModelRole%3Bsensitive_hint%3Abool%3B",
+       "name": "ModelOpinion",
+       "fields": [
+        [
+         "duplicate_hint",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "journal_worthy",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "role",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:mncs.family.journal.v1::ModelRole",
+           "variant_identity": "mncs:0.2:finite-variant:mncs.family.journal.v1::ModelRole::Narrator",
+           "discriminant": 2
+          }
+         }
+        ],
+        [
+         "sensitive_hint",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  }
+ ]
+}
