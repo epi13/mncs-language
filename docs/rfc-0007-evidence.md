@@ -165,6 +165,16 @@ diagnostic observations: only `Verifier` and `KernelProof` classes can
 satisfy obligations, and kernel proofs additionally require exact binding
 reuse.
 
+## Heterogeneity note
+
+The differential suite (`curated` 8 cases plus `fuzz` 120 cases, each
+executed on all five backends and compared against the reference checker)
+passes identically on Linux x86-64 and Windows x86-64 CI runners, in addition
+to local runs and the Fabric-mediated WASM validation above. That is genuine
+execution diversity across operating systems — but it is not Fabric worker
+diversity, so ledger criterion `0007-C16` stays partial until a remote worker
+checks the frozen artifacts.
+
 ## Remaining blockers (highest pressure first)
 
 1. Substitution machinery for dependent application (G1) — the next calculus
