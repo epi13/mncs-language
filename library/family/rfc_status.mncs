@@ -1,0 +1,104 @@
+mncs 0.10;
+
+// mncs.family.rfc_status.v1 — the MNCS-native decision core for RFC status claims.
+//
+// A status string alone can never upgrade an RFC: every implementation claim
+// passes through these gates with its criterion tally and evidence flag.
+// Downgrades are always allowed; upgrades require a PASS gate. This keeps the
+// machine-readable ledger (rfcs/conformance-ledger.json) honest by executing
+// its transition rules instead of trusting editor discipline.
+//
+// Dominance discipline is inherited from mncs.core.status: gates weaken
+// claims monotonically and never map UNKNOWN to PASS.
+module mncs.family.rfc_status.v1;
+
+use mncs.core.status.v1 as status;
+
+enum DesignState { Draft, Proposed, Accepted, Stable, Superseded }
+
+enum ImplState { Absent, Substrate, Partial, Bounded, Experimental, Complete }
+
+record CriterionTally { required: i64, satisfied: i64, partial: i64, excused: i64, evidence_ok: bool }
+
+fn rank(state: ImplState) -> (result: i64) {
+    return match state {
+        Absent => 0,
+        Substrate => 1,
+        Partial => 2,
+        Bounded => 3,
+        Experimental => 4,
+        Complete => 5,
+    };
+}
+
+// EXPERIMENTAL gate: every required criterion is satisfied, partial, or
+// explicitly excused with a recorded gap; at least one is fully satisfied;
+// and every non-excused claim carries qualifying evidence. Anything less
+// stays UNKNOWN or FAIL.
+fn gate_experimental(tally: CriterionTally) -> (result: status.Status) {
+    if tally.required <= 0 {
+        return status.Status.UNKNOWN;
+    }
+    let accounted: i64 = tally.satisfied +% tally.partial +% tally.excused;
+    if tally.satisfied < 0 || tally.partial < 0 || tally.excused < 0 || accounted > tally.required {
+        return status.Status.FAIL;
+    }
+    if tally.evidence_ok {
+        if tally.satisfied > 0 && accounted == tally.required {
+            return status.Status.PASS;
+        }
+        return status.Status.UNKNOWN;
+    }
+    return status.Status.FAIL;
+}
+
+// IMPLEMENTED gate: strictly stronger. Every required criterion is fully
+// satisfied with evidence; partial credit and excuses are not enough for a
+// complete claim.
+fn gate_implemented(tally: CriterionTally) -> (result: status.Status) {
+    if tally.required <= 0 {
+        return status.Status.UNKNOWN;
+    }
+    let accounted: i64 = tally.satisfied +% tally.partial +% tally.excused;
+    if tally.satisfied < 0 || tally.partial < 0 || tally.excused < 0 || accounted > tally.required {
+        return status.Status.FAIL;
+    }
+    if tally.evidence_ok {
+        if tally.partial == 0 && tally.excused == 0 && tally.satisfied == tally.required {
+            return status.Status.PASS;
+        }
+        return status.Status.UNKNOWN;
+    }
+    return status.Status.FAIL;
+}
+
+// Status transitions: staying put and honest downgrades always pass; any
+// upgrade requires the supplied gate verdict to be PASS.
+fn transition_allowed(from: ImplState, to: ImplState, gate: status.Status) -> (result: bool) {
+    if rank(to) <= rank(from) {
+        return true;
+    }
+    return match gate {
+        PASS => true,
+        FAIL => false,
+        UNKNOWN => false,
+    };
+}
+
+// The RFC 0007 tranche tally, executable form: 20 required criteria,
+// 16 satisfied, 3 partial, 1 excused (erasure, recorded gap 0007-G6),
+// evidence bound. The gate must stay PASS for the BOUNDED_IMPLEMENTATION
+// claim and must refuse IMPLEMENTED.
+fn rfc0007_tally() -> (result: CriterionTally) {
+    return CriterionTally { required: 20, satisfied: 16, partial: 3, excused: 1, evidence_ok: true };
+}
+
+// Corpus entrypoints: zero-argument wrappers so experiment cases can invoke
+// the ledger's own tally without supplying arguments.
+fn check_rfc0007_experimental() -> (result: status.Status) {
+    return gate_experimental(rfc0007_tally());
+}
+
+fn check_rfc0007_implemented() -> (result: status.Status) {
+    return gate_implemented(rfc0007_tally());
+}

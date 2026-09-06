@@ -1,0 +1,74 @@
+mncs 0.10;
+
+// mncs.core.proof_term.v1 — canonical flat vocabulary for the RFC 0007 proof core.
+//
+// Proof buffers are fixed `[Cell; 16]` values with an active prefix `count`.
+// Every child reference is a buffer index that must be strictly smaller than
+// its parent (topological order). Termination of checking therefore holds by
+// construction: no recursion, fuel, or timeout participates in meaning.
+//
+// Variables use globally unique binder identities (the binder cell index),
+// the Barendregt convention made explicit. Scope extrusion degrades to
+// weakening, never to capture.
+module mncs.core.proof_term.v1;
+
+enum TermTag { Universe, Var, Pi, Lambda, Apply, Nat, Zero, Succ, Plus, NatElim, Eq, Refl, Unsupported }
+
+record Cell { tag: TermTag, arg0: i64, arg1: i64, arg2: i64, arg3: i64 }
+
+// Discriminants are contract: canonical artifacts and corpora encode them.
+fn tag_code(tag: TermTag) -> (result: i64) {
+    return match tag {
+        Universe => 1,
+        Var => 2,
+        Pi => 3,
+        Lambda => 4,
+        Apply => 5,
+        Nat => 6,
+        Zero => 7,
+        Succ => 8,
+        Plus => 9,
+        NatElim => 10,
+        Eq => 11,
+        Refl => 12,
+        Unsupported => 0,
+    };
+}
+
+fn is_binder_code(code: i64) -> (result: bool) {
+    return code == 3 || code == 4;
+}
+
+// Largest universe level. Universe(l) : Universe(l+1) requires l+1 <= max.
+fn max_universe() -> (result: i64) {
+    return 3;
+}
+
+fn buffer_capacity() -> (result: i64) {
+    return 16;
+}
+
+// Type-descriptor kind codes carried by the checker memo.
+fn type_invalid() -> (result: i64) {
+    return 0;
+}
+
+fn type_universe() -> (result: i64) {
+    return 1;
+}
+
+fn type_nat() -> (result: i64) {
+    return 2;
+}
+
+fn type_pi() -> (result: i64) {
+    return 3;
+}
+
+fn type_eq() -> (result: i64) {
+    return 4;
+}
+
+fn make_cell(tag: TermTag, a0: i64, a1: i64, a2: i64, a3: i64) -> (result: Cell) {
+    return Cell { tag: tag, arg0: a0, arg1: a1, arg2: a2, arg3: a3 };
+}
