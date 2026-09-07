@@ -6337,9 +6337,18 @@ impl<'a> BodyBuilder<'a> {
                     });
                     return Some(ResolvedBinding::plain(id, result_ty));
                 }
-                let arithmetic =
-                    matches!(op, AstBinaryOp::Add | AstBinaryOp::Sub | AstBinaryOp::Mul);
-                let operand_expected = arithmetic.then_some(expected).flatten();
+                // Thread the result expectation into literal operands for
+                // total operators (arithmetic and bitwise alike).
+                let threads_expected = matches!(
+                    op,
+                    AstBinaryOp::Add
+                        | AstBinaryOp::Sub
+                        | AstBinaryOp::Mul
+                        | AstBinaryOp::BitwiseAnd
+                        | AstBinaryOp::BitwiseOr
+                        | AstBinaryOp::BitwiseXor
+                );
+                let operand_expected = threads_expected.then_some(expected).flatten();
                 let left_value = self.elaborate_expr(left, operand_expected, env, diagnostics)?;
                 let right_value =
                     self.elaborate_expr(right, Some(&left_value.ty), env, diagnostics)?;
@@ -6453,6 +6462,45 @@ impl<'a> BodyBuilder<'a> {
                         portability: None,
                     });
                     return Some(ResolvedBinding::plain(id, result_ty));
+                }
+                // Integer bitwise operators: total exact-width operations under
+                // wrapping intent, so no overflow obligation survives. Both
+                // operands already share one integer type (MNE119 above);
+                // signedness is irrelevant to the bit pattern, and the
+                // result keeps the operand width. Non-integer operands fall
+                // through to the comparison catch-all and its diagnostics.
+                if matches!(
+                    op,
+                    AstBinaryOp::BitwiseAnd | AstBinaryOp::BitwiseOr | AstBinaryOp::BitwiseXor
+                ) {
+                    if let BodyType::Integer(operand_type) = left_value.ty {
+                        let id = self.new_value("b");
+                        let kind = BodyOperationKind::Integer {
+                            operator: match op {
+                                AstBinaryOp::BitwiseAnd => "and".to_owned(),
+                                AstBinaryOp::BitwiseOr => "or".to_owned(),
+                                _ => "xor".to_owned(),
+                            },
+                            operand_type,
+                            intent: ArithmeticIntent::Wrapping,
+                        };
+                        let result_ty = BodyType::Integer(operand_type);
+                        self.blocks[self.current].operations.push(BodyOperation {
+                            id: id.clone(),
+                            kind,
+                            operands: vec![left_value.id, right_value.id],
+                            results: vec![BodyValue {
+                                id: id.clone(),
+                                ty: result_ty.clone(),
+                            }],
+                            contracts: Vec::new(),
+                            assumptions: Vec::new(),
+                            machine_intent: None,
+                            lowering: None,
+                            portability: None,
+                        });
+                        return Some(ResolvedBinding::plain(id, result_ty));
+                    }
                 }
                 let id = self.new_value("v");
                 let (kind, result_ty) = match op {

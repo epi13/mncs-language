@@ -450,8 +450,8 @@ pub(crate) fn contract_needs_arena(contract: &BackendValueContract) -> bool {
 ///
 /// Masks do not occupy arena cells, but they are still not argv scalars:
 /// they travel as packed 64-bit words in the same call-file entry array
-/// as cell roots and view descriptors. Forcing them onto argv would use
-/// signed `strtoll` and `argument_argv` currently rejects them.
+/// as cell roots and view descriptors. `argument_argv` currently rejects
+/// them, so forcing them onto argv has no encoder.
 pub(crate) fn contract_uses_call_file(contract: &BackendValueContract) -> bool {
     contract_needs_arena(contract) || matches!(contract, BackendValueContract::Mask { .. })
 }
@@ -727,8 +727,13 @@ fn process_driver_scalar_only(
         .enumerate()
         .map(|(index, ty)| {
             (
+                // Full-range argv words: `strtoll` saturates u64 values
+                // above i64::MAX to LLONG_MAX, so full-range integers
+                // parse with `strtoull` and narrow by cast (bit-exact on
+                // two's-complement targets, including negative words,
+                // which wrap around and cast back exactly).
                 format!(
-                    "  long long a{index} = strtoll(argv[{}], 0, 10);",
+                    "  unsigned long long a{index} = strtoull(argv[{}], 0, 10);",
                     index + 1
                 ),
                 format!("({})a{index}", scalar_c_type(ty)),
@@ -821,7 +826,7 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
         .enumerate()
         .map(|(index, _ty)| {
             format!(
-                "  long long a{index} = ({index} < scalar_argc) ? strtoll(scalar_argv[{index}], 0, 10) : 0;"
+                "  unsigned long long a{index} = ({index} < scalar_argc) ? strtoull(scalar_argv[{index}], 0, 10) : 0;"
             )
         })
         .collect::<Vec<_>>()

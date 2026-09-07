@@ -659,9 +659,14 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                         c_type(dest.ty)
                     );
                 } else {
+                    // Mask to the declared width BEFORE shifting: the C
+                    // variable is signed, so an unmasked cast sign-extends
+                    // (a u32 with bit 31 set becomes 0xFFFF_FFFF_xxxxxxxx
+                    // and the shift-then-narrow keeps ones the logical
+                    // shift must clear).
                     let _ = writeln!(
                         out,
-                        "      {dest_n} = ({})((uint64_t){lhs_n} >> {count});",
+                        "      {dest_n} = ({})(((uint64_t){lhs_n} & {mask}) >> {count});",
                         c_type(dest.ty)
                     );
                 }

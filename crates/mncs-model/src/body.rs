@@ -1358,8 +1358,19 @@ fn validate_operation(
                     "integer operations require two operands and one result",
                 ));
             }
-            for operand in &operation.operands {
-                if available.get(operand) != Some(&BodyType::Integer(*operand_type)) {
+            for (index, operand) in operation.operands.iter().enumerate() {
+                // Shift counts are uniformly u64 and reduce modulo the
+                // declared value width at realization; only the shifted
+                // value must match the operation type.
+                let shift_count = matches!(operator.as_str(), "shl" | "shr")
+                    && index == 1
+                    && available.get(operand)
+                        == Some(&BodyType::Integer(IntegerType {
+                            bits: 64,
+                            signed: false,
+                        }));
+                if !shift_count && available.get(operand) != Some(&BodyType::Integer(*operand_type))
+                {
                     errors.push(body_diagnostic(
                         "MNB017",
                         format!("{path}.operands"),

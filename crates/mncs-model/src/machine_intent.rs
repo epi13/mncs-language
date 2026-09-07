@@ -211,14 +211,19 @@ pub fn minimum_widening_bits(operator: &str, operand: IntegerType) -> Option<u16
 
 /// Reinterpret a value's low `bits` two's-complement digits as an unsigned
 /// magnitude so logical shift math operates on the declared bit pattern.
-fn unsigned_domain(value: i128, bits: u16, signed: bool) -> u128 {
-    let modulus = 1_u128.checked_shl(u32::from(bits)).unwrap_or(u128::MAX);
-    let truncated = (value as u128) % modulus;
-    if signed && value < 0 {
-        modulus - truncated
+fn unsigned_domain(value: i128, bits: u16, _signed: bool) -> u128 {
+    // Two's-complement low digits for every value. `as u128` wraps
+    // negatives mod 2^128, so masking the wrapped form keeps the declared
+    // bit pattern; reducing the wrapped form modulo 2^bits instead yielded
+    // the magnitude for negatives and made signed `shl` shift |value|.
+    let mask = if bits >= 128 {
+        u128::MAX
     } else {
-        truncated
-    }
+        u128::MAX
+            .checked_shr(128 - u32::from(bits))
+            .unwrap_or(u128::MAX)
+    };
+    (value as u128) & mask
 }
 
 fn saturation_bound(operator: &str, left: i128, right: i128, minimum: i128, maximum: i128) -> i128 {

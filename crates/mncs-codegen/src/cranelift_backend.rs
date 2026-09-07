@@ -2597,10 +2597,18 @@ fn jit_boundary_arguments_for_request(
             .any(crate::support::contract_uses_call_file)
         || output_contract.is_some_and(crate::support::contract_uses_call_file);
     if !needs_call_file {
-        // Historical scalar protocol: decimal argv strings.
+        // Historical scalar protocol: decimal argv strings. Words carry
+        // the full u64 range (`18446744073709551615` for u64::MAX), which
+        // does not parse as i64, so round-trip through i128 and keep the
+        // low 64 bits (bit-exact for every value the ABI can carry,
+        // including negative words for signed arguments).
         let raw_args = argv_from_request(request)?
             .iter()
-            .map(|arg| arg.parse::<i64>().map_err(|error| error.to_string()))
+            .map(|arg| {
+                arg.parse::<i128>()
+                    .map(|value| value as i64)
+                    .map_err(|error| error.to_string())
+            })
             .collect::<Result<Vec<_>, _>>()?;
         return Ok((raw_args, None));
     }

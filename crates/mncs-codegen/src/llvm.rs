@@ -821,6 +821,36 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 && !no_overflow
             {
                 emit_checked(out, dest, operator, &left, &right, names, split);
+            } else if matches!(operator.as_str(), "shl" | "shr") {
+                // Total shifts: counts reduce modulo the declared width.
+                // Without this, oversized counts are LLVM poison (not just a
+                // wrong value), so even today's u64-only shifts need it.
+                // Counts are uniformly u64 in the scalar IR (body
+                // validation admits only u64 shift counts), so reduce in
+                // i64 lane width, then truncate to the value width.
+                let width = match dest.ty {
+                    ScalarTy::Int(integer) => integer.bits,
+                    _ => 64,
+                };
+                *split += 1;
+                let raw_modulus = format!("shmod{split}");
+                let _ = writeln!(out, "  %{raw_modulus} = urem i64 %{right}, {width}");
+                let count_reg = if width == 64 {
+                    raw_modulus
+                } else {
+                    *split += 1;
+                    let narrowed = format!("shmod{split}");
+                    let _ = writeln!(out, "  %{narrowed} = trunc i64 %{raw_modulus} to {ty}");
+                    narrowed
+                };
+                *split += 1;
+                let tmp = format!("bin{split}");
+                let flags = overflow_flag.map_or(String::new(), |flag| format!(" {flag}"));
+                let _ = writeln!(
+                    out,
+                    "  %{tmp} = {llvm_op}{flags} {ty} %{left}, %{count_reg}"
+                );
+                store_dest(out, names, dest, &tmp);
             } else {
                 *split += 1;
                 let tmp = format!("bin{split}");

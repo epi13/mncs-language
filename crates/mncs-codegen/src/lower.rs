@@ -1374,13 +1374,14 @@ fn emit_integer(
         (ValType::I32, "or", _) => Instr::I32Or,
         (ValType::I32, "xor", _) => Instr::I32Xor,
         // Total shift semantics: counts are modulo the declared width and
-        // signed shr is arithmetic.
+        // signed shr is arithmetic. The flag is `unsigned`, so the signed
+        // (false) arm takes ShrS and the unsigned (true) arm takes ShrU.
         (ValType::I32, "shl", _) => Instr::I32Shl,
-        (ValType::I32, "shr", true) => Instr::I32ShrS,
-        (ValType::I32, "shr", false) => Instr::I32ShrU,
+        (ValType::I32, "shr", false) => Instr::I32ShrS,
+        (ValType::I32, "shr", true) => Instr::I32ShrU,
         (ValType::I64, "shl", _) => Instr::I64Shl,
-        (ValType::I64, "shr", true) => Instr::I64ShrS,
-        (ValType::I64, "shr", false) => Instr::I64ShrU,
+        (ValType::I64, "shr", false) => Instr::I64ShrS,
+        (ValType::I64, "shr", true) => Instr::I64ShrU,
         (ValType::I64, "add", _) => Instr::I64Add,
         (ValType::I64, "sub", _) => Instr::I64Sub,
         (ValType::I64, "mul", _) => Instr::I64Mul,
@@ -1393,6 +1394,24 @@ fn emit_integer(
         (ValType::I64, "xor", _) => Instr::I64Xor,
         _ => return Err(format!("unsupported integer operator {operator}")),
     };
+    // Body validation admits shifts only under wrapping intent; anything
+    // else keeps the historical lowering path below.
+    if matches!(operator, "shl" | "shr") && matches!(intent, ArithmeticIntent::Wrapping) {
+        // Total shift semantics: the u64 count reduces modulo the declared
+        // value width (native shifts only mask to 32/64 lanes, which is
+        // wrong for narrow widths), and signed shr is arithmetic.
+        body.push(Instr::LocalGet(left));
+        body.push(Instr::LocalGet(right));
+        if matches!(wasm, ValType::I32) {
+            body.push(Instr::I32WrapI64);
+            body.push(Instr::I32Const(i32::from(operand_type.bits) - 1));
+            body.push(Instr::I32And);
+        }
+        body.push(wrapping);
+        mask_width(body, result_type, wasm);
+        body.push(Instr::LocalSet(dest));
+        return Ok(());
+    }
     match intent {
         ArithmeticIntent::Wrapping => {
             body.push(Instr::LocalGet(left));
