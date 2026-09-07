@@ -1461,11 +1461,18 @@ fn read_marshal(
                 ));
             }
             if is_byte_marshal_ty(element) {
-                // Bit 0 is an internal representation marker for byte views
-                // derived from exact canonical-cell sequences. It is removed
-                // at the process boundary; external host descriptors remain
-                // ordinary low-offset/high-length values.
-                read_byte_view(runtime, (raw_offset & !1) as i64, length)
+                // Bit 63 is the lowering-internal cell marker for byte views
+                // derived from exact canonical-cell sequences (see
+                // crate::composite::VIEW_CELL_MARKER). A set marker means
+                // eight-byte cell stride; a clear marker means packed bytes.
+                // The marker bit lives outside the address/length halves, so
+                // odd packed offsets are never mistaken for cell storage.
+                // External host descriptors are always marker-clear.
+                if crate::composite::view_is_cell_backed(address as u64) {
+                    read_byte_cells(runtime, raw_offset as i64, length)
+                } else {
+                    read_byte_view(runtime, raw_offset as i64, length)
+                }
             } else {
                 read_sequence_cell(runtime, raw_offset as i64, element, length)
             }
@@ -1487,6 +1494,27 @@ fn read_byte_view(
     for index in 0..length {
         values.push(ExecutionValue::Byte {
             value: i128::from(runtime.load(address + i64::from(index), 1)? as u8),
+        });
+    }
+    Ok(ExecutionValue::Sequence {
+        values: values.into(),
+    })
+}
+
+/// Read bytes from canonical eight-byte cells (cell-backed view return).
+/// Mirrors the byte case of [`read_slot`]: the value occupies the low bytes
+/// of a four-byte slot store, so a four-byte load truncated to `u8` observes
+/// exactly what [`write_slot`] wrote.
+fn read_byte_cells(
+    runtime: &Runtime,
+    address: i64,
+    length: u32,
+) -> Result<ExecutionValue, WasmTrap> {
+    let mut values = Vec::with_capacity(length as usize);
+    for index in 0..length {
+        let slot = address + i64::from(index) * 8;
+        values.push(ExecutionValue::Byte {
+            value: i128::from(runtime.load(slot, 4)? as u8),
         });
     }
     Ok(ExecutionValue::Sequence {
@@ -2383,6 +2411,38 @@ mod tests {
                     signed: false,
                 },
             }]
+        );
+    }
+
+    #[test]
+    fn arena_allocator_stays_aligned_monotonic_and_bounded() {
+        // Host-ABI allocator discipline (spec/host-abi.md section 5):
+        // regions are 8-byte aligned, the cursor never moves backwards, and
+        // exhaustion fails closed instead of wrapping.
+        let module = WasmModule {
+            functions: Vec::new(),
+            memory: Some(WasmMemory { min_pages: 1 }),
+            globals: vec![WasmGlobal {
+                valtype: ValType::I32,
+                mutable: true,
+                init: 8,
+            }],
+        };
+        let mut runtime = Runtime::new(&module);
+        let first = runtime.allocate(4).expect("first region");
+        assert_eq!(first % 8, 0, "8-byte alignment");
+        let second = runtime.allocate(8).expect("second region");
+        assert!(
+            second >= first + 8,
+            "monotonic cursor: {second} after {first}"
+        );
+        // One page holds 65536 bytes; a 65536-byte request past the two
+        // small regions cannot fit and must fail closed.
+        let trap = runtime.allocate(65536).expect_err("arena must bound");
+        assert_eq!(
+            trap.status,
+            ExecutionStatus::BudgetExhausted,
+            "exhaustion fails closed"
         );
     }
 }

@@ -1254,3 +1254,42 @@ fn profile_09_transitive_visibility_keeps_the_declaring_identity() {
         1
     );
 }
+
+#[test]
+fn imported_nominal_types_resolve_in_signatures_projection_and_match() {
+    let machine = "mncs 0.6;\nmodule lib.machine;\nenum Phase { stopped, playing, paused }\nenum Evt { play, pause, stop }\nrecord Transport { phase: Phase, armed: bool }\nfn step(state: Transport, event: Evt) -> (result: Transport) {\n    return match event {\n        play => Transport { phase: Phase.playing, armed: state.armed },\n        pause => Transport { phase: Phase.paused, armed: state.armed },\n        stop => Transport { phase: Phase.stopped, armed: false },\n    };\n}\nfn is_playing(state: Transport) -> (result: bool) {\n    return match state.phase {\n        playing => true,\n        stopped => false,\n        paused => false,\n    };\n}\n";
+    let resolver = MapResolver::default().with("lib.machine", machine);
+    let program = elaborate(
+        &resolver,
+        "mncs 0.6;\nmodule app.transport;\nuse lib.machine;\nfn launch(armed: bool) -> (result: Transport) {\n    let init: Transport = Transport { phase: Phase.stopped, armed: armed };\n    return step(init, Evt.play);\n}\nfn describe(state: Transport) -> (result: bool) {\n    return match state.phase {\n        playing => true,\n        stopped => false,\n        paused => false,\n    };\n}\n",
+    )
+    .expect("imported nominal types elaborate");
+    let launch = program
+        .functions
+        .iter()
+        .find(|function| function.name == "launch")
+        .expect("launch survives elaboration");
+    let result_ty = launch.outputs.first().expect("launch declares a result");
+    assert_eq!(result_ty.value_type, "Transport");
+    let transport = program
+        .record_types
+        .iter()
+        .find(|record| record.name == "Transport")
+        .expect("imported record is registered");
+    assert!(
+        transport.identity.0.contains("lib.machine"),
+        "imported record keeps its declaring identity, got {}",
+        transport.identity.0
+    );
+}
+
+#[test]
+fn projection_from_a_non_record_value_is_rejected() {
+    let resolver = MapResolver::default();
+    let errors = elaborate(
+        &resolver,
+        "mncs 0.6;\nmodule app.projection;\nfn f(value: i64) -> (result: i64) { return value.phase; }\n",
+    )
+    .unwrap_err();
+    assert!(errors.contains(&"MNE161".to_owned()), "got {errors:?}");
+}

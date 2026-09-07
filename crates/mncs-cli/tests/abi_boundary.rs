@@ -250,3 +250,96 @@ fn over_capacity_view_is_refused() {
         );
     }
 }
+
+#[test]
+fn view_returns_agree_per_backend() {
+    // Sequence/view returns must agree on the logical value on every
+    // executable backend regardless of the in-memory representation (cells
+    // vs packed). Covers the portable-WASM view-return divergence (P-013),
+    // odd packed slice offsets, exact returns up to the 64-element maximum,
+    // non-byte views, repeated calls, and scalar consumption.
+    run_module_corpus(
+        &example("source/abi-view-returns.mncs"),
+        &example("execution/abi-view-returns-corpus.json"),
+        19,
+    );
+}
+
+#[test]
+fn view_return_traps_fail_at_runtime_consistently() {
+    // Out-of-bounds dynamic index and reversed slice bounds trap
+    // deterministically on every executable backend.
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_experiment(
+            &example("source/abi-view-returns.mncs"),
+            backend,
+            &example("execution/abi-view-returns-traps-corpus.json"),
+        );
+        assert_eq!(
+            code,
+            Some(0),
+            "{backend}: trap corpus must execute; stderr={stderr}; result={result:#}"
+        );
+        let cases = result["cases"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{backend}: missing cases; {result:#}"));
+        assert_eq!(cases.len(), 2, "{backend}: expected 2 trap cases");
+        for case in cases {
+            let id = case["case_id"].as_str().unwrap_or("?");
+            assert_eq!(
+                case["status"], "runtime_failure",
+                "{backend} {id}: view trap must fail deterministically; case={case:#}"
+            );
+        }
+    }
+}
+
+#[test]
+fn abi_report_carries_the_host_abi_version() {
+    // Hosts must not guess the calling contract: `mncs abi` binds every
+    // report to spec/host-abi.md via host_abi_version, and exposes the
+    // shapes (exact/view/record) the contract governs.
+    let output = binary()
+        .args(["abi", &example("source/abi-view-returns.mncs")])
+        .output()
+        .expect("run ABI inspection");
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let abi: Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|error| panic!("ABI JSON ({stderr}): {error}"));
+    assert_eq!(output.status.code(), Some(0), "{stderr}: {abi:#}");
+    assert_eq!(abi["host_abi_version"], "1");
+    assert_eq!(
+        abi["functions"]["tail2"]["outputs"][0]["view"]["capacity"],
+        8
+    );
+    assert_eq!(
+        abi["functions"]["exact64"]["outputs"][0]["sequence"]["length"],
+        64
+    );
+}
+
+#[test]
+fn imported_nominal_types_agree_per_backend() {
+    // Cross-module nominal identities (finite/record declared in
+    // test.nominal.machine, used in test.nominal.consumer signatures,
+    // construction, projection, matching, and nested calls) must resolve
+    // to the SAME identities on every executable backend.
+    run_module_corpus(
+        &example("source/test/nominal/consumer.mncs"),
+        &example("execution/import-nominal-corpus.json"),
+        10,
+    );
+}
+
+#[test]
+fn exact_sequences_borrow_into_bounded_views_per_backend() {
+    // P-010: one shared little-endian reader serves 44/46/22-byte exact
+    // windows through the automatic exact-to-bounded-view borrow (N <= M,
+    // same element, no copy). Includes the nested-call borrow shape and
+    // direct stdlib reader calls over staged views.
+    run_module_corpus(
+        &example("source/subtype-windows.mncs"),
+        &example("execution/subtype-windows-corpus.json"),
+        10,
+    );
+}

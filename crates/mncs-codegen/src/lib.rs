@@ -43,6 +43,11 @@ use crate::wasm::{decode_module, encode_module, execute_function_typed, WASM_MAG
 
 pub const PORTABLE_WASM_FORMAT: &str = "application/wasm; mncs-portable-wasm-mvp-0.1";
 pub const PORTABLE_WASM_ARTIFACT_KIND: &str = "wasm_module";
+/// Version of the language-owned host calling contract in
+/// `spec/host-abi.md`. Hosts must check this version (surfaced by
+/// `mncs abi` as `host_abi_version`) before applying that document: the
+/// contract evolves independently of any single backend's artifact format.
+pub const HOST_ABI_VERSION: &str = "1";
 pub const RESEARCH_BYTECODE_BACKEND_NAME: &str = "mncs-research-bytecode";
 pub const RESEARCH_BYTECODE_BACKEND_VERSION: &str = "0.1";
 pub const RESEARCH_BYTECODE_TARGET: &str = "mncs:target:research-bytecode-0.1";

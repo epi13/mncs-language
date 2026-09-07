@@ -208,13 +208,38 @@ pub enum BoundaryValue {
 }
 
 /// Packed view descriptor used by every executable backend: the low 32 bits
-/// hold the element-cell offset, the high 32 bits the runtime length.
+/// hold the element address, bits 32..63 the runtime length. Bit 63 is the
+/// lowering-internal cell marker: when set, a byte view addresses canonical
+/// eight-byte cells instead of packed bytes. The marker is an internal
+/// representation detail, never part of the external host contract: hosts
+/// stage marker-clear descriptors, and boundary decoders must consult
+/// [`view_is_cell_backed`] before choosing a stride. Bit 63 is used rather
+/// than bit 0 because packed byte slices may legitimately start at an odd
+/// address; overloading bit 0 made odd offsets indistinguishable from
+/// cell-backed views.
+pub const VIEW_CELL_MARKER: u64 = 1_u64 << 63;
+/// Length bits that survive [`unpack_view`]: the marker bit is not a length.
+pub const VIEW_LENGTH_MASK: u64 = 0x7fff_ffff;
+
 pub fn pack_view(offset: u64, length: u32) -> u64 {
     (offset & 0xffff_ffff) | ((u64::from(length)) << 32)
 }
 
+/// Split a descriptor into `(address, length)`, discarding the internal cell
+/// marker from the length. Callers that read byte elements must additionally
+/// branch on [`view_is_cell_backed`]: a set marker means eight-byte cell
+/// stride, a clear marker packed bytes.
 pub fn unpack_view(descriptor: u64) -> (u64, u32) {
-    (descriptor & 0xffff_ffff, (descriptor >> 32) as u32)
+    (
+        descriptor & 0xffff_ffff,
+        ((descriptor >> 32) & VIEW_LENGTH_MASK) as u32,
+    )
+}
+
+/// Whether a view descriptor addresses canonical cells (byte views derived
+/// from exact sequences) rather than packed bytes.
+pub fn view_is_cell_backed(descriptor: u64) -> bool {
+    descriptor & VIEW_CELL_MARKER != 0
 }
 
 pub fn pack_mask(lanes: &[bool]) -> u64 {
@@ -1035,6 +1060,21 @@ mod codec_tests {
     fn view_descriptor_packs_offset_and_length() {
         assert_eq!(pack_view(16, 3), 16 | (3_u64 << 32));
         assert_eq!(unpack_view(16 | (3_u64 << 32)), (16, 3));
+    }
+
+    #[test]
+    fn view_cell_marker_survives_outside_address_and_length() {
+        // Bit 63 marks cell-backed byte views. It must not corrupt the
+        // address, must not leak into the length, and must be observable
+        // through view_is_cell_backed. Odd packed offsets (bit 0 set, bit
+        // 63 clear) are ordinary addresses, never cell storage.
+        let marked = VIEW_CELL_MARKER | 24 | (5_u64 << 32);
+        assert!(view_is_cell_backed(marked));
+        assert_eq!(unpack_view(marked), (24, 5));
+        let odd_packed = 25 | (5_u64 << 32);
+        assert!(!view_is_cell_backed(odd_packed));
+        assert_eq!(unpack_view(odd_packed), (25, 5));
+        assert!(!view_is_cell_backed(pack_view(8, 2)));
     }
 
     #[test]

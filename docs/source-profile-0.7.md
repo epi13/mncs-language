@@ -71,6 +71,32 @@ instead of deferring a guaranteed runtime failure.
 - `xs.len` observes the length as `u64` (constant for exact bounds, the
   packed runtime length for views).
 
+### Exact-to-bounded-view borrow
+
+```mncs
+fn read16(window: [byte; up_to 64], offset: u64) -> (result: u16) { ... }
+fn probe44(header: [byte; 44]) -> (result: u16) {
+    return read16(header, 20);   // borrows; no MNE133
+}
+```
+
+An `[E; N]` value satisfies an `[E; up_to M]` expectation exactly when
+`N ≤ M`. The compiler synthesizes the full-range slice at the expectation
+site (annotated `let` bindings, named values, call results, call arguments,
+and `return` positions), so the borrow is explicit in the body and lowers
+through the view machinery:
+
+- no copy is materialized: the view aliases the immutable source cells;
+- the bound is preserved from the static length (`len` observes `N`);
+- element identity is untouched (nominal elements keep their identity);
+- `N > M` still refuses (`MNE133`): a view never widens past its capacity;
+- element mismatch still refuses (`MNE133`);
+- view-to-view capacity relaxation is NOT part of this rule (a view keeps
+  its declared capacity; future work);
+- the representation follows section "Views, lengths, ranges" on every
+  backend: cell-backed for exact-derived byte views, packed for staged
+  ones, with identical logical values at the boundary.
+
 ### Bounded traversal over sequences
 
 ```mncs

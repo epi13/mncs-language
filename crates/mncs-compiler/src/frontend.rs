@@ -2606,67 +2606,85 @@ fn elaborate_function(
             &mut diagnostics,
         );
     }
-    let (blocks, bounded_iterations, builder_resolutions) = if function.body.statements.is_empty()
-        && matches!(function.body.returned_value, AstExpr::Name(_))
-    {
-        let AstExpr::Name(returned_name) = &function.body.returned_value else {
-            unreachable!("guarded above")
-        };
-        let returned = env.resolve(&returned_name.text, returned_name.span, &mut diagnostics);
-        if let Some(returned) = returned {
-            if returned.ty != output_type {
-                diagnostics.push(elaboration_diagnostic(
-                    "MNE103",
-                    "returned value type does not match the declared output type",
-                    returned_name.span,
-                ));
-            }
-        }
-        (
-            vec![BodyBlock {
-                id: "entry".to_owned(),
-                parameters: Vec::new(),
-                operations: Vec::new(),
-                terminator: BodyTerminator::Return {
-                    values: vec![returned_name.text.clone()],
-                },
-            }],
-            Vec::new(),
-            Vec::new(),
-        )
-    } else {
-        let mut builder = BodyBuilder::new(
-            output_type.clone(),
-            function.name.text.clone(),
-            ast.module.text.clone(),
-            finite_types,
-            record_types,
-            signatures,
-            declarations,
-            namespace_aliases,
-            direct_imports,
-            generic_map.clone(),
-        );
-        builder.elaborate_statements(&function.body.statements, &mut env, &mut diagnostics);
-        if let Some(returned) = builder.elaborate_expr(
-            &function.body.returned_value,
-            Some(&output_type),
-            &mut env,
-            &mut diagnostics,
-        ) {
-            builder.finish_return(
-                returned,
-                function.body.returned_value.span(),
-                &mut diagnostics,
-            );
-        }
-        let builder_resolutions = std::mem::take(&mut builder.resolutions);
-        (
-            builder.blocks,
-            builder.bounded_iterations,
-            builder_resolutions,
-        )
+    // A bodyless tail `return name;` whose type differs from the declared output
+    // only by the exact-to-bounded-view borrow takes the general path, which
+    // elaborates the returned expression against the output type and
+    // synthesizes the borrow there. The probe resolves against a cloned
+    // environment so no resolution or diagnostic leaks from the check itself.
+    let tail_name = match &function.body.returned_value {
+        AstExpr::Name(returned_name) => Some(returned_name),
+        _ => None,
     };
+    let tail_borrows = tail_name.is_some_and(|returned_name| {
+        let mut probe = env.clone();
+        let mut sink = Vec::new();
+        probe
+            .resolve(&returned_name.text, returned_name.span, &mut sink)
+            .is_some_and(|returned| {
+                returned.ty != output_type
+                    && exact_view_borrow_dimensions(&returned.ty, &output_type).is_some()
+            })
+    });
+    let (blocks, bounded_iterations, builder_resolutions) =
+        if function.body.statements.is_empty() && tail_name.is_some() && !tail_borrows {
+            let AstExpr::Name(returned_name) = &function.body.returned_value else {
+                unreachable!("guarded above")
+            };
+            let returned = env.resolve(&returned_name.text, returned_name.span, &mut diagnostics);
+            if let Some(returned) = returned {
+                if returned.ty != output_type {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE103",
+                        "returned value type does not match the declared output type",
+                        returned_name.span,
+                    ));
+                }
+            }
+            (
+                vec![BodyBlock {
+                    id: "entry".to_owned(),
+                    parameters: Vec::new(),
+                    operations: Vec::new(),
+                    terminator: BodyTerminator::Return {
+                        values: vec![returned_name.text.clone()],
+                    },
+                }],
+                Vec::new(),
+                Vec::new(),
+            )
+        } else {
+            let mut builder = BodyBuilder::new(
+                output_type.clone(),
+                function.name.text.clone(),
+                ast.module.text.clone(),
+                finite_types,
+                record_types,
+                signatures,
+                declarations,
+                namespace_aliases,
+                direct_imports,
+                generic_map.clone(),
+            );
+            builder.elaborate_statements(&function.body.statements, &mut env, &mut diagnostics);
+            if let Some(returned) = builder.elaborate_expr(
+                &function.body.returned_value,
+                Some(&output_type),
+                &mut env,
+                &mut diagnostics,
+            ) {
+                builder.finish_return(
+                    returned,
+                    function.body.returned_value.span(),
+                    &mut diagnostics,
+                );
+            }
+            let builder_resolutions = std::mem::take(&mut builder.resolutions);
+            (
+                builder.blocks,
+                builder.bounded_iterations,
+                builder_resolutions,
+            )
+        };
     resolutions.extend(env.take_resolutions());
     resolutions.extend(builder_resolutions);
     if !diagnostics.is_empty() {
@@ -2975,6 +2993,7 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
     }
 }
 
+#[derive(Clone)]
 struct BindingEnv {
     scopes: Vec<std::collections::BTreeMap<String, (ResolvedBinding, SourceSpan, BoundNameKind)>>,
     scope_ids: Vec<SemanticId>,
@@ -4433,12 +4452,19 @@ impl<'a> BodyBuilder<'a> {
             }
             AstExpr::Name(name) => {
                 let resolved = env.resolve(&name.text, name.span, diagnostics)?;
-                if expected.is_some_and(|expected| expected != &resolved.ty) {
-                    diagnostics.push(elaboration_diagnostic(
-                        "MNE117",
-                        "resolved name does not have the required expression type",
-                        name.span,
-                    ));
+                if let Some(expected_ty) = expected {
+                    if expected_ty != &resolved.ty {
+                        if let Some(borrowed) =
+                            self.borrow_view_for_expected(&resolved, expected_ty)
+                        {
+                            return Some(borrowed);
+                        }
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE117",
+                            "resolved name does not have the required expression type",
+                            name.span,
+                        ));
+                    }
                 }
                 Some(resolved)
             }
@@ -4964,6 +4990,16 @@ impl<'a> BodyBuilder<'a> {
                         diagnostics,
                     )?;
                     if &argument.ty != parameter_type {
+                        // Exact-to-bounded-view borrow backstop for argument
+                        // shapes that do not thread the callee expectation
+                        // (names and call results borrow at their own
+                        // elaboration sites above).
+                        if let Some(borrowed) =
+                            self.borrow_view_for_expected(&argument, parameter_type)
+                        {
+                            operands.push(borrowed.id);
+                            continue;
+                        }
                         diagnostics.push(elaboration_diagnostic(
                             "MNE133",
                             "call argument type does not match the callee parameter",
@@ -4995,11 +5031,16 @@ impl<'a> BodyBuilder<'a> {
                     return None;
                 }
                 if expected.is_some_and(|expected| expected != &concrete_output) {
-                    diagnostics.push(elaboration_diagnostic(
-                        "MNE135",
-                        "call result does not have the required expression type",
-                        *span,
-                    ));
+                    let borrows = expected.is_some_and(|expected| {
+                        exact_view_borrow_dimensions(&concrete_output, expected).is_some()
+                    });
+                    if !borrows {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE135",
+                            "call result does not have the required expression type",
+                            *span,
+                        ));
+                    }
                 }
                 let id = self.new_value("call");
                 // Compute instantiation identity for concrete substitutions; forwarding keeps symbolic
@@ -5038,7 +5079,16 @@ impl<'a> BodyBuilder<'a> {
                     lowering: None,
                     portability: None,
                 });
-                Some(ResolvedBinding::plain(id, concrete_output.clone()))
+                let binding = ResolvedBinding::plain(id, concrete_output.clone());
+                if let Some(expected_ty) = expected {
+                    if expected_ty != &binding.ty {
+                        if let Some(borrowed) = self.borrow_view_for_expected(&binding, expected_ty)
+                        {
+                            return Some(borrowed);
+                        }
+                    }
+                }
+                Some(binding)
             }
             AstExpr::Match { value, arms, span } => {
                 let subject = self.elaborate_expr(value, None, env, diagnostics)?;
@@ -6934,12 +6984,18 @@ impl<'a> BodyBuilder<'a> {
         span: SourceSpan,
         diagnostics: &mut Vec<SourceDiagnostic>,
     ) {
+        let mut value = value;
         if value.ty != self.output_type {
-            diagnostics.push(elaboration_diagnostic(
-                "MNE103",
-                "returned value type does not match the declared output type",
-                span,
-            ));
+            let output_type = self.output_type.clone();
+            if let Some(borrowed) = self.borrow_view_for_expected(&value, &output_type) {
+                value = borrowed;
+            } else {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE103",
+                    "returned value type does not match the declared output type",
+                    span,
+                ));
+            }
         }
         if self.block_is_open() {
             self.blocks[self.current].terminator = BodyTerminator::Return {
@@ -6997,6 +7053,94 @@ impl<'a> BodyBuilder<'a> {
         id
     }
 
+    /// Exact-to-bounded-view borrow at an expectation site: when `expected`
+    /// is `[E; up_to M]` and the elaborated value is `[E; N]` with `N <= M`,
+    /// synthesize the full-range slice and return the view-typed binding.
+    /// Returns `None` when the rule does not apply (the caller emits its
+    /// own diagnostic). The borrow is explicit in the body and lowers
+    /// through the proven view machinery: no copy is materialized, the
+    /// bound is preserved from the static length, and element identity is
+    /// untouched. `N > M`, element mismatch, and non-sequence shapes all
+    /// correctly refuse.
+    fn borrow_view_for_expected(
+        &mut self,
+        binding: &ResolvedBinding,
+        expected: &BodyType,
+    ) -> Option<ResolvedBinding> {
+        if let Some((length, capacity)) = exact_view_borrow_dimensions(&binding.ty, expected) {
+            return Some(self.borrow_exact_as_view(binding, length, capacity));
+        }
+        None
+    }
+
+    /// Borrow an exact sequence as a bounded view (`[E; N]` to `[E; up_to M]`
+    /// with `N <= M`, same element type) by synthesizing the full-range
+    /// slice. The borrow is explicit in the body and lowers through the
+    /// proven view machinery: no copy is materialized, the bound is
+    /// preserved from the static length, and element identity is untouched.
+    /// Callers must have established `N <= M` and element equality already.
+    fn borrow_exact_as_view(
+        &mut self,
+        argument: &ResolvedBinding,
+        length: u32,
+        capacity: u32,
+    ) -> ResolvedBinding {
+        let element = match &argument.ty {
+            BodyType::Sequence { element, .. } => (**element).clone(),
+            _ => BodyType::Named("invalid".to_owned()),
+        };
+        let counter = BodyType::Integer(IntegerType {
+            bits: 64,
+            signed: false,
+        });
+        let mut constant = |value: i128| {
+            let id = self.new_value("c");
+            self.blocks[self.current].operations.push(BodyOperation {
+                id: id.clone(),
+                kind: BodyOperationKind::Constant {
+                    value,
+                    ty: counter.clone(),
+                },
+                operands: Vec::new(),
+                results: vec![BodyValue {
+                    id: id.clone(),
+                    ty: counter.clone(),
+                }],
+                contracts: Vec::new(),
+                assumptions: Vec::new(),
+                machine_intent: None,
+                lowering: None,
+                portability: None,
+            });
+            id
+        };
+        let start_id = constant(0);
+        let end_id = constant(i128::from(length));
+        let result_ty = BodyType::Sequence {
+            element: Box::new(element),
+            bound: mncs_model::SequenceBound::UpTo(capacity),
+        };
+        let id = self.new_value("view");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::ViewConstruct {
+                source_bound: mncs_model::SequenceBound::Exact(length),
+                view_bound: mncs_model::SequenceBound::UpTo(capacity),
+            },
+            operands: vec![argument.id.clone(), start_id, end_id],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        ResolvedBinding::plain(id, result_ty)
+    }
+
     fn new_block(&mut self) -> String {
         self.next_block += 1;
         let id = format!("b{}", self.next_block);
@@ -7022,6 +7166,29 @@ impl<'a> BodyBuilder<'a> {
             BodyTerminator::Return { values } if values.is_empty()
         )
     }
+}
+
+/// Exact-to-bounded-view borrow rule (`docs/source-profile-0.7.md`): an
+/// `[E; N]` value satisfies an `[E; up_to M]` expectation exactly when
+/// `N <= M`. Returns the static `(length, capacity)` the synthesized
+/// full-range slice must carry. Everything else correctly refuses.
+fn exact_view_borrow_dimensions(actual: &BodyType, expected: &BodyType) -> Option<(u32, u32)> {
+    if let (
+        BodyType::Sequence {
+            element: actual_element,
+            bound: mncs_model::SequenceBound::Exact(length),
+        },
+        BodyType::Sequence {
+            element: expected_element,
+            bound: mncs_model::SequenceBound::UpTo(capacity),
+        },
+    ) = (actual, expected)
+    {
+        if actual_element == expected_element && length <= capacity {
+            return Some((*length, *capacity));
+        }
+    }
+    None
 }
 
 fn profile_type(

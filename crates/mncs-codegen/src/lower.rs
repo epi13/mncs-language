@@ -912,28 +912,32 @@ fn lower_instruction(
                         body.push(Instr::LocalGet(seq));
                         body.push(Instr::I64Const(32));
                         body.push(Instr::I64ShrU);
+                        // Discard the internal cell marker (bit 63) so the
+                        // bound check observes the true runtime length.
+                        body.push(Instr::I64Const(0x7fff_ffff));
+                        body.push(Instr::I64And);
                         body.push(Instr::I64GeU);
                         body.push(Instr::If);
                         body.push(Instr::Unreachable);
                         body.push(Instr::End);
                     }
                     if matches!(&instruction.outputs[0].ty, IrType::Named(name) if name == "byte") {
-                        // Bit 0 marks a byte view whose source is still an
+                        // Bit 63 marks a byte view whose source is still an
                         // exact canonical-cell sequence. Host-packed byte
-                        // views leave it clear. Mask the marker before the
-                        // load and preserve the source representation's
+                        // views leave it clear. The low 32 bits always carry
+                        // the true element address (packed slices may start
+                        // at an odd address, so no address bit may serve as
+                        // the marker); preserve the source representation's
                         // stride for the index.
                         body.push(Instr::LocalGet(seq));
-                        body.push(Instr::I64Const(4_294_967_294));
-                        body.push(Instr::I64And);
                         body.push(Instr::I32WrapI64);
                         body.push(Instr::LocalGet(index));
                         body.push(Instr::I64Const(3));
                         body.push(Instr::I64Shl);
                         body.push(Instr::LocalGet(index));
                         body.push(Instr::LocalGet(seq));
-                        body.push(Instr::I64Const(1));
-                        body.push(Instr::I64And);
+                        body.push(Instr::I64Const(63));
+                        body.push(Instr::I64ShrU);
                         body.push(Instr::I32WrapI64);
                         body.push(Instr::Select);
                         body.push(Instr::I32WrapI64);
@@ -967,6 +971,10 @@ fn lower_instruction(
                     body.push(Instr::LocalGet(seq));
                     body.push(Instr::I64Const(32));
                     body.push(Instr::I64ShrU);
+                    // Discard the internal cell marker (bit 63); lengths
+                    // never carry it.
+                    body.push(Instr::I64Const(0x7fff_ffff));
+                    body.push(Instr::I64And);
                 }
                 mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
                     unreachable!(
@@ -996,6 +1004,10 @@ fn lower_instruction(
                     body.push(Instr::LocalGet(seq));
                     body.push(Instr::I64Const(32));
                     body.push(Instr::I64ShrU);
+                    // Discard the internal cell marker (bit 63) so the
+                    // end-bounds trap observes the true source length.
+                    body.push(Instr::I64Const(0x7fff_ffff));
+                    body.push(Instr::I64And);
                 }
                 mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
                     unreachable!(
@@ -1027,9 +1039,12 @@ fn lower_instruction(
             body.push(Instr::Unreachable);
             body.push(Instr::End);
             // Exact sequences use canonical eight-byte cells; an UpTo source
-            // already carries a packed view descriptor whose low half is the
-            // byte address of its element representation. Preserve that
-            // representation when applying the slice start.
+            // already carries a packed view descriptor whose low 32 bits are
+            // the true byte address of its element representation. Preserve
+            // that representation when applying the slice start. The
+            // cell-backed marker lives in bit 63 (see
+            // crate::composite::VIEW_CELL_MARKER): no address bit may serve
+            // as the marker because packed slices may start at odd offsets.
             let byte_view = matches!(&instruction.outputs[0].ty, IrType::Named(name) if name.contains("[byte;"));
             match source_bound {
                 mncs_model::SequenceBound::Exact(_) => {
@@ -1041,11 +1056,7 @@ fn lower_instruction(
                 }
                 mncs_model::SequenceBound::UpTo(_) => {
                     body.push(Instr::LocalGet(seq));
-                    body.push(Instr::I64Const(if byte_view {
-                        4_294_967_294
-                    } else {
-                        4_294_967_295
-                    }));
+                    body.push(Instr::I64Const(4_294_967_295));
                     body.push(Instr::I64And);
                     if byte_view {
                         // Select start*8 for an exact-cell byte view (marker
@@ -1055,8 +1066,8 @@ fn lower_instruction(
                         body.push(Instr::I64Shl);
                         body.push(Instr::LocalGet(start));
                         body.push(Instr::LocalGet(seq));
-                        body.push(Instr::I64Const(1));
-                        body.push(Instr::I64And);
+                        body.push(Instr::I64Const(63));
+                        body.push(Instr::I64ShrU);
                         body.push(Instr::I32WrapI64);
                         body.push(Instr::Select);
                     } else {
@@ -1075,11 +1086,11 @@ fn lower_instruction(
             if byte_view {
                 match source_bound {
                     mncs_model::SequenceBound::Exact(_) => {
-                        body.push(Instr::I64Const(1));
+                        body.push(Instr::I64Const(i64::MIN));
                     }
                     mncs_model::SequenceBound::UpTo(_) => {
                         body.push(Instr::LocalGet(seq));
-                        body.push(Instr::I64Const(1));
+                        body.push(Instr::I64Const(i64::MIN));
                         body.push(Instr::I64And);
                     }
                     mncs_model::SequenceBound::Param(_)
@@ -1091,8 +1102,10 @@ fn lower_instruction(
                 }
                 body.push(Instr::I64Or);
             }
-            // Keep only the low 32 bits of the address half.
-            body.push(Instr::I64Const(4_294_967_295));
+            // Keep only the low 32 bits of the address half, preserving the
+            // internal cell marker in bit 63 (a plain 0xFFFF_FFFF mask would
+            // strip it right after it was set above).
+            body.push(Instr::I64Const(0x8000_0000_ffff_ffffu64 as i64));
             body.push(Instr::I64And);
             body.push(Instr::LocalGet(end));
             body.push(Instr::LocalGet(start));

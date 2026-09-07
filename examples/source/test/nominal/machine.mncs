@@ -1,0 +1,37 @@
+mncs 0.6;
+
+// Shared nominal vocabulary for the cross-module import tranche: a finite
+// transport phase, a finite transport event, and the transport record that
+// carries them. Imported by test.nominal.consumer, which must observe the
+// SAME nominal identities (projection, matching, calls, and backend ABI),
+// not structural copies.
+module test.nominal.machine;
+
+enum Phase { stopped, playing, paused }
+enum Evt { play, pause, stop }
+
+record Transport { phase: Phase, armed: bool }
+
+fn step(state: Transport, event: Evt) -> (result: Transport) {
+    return match event {
+        play => Transport { phase: Phase.playing, armed: state.armed },
+        pause => Transport { phase: Phase.paused, armed: state.armed },
+        stop => Transport { phase: Phase.stopped, armed: false },
+    };
+}
+
+fn is_playing(state: Transport) -> (result: bool) {
+    return match state.phase {
+        playing => true,
+        stopped => false,
+        paused => false,
+    };
+}
+
+fn arm(state: Transport) -> (result: Transport) {
+    return Transport { phase: state.phase, armed: true };
+}
+
+fn echo_phase(phase: Phase) -> (result: Phase) {
+    return phase;
+}

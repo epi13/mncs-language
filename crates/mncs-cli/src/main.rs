@@ -694,6 +694,7 @@ where
 #[derive(Debug, Serialize)]
 struct LanguageOwnedAbi {
     schema_version: String,
+    host_abi_version: String,
     source_artifact_identity: String,
     module: String,
     semantic_fingerprint: Option<String>,
@@ -757,6 +758,7 @@ where
     let (functions, composites) = mncs_codegen::language_owned_abi_contracts(&program);
     let abi = LanguageOwnedAbi {
         schema_version: "0.1".to_owned(),
+        host_abi_version: mncs_codegen::HOST_ABI_VERSION.to_owned(),
         source_artifact_identity: envelope.identity,
         module: program.module.clone(),
         semantic_fingerprint: program.content_fingerprint().ok(),

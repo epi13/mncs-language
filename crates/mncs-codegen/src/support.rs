@@ -644,6 +644,13 @@ fn scalar_inst_uses_cells(inst: &crate::scalar::ScalarInst) -> bool {
         | ScalarInst::CellStore { .. }
         | ScalarInst::CellLoad { .. }
         | ScalarInst::SequenceReplace { .. } => true,
+        // Sequence projection lowers to canonical slot loads
+        // (`mncs_slot_load32/64`) on every native backend, so a module that
+        // only indexes into sequences or views still needs the cell helpers
+        // in its prelude. Omitting them produced undeclared-function C
+        // failures (and unresolved-symbol JIT failures) for pure
+        // index-into-view modules.
+        ScalarInst::SequenceProject { .. } => true,
         ScalarInst::Sequence(nested) => nested.iter().any(scalar_inst_uses_cells),
         _ => false,
     }
@@ -1027,5 +1034,65 @@ mod driver_tests {
         let payload = u64::from_le_bytes(blob[24..32].try_into().unwrap());
         assert_eq!(kind, 0, "mask travels as packed bits, not a cell root");
         assert_eq!(payload, packed);
+    }
+
+    #[test]
+    fn index_only_module_reports_cell_use_for_its_prelude() {
+        // A module whose only cell-touching operation is indexing into a
+        // view still needs the canonical slot helpers: every native backend
+        // lowers SequenceProject to mncs_slot_load32/64. Missing helpers
+        // surfaced as undeclared-function C failures and unresolved-symbol
+        // JIT failures for pure index-into-view modules.
+        use crate::scalar::{
+            ScalarBlock, ScalarFunction, ScalarInst, ScalarModule, ScalarTerm, ScalarTy,
+            ScalarValue,
+        };
+        use mncs_model::{BoundsEvidence, FailureMode, SemanticId, SequenceBound};
+        let sid = |name: &str| SemanticId(name.to_owned());
+        let project = ScalarInst::SequenceProject {
+            dest: ScalarValue {
+                id: sid("v"),
+                ty: ScalarTy::Byte,
+            },
+            seq: sid("window"),
+            index: sid("at"),
+            bound: SequenceBound::UpTo(8),
+            evidence: BoundsEvidence::RuntimeChecked {
+                failure: FailureMode::Fatal,
+            },
+            width: crate::composite::SlotWidth::W32,
+        };
+        let module = ScalarModule {
+            functions: vec![ScalarFunction {
+                export_name: "pick".to_owned(),
+                params: vec![ScalarValue {
+                    id: sid("window"),
+                    ty: ScalarTy::View,
+                }],
+                result: ScalarValue {
+                    id: sid("v"),
+                    ty: ScalarTy::Byte,
+                },
+                blocks: vec![ScalarBlock {
+                    id: sid("entry"),
+                    params: Vec::new(),
+                    insts: vec![project],
+                    term: ScalarTerm::Return { value: sid("v") },
+                }],
+                promises: Vec::new(),
+                promise_decisions: Vec::new(),
+            }],
+            unsupported: Vec::new(),
+            features: Vec::new(),
+            promise_decisions: Vec::new(),
+        };
+        assert!(
+            scalar_module_uses_cells(&module),
+            "index-into-view needs the cell-helper prelude"
+        );
+        assert!(
+            scalar_module_needs_arena_symbols(&module),
+            "index-into-view needs arena symbols"
+        );
     }
 }
