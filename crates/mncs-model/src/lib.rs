@@ -24,6 +24,7 @@ mod identity;
 mod ir;
 mod machine_intent;
 mod obligations;
+mod proof_dep;
 mod proof_kernel;
 mod provenance;
 mod refinement;
@@ -150,6 +151,12 @@ pub use machine_intent::{
 pub use obligations::{
     generate_machine_intent_obligations, ObligationGeneration, ObligationRecord,
     OBLIGATION_SCHEMA_VERSION,
+};
+pub use proof_dep::{
+    dep_assumptions, dep_check, dep_probe_defeq, dep_probe_eval, parse_proof_dep_corpus,
+    run_dep_case, DepArtifact, DepBinding, DepBuffer, DepCell, DepCellSer, DepCorpusCase, DepEntry,
+    DepTag, DepVerdict, Fuel, PROOF_DEP_BUFFER_CAPACITY, PROOF_DEP_FUEL, PROOF_DEP_KERNEL_ID,
+    PROOF_DEP_MAX_UNIVERSE,
 };
 pub use proof_kernel::{
     kernel_backed_range_result, parse_proof_corpus, reference_check, ProofArtifact, ProofBinding,

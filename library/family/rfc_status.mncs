@@ -90,7 +90,7 @@ fn transition_allowed(from: ImplState, to: ImplState, gate: status.Status) -> (r
 // evidence bound. The gate must stay PASS for the BOUNDED_IMPLEMENTATION
 // claim and must refuse IMPLEMENTED.
 fn rfc0007_tally() -> (result: CriterionTally) {
-    return CriterionTally { required: 20, satisfied: 16, partial: 3, excused: 1, evidence_ok: true };
+    return CriterionTally { required: 20, satisfied: 17, partial: 2, excused: 1, evidence_ok: true };
 }
 
 // Corpus entrypoints: zero-argument wrappers so experiment cases can invoke

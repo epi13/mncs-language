@@ -3,7 +3,7 @@
 > Generated from `rfcs/conformance-ledger.json` by
 > `scripts/gen_rfc_ledger_docs.py`. Do not edit by hand.
 
-Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 68 satisfied, 27 partially satisfied, 38 unsatisfied criteria.
+Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 69 satisfied, 26 partially satisfied, 38 unsatisfied criteria.
 
 ## Reading this document
 
@@ -168,27 +168,27 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 68 
 ### RFC 0007 — Proof-Carrying Dependent Core
 
 - Design: **DRAFT**; implementation: **BOUNDED_IMPLEMENTATION** (experimental; confidence high).
-- Scope: Tranche 0.1: flat topological proof buffers, bounded universes, dependent Pi formation, Nat family with closed computation, propositional equality, deterministic dual checkers (MNCS-native plus independent reference), obligation binding with invalidation, proof-gated SSA elision, and proof-bound lowering certificates. Dependent application/substitution, erasure, and full proof transport remain explicit gaps.
+- Scope: Tranche 0.2: genuine dependency over flat binder-edge buffers with explicit levels (Pi/Lam/App with capture-safe substitution by environment extension, beta and weak-head evaluation with fuel, structural defeq with rigid levels), dependent NatElim with motive application, propositional Eq with Refl/Cong, assumption declarations with usage accounting, dual checkers (MNCS-native mncs.core.proof_dep.v2 plus independent recursive reference) in exact differential agreement over a 15-case corpus on five backends, sealed artifacts with assumption-aware bindings. Full proof transport through every compiler stage, file-based ingestion, and erasure remain explicit gaps.
 - Profiles: 0.10.
 - Stdlib: mncs.core.proof_term.v1, mncs.core.proof_check.v1.
 - Stages: semantic program, SSA, selected SSA, lowering, backend execution.
 - Depends on: RFC 0001, RFC 0002, RFC 0003, RFC 0006, RFC 0012, RFC 0013, RFC 0019, RFC 0020, RFC 0021, RFC 0022, RFC 0027.
 - Required by: RFC 0003, RFC 0006, RFC 0018, RFC 0020, RFC 0021, RFC 0022, RFC 0034, RFC 0038.
-- Tests: `crates/mncs-cli/tests/proof_kernel.rs`, `crates/mncs-model proof_kernel unit tests`.
+- Tests: `crates/mncs-cli/tests/proof_kernel.rs`, `crates/mncs-model proof_kernel unit tests`, `crates/mncs-model proof_dep unit tests`.
 - Acceptance criteria:
   - [x] 0007-C1: Canonical proof-core representation with versioned terms — evidence: `library/core/proof_term.mncs`, `crates/mncs-model/src/proof_kernel.rs`
   - [x] 0007-C2: Explicit inspectable proof terms with canonical identities — evidence: `library/core/proof_term.mncs`, `crates/mncs-model/src/proof_kernel.rs`
   - [x] 0007-C3: Bounded explicit universe hierarchy without hidden impredicativity — evidence: `library/core/proof_check.mncs`, `examples/execution/proof-kernel-corpus.json`
-  - [~] 0007-C4: Dependent function types beyond monomorphized generics — evidence: `library/core/proof_check.mncs`
-  - [x] 0007-C5: At least one inductive family with dependent reasoning (Nat) — evidence: `library/core/proof_check.mncs`, `examples/execution/proof-kernel-corpus.json`
+  - [x] 0007-C4: Dependent function types beyond monomorphized generics — evidence: `library/core/proof_dep.mncs`, `crates/mncs-model/src/proof_dep.rs`, `examples/execution/proof-dep-corpus.json`, `docs/rfc-0007-tranche-02-calculus.md`
+  - [x] 0007-C5: At least one inductive family with dependent reasoning (Nat) — evidence: `library/core/proof_check.mncs`, `examples/execution/proof-kernel-corpus.json`, `library/core/proof_dep.mncs`, `examples/execution/proof-dep-corpus.json`
   - [x] 0007-C6: Explicit propositional equality kept separate from other equalities — evidence: `library/core/proof_check.mncs`, `docs/rfc-0007-evidence.md`
   - [x] 0007-C7: Deterministic checking to PASS/FAIL/UNKNOWN that never promotes UNKNOWN — evidence: `library/core/proof_check.mncs`, `crates/mncs-cli/tests/proof_kernel.rs`
   - [x] 0007-C8: Proof identities and kernel identity/version — evidence: `crates/mncs-model/src/proof_kernel.rs`
   - [x] 0007-C9: Obligation integration: compiler-generated obligation discharged by a proof term — evidence: `crates/mncs-cli/tests/proof_demo.rs`, `crates/mncs-model/src/proof_kernel.rs`, `crates/mncs-model/src/ssa.rs`
   - [x] 0007-C10: Invalidation: changed inputs invalidate proof reuse — evidence: `crates/mncs-model/src/proof_kernel.rs`
   - [x] 0007-C11: MNCS-native checker executing through real backend paths — evidence: `library/core/proof_check.mncs`, `crates/mncs-cli/tests/proof_kernel.rs`
-  - [x] 0007-C12: Independent second checker with differential agreement — evidence: `crates/mncs-model/src/proof_kernel.rs`, `crates/mncs-cli/tests/proof_kernel.rs`
-  - [x] 0007-C13: Valid, invalid, adversarial, and unresolved fixtures — evidence: `examples/execution/proof-kernel-corpus.json`, `examples/execution/proof-kernel-fuzz-corpus.json`
+  - [x] 0007-C12: Independent second checker with differential agreement — evidence: `crates/mncs-model/src/proof_kernel.rs`, `crates/mncs-cli/tests/proof_kernel.rs`, `crates/mncs-model/src/proof_dep.rs`
+  - [x] 0007-C13: Valid, invalid, adversarial, and unresolved fixtures — evidence: `examples/execution/proof-kernel-corpus.json`, `examples/execution/proof-kernel-fuzz-corpus.json`, `examples/execution/proof-dep-corpus.json`
   - [~] 0007-C14: Real compiler integration with explicit proof relationship — evidence: `crates/mncs-model/src/ssa.rs`, `crates/mncs-model/src/machine_intent.rs`
   - [x] 0007-C15: Execution through research bytecode and portable WASM (plus C11/LLVM/Cranelift) — evidence: `crates/mncs-cli/tests/proof_kernel.rs`
   - [~] 0007-C16: Heterogeneous Fabric worker evidence — evidence: `docs/rfc-0007-evidence.md`
@@ -197,13 +197,9 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 68 
   - [x] 0007-C19: Proof-core stratification: total kernel versus effectful execution — evidence: `library/core/proof_term.mncs`, `docs/rfc-0007-evidence.md`
   - [ ] 0007-C20: Proof erasure semantics — evidence: `0007-G6`
 - Known gaps:
-  - 0007-G1 dependent application needs substitution (UNKNOWN boundary)
-  - 0007-G2 NatElim over Succ-literals and stuck scrutinees (UNKNOWN boundary)
-  - 0007-G3 open proof terms need assumption accounting (UNKNOWN boundary)
   - 0007-G4 proof transport through every compiler stage unresolved
   - 0007-G5 file-based proof ingestion into mncs compile is a follow-up
   - 0007-G6 proof erasure semantics unimplemented
-  - 0007-G7 one-step beta reduction deferred
 - Pressure sources: mncs-actions proof-kernel conformance, Fabric heterogeneous validation.
 - Note: Design stays DRAFT (unresolved calculus choices per the RFC); implementation is a bounded experimental tranche, not the full RFC vision. C14/C16 flip to satisfied only with full proof transport plus file-based ingestion, and heterogeneous worker evidence, respectively.
 
