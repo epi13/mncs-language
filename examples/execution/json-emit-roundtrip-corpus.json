@@ -1,0 +1,99 @@
+{
+ "schema_version": "0.1",
+ "name": "json-emit-roundtrip",
+ "cases": [
+  {
+   "id": "row-scans-complete",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.json_emit_roundtrip",
+     "function": "row_score"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 113
+         }
+        },
+        {
+         "byte": {
+          "value": 119
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 58
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 820,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 32768
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1001004,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

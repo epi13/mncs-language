@@ -1,0 +1,3273 @@
+{
+ "schema_version": "0.1",
+ "name": "json-emit",
+ "cases": [
+  {
+   "id": "metrics-row",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.json_emit.v1",
+     "function": "candidate_metrics_row"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 113
+         }
+        },
+        {
+         "byte": {
+          "value": 119
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 58
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 820,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 16384
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.std.json_emit.v1::Writer::buf%3A%5Bbyte%3B%2064%5D%3Bdepth%3Au64%3Bfirst%3Abool%3Blen%3Au64%3Bok%3Abool%3B",
+      "name": "Writer",
+      "fields": [
+       [
+        "buf",
+        {
+         "sequence": {
+          "values": [
+           {
+            "byte": {
+             "value": 123
+            }
+           },
+           {
+            "byte": {
+             "value": 34
+            }
+           },
+           {
+            "byte": {
+             "value": 109
+            }
+           },
+           {
+            "byte": {
+             "value": 111
+            }
+           },
+           {
+            "byte": {
+             "value": 100
+            }
+           },
+           {
+            "byte": {
+             "value": 101
+            }
+           },
+           {
+            "byte": {
+             "value": 108
+            }
+           },
+           {
+            "byte": {
+             "value": 34
+            }
+           },
+           {
+            "byte": {
+             "value": 58
+            }
+           },
+           {
+            "byte": {
+             "value": 34
+            }
+           },
+           {
+            "byte": {
+             "value": 113
+            }
+           },
+           {
+            "byte": {
+             "value": 119
+            }
+           },
+           {
+            "byte": {
+             "value": 101
+            }
+           },
+           {
+            "byte": {
+             "value": 110
+            }
+           },
+           {
+            "byte": {
+             "value": 51
+            }
+           },
+           {
+            "byte": {
+             "value": 58
+            }
+           },
+           {
+            "byte": {
+             "value": 56
+            }
+           },
+           {
+            "byte": {
+             "value": 98
+            }
+           },
+           {
+            "byte": {
+             "value": 34
+            }
+           },
+           {
+            "byte": {
+             "value": 44
+            }
+           },
+           {
+            "byte": {
+             "value": 34
+            }
+           },
+           {
+            "byte": {
+             "value": 115
+            }
+           },
+           {
+            "byte": {
+             "value": 99
+            }
+           },
+           {
+            "byte": {
+             "value": 111
+            }
+           },
+           {
+            "byte": {
+             "value": 114
+            }
+           },
+           {
+            "byte": {
+             "value": 101
+            }
+           },
+           {
+            "byte": {
+             "value": 34
+            }
+           },
+           {
+            "byte": {
+             "value": 58
+            }
+           },
+           {
+            "byte": {
+             "value": 56
+            }
+           },
+           {
+            "byte": {
+             "value": 50
+            }
+           },
+           {
+            "byte": {
+             "value": 48
+            }
+           },
+           {
+            "byte": {
+             "value": 44
+            }
+           },
+           {
+            "byte": {
+             "value": 34
+            }
+           },
+           {
+            "byte": {
+             "value": 111
+            }
+           },
+           {
+            "byte": {
+             "value": 107
+            }
+           },
+           {
+            "byte": {
+             "value": 34
+            }
+           },
+           {
+            "byte": {
+             "value": 58
+            }
+           },
+           {
+            "byte": {
+             "value": 116
+            }
+           },
+           {
+            "byte": {
+             "value": 114
+            }
+           },
+           {
+            "byte": {
+             "value": 117
+            }
+           },
+           {
+            "byte": {
+             "value": 101
+            }
+           },
+           {
+            "byte": {
+             "value": 125
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           }
+          ]
+         }
+        }
+       ],
+       [
+        "depth",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "first",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "len",
+        {
+         "integer": {
+          "value": 42,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "ok",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "int-array",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.json_emit.v1",
+     "function": "candidate_array"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": -2,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 300,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ]
+      }
+     }
+    ],
+    "step_budget": 16384
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.std.json_emit.v1::Writer::buf%3A%5Bbyte%3B%2064%5D%3Bdepth%3Au64%3Bfirst%3Abool%3Blen%3Au64%3Bok%3Abool%3B",
+      "name": "Writer",
+      "fields": [
+       [
+        "buf",
+        {
+         "sequence": {
+          "values": [
+           {
+            "byte": {
+             "value": 91
+            }
+           },
+           {
+            "byte": {
+             "value": 49
+            }
+           },
+           {
+            "byte": {
+             "value": 44
+            }
+           },
+           {
+            "byte": {
+             "value": 45
+            }
+           },
+           {
+            "byte": {
+             "value": 50
+            }
+           },
+           {
+            "byte": {
+             "value": 44
+            }
+           },
+           {
+            "byte": {
+             "value": 51
+            }
+           },
+           {
+            "byte": {
+             "value": 48
+            }
+           },
+           {
+            "byte": {
+             "value": 48
+            }
+           },
+           {
+            "byte": {
+             "value": 93
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           }
+          ]
+         }
+        }
+       ],
+       [
+        "depth",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "first",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "len",
+        {
+         "integer": {
+          "value": 10,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "ok",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "escaped-string",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.json_emit.v1",
+     "function": "candidate_escaped"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 34
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 92
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 1
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 16384
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.std.json_emit.v1::Writer::buf%3A%5Bbyte%3B%2064%5D%3Bdepth%3Au64%3Bfirst%3Abool%3Blen%3Au64%3Bok%3Abool%3B",
+      "name": "Writer",
+      "fields": [
+       [
+        "buf",
+        {
+         "sequence": {
+          "values": [
+           {
+            "byte": {
+             "value": 34
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 92
+            }
+           },
+           {
+            "byte": {
+             "value": 34
+            }
+           },
+           {
+            "byte": {
+             "value": 98
+            }
+           },
+           {
+            "byte": {
+             "value": 92
+            }
+           },
+           {
+            "byte": {
+             "value": 92
+            }
+           },
+           {
+            "byte": {
+             "value": 99
+            }
+           },
+           {
+            "byte": {
+             "value": 92
+            }
+           },
+           {
+            "byte": {
+             "value": 117
+            }
+           },
+           {
+            "byte": {
+             "value": 48
+            }
+           },
+           {
+            "byte": {
+             "value": 48
+            }
+           },
+           {
+            "byte": {
+             "value": 48
+            }
+           },
+           {
+            "byte": {
+             "value": 49
+            }
+           },
+           {
+            "byte": {
+             "value": 34
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           }
+          ]
+         }
+        }
+       ],
+       [
+        "depth",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "first",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "len",
+        {
+         "integer": {
+          "value": 15,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "ok",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "null",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.json_emit.v1",
+     "function": "candidate_null"
+    },
+    "arguments": [],
+    "step_budget": 16384
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.std.json_emit.v1::Writer::buf%3A%5Bbyte%3B%2064%5D%3Bdepth%3Au64%3Bfirst%3Abool%3Blen%3Au64%3Bok%3Abool%3B",
+      "name": "Writer",
+      "fields": [
+       [
+        "buf",
+        {
+         "sequence": {
+          "values": [
+           {
+            "byte": {
+             "value": 110
+            }
+           },
+           {
+            "byte": {
+             "value": 117
+            }
+           },
+           {
+            "byte": {
+             "value": 108
+            }
+           },
+           {
+            "byte": {
+             "value": 108
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           }
+          ]
+         }
+        }
+       ],
+       [
+        "depth",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "first",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "len",
+        {
+         "integer": {
+          "value": 4,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "ok",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "stray-end-fails-closed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.json_emit.v1",
+     "function": "candidate_stray_end"
+    },
+    "arguments": [],
+    "step_budget": 16384
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.std.json_emit.v1::Writer::buf%3A%5Bbyte%3B%2064%5D%3Bdepth%3Au64%3Bfirst%3Abool%3Blen%3Au64%3Bok%3Abool%3B",
+      "name": "Writer",
+      "fields": [
+       [
+        "buf",
+        {
+         "sequence": {
+          "values": [
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           },
+           {
+            "byte": {
+             "value": 0
+            }
+           }
+          ]
+         }
+        }
+       ],
+       [
+        "depth",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "first",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "len",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "ok",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "boundary-exact",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.json_emit.v1",
+     "function": "candidate_array"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "integer": {
+          "value": -9223372036854775808,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": -9223372036854775808,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": -9223372036854775808,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ]
+      }
+     }
+    ],
+    "step_budget": 16384
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.std.json_emit.v1::Writer::buf%3A%5Bbyte%3B%2064%5D%3Bdepth%3Au64%3Bfirst%3Abool%3Blen%3Au64%3Bok%3Abool%3B",
+      "name": "Writer",
+      "fields": [
+       [
+        "buf",
+        {
+         "sequence": {
+          "values": [
+           {
+            "byte": {
+             "value": 91
+            }
+           },
+           {
+            "byte": {
+             "value": 45
+            }
+           },
+           {
+            "byte": {
+             "value": 57
+            }
+           },
+           {
+            "byte": {
+             "value": 50
+            }
+           },
+           {
+            "byte": {
+             "value": 50
+            }
+           },
+           {
+            "byte": {
+             "value": 51
+            }
+           },
+           {
+            "byte": {
+             "value": 51
+            }
+           },
+           {
+            "byte": {
+             "value": 55
+            }
+           },
+           {
+            "byte": {
+             "value": 50
+            }
+           },
+           {
+            "byte": {
+             "value": 48
+            }
+           },
+           {
+            "byte": {
+             "value": 51
+            }
+           },
+           {
+            "byte": {
+             "value": 54
+            }
+           },
+           {
+            "byte": {
+             "value": 56
+            }
+           },
+           {
+            "byte": {
+             "value": 53
+            }
+           },
+           {
+            "byte": {
+             "value": 52
+            }
+           },
+           {
+            "byte": {
+             "value": 55
+            }
+           },
+           {
+            "byte": {
+             "value": 55
+            }
+           },
+           {
+            "byte": {
+             "value": 53
+            }
+           },
+           {
+            "byte": {
+             "value": 56
+            }
+           },
+           {
+            "byte": {
+             "value": 48
+            }
+           },
+           {
+            "byte": {
+             "value": 56
+            }
+           },
+           {
+            "byte": {
+             "value": 44
+            }
+           },
+           {
+            "byte": {
+             "value": 45
+            }
+           },
+           {
+            "byte": {
+             "value": 57
+            }
+           },
+           {
+            "byte": {
+             "value": 50
+            }
+           },
+           {
+            "byte": {
+             "value": 50
+            }
+           },
+           {
+            "byte": {
+             "value": 51
+            }
+           },
+           {
+            "byte": {
+             "value": 51
+            }
+           },
+           {
+            "byte": {
+             "value": 55
+            }
+           },
+           {
+            "byte": {
+             "value": 50
+            }
+           },
+           {
+            "byte": {
+             "value": 48
+            }
+           },
+           {
+            "byte": {
+             "value": 51
+            }
+           },
+           {
+            "byte": {
+             "value": 54
+            }
+           },
+           {
+            "byte": {
+             "value": 56
+            }
+           },
+           {
+            "byte": {
+             "value": 53
+            }
+           },
+           {
+            "byte": {
+             "value": 52
+            }
+           },
+           {
+            "byte": {
+             "value": 55
+            }
+           },
+           {
+            "byte": {
+             "value": 55
+            }
+           },
+           {
+            "byte": {
+             "value": 53
+            }
+           },
+           {
+            "byte": {
+             "value": 56
+            }
+           },
+           {
+            "byte": {
+             "value": 48
+            }
+           },
+           {
+            "byte": {
+             "value": 56
+            }
+           },
+           {
+            "byte": {
+             "value": 44
+            }
+           },
+           {
+            "byte": {
+             "value": 45
+            }
+           },
+           {
+            "byte": {
+             "value": 57
+            }
+           },
+           {
+            "byte": {
+             "value": 50
+            }
+           },
+           {
+            "byte": {
+             "value": 50
+            }
+           },
+           {
+            "byte": {
+             "value": 51
+            }
+           },
+           {
+            "byte": {
+             "value": 51
+            }
+           },
+           {
+            "byte": {
+             "value": 55
+            }
+           },
+           {
+            "byte": {
+             "value": 50
+            }
+           },
+           {
+            "byte": {
+             "value": 48
+            }
+           },
+           {
+            "byte": {
+             "value": 51
+            }
+           },
+           {
+            "byte": {
+             "value": 54
+            }
+           },
+           {
+            "byte": {
+             "value": 56
+            }
+           },
+           {
+            "byte": {
+             "value": 53
+            }
+           },
+           {
+            "byte": {
+             "value": 52
+            }
+           },
+           {
+            "byte": {
+             "value": 55
+            }
+           },
+           {
+            "byte": {
+             "value": 55
+            }
+           },
+           {
+            "byte": {
+             "value": 53
+            }
+           },
+           {
+            "byte": {
+             "value": 56
+            }
+           },
+           {
+            "byte": {
+             "value": 48
+            }
+           },
+           {
+            "byte": {
+             "value": 56
+            }
+           },
+           {
+            "byte": {
+             "value": 93
+            }
+           }
+          ]
+         }
+        }
+       ],
+       [
+        "depth",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "first",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "len",
+        {
+         "integer": {
+          "value": 64,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "ok",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "overflow-poisons",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.json_emit.v1",
+     "function": "candidate_long_string"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 64,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 16384
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.std.json_emit.v1::Writer::buf%3A%5Bbyte%3B%2064%5D%3Bdepth%3Au64%3Bfirst%3Abool%3Blen%3Au64%3Bok%3Abool%3B",
+      "name": "Writer",
+      "fields": [
+       [
+        "buf",
+        {
+         "sequence": {
+          "values": [
+           {
+            "byte": {
+             "value": 34
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           },
+           {
+            "byte": {
+             "value": 97
+            }
+           }
+          ]
+         }
+        }
+       ],
+       [
+        "depth",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "first",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "len",
+        {
+         "integer": {
+          "value": 64,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "ok",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}
