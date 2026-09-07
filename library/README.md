@@ -93,6 +93,7 @@ resolution provenance.
 | `std/json_projection.mncs` | `mncs.std.json_projection.v1` (Profile 0.10) | bounded raw key/member projections over <=64-byte views with <=32-byte target windows; escaped text is validated by the scanner but is not decoded by this projection layer |
 | `std/text_view.mncs` | `mncs.std.text_view.v1` (Profile 0.10) | borrowed bounded text spans, UTF-8/decode flags, and 16/32-byte key matching for schema consumers |
 | `std/text_scan.mncs` | `mncs.std.text_scan.v1` (Profile 0.10) | bounded literal text scanning over <=64-byte views: window equality, contains, prefix/suffix, first-index search, deterministic ordering, byte counting, word scanning; total, allocation-free, explicit complexity bounds |
+| `std/fixed.mncs` | `mncs.std.fixed.v1` (Profile 0.6) | blessed milli-scale decimal scores: type-encoded 1/1000 scale, saturating add/sub, clamp; exact comparison at the call site; products/quotients out of scope |
 | `std/json_cursor.mncs` | `mncs.std.json_cursor.v1` (Profile 0.10) | streaming JSON cursor with bounded container stack, string/key events, absolute spans, 32-byte saturated unknown-key matching, and basic UTF-8 lead/continuation validation |
 | `core/bytes.mncs` | `mncs.core.bytes.v1` (Profile 0.7) | byte bitwise/shift/order, folding fingerprint, nibble split, ASCII classifiers, wrapping checksum |
 | `core/numeric.mncs` | `mncs.core.numeric.v1` (Profile 0.8) | wrapping 4-lane sum/mean/centroid and L2-squared; vector kernels live in `vector.v1` |
