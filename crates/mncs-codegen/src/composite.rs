@@ -133,17 +133,21 @@ fn slot_width(semantic_type: &str, program: &mncs_model::Program) -> SlotWidth {
     // variants are boxed cells too; payload-free variants are bare tags and
     // stay in a 32-bit slot. Sequences ride full words (cell refs or packed
     // view descriptors).
+    // Field spellings may be short names or canonical identities
+    // (`canonical_value_type` emits the identity for qualified references),
+    // so match both; otherwise a nested record collapses to W32 and native
+    // backends truncate its 64-bit arena offset.
     if program
         .record_types
         .iter()
-        .any(|record| record.name == semantic_type)
+        .any(|record| record.name == semantic_type || record.identity.0 == semantic_type)
     {
         return SlotWidth::W64;
     }
     if let Some(finite) = program
         .finite_types
         .iter()
-        .find(|finite| finite.name == semantic_type)
+        .find(|finite| finite.name == semantic_type || finite.identity.0 == semantic_type)
     {
         let boxed = finite
             .variants

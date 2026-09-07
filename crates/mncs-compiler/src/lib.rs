@@ -5,12 +5,17 @@
 //! `mncs-model`.
 
 mod frontend;
+pub mod proof_admission;
 mod resolution;
 
 pub use frontend::{
     elaborate_program, elaborate_program_with_resolutions, elaborate_program_with_resolver,
     elaborate_program_with_resolver_and_modules, ModuleResolution, ModuleResolver, NullResolver,
     SourceFrontEndResult, SourceStudyOutput,
+};
+pub use proof_admission::{
+    admission_library_roots, admit_artifact, authorize_reuse, lower_with_proofs, AdmissionError,
+    AdmittedProof, CompilerProofInput, ProofLowering,
 };
 pub use resolution::{
     NameResolution, NameResolutionIndex, ResolvedNameKind, NAME_RESOLUTION_SCHEMA_VERSION,
@@ -196,6 +201,32 @@ impl ReferenceCompiler {
     }
 
     pub fn compile(&self, request: CompilationRequest, program: &Program) -> CompilationResult {
+        self.compile_inner(request, program, &[], &[])
+    }
+
+    /// Compile with admitted tranche-0.2 proofs carried through HIR, SSA,
+    /// and lowering evidence (see [`proof_admission::lower_with_proofs`]).
+    /// Each input names an artifact file's bytes plus an optional operation;
+    /// admission, corroboration, attachment, authorization, and evidence
+    /// recording all execute inside this call. Proof-free compilations are
+    /// byte-identical to [`Self::compile`].
+    pub fn compile_with_proofs(
+        &self,
+        request: CompilationRequest,
+        program: &Program,
+        inputs: &[CompilerProofInput],
+        library_roots: &[std::path::PathBuf],
+    ) -> CompilationResult {
+        self.compile_inner(request, program, inputs, library_roots)
+    }
+
+    fn compile_inner(
+        &self,
+        request: CompilationRequest,
+        program: &Program,
+        proof_inputs: &[CompilerProofInput],
+        library_roots: &[std::path::PathBuf],
+    ) -> CompilationResult {
         let started = Instant::now();
         let mut diagnostics = request.validate();
         if request.compiler != self.identity || request.pipeline != self.pipeline {
@@ -257,15 +288,33 @@ impl ReferenceCompiler {
         }
         trace_timing("compiler-validation", started);
 
-        let hir = match program.lower_to_ir() {
-            Ok(hir) => hir,
-            Err(error) => {
-                diagnostics.push(CompilerDiagnostic::new(
-                    "CMP204",
-                    CompilerDiagnosticKind::InternalCompilerDefect,
-                    format!("validated semantic input failed HIR lowering: {error}"),
-                ));
-                return failed_result(&request, diagnostics);
+        // With proof inputs, HIR and SSA lower through the admission path:
+        // dependency fingerprints, MNCS admission, attachment, MNCS
+        // authorization, and proof-bearing evidence recording. Without
+        // inputs this block reduces exactly to the historical lowering.
+        let (hir, prelowered_ssa) = if proof_inputs.is_empty() {
+            let hir = match program.lower_to_ir() {
+                Ok(hir) => hir,
+                Err(error) => {
+                    diagnostics.push(CompilerDiagnostic::new(
+                        "CMP204",
+                        CompilerDiagnosticKind::InternalCompilerDefect,
+                        format!("validated semantic input failed HIR lowering: {error}"),
+                    ));
+                    return failed_result(&request, diagnostics);
+                }
+            };
+            (hir, None)
+        } else {
+            match proof_admission::lower_with_proofs(program, proof_inputs, library_roots) {
+                Ok(lowering) => {
+                    diagnostics.extend(lowering.diagnostics);
+                    (lowering.hir, Some(lowering.ssa))
+                }
+                Err(diagnostic) => {
+                    diagnostics.push(*diagnostic);
+                    return failed_result(&request, diagnostics);
+                }
             }
         };
         let hir_fingerprint = hir.fingerprint().expect("HIR is serializable");
@@ -276,16 +325,19 @@ impl ReferenceCompiler {
         );
         trace_timing("compiler-hir", started);
 
-        let ssa = match program.lower_to_ssa_from_ir(&hir) {
-            Ok(ssa) => ssa,
-            Err(error) => {
-                diagnostics.push(CompilerDiagnostic::new(
-                    "CMP205",
-                    CompilerDiagnosticKind::InternalCompilerDefect,
-                    format!("validated semantic input failed SSA lowering: {error}"),
-                ));
-                return failed_result(&request, diagnostics);
-            }
+        let ssa = match prelowered_ssa {
+            Some(ssa) => ssa,
+            None => match program.lower_to_ssa_from_ir(&hir) {
+                Ok(ssa) => ssa,
+                Err(error) => {
+                    diagnostics.push(CompilerDiagnostic::new(
+                        "CMP205",
+                        CompilerDiagnosticKind::InternalCompilerDefect,
+                        format!("validated semantic input failed SSA lowering: {error}"),
+                    ));
+                    return failed_result(&request, diagnostics);
+                }
+            },
         };
         let ssa_fingerprint = ssa.fingerprint().expect("SSA is serializable");
         let ssa_ref = CompilerArtifactRef::new(

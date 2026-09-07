@@ -539,7 +539,10 @@
           "state": "satisfied",
           "evidence": [
             "library/core/proof_check.mncs",
-            "crates/mncs-cli/tests/proof_kernel.rs"
+            "crates/mncs-cli/tests/proof_kernel.rs",
+            "library/core/proof_dep.mncs",
+            "examples/execution/proof-dep-corpus.json",
+            "examples/execution/proof-dep-admission-corpus.json"
           ]
         },
         {
@@ -565,10 +568,13 @@
         {
           "id": "0007-C14",
           "text": "Real compiler integration with explicit proof relationship",
-          "state": "partial",
+          "state": "satisfied",
           "evidence": [
-            "crates/mncs-model/src/ssa.rs",
-            "crates/mncs-model/src/machine_intent.rs"
+            "library/core/proof_admit.mncs",
+            "crates/mncs-compiler/src/proof_admission.rs",
+            "crates/mncs-model/src/proof_transport.rs",
+            "crates/mncs-cli/tests/proof_dep_admission.rs",
+            "examples/execution/proof-dep-admission-corpus.json"
           ]
         },
         {
@@ -576,7 +582,9 @@
           "text": "Execution through research bytecode and portable WASM (plus C11/LLVM/Cranelift)",
           "state": "satisfied",
           "evidence": [
-            "crates/mncs-cli/tests/proof_kernel.rs"
+            "crates/mncs-cli/tests/proof_kernel.rs",
+            "examples/execution/proof-dep-corpus.json",
+            "examples/execution/proof-dep-admission-corpus.json"
           ]
         },
         {
@@ -584,7 +592,8 @@
           "text": "Heterogeneous Fabric worker evidence",
           "state": "partial",
           "evidence": [
-            "docs/rfc-0007-evidence.md"
+            "docs/rfc-0007-evidence.md",
+            "docs/development-evidence/rfc0007-tranche02-fabric-remote-2026-09.md"
           ]
         },
         {
@@ -658,8 +667,7 @@
         "0027"
       ],
       "gaps": [
-        "0007-G4 proof transport through every compiler stage unresolved",
-        "0007-G5 file-based proof ingestion into mncs compile is a follow-up",
+        "0007-G4 proof transport through backend/codegen stages and proof-discharge unresolved (minimum HIR/SSA/lowering path exists)",
         "0007-G6 proof erasure semantics unimplemented"
       ],
       "pressure_sources": [
@@ -682,7 +690,7 @@
         "backend execution"
       ],
       "evidence_confidence": "high",
-      "notes": "Design stays DRAFT (unresolved calculus choices per the RFC); implementation is a bounded experimental tranche, not the full RFC vision. C14/C16 flip to satisfied only with full proof transport plus file-based ingestion, and heterogeneous worker evidence, respectively."
+      "notes": "Design stays DRAFT (unresolved calculus choices per the RFC); implementation is a bounded experimental tranche, not the full RFC vision. C14 is satisfied for the minimum HIR/SSA/lowering integration scope plus file-based ingestion; full proof-discharge and backend-stage transport remain open. C16 stays partial: one remote Fabric worker verdict plus same-host mediation, no Windows verdict."
     },
     {
       "number": "0008",

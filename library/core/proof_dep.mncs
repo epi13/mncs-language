@@ -2618,6 +2618,92 @@ fn probe_defeq_code(cells: [Cell; 32], count: byte, left: byte, right: byte) -> 
     return dq.verdict;
 }
 
+// ---------------------------------------------------------------------------
+// Admission-grade canonical assumption sets (tranche 0.2 hardening).
+//
+// `assumptions_code` above remains as a diagnostic/backward-compatibility
+// projection only: it is a lossy base-33 packing that wraps past ~10
+// hypotheses and MUST NOT appear in the authority protocol. The
+// authoritative representation is `AssumptionSet`: the exact used-hypothesis
+// set in deterministic ascending buffer order, with per-assumption level
+// and carrier identity. Empty set is explicit (`count == 0`, `valid` only
+// on PASS). Adding, removing, or changing any used assumption — its level,
+// its carrier, or its buffer position — changes the set; non-PASS verdicts
+// yield `valid == false` and authorize nothing.
+// ---------------------------------------------------------------------------
+record AssumptionSet { hyp: [i64; 32], level: [i64; 32], carrier: [i64; 32], count: i64, valid: bool }
+
+fn initial_assumption_set() -> (result: AssumptionSet) {
+    return AssumptionSet {
+        hyp: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        level: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        carrier: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        count: 0,
+        valid: false
+    };
+}
+
+// Canonical used-assumption set: same PASS gate and usage rule as the
+// diagnostic code, but exact. Entries ascend in buffer order (the iterate
+// visits cells in order and appends), so ordering can never alias two
+// distinct sets. Unused hypotheses contribute nothing: only consumed
+// assumptions are observable, and the empty set is `count == 0`.
+fn assumption_set(cells: [Cell; 32], count: byte, proof: byte, prop: byte) -> (result: AssumptionSet) {
+    let total: i64 = count as i64;
+    let proof_index: i64 = proof as i64;
+    let prop_index: i64 = prop as i64;
+    if bnot(indices_ok(total, proof_index, prop_index)) {
+        return initial_assumption_set();
+    }
+    if tag_code(cells[proof_index as u64].tag) == 13 || tag_code(cells[prop_index as u64].tag) == 13 {
+        return initial_assumption_set();
+    }
+    let checked: CheckRes = check_proof_inner(cells, total, proof_index, prop_index, cells);
+    if checked.verdict != 0 {
+        return initial_assumption_set();
+    }
+    let parents: Parents = run_parents(cells, total);
+    let reach_p: [i64; 32] = run_reach(cells, parents.par, total, proof_index);
+    let reach_q: [i64; 32] = run_reach(cells, parents.par, total, prop_index);
+    iterate h over cells carrying set: AssumptionSet = initial_assumption_set() {
+        let at: i64 = h as i64;
+        let active: bool = at < total;
+        let cell: Cell = cells[h];
+        let used: bool = active && tag_code(cell.tag) == 13 && hyp_used(cells, checked.shape.target, reach_p, reach_q, total, at);
+        let room: bool = set.count >= 0 && set.count < 32;
+        let append: bool = used && active && room;
+        let slot: u64 = (select(room, set.count, 0)) as u64;
+        let grown: AssumptionSet = AssumptionSet {
+            hyp: replace(set.hyp, slot, select(append, at, at32(set.hyp, set.count, true, 0))),
+            level: replace(set.level, slot, select(append, cell.arg0, at32(set.level, set.count, true, 0))),
+            carrier: replace(set.carrier, slot, select(append, cell.arg1, at32(set.carrier, set.count, true, 0))),
+            count: set.count +% select(append, 1, 0),
+            valid: room
+        };
+        next set = select(active, grown, set);
+    }
+    return set;
+}
+
+// Exact set equality: counts match and every entry matches in order.
+// Order is canonical (ascending buffer position), so field-wise equality
+// is set equality — no sorting, no hashing, no collisions.
+fn assumption_set_equal(first: AssumptionSet, second: AssumptionSet) -> (result: bool) {
+    if bnot(first.valid && second.valid) {
+        return false;
+    }
+    if first.count != second.count {
+        return false;
+    }
+    iterate i over first.hyp carrying same: bool = true {
+        let at: i64 = i as i64;
+        let relevant: bool = at >= 0 && at < first.count;
+        let slot_ok: bool = bnot(relevant) || (at32(first.hyp, at, true, (0 - 1)) == at32(second.hyp, at, true, (0 - 2)) && at32(first.level, at, true, (0 - 1)) == at32(second.level, at, true, (0 - 2)) && at32(first.carrier, at, true, (0 - 1)) == at32(second.carrier, at, true, (0 - 2)));
+        next same = same && slot_ok;
+    }
+    return same;
+}
+
 record VAlloc { pool: VPool, id: i64 }
 
 fn valloc(pool: VPool, tag: i64, a: i64, b: i64, c: i64, d: i64) -> (result: VAlloc) {

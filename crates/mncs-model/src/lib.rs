@@ -26,6 +26,7 @@ mod machine_intent;
 mod obligations;
 mod proof_dep;
 mod proof_kernel;
+mod proof_transport;
 mod provenance;
 mod refinement;
 mod representation;
@@ -153,15 +154,20 @@ pub use obligations::{
     OBLIGATION_SCHEMA_VERSION,
 };
 pub use proof_dep::{
-    dep_assumptions, dep_check, dep_probe_defeq, dep_probe_eval, parse_proof_dep_corpus,
-    run_dep_case, DepArtifact, DepBinding, DepBuffer, DepCell, DepCellSer, DepCorpusCase, DepEntry,
-    DepTag, DepVerdict, Fuel, PROOF_DEP_BUFFER_CAPACITY, PROOF_DEP_FUEL, PROOF_DEP_KERNEL_ID,
-    PROOF_DEP_MAX_UNIVERSE,
+    corroborate_proof, dep_assumption_set, dep_assumptions, dep_check, dep_probe_defeq,
+    dep_probe_eval, parse_proof_dep_corpus, run_dep_case, CorroborationPolicy, DepArtifact,
+    DepAssumptionSet, DepAssumptionUse, DepBuffer, DepCell, DepCellSer, DepCorpusCase,
+    DepCorroboration, DepEntry, DepTag, DepVerdict, Fuel, PROOF_DEP_BUFFER_CAPACITY,
+    PROOF_DEP_FUEL, PROOF_DEP_KERNEL_ID, PROOF_DEP_MAX_UNIVERSE,
 };
 pub use proof_kernel::{
     kernel_backed_range_result, parse_proof_corpus, reference_check, ProofArtifact, ProofBinding,
     ProofCell, ProofCorpusCase, ProofTag, ProofVerdict, PROOF_ARTIFACT_SCHEMA_VERSION,
     PROOF_BUFFER_CAPACITY, PROOF_KERNEL_ID, PROOF_MAX_UNIVERSE,
+};
+pub use proof_transport::{
+    validate_relationship_for_use, ProofAdmissionEvidence, ProofRelationship, TransportMismatch,
+    PROOF_DEPENDENCY_SLOTS, PROOF_EVIDENCE_RULE, PROOF_RELATIONSHIP_SCHEMA_VERSION,
 };
 pub use provenance::{
     evidence_is_current, Realization, RealizationError, RealizationSelection, TargetIdentity,

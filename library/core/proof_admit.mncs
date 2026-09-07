@@ -1,0 +1,217 @@
+mncs 0.10;
+
+// mncs.core.proof_admit.v1 — authoritative tranche-0.2 proof admission and
+// binding (RFC 0007 hardening pass).
+//
+// AUTHORITY CHAIN (the only path that creates proof authority):
+//
+//   candidate artifact
+//   → host transports exact cells + claimed identities (bytes, no semantics)
+//   → `seal_binding` executes the MNCS kernel (`mncs.core.proof_dep.v2`)
+//     over the exact supplied cells and packages the observed verdict with
+//     the canonical assumption set (`dep.AssumptionSet`, never the lossy
+//     base-33 diagnostic projection)
+//   → `binding_authorizes` decides whether that sealed verdict may authorize
+//     reuse: MNCS PASS verdict, expected kernel identity, valid set —
+//     FAIL and UNKNOWN never authorize, and NOTHING upgrades them
+//   → `binding_reusable` re-validates a sealed binding against exact
+//     presented identities (proof digest, obligation, kernel, live cells,
+//     dependency slots), plus a fresh kernel re-run over the sealed cells
+//     and an exact assumption-set recomputation. Any drift rejects.
+//
+// The independent Rust reference checker (`crates/mncs-model/src/proof_dep.rs`)
+// corroborates: it recomputes a diagnostic verdict and reports agreement or
+// disagreement. It NEVER constructs a `ProofBinding`, NEVER issues authority,
+// NEVER upgrades UNKNOWN, and NEVER serves as the source of truth. On
+// disagreement the binding is quarantined: no consumption until resolved.
+//
+// Identity encoding (host is byte transport only; MNCS has no unbounded
+// strings, so variable-length identities cross as digests):
+// - `proof`: the 32 raw sha256 digest bytes of the canonical artifact. The
+//   host seal check binds digest to cells before MNCS runs; MNCS treats the
+//   digest as opaque exact-match identity and additionally re-runs the
+//   kernel over the sealed cells on every reuse check.
+// - `obligation`: the 32 sha256 digest bytes of the obligation identity
+//   string (host-computed). Real obligation identities exceed every bounded
+//   byte slot (106 bytes observed); digest binding is exact under the same
+//   sha256 assumption every artifact seal already rests on. The exact string
+//   travels host-side in the relationship record; mutating it changes the
+//   digest (the host seal covers the string), so drift always rejects.
+// - `kernel`: up to 32 bytes plus explicit length; must equal the expected
+//   tranche-0.2 kernel identity or nothing authorizes.
+// - dependency slots (convention, documented on both sides):
+//   dep0 = obligation fingerprint, dep1 = operation fingerprint,
+//   dep2 = HIR content fingerprint, dep3 = reserved zero.
+//   Host normalizes each fingerprint string to 32 bytes (64-hex decode,
+//   otherwise sha256 of the UTF-8 spelling); MNCS compares bytes exactly.
+//
+// NOTE (backend constraint): native backends emit flat per-module symbols,
+// so every helper in this module keeps a globally-unique name and reuses
+// `dep.*` kernel helpers (e.g. `dep.bnot`) instead of redefining them —
+// a duplicate definition fails C11/LLVM/Cranelift compilation.
+module mncs.core.proof_admit.v1;
+
+use mncs.core.proof_dep.v2 as dep;
+
+// The sealed authoritative binding. `cells` are the EXACT buffer the kernel
+// verdict was observed under: reuse re-runs the kernel over these cells, so
+// no digest trust gap remains inside MNCS. `verdict` is the kernel code
+// (0 PASS, 1 FAIL, 2 UNKNOWN); only 0 can ever authorize.
+record ProofBinding {
+    proof: [byte; 32],
+    obligation: [byte; 32],
+    kernel: [byte; 32],
+    kernel_len: u64,
+    cells: [dep.Cell; 32],
+    count: byte,
+    proof_index: byte,
+    prop_index: byte,
+    assumptions: dep.AssumptionSet,
+    dep_count: u64,
+    dep0: [byte; 32],
+    dep1: [byte; 32],
+    dep2: [byte; 32],
+    dep3: [byte; 32],
+    verdict: i64
+}
+
+// Expected tranche-0.2 kernel identity: `mncs:proof-kernel:0.2` (21 bytes).
+fn expected_kernel() -> (result: [byte; 32]) {
+    return [(109) as byte, (110) as byte, (99) as byte, (115) as byte, (58) as byte, (112) as byte, (114) as byte, (111) as byte, (111) as byte, (102) as byte, (45) as byte, (107) as byte, (101) as byte, (114) as byte, (110) as byte, (101) as byte, (108) as byte, (58) as byte, (48) as byte, (46) as byte, (50) as byte, (0) as byte, (0) as byte, (0) as byte, (0) as byte, (0) as byte, (0) as byte, (0) as byte, (0) as byte, (0) as byte, (0) as byte, (0) as byte];
+}
+
+fn expected_kernel_len() -> (result: u64) {
+    return 21;
+}
+
+fn bytes32_equal(first: [byte; 32], second: [byte; 32]) -> (result: bool) {
+    iterate i over first carrying same: bool = true {
+        next same = same && (first[i] == second[i]);
+    }
+    return same;
+}
+
+fn kernel_matches(kernel: [byte; 32], kernel_len: u64) -> (result: bool) {
+    if kernel_len != expected_kernel_len() {
+        return false;
+    }
+    let expected: [byte; 32] = expected_kernel();
+    iterate i over kernel carrying same: bool = true {
+        let in_span: bool = i < kernel_len;
+        let equal: bool = kernel[i] == expected[i];
+        next same = same && select(in_span, equal, true);
+    }
+    return same;
+}
+
+fn deps_equal(binding: ProofBinding, dep_count: u64, dep0: [byte; 32], dep1: [byte; 32], dep2: [byte; 32], dep3: [byte; 32]) -> (result: bool) {
+    if dep_count != binding.dep_count || dep_count > 4 {
+        return false;
+    }
+    let ok0: bool = select(dep_count >= 1, bytes32_equal(binding.dep0, dep0), true);
+    let ok1: bool = select(dep_count >= 2, bytes32_equal(binding.dep1, dep1), true);
+    let ok2: bool = select(dep_count >= 3, bytes32_equal(binding.dep2, dep2), true);
+    let ok3: bool = select(dep_count >= 4, bytes32_equal(binding.dep3, dep3), true);
+    return ok0 && ok1 && ok2 && ok3;
+}
+
+// Seal one authoritative binding: run the MNCS kernel over the exact
+// supplied cells and package the observed verdict with the canonical
+// assumption set. FAIL/UNKNOWN seal too (observable, never authorizing).
+fn seal_binding(proof: [byte; 32], obligation: [byte; 32], kernel: [byte; 32], kernel_len: u64, cells: [dep.Cell; 32], count: byte, proof_index: byte, prop_index: byte, dep_count: u64, dep0: [byte; 32], dep1: [byte; 32], dep2: [byte; 32], dep3: [byte; 32]) -> (result: ProofBinding) {
+    let verdict: i64 = dep.check_proof_code(cells, count, proof_index, prop_index);
+    let observed: dep.AssumptionSet = dep.assumption_set(cells, count, proof_index, prop_index);
+    let bounded_deps: bool = dep_count <= 4;
+    return ProofBinding {
+        proof: proof,
+        obligation: obligation,
+        kernel: kernel,
+        kernel_len: kernel_len,
+        cells: cells,
+        count: count,
+        proof_index: proof_index,
+        prop_index: prop_index,
+        assumptions: observed,
+        dep_count: select(bounded_deps, dep_count, 0),
+        dep0: dep0,
+        dep1: dep1,
+        dep2: dep2,
+        dep3: dep3,
+        verdict: verdict
+    };
+}
+
+// The single authorization predicate. PASS verdict, expected kernel, valid
+// canonical set: all three, or no authority. FAIL and UNKNOWN fall through
+// to false on every path; no branch upgrades them.
+fn binding_authorizes(binding: ProofBinding) -> (result: bool) {
+    if binding.verdict != 0 {
+        return false;
+    }
+    if dep.bnot(kernel_matches(binding.kernel, binding.kernel_len)) {
+        return false;
+    }
+    return binding.assumptions.valid;
+}
+
+// One cell equality at an active-prefix position: tag plus all four
+// immediates. Levels are immediates, references are indices: both compare
+// as plain integers, so any cell drift flips this to false.
+fn cell_equal_at(first: [dep.Cell; 32], second: [dep.Cell; 32], at: i64) -> (result: bool) {
+    let slot: u64 = (select(at >= 0 && at < 32, at, 0)) as u64;
+    return dep.tag_code(first[slot].tag) == dep.tag_code(second[slot].tag) && first[slot].arg0 == second[slot].arg0 && first[slot].arg1 == second[slot].arg1 && first[slot].arg2 == second[slot].arg2 && first[slot].arg3 == second[slot].arg3;
+}
+
+// Exact buffer-prefix equality over the active prefix (positions below
+// `total`). The presented live cells must match the sealed cells there, so
+// a skewed binding (sealed over different bytes than the live artifact)
+// can never validate, even when the skewed bytes would check PASS on their
+// own. Trailing padding is inert and unchecked: the kernel never reads
+// past `count`, and generation pads with `Nat` by construction.
+fn cells_prefix_equal(first: [dep.Cell; 32], second: [dep.Cell; 32], total: i64) -> (result: bool) {
+    iterate i over first carrying same: bool = true {
+        let at: i64 = i as i64;
+        let relevant: bool = at >= 0 && at < total;
+        next same = same && select(relevant, cell_equal_at(first, second, at), true);
+    }
+    return same;
+}
+
+// Full reuse validation: exact presented identities, presented live cells
+// equal to the sealed cells, dependency slots, plus a fresh kernel re-run
+// over the sealed cells and an exact assumption-set recomputation.
+// Mutating the proof digest, obligation, kernel, live cells, sealed cells,
+// dependency slots, or the stored set each flips at least one conjunct to
+// false. The digest↔cells link itself is established by the host seal check
+// at admission time (documented trust boundary: MNCS has no hash primitive);
+// everything downstream of admission is exact MNCS comparison.
+fn binding_reusable(binding: ProofBinding, proof: [byte; 32], obligation: [byte; 32], kernel: [byte; 32], kernel_len: u64, cells: [dep.Cell; 32], count: byte, proof_index: byte, prop_index: byte, dep_count: u64, dep0: [byte; 32], dep1: [byte; 32], dep2: [byte; 32], dep3: [byte; 32]) -> (result: bool) {
+    if dep.bnot(binding_authorizes(binding)) {
+        return false;
+    }
+    if dep.bnot(bytes32_equal(binding.proof, proof)) {
+        return false;
+    }
+    if dep.bnot(bytes32_equal(binding.obligation, obligation)) {
+        return false;
+    }
+    if dep.bnot(kernel_matches(kernel, kernel_len)) {
+        return false;
+    }
+    let total: i64 = count as i64;
+    if total != binding.count as i64 || proof_index != binding.proof_index || prop_index != binding.prop_index {
+        return false;
+    }
+    if dep.bnot(cells_prefix_equal(binding.cells, cells, total)) {
+        return false;
+    }
+    if dep.bnot(deps_equal(binding, dep_count, dep0, dep1, dep2, dep3)) {
+        return false;
+    }
+    let fresh: i64 = dep.check_proof_code(binding.cells, binding.count, binding.proof_index, binding.prop_index);
+    if fresh != 0 {
+        return false;
+    }
+    let recomputed: dep.AssumptionSet = dep.assumption_set(binding.cells, binding.count, binding.proof_index, binding.prop_index);
+    return dep.assumption_set_equal(binding.assumptions, recomputed);
+}

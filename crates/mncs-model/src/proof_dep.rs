@@ -8,13 +8,23 @@
 //! tables over a `[Cell; 32]` buffer with explicit-substitution closures.
 //! No code is shared between them.
 //!
+//! AUTHORITY BOUNDARY (tranche-0.2 hardening): this checker is corroboration
+//! only. It recomputes a diagnostic verdict, compares it against the
+//! MNCS-issued verdict, and reports agreement or disagreement. It NEVER
+//! creates proof authority: there is no binding constructor in this module,
+//! no verdict upgrade path (UNKNOWN stays UNKNOWN no matter what this
+//! checker says), and disagreement is always a safety stop, never a tie
+//! broken in either implementation's favour. Authoritative admission and
+//! binding live in `library/core/proof_admit.mncs` (`mncs.core.proof_admit.v1`)
+//! and execute through the MNCS toolchain; see `mncs-compiler` admission.
+//!
 //! The differential contract is verdict-class agreement (PASS / FAIL /
-//! UNKNOWN) plus exact agreement on assumption codes and probe outputs over
-//! the shared corpus (`examples/execution/proof-dep-corpus.json`, produced by
-//! `scripts/gen_proof_dep_corpus.py`). Agreement is evidence of consistency,
-//! never a proof of checker correctness. If the two ever disagree, the
-//! dispute is resolved in favour of NEITHER implementation: both are bugs
-//! until the calculus document adjudicates.
+//! UNKNOWN) plus exact agreement on canonical assumption sets and probe
+//! outputs over the shared corpus (`examples/execution/proof-dep-corpus.json`,
+//! produced by `scripts/gen_proof_dep_corpus.py`). Agreement is evidence of
+//! consistency, never a proof of checker correctness. If the two ever
+//! disagree, the dispute is resolved in favour of NEITHER implementation:
+//! both are bugs until the calculus document adjudicates.
 
 use serde::{Deserialize, Serialize};
 
@@ -164,14 +174,74 @@ pub struct DepCorpusCase {
     pub first: usize,
     pub second: usize,
     pub expected: i64,
+    /// Decoded canonical set expectation for [`DepEntry::AssumptionSet`]
+    /// cases (`expected` is 0 on agreement, 1 on divergence).
+    pub expected_set: Option<DepAssumptionSet>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DepEntry {
     Check,
     Assumptions,
+    AssumptionSet,
     Eval,
     Defeq,
+}
+
+fn corpus_record_field<'a>(
+    value: &'a serde_json::Value,
+    name: &str,
+) -> Option<&'a serde_json::Value> {
+    value
+        .get("record")?
+        .get("fields")?
+        .as_array()?
+        .iter()
+        .find_map(|field| {
+            let pair = field.as_array()?;
+            if pair.first()?.as_str()? == name {
+                pair.get(1)
+            } else {
+                None
+            }
+        })
+}
+
+fn corpus_integer_sequence(value: &serde_json::Value) -> Option<Vec<i64>> {
+    value
+        .get("sequence")?
+        .get("values")?
+        .as_array()?
+        .iter()
+        .map(|item| item.get("integer")?.get("value")?.as_i64())
+        .collect()
+}
+
+fn corpus_boolean(value: &serde_json::Value) -> Option<bool> {
+    value.get("boolean")?.get("value")?.as_bool()
+}
+
+/// Decode a pinned canonical `AssumptionSet` record expectation into the
+/// authority-grade representation for exact differential comparison.
+fn corpus_assumption_set(value: &serde_json::Value) -> Option<DepAssumptionSet> {
+    let count_value = corpus_integer(corpus_record_field(value, "count")?)?;
+    let count = usize::try_from(count_value).ok()?;
+    let valid = corpus_boolean(corpus_record_field(value, "valid")?)?;
+    let hyp = corpus_integer_sequence(corpus_record_field(value, "hyp")?)?;
+    let level = corpus_integer_sequence(corpus_record_field(value, "level")?)?;
+    let carrier = corpus_integer_sequence(corpus_record_field(value, "carrier")?)?;
+    if hyp.len() < count || level.len() < count || carrier.len() < count {
+        return None;
+    }
+    let mut uses = Vec::with_capacity(count);
+    for slot in 0..count {
+        uses.push(DepAssumptionUse {
+            hyp: hyp[slot],
+            level: level[slot],
+            carrier: carrier[slot],
+        });
+    }
+    Some(DepAssumptionSet { uses, valid })
 }
 
 fn corpus_integer(value: &serde_json::Value) -> Option<i64> {
@@ -235,6 +305,7 @@ pub fn parse_proof_dep_corpus(text: &str) -> Result<Vec<DepCorpusCase>, String> 
         let entry = match function {
             "check_proof_code" => DepEntry::Check,
             "assumptions_code" => DepEntry::Assumptions,
+            "assumption_set" => DepEntry::AssumptionSet,
             "probe_eval_code" => DepEntry::Eval,
             "probe_defeq_code" => DepEntry::Defeq,
             other => return Err(format!("{id}: unknown entry {other}")),
@@ -265,12 +336,20 @@ pub fn parse_proof_dep_corpus(text: &str) -> Result<Vec<DepCorpusCase>, String> 
         } else {
             corpus_byte(&arguments[3]).ok_or_else(|| format!("{id}: bad index"))?
         };
-        let expected = case
+        let expected_value = case
             .get("expected")
             .and_then(serde_json::Value::as_array)
             .and_then(|expected| expected.first())
-            .and_then(corpus_integer)
             .ok_or_else(|| format!("{id}: bad expectation"))?;
+        let (expected, expected_set) = if entry == DepEntry::AssumptionSet {
+            let set = corpus_assumption_set(expected_value)
+                .ok_or_else(|| format!("{id}: bad set expectation"))?;
+            (0, Some(set))
+        } else {
+            let code =
+                corpus_integer(expected_value).ok_or_else(|| format!("{id}: bad expectation"))?;
+            (code, None)
+        };
         parsed.push(DepCorpusCase {
             id,
             entry,
@@ -279,6 +358,7 @@ pub fn parse_proof_dep_corpus(text: &str) -> Result<Vec<DepCorpusCase>, String> 
             first,
             second,
             expected,
+            expected_set,
         });
     }
     Ok(parsed)
@@ -1422,17 +1502,26 @@ pub fn dep_check(cells: Vec<DepCell>, count: usize, proof: usize, prop: usize) -
     }
 }
 
-/// `assumptions_code`: base-33 over buffer order, -1 unless PASS.
-pub fn dep_assumptions(cells: Vec<DepCell>, count: usize, proof: usize, prop: usize) -> i64 {
-    if !valid_range(count, &[proof, prop]) || is_hyp(&cells, proof) || is_hyp(&cells, prop) {
-        return -1;
+/// The exact used hypotheses on a PASS verdict, in ascending buffer order:
+/// `(hyp_buffer_index, declared_level, carrier_cell)`. `None` unless the
+/// reference checker returns PASS: assumptions are observable only for
+/// checked proofs. This is the shared structural computation behind both
+/// the diagnostic projection below and the canonical authority-grade set.
+fn used_hypotheses(
+    cells: &[DepCell],
+    count: usize,
+    proof: usize,
+    prop: usize,
+) -> Option<Vec<(usize, i64, i64)>> {
+    if !valid_range(count, &[proof, prop]) || is_hyp(cells, proof) || is_hyp(cells, prop) {
+        return None;
     }
-    if dep_check(cells.clone(), count, proof, prop) != DepVerdict::Pass.code() {
-        return -1;
+    if dep_check(cells.to_vec(), count, proof, prop) != DepVerdict::Pass.code() {
+        return None;
     }
-    let buffer = DepBuffer::new(cells, count);
+    let buffer = DepBuffer::new(cells.to_vec(), count);
     // The re-check cannot fail after a PASS, but a second failure still
-    // reports -1 rather than an assumption set.
+    // yields no assumption set rather than a partial one.
     let targets = buffer.check_shape().unwrap_or_else(|_| vec![None; count]);
     let mut cones = vec![false; count];
     let mut stack = vec![proof, prop];
@@ -1446,20 +1535,103 @@ pub fn dep_assumptions(cells: Vec<DepCell>, count: usize, proof: usize, prop: us
             stack.push(cell.args[*slot] as usize);
         }
     }
-    let mut code = 0i64;
+    let mut used = Vec::new();
     for (index, cell) in buffer.cells.iter().enumerate().take(count) {
+        if cell.tag != DepTag::Hyp {
+            continue;
+        }
+        let consumed = (0..count).any(|var| {
+            cones[var] && buffer.cells[var].tag == DepTag::Var && targets[var] == Some(index)
+        });
+        if consumed {
+            used.push((index, cell.args[0], cell.args[1]));
+        }
+    }
+    Some(used)
+}
+
+/// `assumptions_code`: base-33 over buffer order, -1 unless PASS.
+///
+/// DIAGNOSTIC PROJECTION ONLY. This packing wraps past ~10 hypotheses
+/// (saturating arithmetic) and can alias distinct assumption sets. It is
+/// retained for backward-compatible differential evidence over the shared
+/// corpus, and MUST NOT appear in the authority protocol: bindings,
+/// admission, and reuse compare canonical [`DepAssumptionSet`] values, and
+/// the MNCS side compares `dep.AssumptionSet` records. See
+/// `library/core/proof_admit.mncs`.
+pub fn dep_assumptions(cells: Vec<DepCell>, count: usize, proof: usize, prop: usize) -> i64 {
+    let Some(used) = used_hypotheses(&cells, count, proof, prop) else {
+        return -1;
+    };
+    let mut code = 0i64;
+    for (index, cell) in cells.iter().enumerate().take(count) {
         let mut digit = 0i64;
-        if cell.tag == DepTag::Hyp {
-            let used = (0..count).any(|var| {
-                cones[var] && buffer.cells[var].tag == DepTag::Var && targets[var] == Some(index)
-            });
-            if used {
-                digit = cell.args[0] + 1;
-            }
+        if cell.tag == DepTag::Hyp && used.iter().any(|(hyp, _, _)| *hyp == index) {
+            digit = cell.args[0] + 1;
         }
         code = code.saturating_mul(33).saturating_add(digit);
     }
     code
+}
+
+/// One consumed assumption: the `Hyp` cell's buffer index, its declared
+/// level, and its carrier-type cell. Level and carrier are part of the
+/// identity: changing either changes the set even when the buffer position
+/// is unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DepAssumptionUse {
+    pub hyp: i64,
+    pub level: i64,
+    pub carrier: i64,
+}
+
+/// The canonical, collision-resistant used-assumption set: exact entries in
+/// deterministic ascending buffer order. No arithmetic packing, no wrapping,
+/// no silent aliasing. The empty set is explicit (`uses` empty, `valid`
+/// only on PASS). This is the authority-grade representation: artifact seals
+/// and admission corroboration compare these values, never the base-33
+/// diagnostic projection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DepAssumptionSet {
+    pub uses: Vec<DepAssumptionUse>,
+    pub valid: bool,
+}
+
+impl DepAssumptionSet {
+    pub fn invalid() -> Self {
+        Self {
+            uses: Vec::new(),
+            valid: false,
+        }
+    }
+
+    pub fn is_empty_set(&self) -> bool {
+        self.valid && self.uses.is_empty()
+    }
+}
+
+/// Canonical used-assumption set over the exact buffer. Returns an invalid
+/// set unless the reference checker returns PASS.
+pub fn dep_assumption_set(
+    cells: Vec<DepCell>,
+    count: usize,
+    proof: usize,
+    prop: usize,
+) -> DepAssumptionSet {
+    let Some(used) = used_hypotheses(&cells, count, proof, prop) else {
+        return DepAssumptionSet::invalid();
+    };
+    DepAssumptionSet {
+        uses: used
+            .into_iter()
+            .map(|(hyp, level, carrier)| DepAssumptionUse {
+                hyp: hyp as i64,
+                level,
+                carrier,
+            })
+            .collect(),
+        valid: true,
+    }
 }
 
 /// `probe_eval_code`: value head, 100 on abstention, 101 on malformation.
@@ -1515,17 +1687,22 @@ pub fn dep_probe_defeq(cells: Vec<DepCell>, count: usize, left: usize, right: us
 }
 
 /// A sealed tranche-0.2 proof artifact: the exact buffer, the obligation it
-/// discharges, and the observed assumption code. The content identity covers
-/// every byte, so the `Hyp` declarations inside the buffer are part of the
-/// sealed identity: adding, removing, or changing an assumption changes the
-/// identity and invalidates every binding.
+/// discharges, and the claimed canonical assumption set. The content identity
+/// covers every byte, so the `Hyp` declarations inside the buffer are part of
+/// the sealed identity: adding, removing, or changing an assumption changes
+/// the identity and invalidates every binding. The recorded `assumptions`
+/// are a CLAIM, not authority: admission re-runs the MNCS kernel over the
+/// exact cells and the independent checker corroborates before anything is
+/// consumed. Schema 0.3 drops the lossy base-33 `assumption_code` (now a
+/// diagnostic-only projection, see [`dep_assumptions`]) in favour of the
+/// canonical set.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DepArtifact {
     pub schema_version: String,
     pub identity: String,
     pub kernel: String,
     pub obligation: String,
-    pub assumption_code: i64,
+    pub assumptions: DepAssumptionSet,
     pub cells: Vec<DepCellSer>,
     pub count: usize,
     pub proof: usize,
@@ -1580,7 +1757,7 @@ fn dep_seal(artifact: &DepArtifact) -> String {
 }
 
 impl DepArtifact {
-    pub const SCHEMA_VERSION: &'static str = "0.2";
+    pub const SCHEMA_VERSION: &'static str = "0.3";
 
     pub fn new(
         obligation: impl Into<String>,
@@ -1589,13 +1766,13 @@ impl DepArtifact {
         proof: usize,
         proposition: usize,
     ) -> Self {
-        let assumption_code = dep_assumptions(cells.clone(), count, proof, proposition);
+        let assumptions = dep_assumption_set(cells.clone(), count, proof, proposition);
         let mut artifact = Self {
             schema_version: Self::SCHEMA_VERSION.to_owned(),
             identity: String::new(),
             kernel: PROOF_DEP_KERNEL_ID.to_owned(),
             obligation: obligation.into(),
-            assumption_code,
+            assumptions,
             cells: cells.iter().map(DepCellSer::of).collect(),
             count,
             proof,
@@ -1603,6 +1780,13 @@ impl DepArtifact {
         };
         artifact.identity = dep_seal(&artifact);
         artifact
+    }
+
+    /// Recompute the content seal after deliberate assembly or transformation
+    /// (transport only: resealing never checks anything, it just binds the
+    /// current bytes to a fresh identity). Admission always re-validates.
+    pub fn reseal(&mut self) {
+        self.identity = dep_seal(self);
     }
 
     pub fn identity_is_valid(&self) -> bool {
@@ -1621,70 +1805,117 @@ impl DepArtifact {
     }
 }
 
-/// A kernel verdict bound to the exact artifact bytes it was checked under.
-/// Reuse requires an exact match on identity, kernel, obligation, and the
-/// observed assumption code: any material change invalidates the binding.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DepBinding {
-    pub proof: String,
-    pub kernel: String,
-    pub obligation: String,
-    pub assumption_code: i64,
+/// The independent checker's corroboration report: its diagnostic verdict over
+/// the exact artifact cells, compared against the MNCS-issued verdict. This
+/// is the checker's entire safety role — agreement, disagreement, or
+/// abstention — and it carries NO authority: nothing here binds, admits, or
+/// upgrades anything. Consumption additionally requires an MNCS-issued PASS
+/// binding (see `mncs.core.proof_admit.v1`); this report only permits the
+/// compiler to trust that binding when both implementations agree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DepCorroboration {
+    /// Both implementations returned PASS over the exact cells with exactly
+    /// equal canonical assumption sets. The only state in which an
+    /// MNCS-issued binding may be consumed.
+    AgreePass,
+    /// Both implementations agree on a non-PASS verdict class (FAIL or
+    /// UNKNOWN, verdict reported). Nothing is consumable: FAIL rejects and
+    /// UNKNOWN never upgrades, no matter what this checker says.
+    AgreeNonPass { verdict: DepVerdict },
+    /// The implementations disagree (verdict class or assumption set), or
+    /// the artifact is malformed/unsealed. Safety stop: quarantine the
+    /// binding, consume nothing, resolve the dispute first.
+    Disagree { mncs: DepVerdict, rust: DepVerdict },
+    /// The independent checker could not run (unavailable, crashed, or timed
+    /// out). The MNCS verdict stands alone and uncorroborated: under the
+    /// default policy the binding is quarantined, never consumed.
+    CheckerUnavailable,
 }
 
-impl DepBinding {
-    /// Bind a sealed artifact. Returns `None` unless the independent
-    /// reference checker returns PASS for the exact artifact bytes *and*
-    /// the recorded assumption code reproduces, so a binding always
-    /// carries a checked verdict over a checked assumption set.
-    pub fn bind(artifact: &DepArtifact) -> Option<Self> {
-        if !artifact.identity_is_valid() || artifact.kernel != PROOF_DEP_KERNEL_ID {
-            return None;
-        }
-        let buffer = artifact.buffer()?;
-        let cells: Vec<DepCell> = buffer.cells.clone();
-        if dep_check(
-            cells.clone(),
-            artifact.count,
-            artifact.proof,
-            artifact.proposition,
-        ) != DepVerdict::Pass.code()
-        {
-            return None;
-        }
-        if dep_assumptions(cells, artifact.count, artifact.proof, artifact.proposition)
-            != artifact.assumption_code
-        {
-            return None;
-        }
-        Some(Self {
-            proof: artifact.identity.clone(),
-            kernel: artifact.kernel.clone(),
-            obligation: artifact.obligation.clone(),
-            assumption_code: artifact.assumption_code,
-        })
-    }
+/// Corroboration policy: what happens without independent agreement. This is
+/// an explicit, inspectable policy value — never a silent default smuggling
+/// in authority rules. The default (and the only policy the compiler
+/// transport accepts) requires corroboration: an uncorroborated MNCS PASS is
+/// recorded but quarantined, never consumed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CorroborationPolicy {
+    #[default]
+    RequireCorroboration,
+}
 
-    pub fn reusable_if(
-        &self,
-        proof: &str,
-        kernel: &str,
-        obligation: &str,
-        assumption_code: i64,
-    ) -> bool {
-        self.proof == proof
-            && self.kernel == kernel
-            && self.obligation == obligation
-            && self.assumption_code == assumption_code
+impl DepCorroboration {
+    /// Whether an MNCS-issued binding may be consumed under this report.
+    /// Only full PASS agreement consumes. Every other state — including an
+    /// MNCS PASS the checker disputes or could not examine — refuses.
+    pub fn consumable(self) -> bool {
+        matches!(self, Self::AgreePass)
     }
 }
 
-/// Run one shared-corpus case through the reference checker.
+/// Compare the MNCS-issued verdict (and its canonical assumption set)
+/// against an independent re-check of the exact artifact cells.
+///
+/// - `mncs_verdict`: the verdict class MNCS reported for these exact cells.
+/// - `mncs_assumptions`: the canonical set MNCS reported (`None` when the
+///   MNCS side is unavailable or its set failed to decode — treated as a
+///   dispute, never as agreement).
+/// - `rust`: `None` when the independent checker itself is unavailable.
+///
+/// FAIL > UNKNOWN > PASS applies to verdicts, never to authority: an MNCS
+/// UNKNOWN or FAIL with a Rust PASS still reports non-consumable, and a Rust
+/// PASS can never upgrade an MNCS non-PASS.
+pub fn corroborate_proof(
+    mncs_verdict: DepVerdict,
+    mncs_assumptions: Option<&DepAssumptionSet>,
+    cells: Vec<DepCell>,
+    count: usize,
+    proof: usize,
+    proposition: usize,
+    rust: Option<DepVerdict>,
+) -> DepCorroboration {
+    let Some(rust_verdict) = rust else {
+        return DepCorroboration::CheckerUnavailable;
+    };
+    if rust_verdict != mncs_verdict {
+        return DepCorroboration::Disagree {
+            mncs: mncs_verdict,
+            rust: rust_verdict,
+        };
+    }
+    match mncs_verdict {
+        DepVerdict::Pass => {
+            let observed = dep_assumption_set(cells, count, proof, proposition);
+            let sets_equal =
+                mncs_assumptions.is_some_and(|claimed| claimed.valid && *claimed == observed);
+            if observed.valid && sets_equal {
+                DepCorroboration::AgreePass
+            } else {
+                DepCorroboration::Disagree {
+                    mncs: mncs_verdict,
+                    rust: rust_verdict,
+                }
+            }
+        }
+        other => DepCorroboration::AgreeNonPass { verdict: other },
+    }
+}
+
+/// Run one shared-corpus case through the reference checker. Set cases
+/// return 0 on exact canonical-set agreement, 1 on any divergence.
 pub fn run_dep_case(case: &DepCorpusCase) -> i64 {
     match case.entry {
         DepEntry::Check => dep_check(case.cells.clone(), case.count, case.first, case.second),
         DepEntry::Assumptions => {
             dep_assumptions(case.cells.clone(), case.count, case.first, case.second)
+        }
+        DepEntry::AssumptionSet => {
+            let observed =
+                dep_assumption_set(case.cells.clone(), case.count, case.first, case.second);
+            let agrees = case
+                .expected_set
+                .as_ref()
+                .is_some_and(|expected| *expected == observed);
+            i64::from(!agrees)
         }
         DepEntry::Eval => dep_probe_eval(case.cells.clone(), case.count, case.first),
         DepEntry::Defeq => dep_probe_defeq(case.cells.clone(), case.count, case.first, case.second),
@@ -1869,56 +2100,8 @@ mod tests {
         assert_eq!(dep_check(cells, 4, 2, 2), 1);
     }
 
-    #[test]
-    fn binding_seals_flagship_and_rejects_drift() {
-        let artifact = DepArtifact::new(
-            "mncs:obligation:plus-zero-right",
-            flagship_cells(),
-            29,
-            23,
-            28,
-        );
-        assert!(artifact.identity_is_valid());
-        assert_eq!(artifact.assumption_code, 0);
-        let binding = DepBinding::bind(&artifact).expect("flagship binds");
-        assert!(binding.reusable_if(
-            &artifact.identity,
-            PROOF_DEP_KERNEL_ID,
-            "mncs:obligation:plus-zero-right",
-            0,
-        ));
-        // Drifted obligation invalidates reuse.
-        assert!(!binding.reusable_if(
-            &artifact.identity,
-            PROOF_DEP_KERNEL_ID,
-            "mncs:obligation:something-else",
-            0,
-        ));
-        // Drifted kernel version invalidates reuse.
-        assert!(!binding.reusable_if(
-            &artifact.identity,
-            "mncs:proof-kernel:0.1",
-            "mncs:obligation:plus-zero-right",
-            0,
-        ));
-        // A tampered buffer reseals to a different identity and no longer
-        // matches the binding.
-        let mut tampered = artifact.clone();
-        tampered.cells[21] = DepCellSer::of(&var(1));
-        assert_ne!(
-            dep_check(
-                tampered.buffer().expect("buffer").cells,
-                tampered.count,
-                tampered.proof,
-                tampered.proposition,
-            ),
-            0
-        );
-    }
-
-    #[test]
-    fn binding_records_open_assumptions() {
-        let cells = vec![
+    fn open_refl_cells() -> Vec<DepCell> {
+        vec![
             nat(),
             cell(DepTag::Hyp, [0, 0, 0, 0]),
             var(0),
@@ -1926,42 +2109,332 @@ mod tests {
             var(0),
             cell(DepTag::Refl, [2, 0, 0, 0]),
             cell(DepTag::Eq, [0, 3, 4, 0]),
-        ];
-        let artifact = DepArtifact::new("mncs:obligation:open-refl", cells, 7, 5, 6);
-        assert!(artifact.identity_is_valid());
-        assert_eq!(artifact.assumption_code, 33i64.pow(5));
-        let binding = DepBinding::bind(&artifact).expect("open proof binds");
-        assert!(binding.reusable_if(
-            &artifact.identity,
-            PROOF_DEP_KERNEL_ID,
-            "mncs:obligation:open-refl",
-            33i64.pow(5),
-        ));
-        // The same proof under a different assumption set is not reusable.
-        assert!(!binding.reusable_if(
-            &artifact.identity,
-            PROOF_DEP_KERNEL_ID,
-            "mncs:obligation:open-refl",
-            0,
-        ));
+        ]
     }
 
-    #[test]
-    fn artifact_survives_file_round_trip_and_rebinds() {
-        let artifact = DepArtifact::new(
+    fn flagship_artifact() -> DepArtifact {
+        DepArtifact::new(
             "mncs:obligation:plus-zero-right",
             flagship_cells(),
             29,
             23,
             28,
+        )
+    }
+
+    fn rust_verdict_of(artifact: &DepArtifact) -> DepVerdict {
+        let buffer = artifact.buffer().expect("buffer");
+        DepVerdict::from_code(dep_check(
+            buffer.cells,
+            artifact.count,
+            artifact.proof,
+            artifact.proposition,
+        ))
+        .expect("verdict code")
+    }
+
+    /// Corroboration input for the honest path: the MNCS-issued verdict and
+    /// set as the real admission layer would decode them. In this module the
+    /// MNCS side is injected (theory-derived); end-to-end tests in
+    /// `mncs-compiler` and the CLI drive genuine MNCS execution.
+    fn honest_mncs_side(artifact: &DepArtifact) -> (DepVerdict, DepAssumptionSet) {
+        (rust_verdict_of(artifact), artifact.assumptions.clone())
+    }
+
+    // Policy 1: MNCS PASS + Rust PASS over the exact cells with equal
+    // canonical sets is the ONLY consumable state.
+    #[test]
+    fn corroboration_consumes_mncs_pass_with_rust_agreement() {
+        let artifact = flagship_artifact();
+        assert!(artifact.identity_is_valid());
+        assert!(artifact.assumptions.is_empty_set());
+        let (mncs_verdict, mncs_set) = honest_mncs_side(&artifact);
+        assert_eq!(mncs_verdict, DepVerdict::Pass);
+        let report = corroborate_proof(
+            mncs_verdict,
+            Some(&mncs_set),
+            flagship_cells(),
+            29,
+            23,
+            28,
+            Some(rust_verdict_of(&artifact)),
         );
+        assert_eq!(report, DepCorroboration::AgreePass);
+        assert!(report.consumable());
+    }
+
+    // Policy 2: MNCS PASS disputed by the Rust checker quarantines the
+    // binding — no consumption until the disagreement is resolved.
+    #[test]
+    fn corroboration_refuses_mncs_pass_under_rust_disagreement() {
+        let artifact = flagship_artifact();
+        let (mncs_verdict, mncs_set) = honest_mncs_side(&artifact);
+        assert_eq!(mncs_verdict, DepVerdict::Pass);
+        for rust in [DepVerdict::Fail, DepVerdict::Unknown] {
+            let report = corroborate_proof(
+                mncs_verdict,
+                Some(&mncs_set),
+                flagship_cells(),
+                29,
+                23,
+                28,
+                Some(rust),
+            );
+            assert_eq!(
+                report,
+                DepCorroboration::Disagree {
+                    mncs: DepVerdict::Pass,
+                    rust
+                }
+            );
+            assert!(!report.consumable());
+        }
+    }
+
+    // Policy 3: MNCS UNKNOWN + Rust PASS grants no authority. UNKNOWN never
+    // upgrades, no matter how confident the second checker is.
+    #[test]
+    fn corroboration_never_upgrades_mncs_unknown() {
+        let artifact = flagship_artifact();
+        let report = corroborate_proof(
+            DepVerdict::Unknown,
+            Some(&DepAssumptionSet::invalid()),
+            flagship_cells(),
+            29,
+            23,
+            28,
+            Some(rust_verdict_of(&artifact)),
+        );
+        assert_eq!(
+            report,
+            DepCorroboration::Disagree {
+                mncs: DepVerdict::Unknown,
+                rust: DepVerdict::Pass
+            }
+        );
+        assert!(!report.consumable());
+        // Even unanimous UNKNOWN is observable but not consumable.
+        let report = corroborate_proof(
+            DepVerdict::Unknown,
+            Some(&DepAssumptionSet::invalid()),
+            flagship_cells(),
+            29,
+            23,
+            28,
+            Some(DepVerdict::Unknown),
+        );
+        assert_eq!(
+            report,
+            DepCorroboration::AgreeNonPass {
+                verdict: DepVerdict::Unknown
+            }
+        );
+        assert!(!report.consumable());
+    }
+
+    // Policy 4: MNCS FAIL + Rust PASS grants no authority. A second checker's
+    // PASS can never override an MNCS FAIL.
+    #[test]
+    fn corroboration_never_overrides_mncs_fail() {
+        let artifact = flagship_artifact();
+        let report = corroborate_proof(
+            DepVerdict::Fail,
+            Some(&DepAssumptionSet::invalid()),
+            flagship_cells(),
+            29,
+            23,
+            28,
+            Some(rust_verdict_of(&artifact)),
+        );
+        assert_eq!(
+            report,
+            DepCorroboration::Disagree {
+                mncs: DepVerdict::Fail,
+                rust: DepVerdict::Pass
+            }
+        );
+        assert!(!report.consumable());
+        // Unanimous FAIL is observable but not consumable.
+        let report = corroborate_proof(
+            DepVerdict::Fail,
+            Some(&DepAssumptionSet::invalid()),
+            flagship_cells(),
+            29,
+            23,
+            28,
+            Some(DepVerdict::Fail),
+        );
+        assert_eq!(
+            report,
+            DepCorroboration::AgreeNonPass {
+                verdict: DepVerdict::Fail
+            }
+        );
+        assert!(!report.consumable());
+    }
+
+    // Policy 5: Rust checker unavailable + MNCS PASS quarantines under the
+    // explicit default policy. No silent authority rules are invented: the
+    // policy value says RequireCorroboration and the report refuses.
+    #[test]
+    fn corroboration_quarantines_without_checker_under_explicit_policy() {
+        let artifact = flagship_artifact();
+        let (mncs_verdict, mncs_set) = honest_mncs_side(&artifact);
+        assert_eq!(mncs_verdict, DepVerdict::Pass);
+        let policy = CorroborationPolicy::default();
+        assert_eq!(policy, CorroborationPolicy::RequireCorroboration);
+        let report = corroborate_proof(
+            mncs_verdict,
+            Some(&mncs_set),
+            flagship_cells(),
+            29,
+            23,
+            28,
+            None,
+        );
+        assert_eq!(report, DepCorroboration::CheckerUnavailable);
+        assert!(!report.consumable());
+    }
+
+    // Policy 6/7/8/9 (transport legs): mutating the proof cells, the
+    // obligation, the kernel, or the claimed assumption set breaks either
+    // the seal or the corroboration inputs, so reuse is refused.
+    #[test]
+    fn corroboration_rejects_mutated_proof_cells() {
+        let artifact = flagship_artifact();
+        let (mncs_verdict, mncs_set) = honest_mncs_side(&artifact);
+        let mut tampered = flagship_cells();
+        tampered[21] = var(1);
+        let rust =
+            DepVerdict::from_code(dep_check(tampered.clone(), 29, 23, 28)).expect("verdict code");
+        assert_ne!(rust, DepVerdict::Pass);
+        let report = corroborate_proof(
+            mncs_verdict,
+            Some(&mncs_set),
+            tampered,
+            29,
+            23,
+            28,
+            Some(rust),
+        );
+        assert!(!report.consumable());
+    }
+
+    #[test]
+    fn corroboration_rejects_mutated_assumption_claim() {
+        let artifact = flagship_artifact();
+        let (mncs_verdict, _) = honest_mncs_side(&artifact);
+        // Claim the empty flagship set contains an assumption: the
+        // recomputed set disagrees, so the binding quarantines.
+        let mut claimed = artifact.assumptions.clone();
+        claimed.uses.push(DepAssumptionUse {
+            hyp: 1,
+            level: 0,
+            carrier: 0,
+        });
+        let report = corroborate_proof(
+            mncs_verdict,
+            Some(&claimed),
+            flagship_cells(),
+            29,
+            23,
+            28,
+            Some(DepVerdict::Pass),
+        );
+        assert_eq!(
+            report,
+            DepCorroboration::Disagree {
+                mncs: DepVerdict::Pass,
+                rust: DepVerdict::Pass
+            }
+        );
+        assert!(!report.consumable());
+    }
+
+    #[test]
+    fn canonical_set_records_open_assumptions_exactly() {
+        let cells = open_refl_cells();
+        let set = dep_assumption_set(cells.clone(), 7, 5, 6);
+        assert_eq!(
+            set,
+            DepAssumptionSet {
+                uses: vec![DepAssumptionUse {
+                    hyp: 1,
+                    level: 0,
+                    carrier: 0,
+                }],
+                valid: true,
+            }
+        );
+        let artifact = DepArtifact::new("mncs:obligation:open-refl", cells, 7, 5, 6);
+        assert!(artifact.identity_is_valid());
+        assert_eq!(artifact.assumptions, set);
+        // The diagnostic projection still reproduces its historical value,
+        // but it is no longer consulted by anything authoritative here.
+        assert_eq!(
+            dep_assumptions(artifact.buffer().expect("buffer").cells, 7, 5, 6),
+            33i64.pow(5)
+        );
+        // PASS + agreement + equal sets consumes, even with assumptions.
+        let (mncs_verdict, mncs_set) = honest_mncs_side(&artifact);
+        let report = corroborate_proof(
+            mncs_verdict,
+            Some(&mncs_set),
+            open_refl_cells(),
+            7,
+            5,
+            6,
+            Some(DepVerdict::Pass),
+        );
+        assert_eq!(report, DepCorroboration::AgreePass);
+        assert!(report.consumable());
+    }
+
+    #[test]
+    fn canonical_set_distinguishes_level_carrier_and_membership() {
+        let open = open_refl_cells();
+        let base = dep_assumption_set(open.clone(), 7, 5, 6);
+        assert!(base.valid);
+        // Removing the assumption use changes the set (the witness no longer
+        // mentions the hypothesis, so the proof goes non-PASS and the set
+        // goes invalid rather than silently empty).
+        let mut closed = open.clone();
+        closed[2] = nat();
+        closed[3] = nat();
+        closed[4] = nat();
+        let closed_set = dep_assumption_set(closed, 7, 5, 6);
+        assert_ne!(closed_set, base);
+        // Changing the declared level changes the set even at the same index.
+        let mut releveled = open.clone();
+        releveled[1] = cell(DepTag::Hyp, [9, 0, 0, 0]);
+        let releveled_set = dep_assumption_set(releveled.clone(), 7, 5, 6);
+        assert_ne!(releveled_set, base);
+        // Changing the carrier cell changes the set even at the same index.
+        let mut recarriered = open.clone();
+        recarriered[1] = cell(DepTag::Hyp, [0, 1, 0, 0]);
+        let recarriered_set = dep_assumption_set(recarriered.clone(), 7, 5, 6);
+        assert_ne!(recarriered_set, base);
+        // Non-PASS verdicts yield an invalid set, never an empty-looking one.
+        let bad = vec![nat(), var(7)];
+        let fail_set = dep_assumption_set(bad, 2, 1, 0);
+        assert!(!fail_set.valid);
+        assert!(!fail_set.is_empty_set());
+    }
+
+    #[test]
+    fn artifact_seal_covers_canonical_set_and_rejects_tampering() {
+        let artifact = flagship_artifact();
         let json = serde_json::to_string(&artifact).expect("serialize");
         let back: DepArtifact = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back, artifact);
         assert!(back.identity_is_valid());
-        assert!(DepBinding::bind(&back).is_some());
+        // Schema 0.3 carries the canonical set, not the base-33 code.
+        assert!(!json.contains("assumption_code"));
+        assert!(back.assumptions.is_empty_set());
         // A corrupted byte in transit invalidates the seal, never the verdict:
         // flip one hex digit inside the sealed identity (stays valid JSON).
+        // No binding constructor exists to consult, so there is nothing to
+        // upgrade, override, or leak: admission must re-validate first.
         let mut tampered_json = json.clone();
         let marker = "\"identity\":\"mncs:proof-dep:";
         let start = tampered_json.find(marker).expect("identity") + marker.len();
@@ -1974,7 +2447,6 @@ mod tests {
         let tampered: DepArtifact =
             serde_json::from_str(&tampered_json).expect("deserialize tampered");
         assert!(!tampered.identity_is_valid());
-        assert!(DepBinding::bind(&tampered).is_none());
     }
 
     #[test]

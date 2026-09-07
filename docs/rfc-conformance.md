@@ -3,7 +3,7 @@
 > Generated from `rfcs/conformance-ledger.json` by
 > `scripts/gen_rfc_ledger_docs.py`. Do not edit by hand.
 
-Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 69 satisfied, 26 partially satisfied, 38 unsatisfied criteria.
+Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 70 satisfied, 25 partially satisfied, 38 unsatisfied criteria.
 
 ## Reading this document
 
@@ -186,22 +186,21 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 69 
   - [x] 0007-C8: Proof identities and kernel identity/version — evidence: `crates/mncs-model/src/proof_kernel.rs`
   - [x] 0007-C9: Obligation integration: compiler-generated obligation discharged by a proof term — evidence: `crates/mncs-cli/tests/proof_demo.rs`, `crates/mncs-model/src/proof_kernel.rs`, `crates/mncs-model/src/ssa.rs`
   - [x] 0007-C10: Invalidation: changed inputs invalidate proof reuse — evidence: `crates/mncs-model/src/proof_kernel.rs`
-  - [x] 0007-C11: MNCS-native checker executing through real backend paths — evidence: `library/core/proof_check.mncs`, `crates/mncs-cli/tests/proof_kernel.rs`
+  - [x] 0007-C11: MNCS-native checker executing through real backend paths — evidence: `library/core/proof_check.mncs`, `crates/mncs-cli/tests/proof_kernel.rs`, `library/core/proof_dep.mncs`, `examples/execution/proof-dep-corpus.json`, `examples/execution/proof-dep-admission-corpus.json`
   - [x] 0007-C12: Independent second checker with differential agreement — evidence: `crates/mncs-model/src/proof_kernel.rs`, `crates/mncs-cli/tests/proof_kernel.rs`, `crates/mncs-model/src/proof_dep.rs`
   - [x] 0007-C13: Valid, invalid, adversarial, and unresolved fixtures — evidence: `examples/execution/proof-kernel-corpus.json`, `examples/execution/proof-kernel-fuzz-corpus.json`, `examples/execution/proof-dep-corpus.json`
-  - [~] 0007-C14: Real compiler integration with explicit proof relationship — evidence: `crates/mncs-model/src/ssa.rs`, `crates/mncs-model/src/machine_intent.rs`
-  - [x] 0007-C15: Execution through research bytecode and portable WASM (plus C11/LLVM/Cranelift) — evidence: `crates/mncs-cli/tests/proof_kernel.rs`
-  - [~] 0007-C16: Heterogeneous Fabric worker evidence — evidence: `docs/rfc-0007-evidence.md`
+  - [x] 0007-C14: Real compiler integration with explicit proof relationship — evidence: `library/core/proof_admit.mncs`, `crates/mncs-compiler/src/proof_admission.rs`, `crates/mncs-model/src/proof_transport.rs`, `crates/mncs-cli/tests/proof_dep_admission.rs`, `examples/execution/proof-dep-admission-corpus.json`
+  - [x] 0007-C15: Execution through research bytecode and portable WASM (plus C11/LLVM/Cranelift) — evidence: `crates/mncs-cli/tests/proof_kernel.rs`, `examples/execution/proof-dep-corpus.json`, `examples/execution/proof-dep-admission-corpus.json`
+  - [~] 0007-C16: Heterogeneous Fabric worker evidence — evidence: `docs/rfc-0007-evidence.md`, `docs/development-evidence/rfc0007-tranche02-fabric-remote-2026-09.md`
   - [x] 0007-C17: No proof claim implemented through test success or backend agreement alone — evidence: `docs/rfc-0007-evidence.md`, `crates/mncs-model/src/verifier.rs`
   - [x] 0007-C18: Explicit trust boundary with untrusted generation — evidence: `docs/rfc-0007-evidence.md`, `library/core/proof_check.mncs`
   - [x] 0007-C19: Proof-core stratification: total kernel versus effectful execution — evidence: `library/core/proof_term.mncs`, `docs/rfc-0007-evidence.md`
   - [ ] 0007-C20: Proof erasure semantics — evidence: `0007-G6`
 - Known gaps:
-  - 0007-G4 proof transport through every compiler stage unresolved
-  - 0007-G5 file-based proof ingestion into mncs compile is a follow-up
+  - 0007-G4 proof transport through backend/codegen stages and proof-discharge unresolved (minimum HIR/SSA/lowering path exists)
   - 0007-G6 proof erasure semantics unimplemented
 - Pressure sources: mncs-actions proof-kernel conformance, Fabric heterogeneous validation.
-- Note: Design stays DRAFT (unresolved calculus choices per the RFC); implementation is a bounded experimental tranche, not the full RFC vision. C14/C16 flip to satisfied only with full proof transport plus file-based ingestion, and heterogeneous worker evidence, respectively.
+- Note: Design stays DRAFT (unresolved calculus choices per the RFC); implementation is a bounded experimental tranche, not the full RFC vision. C14 is satisfied for the minimum HIR/SSA/lowering integration scope plus file-based ingestion; full proof-discharge and backend-stage transport remain open. C16 stays partial: one remote Fabric worker verdict plus same-host mediation, no Windows verdict.
 
 ### RFC 0008 — Machine-Native I/O, Resource, Effect, and Event Semantics
 

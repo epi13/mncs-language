@@ -1,16 +1,25 @@
 #!/usr/bin/env python3
-"""Generate the RFC 0007 tranche 0.2 (genuine dependency) execution corpus.
+"""Generate the RFC 0007 tranche 0.2 (genuine dependency) execution corpora.
 
 Buffers use the mncs.core.proof_dep.v2 vocabulary (flat `[Cell; 32]`
-binder-edge graphs with explicit levels). Expectations are verdict codes
-from check_proof_code (0 PASS, 1 FAIL, 2 UNKNOWN), head tags from
-probe_eval_code (0..12, 100 abstain, 101 malformed), verdicts from
-probe_defeq_code (0/1/2, 3 malformed), or assumption codes from
-assumptions_code (base-33, -1 when not PASS).
+binder-edge graphs with explicit levels). The main corpus expectations are
+verdict codes from check_proof_code (0 PASS, 1 FAIL, 2 UNKNOWN), head tags
+from probe_eval_code (0..12, 100 abstain, 101 malformed), verdicts from
+probe_defeq_code (0/1/2, 3 malformed), assumption codes from
+assumptions_code (base-33 diagnostic projection, -1 when not PASS), or
+canonical assumption sets from assumption_set (exact, authority-grade).
 
 The same buffer descriptions feed the Rust reference checker
 (`proof_dep.rs`), so MNCS execution and the independent checker stay
 differentially aligned by construction.
+
+A second corpus (proof-dep-admission) covers the authoritative admission
+and binding policy in mncs.core.proof_admit.v1 (seal_binding,
+binding_authorizes, binding_reusable). Those semantics are MNCS-only BY
+DESIGN — no second implementation re-decides them, so the Rust checker
+does not parse that file; it is executed on all five backends as
+MNCS-authoritative evidence, and the Rust side covers it through real
+MNCS execution plus corroboration in the admission integration tests.
 """
 
 import json
@@ -127,13 +136,233 @@ def assumps_case(case_id, cells, count, proof, prop, expected):
     }
 
 
+# --- Tranche-0.2 hardening: canonical sets and MNCS admission ---
+
+U64 = {"bits": 64, "signed": False}
+
+ASSUMPTION_SET_IDENTITY = (
+    "mncs:0.2:record-type:mncs.core.proof_dep.v2::AssumptionSet::"
+    "carrier%3A%5Bi64%3B%2032%5D%3Bcount%3Ai64%3Bhyp%3A%5Bi64%3B%2032%5D%3B"
+    "level%3A%5Bi64%3B%2032%5D%3Bvalid%3Abool%3B"
+)
+
+PROOF_BINDING_IDENTITY = (
+    "mncs:0.2:record-type:mncs.core.proof_admit.v1::ProofBinding::"
+    "assumptions%3Amncs%3A0.2%3Arecord-type%3Amncs.core.proof_dep.v2%3A%3A"
+    "AssumptionSet%3A%3Acarrier%253A%255Bi64%253B%252032%255D%253Bcount%253A"
+    "i64%253Bhyp%253A%255Bi64%253B%252032%255D%253Blevel%253A%255Bi64%253B"
+    "%252032%255D%253Bvalid%253Abool%253B%3Bcells%3A%5Bmncs%3A0.2%3Arecord-"
+    "type%3Amncs.core.proof_dep.v2%3A%3ACell%3A%3Aarg0%253Ai64%253Barg1%253A"
+    "i64%253Barg2%253Ai64%253Barg3%253Ai64%253Btag%253ATermTag%253B%3B%2032"
+    "%5D%3Bcount%3Abyte%3Bdep0%3A%5Bbyte%3B%2032%5D%3Bdep1%3A%5Bbyte%3B%2032"
+    "%5D%3Bdep2%3A%5Bbyte%3B%2032%5D%3Bdep3%3A%5Bbyte%3B%2032%5D%3Bdep_count"
+    "%3Au64%3Bkernel%3A%5Bbyte%3B%2032%5D%3Bkernel_len%3Au64%3Bobligation%3A"
+    "%5Bbyte%3B%2032%5D%3Bproof%3A%5Bbyte%3B%2032%5D"
+    "%3Bproof_index%3Abyte%3Bprop_index%3Abyte%3Bverdict%3Ai64%3B"
+)
+
+KERNEL_ID = list(b"mncs:proof-kernel:0.2")
+assert len(KERNEL_ID) == 21, len(KERNEL_ID)
+
+
+def sha256_digest(text):
+    import hashlib
+    return list(hashlib.sha256(text).digest())
+
+
+# Opaque test digests: the MNCS admission functions treat the proof digest
+# as exact-match identity bytes. These are NOT real artifact hashes (the
+# real digest linkage is covered by the Rust admission tests over sealed
+# artifacts); corpus reuse cases only need consistent vs mutated bytes.
+DIGEST_A = list(range(1, 33))
+DIGEST_B = [9] + list(range(2, 33))
+
+# Obligation identities cross into MNCS as sha256 digests (real obligation
+# identities exceed every bounded byte slot). Corpus cases use the true
+# digests of their label strings, mutated by byte flips below.
+OBLIGATION_FLAGSHIP = sha256_digest(b"obligation:plus-zero-right")
+OBLIGATION_OPEN = sha256_digest(b"obligation:open-refl")
+OBLIGATION_OTHER = sha256_digest(b"obligation:something-else")
+
+DEP_PATTERN = list(range(101, 133))
+
+
+def u64(value):
+    assert value >= 0, value
+    return {"integer": {"value": value, "type": U64}}
+
+
+def boolean(value):
+    return {"boolean": {"value": bool(value)}}
+
+
+def bytes_seq(raw, width):
+    assert len(raw) <= width, (len(raw), width)
+    return {"sequence": {"values": [byte(b) for b in raw] + [byte(0)] * (width - len(raw))}}
+
+
+def i64_seq(values):
+    assert len(values) == CAPACITY, len(values)
+    return {"sequence": {"values": [{"integer": {"value": v, "type": I64}} for v in values]}}
+
+
+def assumption_set_value(uses, valid):
+    """Theory-derived canonical set: uses is [(hyp, level, carrier)]."""
+    hyp = [0] * CAPACITY
+    level = [0] * CAPACITY
+    carrier = [0] * CAPACITY
+    for slot, (h, lv, ca) in enumerate(uses):
+        hyp[slot] = h
+        level[slot] = lv
+        carrier[slot] = ca
+    fields = [
+        ["carrier", i64_seq(carrier)],
+        ["count", {"integer": {"value": len(uses), "type": I64}}],
+        ["hyp", i64_seq(hyp)],
+        ["level", i64_seq(level)],
+        ["valid", boolean(valid)],
+    ]
+    return {"record": {"type_identity": ASSUMPTION_SET_IDENTITY, "name": "AssumptionSet", "fields": fields}}
+
+
+def proof_binding_value(cells32, count, proof_index, prop_index, digest, obligation,
+                        kernel, verdict, uses, valid, dep_count=0, deps=None):
+    """Theory-derived binding record: seals must match what seal_binding
+    would package for the same inputs (verdict + canonical set)."""
+    assert len(cells32) == CAPACITY
+    assert len(digest) == 32 and len(obligation) == 32
+    deps = deps or [[0] * 32] * 4
+    assert len(deps) == 4 and all(len(d) == 32 for d in deps)
+    fields = [
+        ["assumptions", assumption_set_value(uses, valid)],
+        ["cells", {"sequence": {"values": cells32}}],
+        ["count", byte(count)],
+        ["dep0", bytes_seq(deps[0], 32)],
+        ["dep1", bytes_seq(deps[1], 32)],
+        ["dep2", bytes_seq(deps[2], 32)],
+        ["dep3", bytes_seq(deps[3], 32)],
+        ["dep_count", u64(dep_count)],
+        ["kernel", bytes_seq(kernel, 32)],
+        ["kernel_len", u64(len(kernel))],
+        ["obligation", bytes_seq(obligation, 32)],
+        ["proof", bytes_seq(digest, 32)],
+        ["proof_index", byte(proof_index)],
+        ["prop_index", byte(prop_index)],
+        ["verdict", {"integer": {"value": verdict, "type": I64}}],
+    ]
+    return {"record": {"type_identity": PROOF_BINDING_IDENTITY, "name": "ProofBinding", "fields": fields}}
+
+
+def set_case(case_id, cells, count, proof, prop, uses, valid):
+    req = dict(check_case(case_id, cells, count, proof, prop, 0)["request"])
+    req["target"] = {"module": "mncs.core.proof_dep.v2", "function": "assumption_set"}
+    return {
+        "id": case_id,
+        "request": req,
+        "expected_status": "returned",
+        "expected": [assumption_set_value(uses, valid)],
+    }
+
+
+def seal_arguments(cells, count, proof, prop, digest, obligation, kernel,
+                   dep_count=0, deps=None):
+    deps = deps or [[0] * 32] * 4
+    assert len(digest) == 32 and len(obligation) == 32
+    return [
+        bytes_seq(digest, 32),
+        bytes_seq(obligation, 32),
+        bytes_seq(kernel, 32),
+        u64(len(kernel)),
+        {"sequence": {"values": pad(cells)}},
+        byte(count),
+        byte(proof),
+        byte(prop),
+        u64(dep_count),
+        bytes_seq(deps[0], 32),
+        bytes_seq(deps[1], 32),
+        bytes_seq(deps[2], 32),
+        bytes_seq(deps[3], 32),
+    ]
+
+
+def seal_case(case_id, cells, count, proof, prop, digest, obligation, kernel,
+              verdict, uses, valid, dep_count=0, deps=None, budget=2000000):
+    req = {
+        "schema_version": "0.1",
+        "target": {"module": "mncs.core.proof_admit.v1", "function": "seal_binding"},
+        "arguments": seal_arguments(cells, count, proof, prop, digest, obligation, kernel, dep_count, deps),
+        "step_budget": budget,
+    }
+    return {
+        "id": case_id,
+        "request": req,
+        "expected_status": "returned",
+        "expected": [proof_binding_value(pad(cells), count, proof, prop, digest,
+                                         obligation, kernel, verdict, uses, valid,
+                                         dep_count, deps)],
+    }
+
+
+def authorizes_case(case_id, binding):
+    req = {
+        "schema_version": "0.1",
+        "target": {"module": "mncs.core.proof_admit.v1", "function": "binding_authorizes"},
+        "arguments": [binding],
+        "step_budget": 2000000,
+    }
+    return {
+        "id": case_id,
+        "request": req,
+        "expected_status": "returned",
+        "expected": [boolean(True)],
+    }
+
+
+def authorizes_false_case(case_id, binding):
+    case = authorizes_case(case_id, binding)
+    case["expected"] = [boolean(False)]
+    return case
+
+
+def reusable_case(case_id, binding, cells, count, proof, prop, digest, obligation,
+                  kernel, dep_count=0, deps=None, expect=True, budget=4000000):
+    deps = deps or [[0] * 32] * 4
+    assert len(digest) == 32 and len(obligation) == 32
+    req = {
+        "schema_version": "0.1",
+        "target": {"module": "mncs.core.proof_admit.v1", "function": "binding_reusable"},
+        "arguments": [binding] + [
+            bytes_seq(digest, 32),
+            bytes_seq(obligation, 32),
+            bytes_seq(kernel, 32),
+            u64(len(kernel)),
+            {"sequence": {"values": pad(cells)}},
+            byte(count),
+            byte(proof),
+            byte(prop),
+            u64(dep_count),
+            bytes_seq(deps[0], 32),
+            bytes_seq(deps[1], 32),
+            bytes_seq(deps[2], 32),
+            bytes_seq(deps[3], 32),
+        ],
+        "step_budget": budget,
+    }
+    return {
+        "id": case_id,
+        "request": req,
+        "expected_status": "returned",
+        "expected": [boolean(expect)],
+    }
+
+
 def closed_refl():
     # Nat, Zero, Eq(Nat, Zero, Zero), Refl(Zero): PASS.
     cells = [cell("Nat"), cell("Zero"), cell("Eq", 0, 1, 1), cell("Refl", 1)]
     return [check_case("closed-refl", cells, 4, 3, 2, 0)]
 
 
-def flagship_plus_zero_right():
+def flagship_buffer():
     # Pi (n : Nat). Eq Nat (Plus n Zero) n, proved by induction:
     #   motive = Lam Nat. Eq Nat (Plus Var1 Zero) (Var1)   [level 1]
     #   base   = Refl Zero : P Zero  (Plus Zero Zero unfolds to Zero)
@@ -172,8 +401,14 @@ def flagship_plus_zero_right():
         cell("Eq", 0, 25, 26),  # 27
         cell("Pi", 0, 27, 4),   # 28 prop
     ]
-    out = [check_case("flagship-plus-zero-right", cells, 29, 23, 28, 0)]
-    out.append(assumps_case("flagship-assumptions-empty", cells, 29, 23, 28, 0))
+    return cells, 29, 23, 28
+
+
+def flagship_plus_zero_right():
+    cells, count, proof, prop = flagship_buffer()
+    out = [check_case("flagship-plus-zero-right", cells, count, proof, prop, 0)]
+    out.append(assumps_case("flagship-assumptions-empty", cells, count, proof, prop, 0))
+    out.append(set_case("flagship-set-empty", cells, count, proof, prop, [], True))
     return out
 
 
@@ -243,8 +478,7 @@ def elim_const_family():
     return [check_case("elim-const-family", cells, 7, 6, 0, 0)]
 
 
-def assumption_cases():
-    out = []
+def open_refl_buffer():
     # Open proof under one assumption: Refl x : Eq Nat x x with Hyp(0, Nat).
     # Each variable use is its own cell (open cones are trees).
     cells = [
@@ -256,9 +490,161 @@ def assumption_cases():
         cell("Refl", 2),    # 5 proof
         cell("Eq", 0, 3, 4),  # 6 prop
     ]
-    out.append(check_case("assumption-open-refl", cells, 7, 5, 6, 0))
+    return cells, 7, 5, 6
+
+
+def assumption_cases():
+    out = []
+    cells, count, proof, prop = open_refl_buffer()
+    out.append(check_case("assumption-open-refl", cells, count, proof, prop, 0))
     # One used hypothesis of level 0: digits over 7 cells give 33**5.
-    out.append(assumps_case("assumption-used-code", cells, 7, 5, 6, 33 ** 5))
+    out.append(assumps_case("assumption-used-code", cells, count, proof, prop, 33 ** 5))
+    # Canonical exact set: hypothesis 1, level 0, carrier cell 0.
+    out.append(set_case("assumption-used-set", cells, count, proof, prop, [(1, 0, 0)], True))
+    return out
+
+
+def unknown_buffer():
+    # Opaque proof cell against Nat: the kernel abstains (UNKNOWN) instead
+    # of deciding. Both implementations must agree on abstention.
+    cells = [
+        cell("Nat"),          # 0 prop
+        cell("Unsupported", 0, 0, 0, 0),  # 1 opaque proof
+    ]
+    return cells, 2, 1, 0
+
+
+def unknown_cases():
+    out = []
+    cells, count, proof, prop = unknown_buffer()
+    out.append(check_case("unknown-opaque-proof", cells, count, proof, prop, 2))
+    out.append(set_case("unknown-opaque-set", cells, count, proof, prop, [], False))
+    return out
+
+
+def admission_cases():
+    """MNCS-authoritative admission/binding cases (admission corpus only).
+
+    Every expectation is theory-derived from the calculus and the admit
+    module: seal packages the kernel verdict with the canonical set;
+    authorizes is PASS + expected kernel + valid set; reusable additionally
+    requires exact presented identities, live cells, and dependency slots.
+    Each mutation flips exactly one conjunct to false.
+    """
+    out = []
+    fcells, fcount, fproof, fprop = flagship_buffer()
+    ocells, ocount, oproof, oprop = open_refl_buffer()
+
+    flagship_binding = proof_binding_value(
+        pad(fcells), fcount, fproof, fprop, DIGEST_A, OBLIGATION_FLAGSHIP,
+        KERNEL_ID, 0, [], True)
+    open_binding = proof_binding_value(
+        pad(ocells), ocount, oproof, oprop, DIGEST_A, OBLIGATION_OPEN,
+        KERNEL_ID, 0, [(1, 0, 0)], True)
+
+    # Seal packages verdict + canonical set (cheap open-refl buffer keeps
+    # most of the five-backend sweep fast; the flagship seal pins the same
+    # path at full theorem scale, as the Rust admission tests do over the
+    # real artifact).
+    out.append(seal_case("admit-seal-open", ocells, ocount, oproof, oprop,
+                         DIGEST_A, OBLIGATION_OPEN, KERNEL_ID, 0, [(1, 0, 0)], True))
+    out.append(seal_case("admit-seal-flagship", fcells, fcount, fproof, fprop,
+                         DIGEST_A, OBLIGATION_FLAGSHIP, KERNEL_ID, 0, [], True,
+                         budget=4000000))
+
+    # Authorization: PASS + expected kernel + valid set authorizes; every
+    # other combination refuses, and nothing upgrades FAIL/UNKNOWN.
+    out.append(authorizes_case("admit-authorizes-pass", flagship_binding))
+    out.append(authorizes_false_case(
+        "admit-authorizes-fail-verdict",
+        proof_binding_value(pad(fcells), fcount, fproof, fprop, DIGEST_A,
+                            OBLIGATION_FLAGSHIP, KERNEL_ID, 1, [], False)))
+    out.append(authorizes_false_case(
+        "admit-authorizes-unknown-verdict",
+        proof_binding_value(pad(fcells), fcount, fproof, fprop, DIGEST_A,
+                            OBLIGATION_FLAGSHIP, KERNEL_ID, 2, [], False)))
+    wrong_kernel = list(KERNEL_ID)
+    wrong_kernel[0] = 110  # 'm' -> 'n': wrong kernel identity
+    out.append(authorizes_false_case(
+        "admit-authorizes-wrong-kernel",
+        proof_binding_value(pad(fcells), fcount, fproof, fprop, DIGEST_A,
+                            OBLIGATION_FLAGSHIP, wrong_kernel, 0, [], True)))
+    out.append(authorizes_false_case(
+        "admit-authorizes-invalid-set",
+        proof_binding_value(pad(fcells), fcount, fproof, fprop, DIGEST_A,
+                            OBLIGATION_FLAGSHIP, KERNEL_ID, 0, [], False)))
+
+    # Reuse: exact match authorizes (closed flagship and open proof, the
+    # latter also with one bound dependency slot).
+    out.append(reusable_case("admit-reuse-flagship", flagship_binding,
+                             fcells, fcount, fproof, fprop,
+                             DIGEST_A, OBLIGATION_FLAGSHIP, KERNEL_ID))
+    out.append(reusable_case("admit-reuse-open", open_binding,
+                             ocells, ocount, oproof, oprop,
+                             DIGEST_A, OBLIGATION_OPEN, KERNEL_ID))
+    dep_binding = proof_binding_value(
+        pad(ocells), ocount, oproof, oprop, DIGEST_A, OBLIGATION_OPEN,
+        KERNEL_ID, 0, [(1, 0, 0)], True, dep_count=1, deps=[DEP_PATTERN, [0] * 32, [0] * 32, [0] * 32])
+    out.append(reusable_case("admit-reuse-open-dep", dep_binding,
+                             ocells, ocount, oproof, oprop,
+                             DIGEST_A, OBLIGATION_OPEN, KERNEL_ID,
+                             dep_count=1, deps=[DEP_PATTERN, [0] * 32, [0] * 32, [0] * 32]))
+
+    # Mutations: each flips exactly one conjunct.
+    out.append(reusable_case("admit-reject-digest", flagship_binding,
+                             fcells, fcount, fproof, fprop,
+                             DIGEST_B, OBLIGATION_FLAGSHIP, KERNEL_ID, expect=False))
+    flipped_obligation = list(OBLIGATION_FLAGSHIP)
+    flipped_obligation[0] = (flipped_obligation[0] + 1) % 256
+    out.append(reusable_case("admit-reject-obligation", flagship_binding,
+                             fcells, fcount, fproof, fprop,
+                             DIGEST_A, flipped_obligation, KERNEL_ID, expect=False))
+    out.append(reusable_case("admit-reject-obligation-swap", flagship_binding,
+                             fcells, fcount, fproof, fprop,
+                             DIGEST_A, OBLIGATION_OTHER, KERNEL_ID, expect=False))
+    out.append(reusable_case("admit-reject-kernel", flagship_binding,
+                             fcells, fcount, fproof, fprop,
+                             DIGEST_A, OBLIGATION_FLAGSHIP, wrong_kernel, expect=False))
+    drifted_cells = [dict(c) for c in fcells]
+    drifted_record = dict(drifted_cells[3]["record"])
+    drifted_fields = [list(f) for f in drifted_record["fields"]]
+    for field in drifted_fields:
+        if field[0] == "arg0":
+            field[1] = {"integer": {"value": 9, "type": I64}}
+    drifted_record["fields"] = drifted_fields
+    drifted_cells[3]["record"] = drifted_record
+    out.append(reusable_case("admit-reject-live-cells", flagship_binding,
+                             drifted_cells, fcount, fproof, fprop,
+                             DIGEST_A, OBLIGATION_FLAGSHIP, KERNEL_ID, expect=False))
+    skewed_binding = proof_binding_value(
+        pad(drifted_cells), fcount, fproof, fprop, DIGEST_A, OBLIGATION_FLAGSHIP,
+        KERNEL_ID, 0, [], True)
+    out.append(reusable_case("admit-reject-sealed-cells", skewed_binding,
+                             fcells, fcount, fproof, fprop,
+                             DIGEST_A, OBLIGATION_FLAGSHIP, KERNEL_ID, expect=False))
+    out.append(reusable_case("admit-reject-count", flagship_binding,
+                             fcells, fcount + 1, fproof, fprop,
+                             DIGEST_A, OBLIGATION_FLAGSHIP, KERNEL_ID, expect=False))
+    out.append(reusable_case("admit-reject-proof-index", flagship_binding,
+                             fcells, fcount, fproof, 27,
+                             DIGEST_A, OBLIGATION_FLAGSHIP, KERNEL_ID, expect=False))
+    flipped_dep = list(DEP_PATTERN)
+    flipped_dep[7] = (flipped_dep[7] + 1) % 256
+    out.append(reusable_case("admit-reject-dep", dep_binding,
+                             ocells, ocount, oproof, oprop,
+                             DIGEST_A, OBLIGATION_OPEN, KERNEL_ID,
+                             dep_count=1, deps=[flipped_dep, [0] * 32, [0] * 32, [0] * 32],
+                             expect=False))
+    out.append(reusable_case("admit-reject-dep-count", dep_binding,
+                             ocells, ocount, oproof, oprop,
+                             DIGEST_A, OBLIGATION_OPEN, KERNEL_ID,
+                             dep_count=0, expect=False))
+    mutated_set_binding = proof_binding_value(
+        pad(ocells), ocount, oproof, oprop, DIGEST_A, OBLIGATION_OPEN,
+        KERNEL_ID, 0, [(2, 0, 0)], True)
+    out.append(reusable_case("admit-reject-set", mutated_set_binding,
+                             ocells, ocount, oproof, oprop,
+                             DIGEST_A, OBLIGATION_OPEN, KERNEL_ID, expect=False))
     return out
 
 
@@ -266,6 +652,7 @@ def adversarial_cases():
     out = []
     # Undeclared variable: resolution failure is FAIL.
     out.append(check_case("undeclared-var", [cell("Nat"), cell("Var", 7)], 2, 1, 0, 1))
+    out.append(set_case("undeclared-var-set", [cell("Nat"), cell("Var", 7)], 2, 1, 0, [], False))
     # A declaration is not a term: naming a Hyp as proof is FAIL.
     out.append(check_case("hyp-as-proof", [cell("Nat"), cell("Hyp", 0, 0)], 2, 1, 0, 1))
     # A declaration is not a subterm: embedded Hyp is FAIL.
@@ -287,13 +674,23 @@ def main():
     cases.extend(substitution_probes())
     cases.extend(elim_const_family())
     cases.extend(assumption_cases())
+    cases.extend(unknown_cases())
     cases.extend(adversarial_cases())
     corpus = {"schema_version": "0.1", "name": "proof-dep", "cases": cases}
     text = json.dumps(corpus, indent=1) + "\n"
+    admission = admission_cases()
+    admission_corpus = {"schema_version": "0.1", "name": "proof-dep-admission", "cases": admission}
+    admission_text = json.dumps(admission_corpus, indent=1) + "\n"
     if len(sys.argv) > 1:
         with open(sys.argv[1], "w") as handle:
             handle.write(text)
         print(f"wrote {len(cases)} cases to {sys.argv[1]}")
+        if len(sys.argv) > 2:
+            with open(sys.argv[2], "w") as handle:
+                handle.write(admission_text)
+            print(f"wrote {len(admission)} cases to {sys.argv[2]}")
+        else:
+            print(admission_text)
     else:
         print(text)
 

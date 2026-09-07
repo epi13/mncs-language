@@ -445,9 +445,12 @@ fn emit_module(module: &ScalarModule) -> String {
         "/* MNCS C11 realization 0.2. Not MNCS semantics. No C undefined behavior for integers. */\n#include <stdint.h>\n#include <stdbool.h>\n#include <string.h>\n\n",
     );
     if crate::support::scalar_module_needs_arena_symbols(module) {
-        out.push_str(
-            "/* Canonical composite cell arena (MNCS cell layout v0.1). Defined\n   whenever the call-file driver may copy an arena image, including\n   mask-only modules that never allocate cells. */\n#define MNCS_ARENA_BYTES (4u * 1024u * 1024u)\nunsigned char mncs_arena[MNCS_ARENA_BYTES];\nuint64_t mncs_bump = 0;\n",
-        );
+        // Shared canonical capacity; the driver declares the same
+        // `NATIVE_ARENA_BYTES`, so module and driver always agree.
+        let arena = crate::support::NATIVE_ARENA_BYTES;
+        out.push_str(&format!(
+            "/* Canonical composite cell arena (MNCS cell layout v0.1). Defined\n   whenever the call-file driver may copy an arena image, including\n   mask-only modules that never allocate cells. */\n#define MNCS_ARENA_BYTES ({arena}u)\nunsigned char mncs_arena[MNCS_ARENA_BYTES];\nuint64_t mncs_bump = 0;\n",
+        ));
         if crate::support::scalar_module_uses_cells(module) {
             out.push_str(
                 "uint64_t mncs_cell_alloc(uint64_t bytes) {\n  uint64_t base = (mncs_bump + 7u) & ~(uint64_t)7u;\n  mncs_bump = base + bytes;\n  return base;\n}\nvoid mncs_slot_store32(unsigned char *a, uint64_t at, uint32_t v) {\n  memcpy(a + at, &v, sizeof v);\n}\nvoid mncs_slot_store64(unsigned char *a, uint64_t at, uint64_t v) {\n  memcpy(a + at, &v, sizeof v);\n}\nuint32_t mncs_slot_load32(const unsigned char *a, uint64_t at) {\n  uint32_t v;\n  memcpy(&v, a + at, sizeof v);\n  return v;\n}\nuint64_t mncs_slot_load64(const unsigned char *a, uint64_t at) {\n  uint64_t v;\n  memcpy(&v, a + at, sizeof v);\n  return v;\n}\n",

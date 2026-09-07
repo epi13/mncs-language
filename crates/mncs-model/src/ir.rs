@@ -360,6 +360,10 @@ pub struct HighLevelIr {
     pub transformations: Vec<TransformationRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub generic_specializations: Vec<crate::GenericSpecializationRecord>,
+    /// Admitted tranche-0.2 proof relationships validated against this HIR.
+    /// Skipped when empty so proof-free fingerprints are unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proof_relationships: Vec<crate::ProofRelationship>,
 }
 
 #[derive(Debug, Error)]
@@ -368,6 +372,8 @@ pub enum IrError {
     InvalidProgram(ValidationReport),
     #[error("semantic graph construction failed during IR lowering: {0}")]
     Graph(#[from] GraphError),
+    #[error("proof relationship refused by current HIR state: {0}")]
+    ProofTransport(String),
 }
 
 impl HighLevelIr {
@@ -733,12 +739,30 @@ impl Program {
             trace,
             transformations,
             generic_specializations: self.generic_specializations.clone(),
+            proof_relationships: Vec::new(),
         };
         module.content_fingerprint = module
             .content_binding()
             .expect("validated HIR is canonicalizable");
         trace_timing("ir-total", started);
         Ok(module)
+    }
+
+    /// Lower HIR and attach admitted tranche-0.2 proof relationships,
+    /// validated against the lowered HIR with the exact current dependency
+    /// fingerprints. Any refusal fails the whole lowering (fail-closed):
+    /// a stale relationship never survives into SSA.
+    pub fn lower_to_ir_with_proofs(
+        &self,
+        relationships: &[crate::ProofRelationship],
+        dependencies: &[String],
+    ) -> Result<HighLevelIr, IrError> {
+        let mut hir = self.lower_to_ir()?;
+        for relationship in relationships {
+            hir.attach_proof_relationship(relationship.clone(), dependencies)
+                .map_err(|mismatch| IrError::ProofTransport(mismatch.to_string()))?;
+        }
+        Ok(hir)
     }
 }
 

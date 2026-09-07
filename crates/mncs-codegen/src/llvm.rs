@@ -22,6 +22,7 @@ use crate::scalar::{
     abi_bits, llvm_type, lower_to_scalar, ScalarBlock, ScalarFunction, ScalarInst, ScalarModule,
     ScalarTerm, ScalarTy, ScalarValue,
 };
+use crate::support::NATIVE_ARENA_BYTES as NATIVE_ARENA_LEN;
 use crate::support::{
     artifact_ref, empty_execution, execution_failure, function_names, function_value_contracts,
     unknown, validate_realizable_ssa, validate_selected_ssa,
@@ -509,7 +510,10 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
         // aligned cells; slot access is plain i32/i64 load/store at 8-byte
         // strides so alignment holds by construction.
         out.push_str("; Canonical composite cell arena (v0.1)\n");
-        out.push_str("@mncs_arena = global [4194304 x i8] zeroinitializer\n");
+        let _ = writeln!(
+            out,
+            "@mncs_arena = global [{NATIVE_ARENA_LEN} x i8] zeroinitializer"
+        );
         out.push_str("@mncs_bump = global i64 0\n\n");
     }
     for width in ["i8", "i16", "i32", "i64"] {
@@ -906,7 +910,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, 0");
             let _ = writeln!(
                 out,
-                "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
+                "  %{gep} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
             );
             let _ = writeln!(out, "  store i32 {discriminant}, ptr %{gep}");
         }
@@ -932,7 +936,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                     let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
                     let _ = writeln!(
                         out,
-                        "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
+                        "  %{gep} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
                     );
                     let _ = writeln!(out, "  %{raw} = load {raw_ty}, ptr %{v}_slot");
                     let _ = writeln!(out, "  store {raw_ty} %{raw}, ptr %{gep}");
@@ -942,7 +946,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                     let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
                     let _ = writeln!(
                         out,
-                        "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
+                        "  %{gep} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
                     );
                     let _ = writeln!(out, "  %{raw} = load i64, ptr %{v}_slot");
                     let _ = writeln!(out, "  store i64 %{raw}, ptr %{gep}");
@@ -968,7 +972,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                     let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
                     let _ = writeln!(
                         out,
-                        "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
+                        "  %{gep} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
                     );
                     let _ = writeln!(out, "  %{d}_v32 = load {raw_ty}, ptr %{gep}");
                     let _ = writeln!(out, "  store {raw_ty} %{d}_v32, ptr %{d}_slot");
@@ -978,7 +982,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                     let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
                     let _ = writeln!(
                         out,
-                        "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
+                        "  %{gep} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
                     );
                     let _ = writeln!(out, "  %{d}_v64 = load i64, ptr %{gep}");
                     let _ = writeln!(out, "  store i64 %{d}_v64, ptr %{d}_slot");
@@ -1122,8 +1126,8 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 let offset = u64::from(lane) * 8;
                 let _ = writeln!(out, "  %rsaddr{tag}_{lane} = add i64 %{source}, {offset}");
                 let _ = writeln!(out, "  %rdaddr{tag}_{lane} = add i64 %ral{tag}, {offset}");
-                let _ = writeln!(out, "  %rsgep{tag}_{lane} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %rsaddr{tag}_{lane}");
-                let _ = writeln!(out, "  %rdgep{tag}_{lane} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %rdaddr{tag}_{lane}");
+                let _ = writeln!(out, "  %rsgep{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %rsaddr{tag}_{lane}");
+                let _ = writeln!(out, "  %rdgep{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %rdaddr{tag}_{lane}");
                 let _ = writeln!(
                     out,
                     "  %rslot{tag}_{lane} = load {raw_ty}, ptr %rsgep{tag}_{lane}"
@@ -1141,7 +1145,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 out,
                 "  %riaddr{store_tag} = add i64 %ral{tag}, %rioff{store_tag}"
             );
-            let _ = writeln!(out, "  %rige{store_tag} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %riaddr{store_tag}");
+            let _ = writeln!(out, "  %rige{store_tag} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %riaddr{store_tag}");
             let _ = writeln!(out, "  store {raw_ty} %{element}, ptr %rige{store_tag}");
         }
         ScalarInst::SequenceProject {
@@ -1203,7 +1207,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let gep = format!("sgep{split}");
             let _ = writeln!(
                 out,
-                "  %{gep} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{off}"
+                "  %{gep} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %{off}"
             );
             let d = names.value(&dest.id);
             let elem_ty = slot_payload_ty(*width, dest.ty);
@@ -1324,7 +1328,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let tag = format!("tagv{split}");
             let _ = writeln!(
                 out,
-                "  %{tagptr} = getelementptr inbounds [4194304 x i8], ptr @mncs_arena, i64 0, i64 %{srcv}"
+                "  %{tagptr} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %{srcv}"
             );
             let _ = writeln!(out, "  %{tag} = load i32, ptr %{tagptr}");
             let _ = writeln!(

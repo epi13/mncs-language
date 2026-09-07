@@ -86,11 +86,11 @@ fn transition_allowed(from: ImplState, to: ImplState, gate: status.Status) -> (r
 }
 
 // The RFC 0007 tranche tally, executable form: 20 required criteria,
-// 16 satisfied, 3 partial, 1 excused (erasure, recorded gap 0007-G6),
-// evidence bound. The gate must stay PASS for the BOUNDED_IMPLEMENTATION
-// claim and must refuse IMPLEMENTED.
+// 18 satisfied, 1 partial (heterogeneous Fabric workers, 0007-C16),
+// 1 excused (erasure, recorded gap 0007-G6), evidence bound. The gate must
+// stay PASS for the BOUNDED_IMPLEMENTATION claim and must refuse IMPLEMENTED.
 fn rfc0007_tally() -> (result: CriterionTally) {
-    return CriterionTally { required: 20, satisfied: 17, partial: 2, excused: 1, evidence_ok: true };
+    return CriterionTally { required: 20, satisfied: 18, partial: 1, excused: 1, evidence_ok: true };
 }
 
 // Corpus entrypoints: zero-argument wrappers so experiment cases can invoke

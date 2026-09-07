@@ -130,8 +130,8 @@ fn ledger_rfc0007_tally_matches_the_executable_gate() {
     // These numbers are duplicated in mncs.family.rfc_status.v1
     // `rfc0007_tally`; this test fails if the ledger drifts from the gate.
     assert_eq!(criteria.len(), 20);
-    assert_eq!(count("satisfied"), 17);
-    assert_eq!(count("partial"), 2);
+    assert_eq!(count("satisfied"), 18);
+    assert_eq!(count("partial"), 1);
     assert_eq!(excused, 1);
 }
 

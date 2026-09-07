@@ -325,6 +325,10 @@ pub struct SsaModule {
     pub transformations: Vec<TransformationRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub generic_specializations: Vec<crate::GenericSpecializationRecord>,
+    /// Admitted tranche-0.2 proof relationships validated against this SSA.
+    /// Skipped when empty so proof-free fingerprints are unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proof_relationships: Vec<crate::ProofRelationship>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -352,6 +356,8 @@ pub enum SsaError {
     IrIntegrity(String),
     #[error("SSA artifact is invalid")]
     Invalid(SsaValidationReport),
+    #[error("proof relationship refused by current SSA state: {0}")]
+    ProofTransport(String),
 }
 
 impl SsaModule {
@@ -890,6 +896,24 @@ impl Program {
         self.lower_to_ssa_from_ir_inner(ir, started)
     }
 
+    /// Lower SSA from already-lowered HIR and attach admitted tranche-0.2
+    /// proof relationships, validated against the lowered SSA with the exact
+    /// current dependency fingerprints. Any refusal fails the whole lowering
+    /// (fail-closed): a stale relationship never reaches lowering evidence.
+    pub fn lower_to_ssa_from_ir_with_proofs(
+        &self,
+        ir: &HighLevelIr,
+        relationships: &[crate::ProofRelationship],
+        dependencies: &[String],
+    ) -> Result<SsaModule, SsaError> {
+        let mut ssa = self.lower_to_ssa_from_ir(ir)?;
+        for relationship in relationships {
+            ssa.attach_proof_relationship(relationship.clone(), dependencies)
+                .map_err(|mismatch| SsaError::ProofTransport(mismatch.to_string()))?;
+        }
+        Ok(ssa)
+    }
+
     fn lower_to_ssa_from_ir_inner(
         &self,
         ir: &HighLevelIr,
@@ -1009,6 +1033,7 @@ impl Program {
             },
             transformations,
             generic_specializations: ir.generic_specializations.clone(),
+            proof_relationships: Vec::new(),
         };
         let validation = module.validate();
         trace_timing("ssa-total", started);

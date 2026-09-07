@@ -608,6 +608,8 @@ struct CompileOptions {
     output_dir: Option<PathBuf>,
     target: Option<TargetContractRef>,
     kernel_entries: Vec<String>,
+    proof_artifacts: Vec<String>,
+    proof_operation: Option<String>,
 }
 
 fn valid_kernel_entry(name: &str) -> bool {
@@ -648,7 +650,28 @@ where
             &options.kernel_entries,
         )
     };
-    let result = compiler.compile(request, &program);
+    // Proof ingestion (RFC 0007 tranche 0.2): host reads artifact files
+    // (transport only); semantic admission executes inside
+    // compile_with_proofs. Any refusal fails the compilation loudly.
+    let result = if options.proof_artifacts.is_empty() {
+        compiler.compile(request, &program)
+    } else {
+        let mut inputs = Vec::with_capacity(options.proof_artifacts.len());
+        for path in &options.proof_artifacts {
+            match std::fs::read_to_string(path) {
+                Ok(artifact_json) => inputs.push(mncs_compiler::CompilerProofInput {
+                    artifact_json,
+                    operation: options.proof_operation.clone(),
+                }),
+                Err(error) => {
+                    eprintln!("error: unable to read proof artifact {path:?}: {error}");
+                    return ExitCode::from(2);
+                }
+            }
+        }
+        let library_roots = mncs_compiler::admission_library_roots(&[]);
+        compiler.compile_with_proofs(request, &program, &inputs, &library_roots)
+    };
     if let Some(output_dir) = &options.output_dir {
         if let Err(error) = write_compilation_outputs(output_dir, &result) {
             eprintln!(
@@ -2247,6 +2270,8 @@ where
     let mut output_dir = None;
     let mut target = None;
     let mut kernel_entries = Vec::new();
+    let mut proof_artifacts = Vec::new();
+    let mut proof_operation = None;
     while let Some(option) = args.next() {
         match option.as_str() {
             "--emit" => {
@@ -2280,6 +2305,23 @@ where
                     kernel_entries.push(value);
                 }
             }
+            "--proof" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--proof requires a proof artifact path".to_owned())?;
+                if !proof_artifacts.contains(&value) {
+                    proof_artifacts.push(value);
+                }
+            }
+            "--proof-operation" => {
+                let value = args.next().ok_or_else(|| {
+                    "--proof-operation requires an SSA operation identity".to_owned()
+                })?;
+                if value.is_empty() || value.len() > 512 {
+                    return Err("--proof-operation identity is empty or too long".to_owned());
+                }
+                proof_operation = Some(value);
+            }
             other => return Err(format!("unknown compile option {other:?}")),
         }
     }
@@ -2300,12 +2342,17 @@ where
         emit.insert(ArtifactRepresentation::TargetLoweringPlan);
         emit.insert(ArtifactRepresentation::BackendArtifact);
     }
+    if proof_operation.is_some() && proof_artifacts.is_empty() {
+        return Err("--proof-operation requires at least one --proof artifact".to_owned());
+    }
     Ok(CompileOptions {
         program_path,
         emit,
         output_dir,
         target,
         kernel_entries,
+        proof_artifacts,
+        proof_operation,
     })
 }
 
@@ -3509,6 +3556,7 @@ fn print_usage() {
     eprintln!("  mncs compare-execution <baseline.json> <candidate.json> <corpus.json>");
     eprintln!("  mncs check-lowering-execution <program.json> <corpus.json>");
     eprintln!("  mncs compile <program.json> [--emit semantic,hir,ssa,evidence,target-plan,backend] [--output-dir DIR] [--target TARGET]");
+    eprintln!("  mncs compile <program> --proof <artifact.json> [--proof-operation OP]  (RFC 0007 tranche-0.2 proof ingestion)");
     eprintln!("  mncs abi <program.mncs|program.json>");
     eprintln!("  mncs execute-backend <program.json> <execution-request.json>");
     eprintln!("  mncs check-backend-execution <program.json> <corpus.json>");

@@ -1266,8 +1266,20 @@ pub fn execute_cranelift(
             arena.extend_from_slice(image);
         });
     }
+    JIT_OOB.store(false, std::sync::atomic::Ordering::Relaxed);
     match jit_execute_with_arguments(&payload, request.target.function.as_str(), &raw_args) {
         Ok((status, value)) => {
+            if JIT_OOB.load(std::sync::atomic::Ordering::Relaxed) {
+                // A host slot access escaped the installed arena image
+                // (allocation cap or wild address). The computed value is
+                // untrustworthy, so the observation fails closed here
+                // instead of decoding possibly-zeroed cells.
+                return execution_failure(
+                    result,
+                    ExecutionStatus::RuntimeFailure,
+                    "cranelift JIT cell access exceeded the arena image; failing closed",
+                );
+            }
             result.status = status;
             result.steps = 1;
             match crate::support::decode_native_observation(
@@ -2464,11 +2476,21 @@ fn with_jit_arena<T>(operation: impl FnOnce(&mut Vec<u8>) -> T) -> T {
     operation(&mut arena)
 }
 
+/// Set by any JIT host slot access outside the installed arena image.
+/// Loads/stores beyond the image cannot trap through the `u64` host-call
+/// boundary, so without this flag an exhausted arena would silently compute
+/// with dropped writes and zero reads instead of failing closed. The
+/// execute path checks the flag after every JIT call and reports
+/// `RuntimeFailure` while it is set; it is cleared on each arena install.
+static JIT_OOB: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 extern "C" fn host_cell_alloc(bytes: u64) -> u64 {
     with_jit_arena(|arena| {
         let base = (arena.len() as u64 + 7) & !7u64;
-        let end = base + bytes;
-        if end > 4 * 1024 * 1024 {
+        let Some(end) = base.checked_add(bytes) else {
+            return u64::MAX;
+        };
+        if end > crate::support::NATIVE_ARENA_BYTES {
             return u64::MAX;
         }
         arena.resize(end as usize, 0);
@@ -2476,30 +2498,46 @@ extern "C" fn host_cell_alloc(bytes: u64) -> u64 {
     })
 }
 
+fn slot_range(arena_len: usize, at: u64, width: usize) -> Option<std::ops::Range<usize>> {
+    // Wraparound-safe bounds check: `at + width` overflows for sentinel
+    // addresses (notably the u64::MAX allocation-failure sentinel), which
+    // previously bypassed the guard and aborted the backend instead of
+    // taking the deliberate out-of-bounds path.
+    let at = usize::try_from(at).ok()?;
+    let end = at.checked_add(width)?;
+    if end <= arena_len {
+        Some(at..end)
+    } else {
+        None
+    }
+}
+
 extern "C" fn host_slot_store32(at: u64, value: u64) {
     with_jit_arena(|arena| {
-        let at = at as usize;
-        if at + 4 <= arena.len() {
-            arena[at..at + 4].copy_from_slice(&(value as u32).to_le_bytes());
+        if let Some(range) = slot_range(arena.len(), at, 4) {
+            arena[range].copy_from_slice(&(value as u32).to_le_bytes());
+        } else {
+            JIT_OOB.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     });
 }
 
 extern "C" fn host_slot_store64(at: u64, value: u64) {
     with_jit_arena(|arena| {
-        let at = at as usize;
-        if at + 8 <= arena.len() {
-            arena[at..at + 8].copy_from_slice(&value.to_le_bytes());
+        if let Some(range) = slot_range(arena.len(), at, 8) {
+            arena[range].copy_from_slice(&value.to_le_bytes());
+        } else {
+            JIT_OOB.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     });
 }
 
 extern "C" fn host_slot_load32(at: u64) -> u64 {
     with_jit_arena(|arena| {
-        let at = at as usize;
-        if at + 4 <= arena.len() {
-            u32::from_le_bytes(arena[at..at + 4].try_into().unwrap()) as u64
+        if let Some(range) = slot_range(arena.len(), at, 4) {
+            u32::from_le_bytes(arena[range].try_into().unwrap()) as u64
         } else {
+            JIT_OOB.store(true, std::sync::atomic::Ordering::Relaxed);
             0
         }
     })
@@ -2507,10 +2545,10 @@ extern "C" fn host_slot_load32(at: u64) -> u64 {
 
 extern "C" fn host_slot_load64(at: u64) -> u64 {
     with_jit_arena(|arena| {
-        let at = at as usize;
-        if at + 8 <= arena.len() {
-            u64::from_le_bytes(arena[at..at + 8].try_into().unwrap())
+        if let Some(range) = slot_range(arena.len(), at, 8) {
+            u64::from_le_bytes(arena[range].try_into().unwrap())
         } else {
+            JIT_OOB.store(true, std::sync::atomic::Ordering::Relaxed);
             0
         }
     })
@@ -2910,6 +2948,31 @@ impl CraneliftStatefulSession<'_> {
             }
             Err(reason) => execution_failure(result, ExecutionStatus::Unsupported, reason),
         }
+    }
+}
+
+#[cfg(test)]
+mod slot_range_tests {
+    use super::slot_range;
+
+    #[test]
+    fn sentinel_and_wrapping_addresses_never_validate() {
+        // The u64::MAX allocation-failure sentinel previously wrapped
+        // `at + width` past the bounds check and aborted the backend.
+        assert_eq!(slot_range(4_194_224, u64::MAX, 8), None);
+        assert_eq!(slot_range(4_194_224, u64::MAX, 4), None);
+        // Wrapping near-max address: old code computed end 0 and passed.
+        assert_eq!(slot_range(4_194_224, u64::MAX - 7, 8), None);
+        // Ordinary out-of-bounds stays out-of-bounds.
+        assert_eq!(slot_range(100, 93, 8), None);
+        assert_eq!(slot_range(100, 97, 4), None);
+    }
+
+    #[test]
+    fn in_bounds_ranges_validate_exactly() {
+        assert_eq!(slot_range(100, 92, 8), Some(92..100));
+        assert_eq!(slot_range(100, 0, 4), Some(0..4));
+        assert_eq!(slot_range(0, 0, 4), None);
     }
 }
 

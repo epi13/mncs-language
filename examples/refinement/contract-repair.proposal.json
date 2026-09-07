@@ -3,7 +3,7 @@
   "identity": "mncs:0.2:proposal:contract-repair",
   "generator": "mncs:0.2:generator:diagnostic-agent",
   "baseline_identity": "mncs:0.2:program:Examples.SemanticFoundation",
-  "baseline_fingerprint": "b6c85a02c2c4a311ab3e9b5f030072942f19bd84c58723fc16104e39ddede015",
+  "baseline_fingerprint": "3395f106ba0610ecff9d9f0902df55415440a05e10fab7cbc45e9b597e9d6f20",
   "objective": "tighten the nonnegative record precondition",
   "protected_properties": [
     "mncs:0.2:contract:Examples.SemanticFoundation::record::nonnegative"

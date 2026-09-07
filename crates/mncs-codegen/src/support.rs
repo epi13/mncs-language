@@ -14,6 +14,15 @@ use sha2::{Digest, Sha256};
 
 use crate::BackendExecutionResult;
 
+/// Canonical native cell-arena capacity in bytes, shared by every native
+/// realization (C11, LLVM IR, the AOT cell runtime, and the Cranelift JIT
+/// host runtime) so flagship-scale admission fits everywhere with headroom:
+/// measured peak is 6,020,616 bytes for `binding_reusable` over the
+/// 29-cell flagship (`admit-reuse-flagship`). The bump allocators still
+/// carry no in-band overflow guard, so genuine exhaustion stays a loud
+/// runner-level failure, never a silent verdict.
+pub(crate) const NATIVE_ARENA_BYTES: u64 = 16 * 1024 * 1024;
+
 pub(crate) fn failed(diagnostics: Vec<CompilerDiagnostic>) -> BackendResult {
     BackendResult {
         status: TransformationStatus::Fail,
@@ -572,34 +581,43 @@ pub(crate) fn process_driver_cell_runtime(
     let base = process_driver_full(function, inputs);
     // Replace the extern declarations with local definitions of the same
     // names so imported cell libcalls resolve against this driver.
-    base.replace(
-        r#"extern unsigned char mncs_arena[4194304];
-extern uint64_t mncs_bump;"#,
-        r#"static unsigned char mncs_arena[4194304];
-static uint64_t mncs_bump = 0;
-uint64_t mncs_cell_alloc(uint64_t bytes) {
-  uint64_t base = (mncs_bump + 7u) & ~(uint64_t)7u;
-  mncs_bump = base + bytes;
-  return base;
-}
-void mncs_slot_store32(uint64_t at, uint64_t v) {
-  uint32_t x = (uint32_t)v;
-  memcpy(mncs_arena + at, &x, sizeof x);
-}
-void mncs_slot_store64(uint64_t at, uint64_t v) {
-  memcpy(mncs_arena + at, &v, sizeof v);
-}
-uint64_t mncs_slot_load32(uint64_t at) {
-  uint32_t x;
-  memcpy(&x, mncs_arena + at, sizeof x);
-  return x;
-}
-uint64_t mncs_slot_load64(uint64_t at) {
-  uint64_t x;
-  memcpy(&x, mncs_arena + at, sizeof x);
-  return x;
-}"#,
-    )
+    let pattern = format!(
+        "extern unsigned char mncs_arena[{NATIVE_ARENA_BYTES}];\nextern uint64_t mncs_bump;"
+    );
+    let prefix = format!(
+        "static unsigned char mncs_arena[{NATIVE_ARENA_BYTES}];\nstatic uint64_t mncs_bump = 0;"
+    );
+    let replacement = format!(
+        "{prefix}\n\
+         uint64_t mncs_cell_alloc(uint64_t bytes) {{\n  \
+           uint64_t base = (mncs_bump + 7u) & ~(uint64_t)7u;\n  \
+           mncs_bump = base + bytes;\n  \
+           return base;\n\
+         }}\n\
+         void mncs_slot_store32(uint64_t at, uint64_t v) {{\n  \
+           uint32_t x = (uint32_t)v;\n  \
+           memcpy(mncs_arena + at, &x, sizeof x);\n\
+         }}\n\
+         void mncs_slot_store64(uint64_t at, uint64_t v) {{\n  \
+           memcpy(mncs_arena + at, &v, sizeof v);\n\
+         }}\n\
+         uint64_t mncs_slot_load32(uint64_t at) {{\n  \
+           uint32_t x;\n  \
+           memcpy(&x, mncs_arena + at, sizeof x);\n  \
+           return x;\n\
+         }}\n\
+         uint64_t mncs_slot_load64(uint64_t at) {{\n  \
+           uint64_t x;\n  \
+           memcpy(&x, mncs_arena + at, sizeof x);\n  \
+           return x;\n\
+         }}"
+    );
+    let replaced = base.replace(&pattern, &replacement);
+    debug_assert!(
+        replaced.len() != base.len(),
+        "cell-runtime driver must carry the canonical arena declarations"
+    );
+    replaced
 }
 
 /// Whether the native process driver will need `mncs_arena` / `mncs_bump`.
@@ -826,7 +844,7 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
 #include <stdlib.h>
 #include <string.h>
 
-extern unsigned char mncs_arena[4194304];
+extern unsigned char mncs_arena[{NATIVE_ARENA_BYTES}];
 extern uint64_t mncs_bump;
 
 void {function}({proto});
