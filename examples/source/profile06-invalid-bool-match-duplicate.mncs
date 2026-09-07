@@ -1,0 +1,12 @@
+mncs 0.6;
+
+// Negative fixture: a duplicated boolean arm is unreachable (MNE139).
+module examples.profile06_invalid_bool_match_duplicate;
+
+fn gate(flag: bool) -> (result: i32) {
+    return match flag {
+        true => 1,
+        true => 2,
+        false => 0,
+    };
+}

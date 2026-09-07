@@ -391,6 +391,39 @@ pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagn
                 }
             }
         }
+        // Repair pass: the call rewrite above may have changed callee
+        // identities inside iteration bodies. Re-derive each recorded
+        // iteration closure from the rewritten blocks, exactly as
+        // elaboration derives them. Without this, a generic call nested in
+        // an iteration (e.g. a generic scanner inside a generic search)
+        // specializes its target but leaves the stale generic identity in
+        // the closure, and SSA validation fails closed (SSA022).
+        let repaired: Vec<Vec<SemanticId>> = body
+            .bounded_iterations
+            .iter()
+            .map(|iteration| {
+                let mut callees = BTreeSet::new();
+                for block in body
+                    .blocks
+                    .iter()
+                    .filter(|block| iteration.body_blocks.contains(&block.id))
+                {
+                    for operation in &block.operations {
+                        if let BodyOperationKind::Call { function, .. } = &operation.kind {
+                            callees.insert(function.clone());
+                        }
+                    }
+                }
+                callees.into_iter().collect()
+            })
+            .collect();
+        for (iteration, callees) in body.bounded_iterations.iter_mut().zip(repaired) {
+            let recorded: BTreeSet<SemanticId> = iteration.callees.iter().cloned().collect();
+            let derived: BTreeSet<SemanticId> = callees.iter().cloned().collect();
+            if derived != recorded {
+                iteration.callees = callees;
+            }
+        }
     }
 
     // Validate no generic call remains in concrete functions

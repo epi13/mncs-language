@@ -1,0 +1,23 @@
+mncs 0.8;
+
+// Negative fixture: crypto intrinsics take fixed data operands
+// (MNP195/MNP196). Operands carry data only; authority still comes from
+// declarations.
+module examples.crypto_invalid_arity;
+
+fn digest_two(a: [byte; up_to 64], b: [byte; up_to 64]) -> (result: [byte; up_to 64])
+    capability verifier
+    effect sha256_digest authorized_by verifier
+{
+    return sha256_digest(a, b);
+}
+
+fn check_pair(
+    pubkey: [byte; up_to 64],
+    msg: [byte; up_to 64]
+) -> (result: bool)
+    capability verifier
+    effect ed25519_verify authorized_by verifier
+{
+    return ed25519_verify(pubkey, msg);
+}

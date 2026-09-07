@@ -1,0 +1,91 @@
+mncs 0.6;
+
+// mncs.std.fixed — blessed milli-scale decimal scores.
+//
+// Deterministic fixed-point for scores, thresholds, margins, and sampling
+// parameters (temperature/top_p), chosen over IEEE floats for one reason:
+// every operation here is exact, total, and backend-identical by
+// construction, with no NaN, infinity, signed zero, rounding mode, or
+// optimizer legality to specify. The harness semantic-routing pressure
+// (HARNESS-PRESSURE-002) needs lane scores in [0, 1], `minimum_score` /
+// `minimum_margin` thresholds, and temperature/top_p representation — all
+// of which fit milli units with room to spare.
+//
+// Scale contract: ONE fixed scale, 1/1000, encoded in the `Score` type.
+// A Score is an i64 count of milli-units: 0.60 is 600, 0.12 is 120,
+// temperature 1.0 is 1000. Hosts encode with round(x * 1000); decoding is
+// the inverse. There is no scale parameter to mismatch and no other scale
+// in this module.
+//
+// Exactness and overflow: addition and subtraction saturate at the i64
+// bounds with explicit saturating intents (`+|`, `-|`), so overflow is
+// visible at the call site and can never wrap into a wrong-sign score.
+// Valid domains (milli magnitudes far below 2^63) never saturate; the
+// saturation bound is a fail-safe, not a value. Comparison is exact native
+// i64 comparison at the call site; min/max/clamp compose from
+// `mncs.core.ordering.v1` (`min_i64`, `max_i64`, `clamp_i64`).
+//
+// Deliberately out of scope: products and quotients. Milli-times-milli
+// needs an explicit divide that would carry an honest UNKNOWN obligation
+// into every consumer; represent rates and weights as premultiplied millis
+// instead. If a future pressure needs scaled multiplication, it extends
+// this module with explicit rounding — not a parallel convention.
+module mncs.std.fixed.v1;
+
+// A milli-scale decimal value. The scale lives in the type: unwrapping is
+// the only way to observe the raw count, and constructing is the only way
+// to bless one.
+record Score { millis: i64 }
+
+// Bless a milli count as a score. Total: every i64 is a representable
+// count; domain policy (e.g. lanes in [0, 1000]) belongs to the caller.
+fn score(millis: i64) -> (result: Score) {
+    return Score { millis: millis };
+}
+
+// Observe the milli count. Explicit: crossing back to raw integers is
+// always visible at the call site.
+fn millis(value: Score) -> (result: i64) {
+    return value.millis;
+}
+
+// Same-scale addition with saturating intent. Exact: no rounding exists
+// at this scale to choose.
+fn add(left: Score, right: Score) -> (result: Score) {
+    return Score { millis: left.millis +| right.millis };
+}
+
+// Same-scale subtraction with saturating intent. Margins are the
+// canonical use: `sub(selected, runner_up)` is exact and total.
+fn sub(left: Score, right: Score) -> (result: Score) {
+    return Score { millis: left.millis -| right.millis };
+}
+
+// Clamp a score into a closed milli interval. Comparison-only, hence
+// obligation-free like the ordering kernels it mirrors.
+fn clamp_score(value: Score, lo: Score, hi: Score) -> (result: Score) {
+    if value.millis < lo.millis {
+        return lo;
+    }
+    if value.millis > hi.millis {
+        return hi;
+    }
+    return value;
+}
+
+// Executable entry points with concrete shapes for backend corpora.
+
+fn candidate_blend(base_millis: i64, bonus_millis: i64) -> (result: i64) {
+    let total: Score = add(score(base_millis), score(bonus_millis));
+    return millis(total);
+}
+
+fn candidate_margin(selected_millis: i64, runner_up_millis: i64) -> (result: i64) {
+    let margin: Score = sub(score(selected_millis), score(runner_up_millis));
+    return millis(margin);
+}
+
+fn candidate_clamp(value_millis: i64, lo_millis: i64, hi_millis: i64) -> (result: i64) {
+    let clamped: Score = clamp_score(score(value_millis), score(lo_millis), score(hi_millis));
+    return millis(clamped);
+}

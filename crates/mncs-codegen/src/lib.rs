@@ -28,7 +28,7 @@ use mncs_model::{
     BackendFunctionValueContract, BackendIdentity, BackendResult, BackendValueContract,
     BodyExecutionSession, BodyType, CompilerArtifactRef, CompilerDiagnostic,
     CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure, ExecutionRequest, ExecutionResult,
-    ExecutionStatus, ExecutionTarget, ExecutionValue, IntegerType, Program, SemanticId,
+    ExecutionStatus, ExecutionTarget, ExecutionValue, HostGrant, IntegerType, Program, SemanticId,
     SsaExecutionSession, SsaModule, StatefulCallResult, StatefulExecutionCase,
     StatefulExecutionCheckpoint, StatefulExecutionResult, TargetContractRef, TargetLoweringPlan,
     TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION, COMPILER_ARTIFACT_SCHEMA_VERSION,
@@ -2071,6 +2071,7 @@ pub fn compare_body_ssa_and_backend(
     ssa: &SsaModule,
     artifact: &BackendArtifact,
     corpus: &ExecutionCorpus,
+    host_grants: &[HostGrant],
 ) -> LayeredExecutionComparison {
     let started = Instant::now();
     let mut matching = 0usize;
@@ -2089,17 +2090,21 @@ pub fn compare_body_ssa_and_backend(
     // (nested) call. Request-specific checks still run every time.
     let body_session = BodyExecutionSession::new(program);
     for case_ in &corpus.cases {
-        let body = body_session.execute(&case_.request);
+        // Granted requests replay the same explicit host authority the
+        // experiment runner attaches, so host-effect corpora compare the
+        // realized observations instead of unanimous refusals.
+        let request = case_.request.with_host_grants(host_grants);
+        let body = body_session.execute(&request);
         trace_timing("compare-body", started);
         let ssa_result = ssa_session.as_ref().map_or_else(
-            || execute_ssa_module(program, ssa, &case_.request),
+            || execute_ssa_module(program, ssa, &request),
             |session| {
                 mncs_model::record_counter("reused_execution");
-                session.execute(&case_.request)
+                session.execute(&request)
             },
         );
         trace_timing("compare-ssa", started);
-        let backend = backend_session.execute(&case_.request);
+        let backend = backend_session.execute(&request);
         trace_timing("compare-backend", started);
         unsupported |= matches!(body.status, ExecutionStatus::Unsupported)
             || matches!(ssa_result.status, ExecutionStatus::Unsupported)
@@ -2359,6 +2364,7 @@ mod tests {
             ],
             step_budget: 64,
             policy: ExecutionPolicy::default(),
+            host_grants: Vec::new(),
         }
     }
 
@@ -2413,7 +2419,7 @@ mod tests {
                 },
             ],
         };
-        let comparison = compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus);
+        let comparison = compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus, &[]);
         assert_eq!(
             comparison.interpretation,
             LAYERED_EXECUTION_COMPARISON_INTERPRETATION
@@ -2519,6 +2525,7 @@ mod tests {
             }],
             step_budget: budget,
             policy: mncs_model::ExecutionPolicy::default(),
+            host_grants: Vec::new(),
         };
         let generous = session.execute(&request(10_000));
         assert_eq!(generous.status, mncs_model::ExecutionStatus::Returned);
@@ -2565,7 +2572,7 @@ mod tests {
             let artifact = lower_with_backend(backend, &program, &ssa, selected.clone(), &plan)
                 .artifact
                 .expect("arithmetic artifact");
-            let comparison = compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus);
+            let comparison = compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus, &[]);
             assert_eq!(
                 comparison.status,
                 LayeredExecutionStatus::ConsistentOverCorpus,
@@ -2891,6 +2898,7 @@ mod record_tests {
             }],
             step_budget: 256,
             policy: ExecutionPolicy::default(),
+            host_grants: Vec::new(),
         }
     }
 

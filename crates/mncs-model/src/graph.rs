@@ -530,6 +530,12 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                                 &operation_identity,
                             ))
                         }
+                        crate::BodyOperationKind::HostCall { .. } => {
+                            Some(crate::obligations::body_obligation_id(
+                                "effect-authorized",
+                                &operation_identity,
+                            ))
+                        }
                         crate::BodyOperationKind::RuntimeCheck { .. } => {
                             Some(crate::obligations::body_obligation_id(
                                 "runtime-check",

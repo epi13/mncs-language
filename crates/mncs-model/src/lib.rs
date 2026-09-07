@@ -50,12 +50,12 @@ pub use bindings::{
     SemanticNamespace, SemanticReference, SemanticScope, SEMANTIC_BINDING_SCHEMA_VERSION,
 };
 pub use body::{
-    BodyBlock, BodyBoundedIteration, BodyCyclePolicy, BodyOperation, BodyOperationKind,
-    BodyParameter, BodyTerminator, BodyType, BodyValue, BoundedIterationCompletion, BoundsEvidence,
-    FunctionBody, GenericArg, GenericParam, GenericParamKind, IterationDomain, LoweringEnvelope,
-    MachineIntentSpec, PortabilityEnvelope, PortabilityTarget, RealizationClass, SequenceBound,
-    EXECUTABLE_BODY_SCHEMA_VERSION, MAX_SEQUENCE_BOUND, MAX_VECTOR_LANES,
-    SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
+    host_call_arity, host_call_effect_kind, BodyBlock, BodyBoundedIteration, BodyCyclePolicy,
+    BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator, BodyType, BodyValue,
+    BoundedIterationCompletion, BoundsEvidence, FunctionBody, GenericArg, GenericParam,
+    GenericParamKind, IterationDomain, LoweringEnvelope, MachineIntentSpec, PortabilityEnvelope,
+    PortabilityTarget, RealizationClass, SequenceBound, EXECUTABLE_BODY_SCHEMA_VERSION,
+    MAX_SEQUENCE_BOUND, MAX_VECTOR_LANES, SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
 };
 pub use canonical::sha256_hex;
 pub use canonical::{CanonicalError, CanonicalForm, CANONICAL_SCHEMA_VERSION};
@@ -109,13 +109,13 @@ pub use execution::{
     ComparisonStatus, EffectExecutionPolicy, ExecutionCase, ExecutionComparison, ExecutionCorpus,
     ExecutionEffectEvent, ExecutionFailure, ExecutionPolicy, ExecutionProperty, ExecutionRequest,
     ExecutionResult, ExecutionStatus, ExecutionSubject, ExecutionTarget, ExecutionTraceEntry,
-    ExecutionValue, ExpectedEffectObservation, StatefulArgument, StatefulCallResult,
+    ExecutionValue, ExpectedEffectObservation, HostGrant, StatefulArgument, StatefulCallResult,
     StatefulExecutionCase, StatefulExecutionCheckpoint, StatefulExecutionComparison,
     StatefulExecutionMismatch, StatefulExecutionResult, StatefulExecutionStep,
     StatefulStepObservation, EXECUTION_COMPARISON_SCHEMA_VERSION, EXECUTION_CORPUS_SCHEMA_VERSION,
     EXECUTION_CORPUS_SCHEMA_VERSION_0_2, EXECUTION_CORPUS_SCHEMA_VERSION_0_3,
-    EXECUTION_REQUEST_SCHEMA_VERSION, EXECUTION_RESULT_SCHEMA_VERSION, MAX_EXECUTION_BUDGET,
-    MAX_STATEFUL_CALLS, STATEFUL_EXECUTION_COMPARISON_SCHEMA_VERSION,
+    EXECUTION_REQUEST_SCHEMA_VERSION, EXECUTION_RESULT_SCHEMA_VERSION, HOST_GRANT_MAX_BYTES,
+    MAX_EXECUTION_BUDGET, MAX_STATEFUL_CALLS, STATEFUL_EXECUTION_COMPARISON_SCHEMA_VERSION,
     STATEFUL_EXECUTION_SCHEMA_VERSION,
 };
 pub use experiment::{

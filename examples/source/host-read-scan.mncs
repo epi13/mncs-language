@@ -1,0 +1,27 @@
+mncs 0.10;
+
+// Positive fixture: a real MNCS program obtains bounded bytes through the
+// host-capability boundary and composes them with text/view scanning
+// (HARNESS-PRESSURE-004). Authority is declared, never ambient: the
+// function names its capability and its `host_read` effect, and the
+// executor realizes `host_read()` from an explicit grant for that
+// capability. Without a grant the call fails closed.
+module examples.host_read_scan;
+
+use mncs.std.text_scan.v1 as text;
+
+fn has_term(needle: [byte; 4], needle_length: u64) -> (result: bool)
+    capability note_reader
+    effect host_read authorized_by note_reader
+{
+    let blob: [byte; up_to 64] = host_read();
+    return text.contains<4>(blob, blob.len, needle, needle_length);
+}
+
+fn blob_len() -> (result: u64)
+    capability note_reader
+    effect host_read authorized_by note_reader
+{
+    let blob: [byte; up_to 64] = host_read();
+    return blob.len;
+}

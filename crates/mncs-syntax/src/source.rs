@@ -582,6 +582,50 @@ pub enum AstExpr {
         element: Box<AstExpr>,
         span: SourceSpan,
     },
+    /// Host-realized read `host_read()` (Profile 0.8). Authority comes
+    /// from the enclosing function's declarations (`effect host_read`
+    /// plus its capability), never from arguments: the executor realizes
+    /// the value from an explicit grant for that capability.
+    HostRead {
+        span: SourceSpan,
+    },
+    /// Host-realized wall-clock read `clock_read()` (Profile 0.8).
+    /// Authority comes from the enclosing function's declarations
+    /// (`effect clock_read` plus its capability), never from arguments:
+    /// the executor realizes epoch milliseconds from its own clock once
+    /// the operator grants that capability (`--grant-time`). No grant
+    /// file backs it; wall-clock trust sits at the host boundary, and
+    /// programs must compare instants relationally (elapsed/expired),
+    /// never pin absolute values.
+    ClockRead {
+        span: SourceSpan,
+    },
+    /// Verify-only SHA-256 digest `sha256_digest(view)` (Profile 0.8).
+    /// Authority comes from the enclosing function's declarations
+    /// (`effect sha256_digest` plus its capability), granted via
+    /// `--grant-crypto`. The operand is a byte view; the digest covers
+    /// exactly the view's runtime bytes (callers size views exactly —
+    /// padding is covered, never stripped). Delivers the 32 digest bytes
+    /// as `[byte; up_to 64]`. Pure function of its operand, so every
+    /// layer agrees byte-exactly.
+    Sha256Digest {
+        view: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Verify-only Ed25519 check
+    /// `ed25519_verify(pubkey, message, signature)` (Profile 0.8).
+    /// Authority comes from the enclosing function's declarations
+    /// (`effect ed25519_verify` plus its capability), granted via
+    /// `--grant-crypto`. Views are runtime-length exact: the public key
+    /// must be 32 bytes and the signature 64, else InvalidRequest; the
+    /// message is covered at its runtime length. No keygen exists
+    /// in-language; verification uses the audited dalek primitive.
+    Ed25519Verify {
+        pubkey: Box<AstExpr>,
+        message: Box<AstExpr>,
+        signature: Box<AstExpr>,
+        span: SourceSpan,
+    },
     /// Profile 0.8 semantic vector/mask intrinsic. The parser preserves the
     /// intrinsic identity and arguments; elaboration supplies lane/type facts.
     VectorIntrinsic {
@@ -610,6 +654,10 @@ impl AstExpr {
             | Self::Cast { span, .. }
             | Self::Select { span, .. }
             | Self::SequenceReplace { span, .. }
+            | Self::HostRead { span, .. }
+            | Self::ClockRead { span, .. }
+            | Self::Sha256Digest { span, .. }
+            | Self::Ed25519Verify { span, .. }
             | Self::VectorIntrinsic { span, .. } => *span,
         }
     }
@@ -1521,7 +1569,7 @@ impl<'a> Parser<'a> {
     fn function(&mut self) -> (CstNode, Option<AstFunction>) {
         let start = self.current_token_index();
         self.expect(TokenKind::FunctionKeyword, "MNP010", "expected 'fn'");
-        let name = self.spanned(TokenKind::Identifier, "MNP011", "expected function name");
+        let name = self.value_name("MNP011", "expected function name");
         let generic_params = self.generic_params();
         let (input_node, inputs) = self.parameter_list("input");
         self.expect(TokenKind::Arrow, "MNP012", "expected '->' before outputs");
@@ -1545,11 +1593,7 @@ impl<'a> Parser<'a> {
                     "expected explicit return",
                 );
                 let returned_value = self
-                    .spanned(
-                        TokenKind::Identifier,
-                        "MNP015",
-                        "expected returned value name",
-                    )
+                    .value_name("MNP015", "expected returned value name")
                     .map(AstExpr::Name);
                 self.expect(TokenKind::Semicolon, "MNP016", "expected ';' after return");
                 let return_end = self.previous_token_index(return_start);
@@ -1686,12 +1730,8 @@ impl<'a> Parser<'a> {
             returned = if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_3) {
                 self.expression()
             } else {
-                self.spanned(
-                    TokenKind::Identifier,
-                    "MNP015",
-                    "expected returned value name",
-                )
-                .map(AstExpr::Name)
+                self.value_name("MNP015", "expected returned value name")
+                    .map(AstExpr::Name)
             };
             self.expect(TokenKind::Semicolon, "MNP016", "expected ';' after return");
             let return_end = self.previous_token_index(return_start);
@@ -1716,7 +1756,7 @@ impl<'a> Parser<'a> {
         match self.current_kind() {
             Some(TokenKind::LetKeyword) => {
                 self.cursor += 1;
-                let name = self.spanned(TokenKind::Identifier, "MNP050", "expected binding name");
+                let name = self.value_name("MNP050", "expected binding name");
                 self.expect(
                     TokenKind::Colon,
                     "MNP051",
@@ -1807,12 +1847,8 @@ impl<'a> Parser<'a> {
                 let value = if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_3) {
                     self.expression()
                 } else {
-                    self.spanned(
-                        TokenKind::Identifier,
-                        "MNP015",
-                        "expected returned value name",
-                    )
-                    .map(AstExpr::Name)
+                    self.value_name("MNP015", "expected returned value name")
+                        .map(AstExpr::Name)
                 };
                 self.expect(TokenKind::Semicolon, "MNP016", "expected ';' after return");
                 let end = self.previous_token_index(start);
@@ -1866,18 +1902,14 @@ impl<'a> Parser<'a> {
             );
         }
         self.expect(TokenKind::IterateKeyword, "MNP091", "expected 'iterate'");
-        let name = self.spanned(
-            TokenKind::Identifier,
-            "MNP092",
-            "expected iteration identity",
-        );
+        let name = self.value_name("MNP092", "expected iteration identity");
         // Profile 0.7 adds the bounded-sequence traversal form
         // `iterate i over xs carrying ...`; the counted attempt form is
         // unchanged. The traversal source is parsed here so elaboration can
         // derive the exact step ceiling from its declared bound.
         let mut over_source: Option<Box<AstExpr>> = None;
-        let bound: Option<SpannedText>;
-        let bound_value: Option<i128>;
+        let mut bound: Option<SpannedText>;
+        let mut bound_value: Option<i128>;
         if self.current_kind() == Some(TokenKind::OverKeyword) {
             if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_7) {
                 self.error(
@@ -1906,21 +1938,41 @@ impl<'a> Parser<'a> {
                 "MNP094",
                 "expected a literal iteration bound",
             );
-            bound_value = parsed_bound
+            // A non-literal bound previously cascaded into a wall of
+            // follow-on errors (HARNESS-PRESSURE-012): the offending token
+            // stayed in place and every later header expectation misfired.
+            // Skip the single offending token so the rest of the header
+            // still parses and the diagnostic stays at one precise MNP094.
+            bound = parsed_bound;
+            if bound.is_none()
+                && !matches!(
+                    self.current_kind(),
+                    Some(TokenKind::CarryingKeyword | TokenKind::LeftBrace | TokenKind::RightBrace)
+                        | None
+                )
+            {
+                self.cursor += 1;
+            }
+            bound_value = bound
                 .as_ref()
                 .and_then(|bound| bound.text.parse::<i128>().ok());
-            bound = parsed_bound;
+            // A skipped (non-literal) bound must still fail elaboration:
+            // keep the statement absent by clearing the bound value while
+            // retaining the placeholder shape for span recovery.
+            if bound.is_none() {
+                bound = Some(SpannedText {
+                    text: "0".to_owned(),
+                    span: SourceSpan::at(&self.envelope.text, 0, 0),
+                });
+                bound_value = None;
+            }
         }
         self.expect(
             TokenKind::CarryingKeyword,
             "MNP095",
             "expected 'carrying' after iteration bound",
         );
-        let state = self.spanned(
-            TokenKind::Identifier,
-            "MNP096",
-            "expected carried state name",
-        );
+        let state = self.value_name("MNP096", "expected carried state name");
         self.expect(
             TokenKind::Colon,
             "MNP097",
@@ -1953,11 +2005,7 @@ impl<'a> Parser<'a> {
             "MNP101",
             "iteration body must end with an explicit 'next' transition",
         );
-        let next_state = self.spanned(
-            TokenKind::Identifier,
-            "MNP102",
-            "expected carried state after 'next'",
-        );
+        let next_state = self.value_name("MNP102", "expected carried state after 'next'");
         self.expect(
             TokenKind::Equal,
             "MNP103",
@@ -2084,13 +2132,13 @@ impl<'a> Parser<'a> {
 
     fn primary_atom(&mut self) -> Option<AstExpr> {
         match self.current_kind() {
-            Some(TokenKind::Identifier) => {
+            Some(TokenKind::Identifier | TokenKind::CapabilityKeyword) => {
                 if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_9)
                     && self.peek_kind(1) == Some(TokenKind::Dot)
                 {
                     return self.qualified_primary();
                 }
-                let name = self.spanned(TokenKind::Identifier, "MNP062", "expected expression")?;
+                let name = self.value_name("MNP062", "expected expression")?;
                 // Branchless-selection intrinsics (Profile 0.8). The names
                 // are reserved in expression head position so the semantic
                 // operation is explicit at the source: `select(c, t, f)` is
@@ -2278,7 +2326,7 @@ impl<'a> Parser<'a> {
     /// parser preserves the path; the resolver decides whether its leading
     /// segment is an import alias/module route or an invalid value path.
     fn qualified_primary(&mut self) -> Option<AstExpr> {
-        let first = self.spanned(TokenKind::Identifier, "MNP062", "expected expression")?;
+        let first = self.value_name("MNP062", "expected expression")?;
         let mut segments = vec![first.clone()];
         while self.current_kind() == Some(TokenKind::Dot) {
             self.cursor += 1;
@@ -2471,7 +2519,8 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse the Profile 0.8 selection intrinsics `select(c, t, f)` and
-    /// `replace(seq, index, element)`. `name` is the already-consumed
+    /// `replace(seq, index, element)`, plus the host intrinsics
+    /// `host_read()` and `clock_read()`. `name` is the already-consumed
     /// intrinsic identifier.
     fn intrinsic_selection(&mut self, name: SpannedText) -> Option<AstExpr> {
         self.expect(
@@ -2532,6 +2581,64 @@ impl<'a> Parser<'a> {
                 self.error(
                     "MNP162",
                     "selection intrinsics take exactly three arguments",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("host_read", 0) => Some(AstExpr::HostRead { span }),
+            ("host_read", _) => {
+                self.error(
+                    "MNP193",
+                    "host_read takes no arguments; authority comes from the enclosing function's declarations",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("clock_read", 0) => Some(AstExpr::ClockRead { span }),
+            ("clock_read", _) => {
+                self.error(
+                    "MNP194",
+                    "clock_read takes no arguments; authority comes from the enclosing function's declarations",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("sha256_digest", 1) => {
+                let mut iter = arguments.into_iter();
+                let (Some(view),) = (iter.next(),) else {
+                    return None;
+                };
+                Some(AstExpr::Sha256Digest {
+                    view: Box::new(view),
+                    span,
+                })
+            }
+            ("sha256_digest", _) => {
+                self.error(
+                    "MNP195",
+                    "sha256_digest takes exactly one byte-view argument",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("ed25519_verify", 3) => {
+                let mut iter = arguments.into_iter();
+                let (Some(pubkey), Some(message), Some(signature)) =
+                    (iter.next(), iter.next(), iter.next())
+                else {
+                    return None;
+                };
+                Some(AstExpr::Ed25519Verify {
+                    pubkey: Box::new(pubkey),
+                    message: Box::new(message),
+                    signature: Box::new(signature),
+                    span,
+                })
+            }
+            ("ed25519_verify", _) => {
+                self.error(
+                    "MNP196",
+                    "ed25519_verify takes exactly three byte-view arguments (pubkey, message, signature)",
                     vec![TokenKind::RightParen],
                 );
                 None
@@ -2772,13 +2879,28 @@ impl<'a> Parser<'a> {
             "expected '{' after match value",
         );
         let mut arms = Vec::new();
-        while self.current_kind() == Some(TokenKind::Identifier) {
-            let first = self.spanned(TokenKind::Identifier, "MNP082", "expected match variant")?;
+        while matches!(
+            self.current_kind(),
+            Some(TokenKind::Identifier | TokenKind::TrueKeyword | TokenKind::FalseKeyword)
+        ) {
+            // Boolean patterns `true` / `false` (HARNESS-PRESSURE-013). The
+            // lexer never produces these spellings as identifiers, so the
+            // text alone distinguishes a boolean pattern from a variant.
+            let first = match self.current_kind() {
+                Some(TokenKind::TrueKeyword | TokenKind::FalseKeyword) => {
+                    let kind = self.current_kind().expect("boolean match pattern");
+                    self.spanned(kind, "MNP082", "expected match variant")?
+                }
+                _ => self.spanned(TokenKind::Identifier, "MNP082", "expected match variant")?,
+            };
+            let is_bool_pattern = first.text == "true" || first.text == "false";
             // Qualified pattern `Type.VARIANT` (Profile 0.6) or the bare
-            // variant name accepted by every profile.
+            // variant name accepted by every profile. Boolean patterns
+            // carry neither a qualifier nor a payload.
             let mut type_name = None;
             let mut variant = first;
-            if self.current_kind() == Some(TokenKind::Dot)
+            if !is_bool_pattern
+                && self.current_kind() == Some(TokenKind::Dot)
                 && profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_6)
             {
                 self.cursor += 1;
@@ -2820,7 +2942,8 @@ impl<'a> Parser<'a> {
             // bindings.
             let mut bindings = Vec::new();
             let mut ignore_payload = false;
-            if self.current_kind() == Some(TokenKind::LeftBrace)
+            if !is_bool_pattern
+                && self.current_kind() == Some(TokenKind::LeftBrace)
                 && profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_6)
             {
                 self.cursor += 1;
@@ -2873,10 +2996,25 @@ impl<'a> Parser<'a> {
                 value: arm_value,
                 span,
             });
-            if self.current_kind() != Some(TokenKind::Comma) {
-                break;
+            if self.current_kind() == Some(TokenKind::Comma) {
+                self.cursor += 1;
+                continue;
             }
-            self.cursor += 1;
+            // A missing comma between arms previously cascaded into an
+            // MNP084 wall (HARNESS-PRESSURE-012). When another arm clearly
+            // follows, pin the single precise error and keep parsing arms.
+            if matches!(
+                self.current_kind(),
+                Some(TokenKind::Identifier | TokenKind::TrueKeyword | TokenKind::FalseKeyword)
+            ) {
+                self.error(
+                    "MNP192",
+                    "expected ',' between match arms",
+                    vec![TokenKind::Comma],
+                );
+                continue;
+            }
+            break;
         }
         self.expect(
             TokenKind::RightBrace,
@@ -2909,9 +3047,9 @@ impl<'a> Parser<'a> {
         );
         let mut parameters = Vec::new();
         let mut children = Vec::new();
-        while self.current_kind() == Some(TokenKind::Identifier) {
+        while self.is_value_name() {
             let parameter_start = self.current_token_index();
-            let name = self.spanned(TokenKind::Identifier, "MNP021", "expected parameter name");
+            let name = self.value_name("MNP021", "expected parameter name");
             self.expect(
                 TokenKind::Colon,
                 "MNP022",
@@ -3273,6 +3411,40 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// A term-level name: an ordinary identifier, or the `capability`
+    /// keyword used as a value-level identifier
+    /// (HARNESS-PRESSURE-014). Capability *declarations* only occur in the
+    /// function-header clause position (parsed by `clauses`), so the
+    /// keyword is unambiguous in binding and reference positions: parameter
+    /// lists live inside parentheses, and `let`/`fn`/expression heads all
+    /// carry their own introducing token.
+    fn value_name(&mut self, code: &str, message: &str) -> Option<SpannedText> {
+        match self.current_kind() {
+            Some(TokenKind::Identifier) => self.spanned(TokenKind::Identifier, code, message),
+            Some(TokenKind::CapabilityKeyword) => {
+                let index = self.significant[self.cursor];
+                self.cursor += 1;
+                let token = &self.tokens[index];
+                Some(SpannedText {
+                    text: token.text.clone(),
+                    span: token.span,
+                })
+            }
+            _ => {
+                self.error(code, message, vec![TokenKind::Identifier]);
+                None
+            }
+        }
+    }
+
+    /// Whether the cursor sits on a term-level name (`value_name`).
+    fn is_value_name(&self) -> bool {
+        matches!(
+            self.current_kind(),
+            Some(TokenKind::Identifier | TokenKind::CapabilityKeyword)
+        )
+    }
+
     /// Parse a type annotation: a plain named/scalar identifier, a Profile
     /// 0.7 bounded sequence, or a Profile 0.8 semantic vector/mask family.
     /// The returned text is canonical; elaboration owns its semantic identity.
@@ -3605,6 +3777,10 @@ fn is_profile08_intrinsic(name: &str) -> bool {
         name,
         "select"
             | "replace"
+            | "host_read"
+            | "clock_read"
+            | "sha256_digest"
+            | "ed25519_verify"
             | "vector"
             | "splat"
             | "extract_lane"

@@ -1,0 +1,13 @@
+mncs 0.8;
+
+// Negative fixture: `host_read` takes no arguments (MNP193). Authority
+// comes from declarations, never from call-site values.
+module examples.host_read_invalid_arity;
+
+fn blob_len(extra: u64) -> (result: u64)
+    capability note_reader
+    effect host_read authorized_by note_reader
+{
+    let blob: [byte; up_to 64] = host_read(extra);
+    return blob.len;
+}

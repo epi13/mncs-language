@@ -1,0 +1,25 @@
+mncs 0.8;
+
+// Negative fixture: doubled crypto effects for one function are rejected
+// (MNE242/MNE245). One call site maps to exactly one authority record.
+module examples.crypto_invalid_double;
+
+fn digest_message(msg: [byte; up_to 64]) -> (result: [byte; up_to 64])
+    capability verifier
+    effect sha256_digest authorized_by verifier
+    effect sha256_digest authorized_by verifier
+{
+    return sha256_digest(msg);
+}
+
+fn check_issuance(
+    pubkey: [byte; up_to 64],
+    msg: [byte; up_to 64],
+    sig: [byte; up_to 64]
+) -> (result: bool)
+    capability verifier
+    effect ed25519_verify authorized_by verifier
+    effect ed25519_verify authorized_by verifier
+{
+    return ed25519_verify(pubkey, msg, sig);
+}

@@ -230,6 +230,14 @@ pub enum IrOperationKind {
         kind: ContractKind,
     },
     Effect,
+    /// A value-producing host-realized operation. Authority was checked at
+    /// the body layer; the IR carries the capability and operation names so
+    /// every lowering either realizes them from an explicit grant or
+    /// refuses with Unsupported.
+    HostCall {
+        capability: String,
+        operation: String,
+    },
     RuntimeCheck {
         obligation: SemanticId,
         fact: SemanticId,
@@ -1351,6 +1359,43 @@ fn lower_executable_body(
                         vec![CapabilityUse {
                             capability: capability.clone(),
                             semantic_declaration: Some(capability),
+                        }],
+                        None,
+                        Some(state_identity),
+                    )
+                }
+                BodyOperationKind::HostCall {
+                    capability,
+                    operation,
+                } => {
+                    // The declared host effect is the authority record;
+                    // the call carries no other effects. The target
+                    // mirrors declaration elaboration, which anchors
+                    // declared effects to the function name.
+                    let declared = crate::Effect {
+                        kind: crate::host_call_effect_kind(operation).to_owned(),
+                        target: function.name.clone(),
+                        capability: capability.clone(),
+                    };
+                    let effect_identity = declared_effect_identity(program, function, &declared);
+                    let capability_identity = capability_id(namespace, &function.name, capability);
+                    let state_identity = ir_identity("state", &effect_identity, 0);
+                    regions.push(IrStateRegion {
+                        identity: state_identity.clone(),
+                        semantic_identity: Some(effect_identity.clone()),
+                        name: operation.clone(),
+                        kind: StateRegionKind::CapabilityControlled,
+                        capability: Some(capability_identity.clone()),
+                    });
+                    (
+                        IrOperationKind::HostCall {
+                            capability: capability.clone(),
+                            operation: operation.clone(),
+                        },
+                        vec![effect_identity],
+                        vec![CapabilityUse {
+                            capability: capability_identity.clone(),
+                            semantic_declaration: Some(capability_identity),
                         }],
                         None,
                         Some(state_identity),

@@ -1,0 +1,12 @@
+mncs 0.8;
+
+// Negative fixture: `host_read()` without a declared `host_read` effect
+// is rejected (MNE235). Authority cannot be assumed.
+module examples.host_read_invalid_missing_decl;
+
+fn blob_len() -> (result: u64)
+    capability note_reader
+{
+    let blob: [byte; up_to 64] = host_read();
+    return blob.len;
+}

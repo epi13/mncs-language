@@ -1,0 +1,292 @@
+mncs 0.10;
+
+// mncs.std.json_emit — bounded canonical JSON emission.
+//
+// The recognition side (`mncs.std.json.v1`, `json_stream`, `json_cursor`,
+// `json_projection`) scans; this module emits. Together they close the
+// structured-data loop over the same bounded-view substrate
+// (HARNESS-PRESSURE-009, first slice).
+//
+// Bounded writer model: a fixed `[byte; 64]` buffer plus an explicit
+// length, a container state machine (depth + first-element flag), and an
+// `ok` flag. There is no heap, no DOM, and no dynamic object construction:
+// callers thread one `Writer` value through typed emit primitives in
+// emission order. Output beyond 64 bytes is not truncated or wrapped —
+// the writer goes `ok = false` and stays there (explicit
+// insufficient-capacity result). Larger documents chain writers per
+// 64-byte view, mirroring how `json_stream` feeds larger inputs.
+//
+// Canonical contract: canonical-ness is byte-exact replay of a fixed call
+// sequence. The writer emits no whitespace, escapes `"` / `\` /
+// control bytes (`\u00XX`, lowercase hex), and renders integers in minimal
+// decimal form. KEY ORDER IS THE CALLER'S CONTRACT: the writer does not
+// sort keys (sorting needs allocation); a canonical document emits keys in
+// lexicographic order by construction of its call sequence. Golden vectors
+// pin the byte-exact output.
+//
+// Numbers: integers only. Fractional values cross the boundary as integer
+// millis per `mncs.std.fixed.v1` (e.g. `{"score_millis":820}`), so no
+// decimal-point rendering, float formatting, or locale dependence exists
+// anywhere in this module.
+//
+// Finishing: a document is complete when `w.ok && w.depth == 0`; its bytes
+// are `w.buf[0..w.len)`. Mismatched `end_*` calls fail closed
+// (`ok = false`); unclosed containers read back through `depth`.
+module mncs.std.json_emit.v1;
+
+// A bounded emission cursor. Only `buf[0..len)` is meaningful output;
+// the tail is unobserved scratch. `first` inhibits the separator: it is
+// true in a fresh container and in the value position just after a key,
+// false once a value has been emitted.
+record Writer { buf: [byte; 64], len: u64, depth: u64, first: bool, ok: bool }
+
+// Completion witness: byte length plus the closed-container check.
+record Emitted { len: u64, closed: bool, ok: bool }
+
+// Integer-to-decimal cursor: remaining magnitude, current divisor, and
+// whether a nonzero digit (or the units place) has been emitted.
+record Digits { rest: u64, div: u64, started: bool }
+
+fn open() -> (result: Writer) {
+    return Writer {
+        buf: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        len: 0,
+        depth: 0,
+        first: true,
+        ok: true
+    };
+}
+
+// Raw byte append. Total: over-capacity appends poison `ok` instead of
+// trapping or wrapping.
+fn put(w: Writer, value: byte) -> (result: Writer) {
+    if w.ok && w.len < 64 {
+        return Writer { ..w, buf: replace(w.buf, w.len, value), len: w.len +% 1 };
+    }
+    return Writer { ..w, ok: false };
+}
+
+// Separator rule shared by every value-opening primitive: emit `,` unless
+// this value is the first in its container (or the root).
+fn comma_if_needed(w: Writer) -> (result: Writer) {
+    if w.depth > 0 {
+        if w.first {
+            return w;
+        }
+        return put(w, 44);
+    }
+    return w;
+}
+
+fn begin_object(w: Writer) -> (result: Writer) {
+    let comma: Writer = comma_if_needed(w);
+    let opened: Writer = put(comma, 123);
+    return Writer { ..opened, depth: opened.depth +% 1, first: true };
+}
+
+fn end_object(w: Writer) -> (result: Writer) {
+    if w.depth == 0 {
+        return Writer { ..w, ok: false };
+    }
+    let closed: Writer = put(w, 125);
+    return Writer { ..closed, depth: closed.depth -% 1, first: false };
+}
+
+fn begin_array(w: Writer) -> (result: Writer) {
+    let comma: Writer = comma_if_needed(w);
+    let opened: Writer = put(comma, 91);
+    return Writer { ..opened, depth: opened.depth +% 1, first: true };
+}
+
+fn end_array(w: Writer) -> (result: Writer) {
+    if w.depth == 0 {
+        return Writer { ..w, ok: false };
+    }
+    let closed: Writer = put(w, 93);
+    return Writer { ..closed, depth: closed.depth -% 1, first: false };
+}
+
+// One hex digit, lowercase, as a byte. Total by arithmetic, not by table.
+fn hexchar(nibble: u64) -> (result: byte) {
+    let zero_glyph: u64 = 48;
+    let alpha_base: u64 = 87;
+    return select(nibble < 10, (nibble +% zero_glyph) as byte, (nibble +% alpha_base) as byte);
+}
+
+// Escaped byte append for quoted strings: `"` -> `\"`, `\` -> `\\`,
+// control bytes -> `\u00XX`, everything else raw.
+fn put_quoted_byte(w: Writer, value: byte) -> (result: Writer) {
+    if value == 34 {
+        return put(put(w, 92), 34);
+    }
+    if value == 92 {
+        return put(put(w, 92), 92);
+    }
+    if (value as u64) < 32 {
+        let hi: byte = hexchar((value as u64) / 16);
+        let lo: byte = hexchar((value as u64) % 16);
+        let esc: Writer = put(put(put(put(w, 92), 117), 48), 48);
+        return put(put(esc, hi), lo);
+    }
+    return put(w, value);
+}
+
+fn put_quoted_live(acc: Writer, live: bool, value: byte) -> (result: Writer) {
+    if live {
+        return put_quoted_byte(acc, value);
+    }
+    return acc;
+}
+
+fn put_quoted<N: Nat>(w: Writer, text: [byte; N], text_length: u64) -> (result: Writer) {
+    let opened: Writer = put(w, 34);
+    iterate i over text carrying acc: Writer = opened {
+        let live: bool = i < text_length;
+        next acc = put_quoted_live(acc, live, text[i]);
+    }
+    return put(acc, 34);
+}
+
+// Object key: separator, quoted name, colon. The value follows with no
+// further separator, so the flag stays raised through the colon: `first`
+// means "no separator needed before the next emission", which covers both
+// a fresh container and the value position after a key.
+fn key<N: Nat>(w: Writer, name: [byte; N], name_length: u64) -> (result: Writer) {
+    let comma: Writer = comma_if_needed(w);
+    let quoted: Writer = put_quoted<N>(comma, name, name_length);
+    let colon: Writer = put(quoted, 58);
+    return Writer { ..colon, first: true };
+}
+
+fn null_value(w: Writer) -> (result: Writer) {
+    let comma: Writer = comma_if_needed(w);
+    let n: Writer = put(comma, 110);
+    let u: Writer = put(n, 117);
+    let l1: Writer = put(u, 108);
+    let l2: Writer = put(l1, 108);
+    return Writer { ..l2, first: false };
+}
+
+fn bool_value(w: Writer, value: bool) -> (result: Writer) {
+    let comma: Writer = comma_if_needed(w);
+    if value {
+        let t: Writer = put(comma, 116);
+        let r: Writer = put(t, 114);
+        let u: Writer = put(r, 117);
+        let e: Writer = put(u, 101);
+        return Writer { ..e, first: false };
+    }
+    let f: Writer = put(comma, 102);
+    let a: Writer = put(f, 97);
+    let l: Writer = put(a, 108);
+    let s: Writer = put(l, 115);
+    let e: Writer = put(s, 101);
+    return Writer { ..e, first: false };
+}
+
+fn str_value<N: Nat>(w: Writer, text: [byte; N], text_length: u64) -> (result: Writer) {
+    let comma: Writer = comma_if_needed(w);
+    let quoted: Writer = put_quoted<N>(comma, text, text_length);
+    return Writer { ..quoted, first: false };
+}
+
+// One decimal step: emit the current most-significant digit unless it is
+// a skippable leading zero. Selection cannot guard the append (both
+// `select` candidates evaluate, and the discarded append would still
+// consume capacity), so the skip is a branch.
+fn digit_step(w: Writer, st: Digits) -> (result: Writer) {
+    let digit: u64 = st.rest / st.div;
+    let significant: bool = st.started || digit != 0 || st.div == 1;
+    if significant {
+        let zero_glyph: u64 = 48;
+        return put(w, (digit +% zero_glyph) as byte);
+    }
+    return w;
+}
+
+fn digit_state(st: Digits) -> (result: Digits) {
+    return Digits { rest: st.rest % st.div, div: st.div / 10, started: st.started || (st.rest / st.div) != 0 || st.div == 1 };
+}
+
+// Digit emission cursor: the writer plus the conversion state threaded
+// together through the counted loop below.
+record EmitStep { w: Writer, st: Digits }
+
+// Unsigned magnitude in minimal decimal form. Twenty counted steps cover
+// every u64 (2^64 < 10^20); leading zeros are skipped by the started
+// flag, and the units place always emits so zero renders as "0".
+fn put_u64(w: Writer, value: u64) -> (result: Writer) {
+    let seed: EmitStep = EmitStep { w: w, st: Digits { rest: value, div: 10000000000000000000, started: false } };
+    iterate d up_to 20 carrying acc: EmitStep = seed {
+        next acc = EmitStep { w: digit_step(acc.w, acc.st), st: digit_state(acc.st) };
+    }
+    return acc.w;
+}
+
+// Signed integers: sign plus magnitude. The magnitude crosses through u64
+// with wrapping subtraction so i64::MIN needs no special case: `0 -% mag`
+// is total by definition. The sign append is a branch for the same
+// strict-selection reason as `digit_step`: a discarded `select` append
+// would still consume capacity.
+fn int_value(w: Writer, value: i64) -> (result: Writer) {
+    let comma: Writer = comma_if_needed(w);
+    let negative: bool = value < 0;
+    if negative {
+        let signed: Writer = put(comma, 45);
+        let zero: u64 = 0;
+        let mag: u64 = zero -% (value as u64);
+        let digits: Writer = put_u64(signed, mag);
+        return Writer { ..digits, first: false };
+    }
+    let mag: u64 = value as u64;
+    let digits: Writer = put_u64(comma, mag);
+    return Writer { ..digits, first: false };
+}
+
+// Completion witness: length, closed-container check, and health.
+fn finish(w: Writer) -> (result: Emitted) {
+    return Emitted { len: w.len, closed: w.depth == 0, ok: w.ok };
+}
+
+// Executable entry points with concrete shapes for backend corpora.
+
+fn candidate_metrics_row(model: [byte; 8], model_length: u64, score_millis: i64, ok_flag: bool) -> (result: Writer) {
+    let w0: Writer = open();
+    let w1: Writer = begin_object(w0);
+    let w2: Writer = key<8>(w1, [109, 111, 100, 101, 108, 0, 0, 0], 5);
+    let w3: Writer = str_value<8>(w2, model, model_length);
+    let w4: Writer = key<8>(w3, [115, 99, 111, 114, 101, 0, 0, 0], 5);
+    let w5: Writer = int_value(w4, score_millis);
+    let w6: Writer = key<8>(w5, [111, 107, 0, 0, 0, 0, 0, 0], 2);
+    let w7: Writer = bool_value(w6, ok_flag);
+    return end_object(w7);
+}
+
+fn candidate_array(ints: [i64; 3]) -> (result: Writer) {
+    let w0: Writer = open();
+    let w1: Writer = begin_array(w0);
+    let w2: Writer = int_value(w1, ints[0]);
+    let w3: Writer = int_value(w2, ints[1]);
+    let w4: Writer = int_value(w3, ints[2]);
+    return end_array(w4);
+}
+
+fn candidate_escaped(text: [byte; 8], text_length: u64) -> (result: Writer) {
+    let w0: Writer = open();
+    let w1: Writer = str_value<8>(w0, text, text_length);
+    return w1;
+}
+
+fn candidate_null() -> (result: Writer) {
+    let w0: Writer = open();
+    return null_value(w0);
+}
+
+fn candidate_long_string(text: [byte; 64], text_length: u64) -> (result: Writer) {
+    let w0: Writer = open();
+    return str_value<64>(w0, text, text_length);
+}
+
+fn candidate_stray_end() -> (result: Writer) {
+    return end_object(open());
+}

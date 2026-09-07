@@ -1102,7 +1102,7 @@ fn cre3_body_ssa_and_each_backend_agree_over_the_typed_corpus() {
             .artifact
             .expect("backend artifact");
         let comparison =
-            mncs_codegen::compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus);
+            mncs_codegen::compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus, &[]);
         assert_eq!(
             comparison.status,
             mncs_codegen::LayeredExecutionStatus::ConsistentOverCorpus,

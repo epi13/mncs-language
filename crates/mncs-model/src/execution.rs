@@ -18,6 +18,8 @@ use crate::{
     ArithmeticIntent, BodyBlock, BodyOperation, BodyOperationKind, BodyTerminator, BodyType,
     BoundsEvidence, Function, FunctionBody, IntegerType, Program, SequenceBound,
 };
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use sha2::{Digest, Sha256};
 
 pub const EXECUTION_REQUEST_SCHEMA_VERSION: &str = "0.1";
 pub const EXECUTION_RESULT_SCHEMA_VERSION: &str = "0.1";
@@ -105,6 +107,91 @@ pub enum EffectExecutionPolicy {
     #[default]
     Unsupported,
     Record,
+    /// Realize host-granted effects from `ExecutionRequest.host_grants`.
+    /// A value-producing host operation with no matching grant fails
+    /// closed; grants never confer ambient authority.
+    Realize,
+}
+
+/// One bounded host-granted input (HARNESS-PRESSURE-004). The executor
+/// matches grants by capability name only; the bytes are an explicit
+/// copy (at most 64) supplied with the request, never a live handle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostGrant {
+    pub capability: String,
+    /// Operator-supplied provenance for the grant (file path, fixture
+    /// name, or test provider identity). Recorded into evidence.
+    pub locator: String,
+    pub bytes: Vec<u8>,
+}
+
+/// Maximum bytes in one host grant: the executor ABI's sequence bound.
+pub const HOST_GRANT_MAX_BYTES: usize = 64;
+
+/// Wall-clock epoch milliseconds observed from the host
+/// (HARNESS-PRESSURE-005). `None` when the host clock is unavailable;
+/// callers fail closed. This is wall time, not a monotonic tick: hosts
+/// may adjust it, so programs must compare instants relationally with
+/// wide margins (elapsed/expired), never pin absolute values in corpora.
+pub(crate) fn host_epoch_millis() -> Option<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|elapsed| elapsed.as_millis().min(u128::from(u64::MAX)) as u64)
+}
+
+/// The runtime bytes of one crypto view operand (HARNESS-PRESSURE-006).
+/// Coverage is exactly the view's runtime bytes — callers size views
+/// exactly, since padding is covered, never stripped. Every element
+/// must be a byte-domain value and the view must fit the 64-byte
+/// executor bound; `None` fails the call closed at the call site.
+pub(crate) fn host_view_bytes(value: &ExecutionValue) -> Option<Vec<u8>> {
+    let ExecutionValue::Sequence { values } = value else {
+        return None;
+    };
+    if values.len() > HOST_GRANT_MAX_BYTES {
+        return None;
+    }
+    values
+        .iter()
+        .map(|element| match element {
+            ExecutionValue::Byte { value } => u8::try_from(*value).ok(),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Read one crypto view operand by position. A missing binding or a
+/// non-view value is InvalidRequest: elaboration pins the arity, so
+/// anything else is a malformed request, never a default.
+pub(crate) fn host_view_operand(
+    operation: &BodyOperation,
+    values: &BTreeMap<String, ExecutionValue>,
+    position: usize,
+) -> Option<Vec<u8>> {
+    let binding = operation.operands.get(position)?;
+    host_view_bytes(values.get(binding)?)
+}
+
+/// Verify-only SHA-256 over raw bytes (HARNESS-PRESSURE-006). Pure
+/// function of the input through the audited SHA-2 primitive; returns
+/// the 32 digest bytes. Callers size the delivered sequence.
+pub(crate) fn sha256_digest_bytes(view: &[u8]) -> [u8; 32] {
+    Sha256::digest(view).into()
+}
+
+/// Verify-only Ed25519 over raw parts (HARNESS-PRESSURE-006).
+/// `Some(valid)` reports the dalek verdict: a forged signature is
+/// `Some(false)`, never a failure status. `None` marks malformed shapes
+/// (a key that is not 32 bytes, a signature that is not 64, or bytes no
+/// curve point accepts): the authority was granted but the request is
+/// ill-formed. No signing API exists on this path.
+pub(crate) fn ed25519_verify_bytes(key: &[u8], message: &[u8], signature: &[u8]) -> Option<bool> {
+    let key_bytes: [u8; 32] = key.try_into().ok()?;
+    let signature_bytes: [u8; 64] = signature.try_into().ok()?;
+    let verifying = VerifyingKey::from_bytes(&key_bytes).ok()?;
+    let signature = Signature::from_slice(&signature_bytes).ok()?;
+    Some(verifying.verify(message, &signature).is_ok())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -129,6 +216,28 @@ pub struct ExecutionRequest {
     pub step_budget: u64,
     #[serde(default)]
     pub policy: ExecutionPolicy,
+    /// Bounded host-granted inputs, matched by capability name. Empty by
+    /// default, so every existing corpus and request stays Unsupported.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_grants: Vec<HostGrant>,
+}
+
+impl ExecutionRequest {
+    /// Attach explicit host authority to one request
+    /// (HARNESS-PRESSURE-004). Requests without grants are returned
+    /// unchanged; otherwise the effect policy switches to Realize and the
+    /// grants travel with the request, still bounded and still matched by
+    /// capability name. Layered validation replays these granted requests
+    /// so body, SSA, and backend observations stay comparable.
+    pub fn with_host_grants(&self, grants: &[HostGrant]) -> Self {
+        if grants.is_empty() {
+            return self.clone();
+        }
+        let mut granted = self.clone();
+        granted.policy.effects = EffectExecutionPolicy::Realize;
+        granted.host_grants = grants.to_vec();
+        granted
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +270,11 @@ pub struct ExecutionEffectEvent {
     pub kind: String,
     pub target: String,
     pub capability: String,
+    /// Provenance of the realized payload: the grant locator plus the
+    /// hex sha256 of the exact bytes delivered. Absent for record-only
+    /// observations, which realize nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -765,6 +879,7 @@ where
             arguments,
             step_budget: step.step_budget,
             policy: step.policy.clone(),
+            host_grants: Vec::new(),
         };
         let call = execute(request);
         result.calls += 1;
@@ -2455,6 +2570,10 @@ fn execute_operation(
                 arguments,
                 step_budget: remaining,
                 policy: request.policy.clone(),
+                // Authority flows explicitly to callees within one
+                // execution: nested calls inherit the request's grants,
+                // still bounded and still matched by capability name.
+                host_grants: request.host_grants.clone(),
             };
             let nested = execute_inner(session, &nested_request, record_effects);
             let trace_offset = result.steps;
@@ -2497,7 +2616,191 @@ fn execute_operation(
                 kind: effect.kind.clone(),
                 target: effect.target.clone(),
                 capability: capability.clone(),
+                // Record-only observations realize nothing.
+                provenance: None,
             });
+        }
+        BodyOperationKind::HostCall {
+            capability,
+            operation: operation_id,
+        } => {
+            // Host-realized value-producing operation
+            // (HARNESS-PRESSURE-004/005/006). Authority is the declared
+            // capability, already checked at validation; realization
+            // needs an explicit grant for that capability. `blob_read`
+            // delivers the grant's bounded bytes with their digest;
+            // `clock_read` observes epoch milliseconds from the host
+            // clock (granted via `--grant-time`, no file backs it);
+            // `sha256_digest` and `ed25519_verify` are verify-only
+            // crypto over operand views (granted via `--grant-crypto`).
+            // Anything missing fails closed: no ambient access, no
+            // synthesized values, no silent empty reads.
+            if crate::host_call_arity(operation_id).is_none() {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    format!("unknown host operation {operation_id:?}; fail closed"),
+                );
+                return Some(result.clone());
+            }
+            if !matches!(request.policy.effects, EffectExecutionPolicy::Realize) {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    "host call requires the explicit realize policy with a matching grant; no external access was performed".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            let Some(grant) = request
+                .host_grants
+                .iter()
+                .find(|grant| grant.capability == *capability)
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    format!("no host grant for capability {capability:?}; declared authority was not fulfilled"),
+                );
+                return Some(result.clone());
+            };
+            if grant.bytes.len() > HOST_GRANT_MAX_BYTES {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    format!(
+                        "host grant for capability {capability:?} exceeds the {}-byte bound",
+                        HOST_GRANT_MAX_BYTES
+                    ),
+                );
+                return Some(result.clone());
+            }
+            if operation_id == "clock_read" {
+                let Some(millis) = host_epoch_millis() else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "host clock is unavailable; no instant was observed".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                values.insert(
+                    operation.results[0].id.clone(),
+                    ExecutionValue::Integer {
+                        value: millis as i128,
+                        ty: IntegerType {
+                            bits: 64,
+                            signed: false,
+                        },
+                    },
+                );
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: "clock_read".to_owned(),
+                    target: operation_id.clone(),
+                    capability: capability.clone(),
+                    provenance: Some("host-clock:wall".to_owned()),
+                });
+            } else if operation_id == "sha256_digest" {
+                let Some(view) = host_view_operand(operation, values, 0) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "sha256_digest requires one byte-view operand".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let digest = sha256_digest_bytes(&view);
+                values.insert(
+                    operation.results[0].id.clone(),
+                    ExecutionValue::Sequence {
+                        values: digest
+                            .iter()
+                            .map(|byte| ExecutionValue::Byte {
+                                value: i128::from(*byte),
+                            })
+                            .collect::<Vec<_>>()
+                            .into(),
+                    },
+                );
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: "sha256_digest".to_owned(),
+                    target: operation_id.clone(),
+                    capability: capability.clone(),
+                    provenance: Some("crypto:sha256".to_owned()),
+                });
+            } else if operation_id == "ed25519_verify" {
+                let Some(key_bytes) = host_view_operand(operation, values, 0) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "ed25519_verify requires a byte-view public key".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let Some(message) = host_view_operand(operation, values, 1) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "ed25519_verify requires a byte-view message".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let Some(signature_bytes) = host_view_operand(operation, values, 2) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "ed25519_verify requires a byte-view signature".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let valid = ed25519_verify_bytes(&key_bytes, &message, &signature_bytes);
+                let Some(valid) = valid else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "ed25519_verify requires a 32-byte public key and a 64-byte signature"
+                            .to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                values.insert(
+                    operation.results[0].id.clone(),
+                    ExecutionValue::Boolean { value: valid },
+                );
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: "ed25519_verify".to_owned(),
+                    target: operation_id.clone(),
+                    capability: capability.clone(),
+                    provenance: Some("crypto:ed25519".to_owned()),
+                });
+            } else {
+                let delivered: Vec<ExecutionValue> = grant
+                    .bytes
+                    .iter()
+                    .map(|byte| ExecutionValue::Byte {
+                        value: *byte as i128,
+                    })
+                    .collect();
+                values.insert(
+                    operation.results[0].id.clone(),
+                    ExecutionValue::Sequence {
+                        values: delivered.into(),
+                    },
+                );
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: "host_read".to_owned(),
+                    target: operation_id.clone(),
+                    capability: capability.clone(),
+                    provenance: Some(format!(
+                        "grant:{} sha256:{}",
+                        grant.locator,
+                        sha256_hex(&grant.bytes)
+                    )),
+                });
+            }
         }
         BodyOperationKind::RuntimeCheck { .. } => {
             result.fail(
@@ -3611,6 +3914,7 @@ mod tests {
             arguments: Vec::new(),
             step_budget: 1,
             policy: ExecutionPolicy::default(),
+            host_grants: Vec::new(),
         });
         result.trace = (0..MAX_TRACE_ENTRIES)
             .map(|step| ExecutionTraceEntry {

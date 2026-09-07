@@ -714,11 +714,50 @@ pub enum BodyOperationKind {
         effect: Effect,
         capability: String,
     },
+    /// A value-producing host-realized operation
+    /// (HARNESS-PRESSURE-004). Authority comes from the enclosing
+    /// function's declarations, never from ambient access: validation
+    /// requires the named capability in `function.capabilities` and a
+    /// matching declared effect, and executors realize the operation only
+    /// from an explicit `HostGrant` for that capability. `operation`
+    /// selects the realized primitive (`blob_read`, `clock_read`);
+    /// unknown operations fail closed at every layer.
+    HostCall {
+        capability: String,
+        operation: String,
+    },
     RuntimeCheck {
         obligation: SemanticId,
         fact: Fact,
         failure: FailureMode,
     },
+}
+
+/// The declared-effect kind discharged by one host-call operation id
+/// (HARNESS-PRESSURE-004/005/006). `blob_read` discharges `host_read`;
+/// every other known operation discharges an effect of its own name.
+/// Anything unknown maps to `host_read` so pre-validation lowering keeps
+/// today's shape; unknown operations still fail closed at validation
+/// (MNB123) and at every executor.
+pub fn host_call_effect_kind(operation: &str) -> &'static str {
+    match operation {
+        "clock_read" => "clock_read",
+        "sha256_digest" => "sha256_digest",
+        "ed25519_verify" => "ed25519_verify",
+        _ => "host_read",
+    }
+}
+
+/// The fixed operand arity of one host-call operation id. `None` marks
+/// an unknown operation: validation reports MNB123 and skips the arity
+/// check rather than stacking a second error on it.
+pub fn host_call_arity(operation: &str) -> Option<usize> {
+    match operation {
+        "blob_read" | "clock_read" => Some(0),
+        "sha256_digest" => Some(1),
+        "ed25519_verify" => Some(3),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2633,6 +2672,57 @@ fn validate_operation(
                     "MNB021",
                     format!("{path}.kind"),
                     "body effect is not declared by the enclosing function",
+                ));
+            }
+        }
+        BodyOperationKind::HostCall {
+            capability,
+            operation: operation_id,
+        } => {
+            if operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB122",
+                    path.to_owned(),
+                    "host calls produce exactly one value",
+                ));
+            }
+            // Data operands are not authority: verify-only crypto
+            // operations consume byte views, while reads and clocks take
+            // none. Unknown operations skip this check; MNB123 covers them
+            // without stacking a second error.
+            if let Some(arity) = host_call_arity(operation_id) {
+                if operation.operands.len() != arity {
+                    errors.push(body_diagnostic(
+                        "MNB122",
+                        path.to_owned(),
+                        format!("host operation {operation_id:?} takes exactly {arity} operands"),
+                    ));
+                }
+            }
+            if host_call_arity(operation_id).is_none() {
+                errors.push(body_diagnostic(
+                    "MNB123",
+                    format!("{path}.kind"),
+                    format!("unknown host operation {operation_id:?}; fail closed"),
+                ));
+            }
+            if !function.capabilities.contains(capability) {
+                errors.push(body_diagnostic(
+                    "MNB124",
+                    format!("{path}.kind"),
+                    "host call capability is not declared by the enclosing function",
+                ));
+            }
+            let required_kind = host_call_effect_kind(operation_id);
+            if !function.effects.iter().any(|declared| {
+                declared.kind == required_kind && declared.capability == *capability
+            }) {
+                errors.push(body_diagnostic(
+                    "MNB125",
+                    format!("{path}.kind"),
+                    format!(
+                        "host call has no matching declared {required_kind} effect for its capability"
+                    ),
                 ));
             }
         }

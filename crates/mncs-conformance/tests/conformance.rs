@@ -317,6 +317,7 @@ fn nested_calls_reuse_execution_identity() {
             }],
             step_budget: 16384,
             policy: Default::default(),
+            host_grants: Vec::new(),
         },
     );
     assert_eq!(result.status, ExecutionStatus::Returned);

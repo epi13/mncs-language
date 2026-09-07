@@ -1161,6 +1161,12 @@ fn lower_instruction(
         SsaInstructionKind::Effect => {
             return Err("effects are unsupported on the portable WASM MVP backend".to_owned());
         }
+        SsaInstructionKind::HostCall { .. } => {
+            return Err(
+                "host calls are unsupported on the portable WASM MVP backend; run on the research bytecode backend with an explicit grant"
+                    .to_owned(),
+            );
+        }
         SsaInstructionKind::RuntimeCheck { .. } => {
             return Err(
                 "runtime checks have no executable condition in the current SSA subset".to_owned(),

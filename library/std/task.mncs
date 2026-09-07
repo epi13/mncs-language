@@ -1,0 +1,156 @@
+mncs 0.8;
+
+// mncs.std.task — bounded task/cancellation lifecycle seed.
+//
+// The checked skeleton for `init -> transition* -> finish` with explicit
+// cooperative cancellation (HARNESS-PRESSURE-007, first slice; RFC 0045 is
+// the execution-side trace contract, this module is the language-side
+// lifecycle vocabulary). This is deliberately NOT an async runtime: there
+// are no threads, no channels, no preemption, and no fan-out. There is one
+// task value, explicit transitions, an explicit cancellation flag, and a
+// deterministic step counter that doubles as trace evidence.
+//
+// Cooperative cancellation: `request_cancel` never interrupts a step. It
+// arms a flag; the next `advance` observes the flag and moves the task to
+// CANCELLED instead of running the step. Cleanup/verification semantics
+// cannot be skipped by cancellation because cancellation IS a transition
+// with the same acceptance discipline as every other transition.
+//
+// Every transition reports acceptance explicitly (`Transition.accepted`).
+// Invalid transitions (advance on READY, finish on CANCELLED, any
+// transition on DONE) leave the task unchanged and report rejected —
+// never trap, never promote. Terminal states are DONE and CANCELLED.
+//
+// Results are NOT stored in the task. Values flow through host calls per
+// RFC 0045 (`previous_result` references); the skeleton owns lifecycle,
+// the host threads values. Joining is reading the final threaded value
+// once `is_terminal` holds.
+module mncs.std.task.v1;
+
+// Lifecycle phases. READY has spawned but not begun; RUNNING accepts
+// steps; CANCELLED and DONE are terminal.
+enum Phase { READY, RUNNING, CANCELLED, DONE }
+
+record Task { phase: Phase, steps_taken: u64, step_budget: u64, cancel_requested: bool }
+
+record Transition { task: Task, accepted: bool }
+
+// Spawn a task with an explicit step budget. The budget bounds how many
+// steps `advance` will accept; it is not a timeout (see the clock
+// capability for time) and not a thread count.
+fn spawn(step_budget: u64) -> (result: Task) {
+    return Task { phase: Phase.READY, steps_taken: 0, step_budget: step_budget, cancel_requested: false };
+}
+
+// Begin a READY task. Any other phase rejects and leaves the task
+// unchanged, so double-begin is observable, not fatal.
+fn begin(t: Task) -> (result: Transition) {
+    return match t.phase {
+        READY => Transition { task: Task { ..t, phase: Phase.RUNNING }, accepted: true },
+        RUNNING => Transition { task: t, accepted: false },
+        CANCELLED => Transition { task: t, accepted: false },
+        DONE => Transition { task: t, accepted: false },
+    };
+}
+
+// Arm cooperative cancellation. Idempotent and total in every phase:
+// arming on a DONE task records the request and changes nothing else,
+// which keeps the flag's meaning uniform (requested, not necessarily
+// honored — DONE has no steps left to cancel).
+fn request_cancel(t: Task) -> (result: Task) {
+    return Task { ..t, cancel_requested: true };
+}
+
+// Run one step. On a RUNNING task with no pending cancellation and budget
+// remaining, the step is accepted and the counter advances. A pending
+// cancellation converts the step boundary into CANCELLED (the step does
+// NOT run). An exhausted budget or a non-RUNNING phase rejects unchanged.
+fn advance(t: Task) -> (result: Transition) {
+    return match t.phase {
+        READY => Transition { task: t, accepted: false },
+        RUNNING => advance_running(t),
+        CANCELLED => Transition { task: t, accepted: false },
+        DONE => Transition { task: t, accepted: false },
+    };
+}
+
+fn advance_running(t: Task) -> (result: Transition) {
+    if t.cancel_requested {
+        return Transition { task: Task { ..t, phase: Phase.CANCELLED }, accepted: true };
+    }
+    if t.steps_taken < t.step_budget {
+        return Transition {
+            task: Task { ..t, steps_taken: t.steps_taken +% 1 },
+            accepted: true
+        };
+    }
+    return Transition { task: t, accepted: false };
+}
+
+// Finish a RUNNING task normally. Terminal tasks reject: finishing is how
+// a run completes, not how a cancelled or done task is revisited.
+fn finish(t: Task) -> (result: Transition) {
+    return match t.phase {
+        READY => Transition { task: t, accepted: false },
+        RUNNING => Transition { task: Task { ..t, phase: Phase.DONE }, accepted: true },
+        CANCELLED => Transition { task: t, accepted: false },
+        DONE => Transition { task: t, accepted: false },
+    };
+}
+
+// Terminal-state queries for join discipline.
+fn is_terminal(t: Task) -> (result: bool) {
+    return match t.phase {
+        READY => false,
+        RUNNING => false,
+        CANCELLED => true,
+        DONE => true,
+    };
+}
+
+fn was_cancelled(t: Task) -> (result: bool) {
+    return match t.phase {
+        READY => false,
+        RUNNING => false,
+        CANCELLED => true,
+        DONE => false,
+    };
+}
+
+// Executable entry points with concrete shapes for backend corpora. The
+// counted loops stand in for host-driven step calls: each iteration is
+// one `advance`, exactly as a host tool loop would issue.
+
+// Happy path: start, step, step, finish with budget to spare.
+fn candidate_lifecycle(step_budget: u64) -> (result: Task) {
+    let begun: Transition = begin(spawn(step_budget));
+    iterate i up_to 8 carrying st: Task = begun.task {
+        next st = advance(st).task;
+    }
+    return finish(st).task;
+}
+
+// Operator abort: two steps run, cancellation is requested, the next
+// boundary terminates cleanly instead of running step three.
+fn candidate_cancel(step_budget: u64) -> (result: Task) {
+    let begun: Transition = begin(spawn(step_budget));
+    let first: Transition = advance(begun.task);
+    let second: Transition = advance(first.task);
+    let armed: Task = request_cancel(second.task);
+    let stopped: Transition = advance(armed);
+    let again: Transition = advance(stopped.task);
+    return finish(again.task).task;
+}
+
+// Invalid transitions report rejected and leave the task unchanged:
+// advance on READY, double begin, finish on READY. Packs the three
+// acceptance flags into one i64 (4/2/1 bits) for a scalar corpus witness.
+fn candidate_invalid() -> (result: i64) {
+    let fresh: Task = spawn(4);
+    let early: Transition = advance(fresh);
+    let begun: Transition = begin(fresh);
+    let double: Transition = begin(begun.task);
+    let unfinished: Transition = finish(fresh);
+    let flags: i64 = select(early.accepted, 4, 0) +% select(double.accepted, 2, 0) +% select(unfinished.accepted, 1, 0);
+    return flags;
+}

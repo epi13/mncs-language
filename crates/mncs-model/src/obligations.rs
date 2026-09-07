@@ -6,7 +6,9 @@ use crate::body::BodyOperationKind;
 use crate::canonical::sha256_hex;
 use crate::identity::{assumption_id, capability_id, contract_id, effect_id, function_id};
 use crate::ir::effect_obligation_identity;
-use crate::{EvidenceFreshness, MachineIntentExpression, ObligationStatus, Program, SemanticId};
+use crate::{
+    Effect, EvidenceFreshness, MachineIntentExpression, ObligationStatus, Program, SemanticId,
+};
 
 pub const OBLIGATION_SCHEMA_VERSION: &str = "0.2";
 
@@ -384,6 +386,52 @@ impl Program {
                                         ObligationStatus::Fail
                                     },
                                     method: "body-effect-closure".to_owned(),
+                                    assumptions: Vec::new(),
+                                    dependencies: vec![subject, effect_identity],
+                                    freshness: EvidenceFreshness::Current,
+                                    fallback: None,
+                                });
+                            }
+                            BodyOperationKind::HostCall {
+                                capability,
+                                operation,
+                            } => {
+                                // A host call authorizes exactly like a
+                                // declared effect: the obligation passes
+                                // when the capability is declared, and the
+                                // executor discharges the grant at run time.
+                                let granted = Effect {
+                                    kind: crate::host_call_effect_kind(operation).to_owned(),
+                                    target: String::new(),
+                                    capability: capability.clone(),
+                                };
+                                let effect_identity = effect_id(
+                                    namespace,
+                                    &function.name,
+                                    &serde_json::to_string(&crate::canonical::canonical_effect(
+                                        &granted,
+                                    ))
+                                    .expect("host call effect"),
+                                    function
+                                        .effects
+                                        .iter()
+                                        .position(|declared| {
+                                            declared.kind == granted.kind
+                                                && declared.capability == *capability
+                                        })
+                                        .unwrap_or(0),
+                                );
+                                obligations.push(ObligationRecord {
+                                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                    identity: body_obligation_id("effect-authorized", &subject),
+                                    subject: subject.clone(),
+                                    requirement: requirement_id("effect-authorized", &subject),
+                                    status: if function.capabilities.contains(capability) {
+                                        ObligationStatus::Pass
+                                    } else {
+                                        ObligationStatus::Fail
+                                    },
+                                    method: "host-call-closure".to_owned(),
                                     assumptions: Vec::new(),
                                     dependencies: vec![subject, effect_identity],
                                     freshness: EvidenceFreshness::Current,
