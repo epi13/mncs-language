@@ -1,0 +1,12 @@
+mncs 0.6;
+
+// Negative fixture: a non-boolean arm on a bool subject names a variant
+// outside the subject type (MNE138).
+module examples.profile06_invalid_bool_match_unknown;
+
+fn gate(flag: bool) -> (result: i32) {
+    return match flag {
+        true => 1,
+        other => 0,
+    };
+}

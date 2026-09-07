@@ -18,11 +18,11 @@ use mncs_model::{
     SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND, SUPPORTED_SCHEMA_VERSION,
 };
 use mncs_syntax::{
-    parse, AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstStmt, ConcreteSyntaxTree,
-    DiagnosticSeverity, DiagnosticStage, LexedDocument, ParseOutput, SourceArtifactKind,
-    SourceDiagnostic, SourceEnvelope, SourceSpan, SpannedText, AST_SCHEMA_VERSION,
-    CST_SCHEMA_VERSION, LEXICAL_SCHEMA_VERSION, SOURCE_ENVELOPE_SCHEMA_VERSION,
-    SOURCE_PROFILE_VERSION_0_4, SOURCE_PROFILE_VERSION_0_9,
+    parse, AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstMatchArm, AstStmt,
+    ConcreteSyntaxTree, DiagnosticSeverity, DiagnosticStage, LexedDocument, ParseOutput,
+    SourceArtifactKind, SourceDiagnostic, SourceEnvelope, SourceSpan, SpannedText,
+    AST_SCHEMA_VERSION, CST_SCHEMA_VERSION, LEXICAL_SCHEMA_VERSION,
+    SOURCE_ENVELOPE_SCHEMA_VERSION, SOURCE_PROFILE_VERSION_0_4, SOURCE_PROFILE_VERSION_0_9,
 };
 use serde::Serialize;
 
@@ -3881,6 +3881,136 @@ impl<'a> BodyBuilder<'a> {
         );
     }
 
+    /// Elaborate `match` over a `bool` subject (HARNESS-PRESSURE-013).
+    ///
+    /// Boolean patterns carry the same exhaustiveness rule as a two-variant
+    /// finite type: `true` and `false` must each appear exactly once.
+    /// Anything else (qualified patterns, payload bindings, unknown names)
+    /// fails with the same diagnostic codes as the finite-type path. The
+    /// accepted form lowers to the branchless `Select` operation every
+    /// backend already realizes, rather than growing a parallel
+    /// boolean-dispatch form.
+    fn elaborate_bool_match(
+        &mut self,
+        subject: &ResolvedBinding,
+        arms: &[AstMatchArm],
+        span: &SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let Some(result_type) = expected.cloned() else {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE137",
+                "match result requires an expected type in Source Profile 0.3",
+                *span,
+            ));
+            return None;
+        };
+        let diagnostic_count = diagnostics.len();
+        let mut true_arm: Option<&AstExpr> = None;
+        let mut false_arm: Option<&AstExpr> = None;
+        for arm in arms {
+            if arm.type_name.is_some()
+                || (arm.variant.text != "true" && arm.variant.text != "false")
+            {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE138",
+                    "match arm names a variant outside the subject's finite type",
+                    arm.variant.span,
+                ));
+                continue;
+            }
+            if !arm.bindings.is_empty() || arm.ignore_payload {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE177",
+                    "pattern binds a payload field the variant does not declare",
+                    arm.variant.span,
+                ));
+                continue;
+            }
+            let slot = if arm.variant.text == "true" {
+                &mut true_arm
+            } else {
+                &mut false_arm
+            };
+            if slot.is_some() {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE139",
+                    "duplicate match arm is unreachable",
+                    arm.variant.span,
+                ));
+                continue;
+            }
+            *slot = Some(&arm.value);
+        }
+        let missing = ["true", "false"]
+            .into_iter()
+            .filter(|name| {
+                (*name == "true" && true_arm.is_none())
+                    || (*name == "false" && false_arm.is_none())
+            })
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE140",
+                format!(
+                    "non-exhaustive match; missing variants: {}",
+                    missing.join(", ")
+                ),
+                *span,
+            ));
+        }
+        if diagnostics.len() != diagnostic_count || true_arm.is_none() || false_arm.is_none() {
+            return None;
+        }
+        let (Some(true_expr), Some(false_expr)) = (true_arm, false_arm) else {
+            return None;
+        };
+        let true_binding =
+            self.elaborate_expr(true_expr, Some(&result_type), env, diagnostics)?;
+        if true_binding.ty != result_type {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE141",
+                "match arms must produce the same expected type",
+                true_expr.span(),
+            ));
+            return None;
+        }
+        let false_binding =
+            self.elaborate_expr(false_expr, Some(&result_type), env, diagnostics)?;
+        if false_binding.ty != result_type {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE141",
+                "match arms must produce the same expected type",
+                false_expr.span(),
+            ));
+            return None;
+        }
+        let id = self.new_value("boolsel");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::Select {
+                operand_type: Box::new(result_type.clone()),
+            },
+            operands: vec![
+                subject.id.clone(),
+                true_binding.id,
+                false_binding.id,
+            ],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_type.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_type))
+    }
+
     fn elaborate_expr(
         &mut self,
         expr: &AstExpr,
@@ -4546,6 +4676,19 @@ impl<'a> BodyBuilder<'a> {
             }
             AstExpr::Match { value, arms, span } => {
                 let subject = self.elaborate_expr(value, None, env, diagnostics)?;
+                // Boolean patterns (HARNESS-PRESSURE-013): `match` over a
+                // `bool` subject accepts `true`/`false` arms with the same
+                // exhaustiveness rule as a two-variant finite type.
+                if subject.ty == BodyType::Named("bool".to_owned()) {
+                    return self.elaborate_bool_match(
+                        &subject,
+                        arms,
+                        span,
+                        expected,
+                        env,
+                        diagnostics,
+                    );
+                }
                 let BodyType::Finite {
                     identity: type_identity,
                     name: type_name,

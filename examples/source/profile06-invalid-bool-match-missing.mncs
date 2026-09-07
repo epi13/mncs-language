@@ -1,0 +1,11 @@
+mncs 0.6;
+
+// Negative fixture: a boolean match missing one arm is rejected with the
+// same exhaustiveness diagnostic as a finite-type match (MNE140).
+module examples.profile06_invalid_bool_match_missing;
+
+fn gate(flag: bool) -> (result: i32) {
+    return match flag {
+        true => 1,
+    };
+}

@@ -1,0 +1,21 @@
+mncs 0.6;
+
+// Source Profile 0.6 positive fixture: boolean `match` patterns
+// (HARNESS-PRESSURE-013). `true`/`false` arms carry the same
+// exhaustiveness rule as a two-variant finite type and lower to the
+// branchless selection every backend already realizes.
+module examples.profile06_bool_match;
+
+fn gate(flag: bool) -> (result: i32) {
+    return match flag {
+        true => 1,
+        false => 0,
+    };
+}
+
+fn invert(flag: bool) -> (result: bool) {
+    return match flag {
+        false => true,
+        true => false,
+    };
+}

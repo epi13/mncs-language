@@ -1,0 +1,21 @@
+mncs 0.6;
+
+// Positive fixture: `capability` as a term-level identifier
+// (HARNESS-PRESSURE-013 companion / HARNESS-PRESSURE-014). Capability
+// *declarations* only occur in the function-header clause position, so the
+// keyword is unambiguous as a parameter name, a `let` binding, and an
+// expression reference.
+module examples.profile06_capability_identifier;
+
+enum Capability { COMPLETION, TOOLS }
+
+fn eligible(capability: Capability) -> (result: bool) {
+    let capability_seen: bool = match capability {
+        COMPLETION => true,
+        TOOLS => false,
+    };
+    return match capability_seen {
+        true => true,
+        false => false,
+    };
+}
