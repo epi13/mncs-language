@@ -600,6 +600,32 @@ pub enum AstExpr {
     ClockRead {
         span: SourceSpan,
     },
+    /// Verify-only SHA-256 digest `sha256_digest(view)` (Profile 0.8).
+    /// Authority comes from the enclosing function's declarations
+    /// (`effect sha256_digest` plus its capability), granted via
+    /// `--grant-crypto`. The operand is a byte view; the digest covers
+    /// exactly the view's runtime bytes (callers size views exactly —
+    /// padding is covered, never stripped). Delivers the 32 digest bytes
+    /// as `[byte; up_to 64]`. Pure function of its operand, so every
+    /// layer agrees byte-exactly.
+    Sha256Digest {
+        view: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Verify-only Ed25519 check
+    /// `ed25519_verify(pubkey, message, signature)` (Profile 0.8).
+    /// Authority comes from the enclosing function's declarations
+    /// (`effect ed25519_verify` plus its capability), granted via
+    /// `--grant-crypto`. Views are runtime-length exact: the public key
+    /// must be 32 bytes and the signature 64, else InvalidRequest; the
+    /// message is covered at its runtime length. No keygen exists
+    /// in-language; verification uses the audited dalek primitive.
+    Ed25519Verify {
+        pubkey: Box<AstExpr>,
+        message: Box<AstExpr>,
+        signature: Box<AstExpr>,
+        span: SourceSpan,
+    },
     /// Profile 0.8 semantic vector/mask intrinsic. The parser preserves the
     /// intrinsic identity and arguments; elaboration supplies lane/type facts.
     VectorIntrinsic {
@@ -630,6 +656,8 @@ impl AstExpr {
             | Self::SequenceReplace { span, .. }
             | Self::HostRead { span, .. }
             | Self::ClockRead { span, .. }
+            | Self::Sha256Digest { span, .. }
+            | Self::Ed25519Verify { span, .. }
             | Self::VectorIntrinsic { span, .. } => *span,
         }
     }
@@ -2575,6 +2603,46 @@ impl<'a> Parser<'a> {
                 );
                 None
             }
+            ("sha256_digest", 1) => {
+                let mut iter = arguments.into_iter();
+                let (Some(view),) = (iter.next(),) else {
+                    return None;
+                };
+                Some(AstExpr::Sha256Digest {
+                    view: Box::new(view),
+                    span,
+                })
+            }
+            ("sha256_digest", _) => {
+                self.error(
+                    "MNP195",
+                    "sha256_digest takes exactly one byte-view argument",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("ed25519_verify", 3) => {
+                let mut iter = arguments.into_iter();
+                let (Some(pubkey), Some(message), Some(signature)) =
+                    (iter.next(), iter.next(), iter.next())
+                else {
+                    return None;
+                };
+                Some(AstExpr::Ed25519Verify {
+                    pubkey: Box::new(pubkey),
+                    message: Box::new(message),
+                    signature: Box::new(signature),
+                    span,
+                })
+            }
+            ("ed25519_verify", _) => {
+                self.error(
+                    "MNP196",
+                    "ed25519_verify takes exactly three byte-view arguments (pubkey, message, signature)",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
             _ => Some(AstExpr::VectorIntrinsic {
                 name,
                 arguments,
@@ -3711,6 +3779,8 @@ fn is_profile08_intrinsic(name: &str) -> bool {
             | "replace"
             | "host_read"
             | "clock_read"
+            | "sha256_digest"
+            | "ed25519_verify"
             | "vector"
             | "splat"
             | "extract_lane"

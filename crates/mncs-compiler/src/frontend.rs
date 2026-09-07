@@ -2954,6 +2954,17 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
                 calls_in_expr(element, calls);
             }
         }
+        AstExpr::Sha256Digest { view, .. } => calls_in_expr(view, calls),
+        AstExpr::Ed25519Verify {
+            pubkey,
+            message,
+            signature,
+            ..
+        } => {
+            calls_in_expr(pubkey, calls);
+            calls_in_expr(message, calls);
+            calls_in_expr(signature, calls);
+        }
         AstExpr::Name(_)
         | AstExpr::QualifiedPath { .. }
         | AstExpr::Integer { .. }
@@ -4058,6 +4069,66 @@ impl<'a> BodyBuilder<'a> {
 
     /// Elaborate the `host_read()` intrinsic (HARNESS-PRESSURE-004).
     ///
+    /// Check the declared host authority for one host intrinsic
+    /// (HARNESS-PRESSURE-004/005/006). Returns the authorizing capability
+    /// when the enclosing function declares exactly one effect of
+    /// `effect_kind` plus that capability; otherwise emits the intrinsic's
+    /// missing/double diagnostics and returns `None`. Argument-carrying
+    /// intrinsics (`sha256_digest`, `ed25519_verify`) still take data
+    /// operands — data is not authority — but the capability record that
+    /// authorizes realization comes only from here.
+    #[allow(clippy::too_many_arguments)]
+    fn check_host_authority(
+        &self,
+        effect_kind: &str,
+        missing_code: &str,
+        double_code: &str,
+        span: SourceSpan,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<String> {
+        let signature = self.signatures.get(&self.function);
+        let mut granted: Vec<&Effect> = signature
+            .into_iter()
+            .flat_map(|signature| signature.effects.iter())
+            .filter(|effect| effect.kind == effect_kind)
+            .collect();
+        if granted.is_empty() {
+            diagnostics.push(elaboration_diagnostic(
+                missing_code,
+                format!(
+                    "host intrinsic requires a declared {effect_kind} effect with its authorizing capability"
+                ),
+                span,
+            ));
+            return None;
+        }
+        if granted.len() > 1 {
+            diagnostics.push(elaboration_diagnostic(
+                double_code,
+                format!(
+                    "host intrinsic requires exactly one declared {effect_kind} effect per function"
+                ),
+                span,
+            ));
+            return None;
+        }
+        let granted = granted.pop().expect("one host effect");
+        let capabilities = signature
+            .map(|signature| signature.capabilities.clone())
+            .unwrap_or_default();
+        if !capabilities.contains(&granted.capability) {
+            diagnostics.push(elaboration_diagnostic(
+                missing_code,
+                format!(
+                    "host intrinsic requires a declared {effect_kind} effect with its authorizing capability"
+                ),
+                span,
+            ));
+            return None;
+        }
+        Some(granted.capability.clone())
+    }
+
     /// Elaborate the `clock_read()` intrinsic (HARNESS-PRESSURE-005).
     ///
     /// Authority comes entirely from the enclosing function's
@@ -4087,45 +4158,13 @@ impl<'a> BodyBuilder<'a> {
             ));
             return None;
         }
-        let signature = self.signatures.get(&self.function);
-        let mut granted: Vec<&Effect> = signature
-            .into_iter()
-            .flat_map(|signature| signature.effects.iter())
-            .filter(|effect| effect.kind == "clock_read")
-            .collect();
-        if granted.is_empty() {
-            diagnostics.push(elaboration_diagnostic(
-                "MNE238",
-                "clock_read requires a declared clock_read effect with its authorizing capability",
-                span,
-            ));
-            return None;
-        }
-        if granted.len() > 1 {
-            diagnostics.push(elaboration_diagnostic(
-                "MNE239",
-                "clock_read requires exactly one declared clock_read effect per function",
-                span,
-            ));
-            return None;
-        }
-        let granted = granted.pop().expect("one clock_read effect");
-        let capabilities = signature
-            .map(|signature| signature.capabilities.clone())
-            .unwrap_or_default();
-        if !capabilities.contains(&granted.capability) {
-            diagnostics.push(elaboration_diagnostic(
-                "MNE238",
-                "clock_read requires a declared clock_read effect with its authorizing capability",
-                span,
-            ));
-            return None;
-        }
+        let capability =
+            self.check_host_authority("clock_read", "MNE238", "MNE239", span, diagnostics)?;
         let id = self.new_value("clockread");
         self.blocks[self.current].operations.push(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::HostCall {
-                capability: granted.capability.clone(),
+                capability,
                 operation: "clock_read".to_owned(),
             },
             operands: Vec::new(),
@@ -4168,48 +4207,163 @@ impl<'a> BodyBuilder<'a> {
             ));
             return None;
         }
-        let signature = self.signatures.get(&self.function);
-        let mut granted: Vec<&Effect> = signature
-            .into_iter()
-            .flat_map(|signature| signature.effects.iter())
-            .filter(|effect| effect.kind == "host_read")
-            .collect();
-        if granted.is_empty() {
-            diagnostics.push(elaboration_diagnostic(
-                "MNE235",
-                "host_read requires a declared host_read effect with its authorizing capability",
-                span,
-            ));
-            return None;
-        }
-        if granted.len() > 1 {
-            diagnostics.push(elaboration_diagnostic(
-                "MNE236",
-                "host_read requires exactly one declared host_read effect per function",
-                span,
-            ));
-            return None;
-        }
-        let granted = granted.pop().expect("one host_read effect");
-        let capabilities = signature
-            .map(|signature| signature.capabilities.clone())
-            .unwrap_or_default();
-        if !capabilities.contains(&granted.capability) {
-            diagnostics.push(elaboration_diagnostic(
-                "MNE235",
-                "host_read requires a declared host_read effect with its authorizing capability",
-                span,
-            ));
-            return None;
-        }
+        let capability =
+            self.check_host_authority("host_read", "MNE235", "MNE236", span, diagnostics)?;
         let id = self.new_value("hostread");
         self.blocks[self.current].operations.push(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::HostCall {
-                capability: granted.capability.clone(),
+                capability,
                 operation: "blob_read".to_owned(),
             },
             operands: Vec::new(),
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
+    /// Elaborate one byte-view operand of a verify-only crypto intrinsic.
+    /// The operand must elaborate to a byte sequence; coverage is the
+    /// view's runtime bytes, so no length accompanies it. Fixed
+    /// algorithm sizes (32-byte keys, 64-byte signatures) are enforced
+    /// at realization, not here.
+    fn elaborate_crypto_view(
+        &mut self,
+        view: &AstExpr,
+        intrinsic: &str,
+        type_code: &str,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let binding = self.elaborate_expr(view, None, env, diagnostics)?;
+        let BodyType::Sequence { element, .. } = binding.ty.clone() else {
+            diagnostics.push(elaboration_diagnostic(
+                type_code,
+                format!("{intrinsic} requires byte-view operands, not a non-sequence value"),
+                view.span(),
+            ));
+            return None;
+        };
+        if *element != BodyType::Byte {
+            diagnostics.push(elaboration_diagnostic(
+                type_code,
+                format!("{intrinsic} requires byte-view operands over `byte` elements"),
+                view.span(),
+            ));
+            return None;
+        }
+        Some(binding)
+    }
+
+    /// Elaborate the `sha256_digest(view)` intrinsic
+    /// (HARNESS-PRESSURE-006). Verify-only: no secrets enter, the 32
+    /// digest bytes leave as `[byte; up_to 64]`, and realization is a
+    /// pure function of the operand through the audited SHA-256
+    /// primitive. Authority is the declared `sha256_digest` effect plus
+    /// its capability (`--grant-crypto`); the operand carries data only.
+    fn elaborate_sha256_digest(
+        &mut self,
+        view: &AstExpr,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let result_ty = BodyType::Sequence {
+            element: Box::new(BodyType::Byte),
+            bound: mncs_model::SequenceBound::UpTo(64),
+        };
+        if expected.is_some_and(|expected| expected != &result_ty) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE243",
+                format!(
+                    "sha256_digest produces {} which does not satisfy the required type",
+                    result_ty.semantic_name()
+                ),
+                span,
+            ));
+            return None;
+        }
+        let capability =
+            self.check_host_authority("sha256_digest", "MNE241", "MNE242", span, diagnostics)?;
+        let operand =
+            self.elaborate_crypto_view(view, "sha256_digest", "MNE243", env, diagnostics)?;
+        let id = self.new_value("sha256");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability,
+                operation: "sha256_digest".to_owned(),
+            },
+            operands: vec![operand.id.clone()],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
+    /// Elaborate the `ed25519_verify(pubkey, message, signature)`
+    /// intrinsic (HARNESS-PRESSURE-006). Verify-only: no keygen exists
+    /// in-language, and realization reports a boolean through the
+    /// audited dalek primitive. Authority is the declared
+    /// `ed25519_verify` effect plus its capability (`--grant-crypto`).
+    /// Eight parameters because the three operand expressions, the
+    /// expected type, and the elaboration context each travel
+    /// separately; bundling them would obscure the call sites.
+    #[allow(clippy::too_many_arguments)]
+    fn elaborate_ed25519_verify(
+        &mut self,
+        pubkey: &AstExpr,
+        message: &AstExpr,
+        signature: &AstExpr,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let result_ty = BodyType::Named("bool".to_owned());
+        if expected.is_some_and(|expected| expected != &result_ty) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE246",
+                format!(
+                    "ed25519_verify produces {} which does not satisfy the required type",
+                    result_ty.semantic_name()
+                ),
+                span,
+            ));
+            return None;
+        }
+        let capability =
+            self.check_host_authority("ed25519_verify", "MNE244", "MNE245", span, diagnostics)?;
+        let key =
+            self.elaborate_crypto_view(pubkey, "ed25519_verify", "MNE246", env, diagnostics)?;
+        let msg =
+            self.elaborate_crypto_view(message, "ed25519_verify", "MNE246", env, diagnostics)?;
+        let sig =
+            self.elaborate_crypto_view(signature, "ed25519_verify", "MNE246", env, diagnostics)?;
+        let id = self.new_value("edverify");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability,
+                operation: "ed25519_verify".to_owned(),
+            },
+            operands: vec![key.id.clone(), msg.id.clone(), sig.id.clone()],
             results: vec![BodyValue {
                 id: id.clone(),
                 ty: result_ty.clone(),
@@ -5787,6 +5941,23 @@ impl<'a> BodyBuilder<'a> {
             ),
             AstExpr::HostRead { span } => self.elaborate_host_read(*span, expected, diagnostics),
             AstExpr::ClockRead { span } => self.elaborate_clock_read(*span, expected, diagnostics),
+            AstExpr::Sha256Digest { view, span } => {
+                self.elaborate_sha256_digest(view, *span, expected, env, diagnostics)
+            }
+            AstExpr::Ed25519Verify {
+                pubkey,
+                message,
+                signature,
+                span,
+            } => self.elaborate_ed25519_verify(
+                pubkey,
+                message,
+                signature,
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
             AstExpr::SequenceLiteral { elements, span } => {
                 let BodyType::Sequence {
                     element: element_type,

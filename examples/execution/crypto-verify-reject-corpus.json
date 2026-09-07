@@ -1,0 +1,1194 @@
+{
+ "schema_version": "0.1",
+ "name": "crypto-verify-reject",
+ "cases": [
+  {
+   "id": "short-key",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.crypto_verify",
+     "function": "check_issuance"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 3
+         }
+        },
+        {
+         "byte": {
+          "value": 161
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 191
+         }
+        },
+        {
+         "byte": {
+          "value": 243
+         }
+        },
+        {
+         "byte": {
+          "value": 206
+         }
+        },
+        {
+         "byte": {
+          "value": 16
+         }
+        },
+        {
+         "byte": {
+          "value": 190
+         }
+        },
+        {
+         "byte": {
+          "value": 29
+         }
+        },
+        {
+         "byte": {
+          "value": 112
+         }
+        },
+        {
+         "byte": {
+          "value": 221
+         }
+        },
+        {
+         "byte": {
+          "value": 24
+         }
+        },
+        {
+         "byte": {
+          "value": 231
+         }
+        },
+        {
+         "byte": {
+          "value": 75
+         }
+        },
+        {
+         "byte": {
+          "value": 192
+         }
+        },
+        {
+         "byte": {
+          "value": 153
+         }
+        },
+        {
+         "byte": {
+          "value": 103
+         }
+        },
+        {
+         "byte": {
+          "value": 228
+         }
+        },
+        {
+         "byte": {
+          "value": 214
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 155
+         }
+        },
+        {
+         "byte": {
+          "value": 165
+         }
+        },
+        {
+         "byte": {
+          "value": 13
+         }
+        },
+        {
+         "byte": {
+          "value": 95
+         }
+        },
+        {
+         "byte": {
+          "value": 29
+         }
+        },
+        {
+         "byte": {
+          "value": 220
+         }
+        },
+        {
+         "byte": {
+          "value": 134
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 18
+         }
+        },
+        {
+         "byte": {
+          "value": 85
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 116
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 117
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 55
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 246
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 156
+         }
+        },
+        {
+         "byte": {
+          "value": 122
+         }
+        },
+        {
+         "byte": {
+          "value": 216
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 123
+         }
+        },
+        {
+         "byte": {
+          "value": 112
+         }
+        },
+        {
+         "byte": {
+          "value": 133
+         }
+        },
+        {
+         "byte": {
+          "value": 42
+         }
+        },
+        {
+         "byte": {
+          "value": 127
+         }
+        },
+        {
+         "byte": {
+          "value": 111
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 39
+         }
+        },
+        {
+         "byte": {
+          "value": 204
+         }
+        },
+        {
+         "byte": {
+          "value": 142
+         }
+        },
+        {
+         "byte": {
+          "value": 228
+         }
+        },
+        {
+         "byte": {
+          "value": 165
+         }
+        },
+        {
+         "byte": {
+          "value": 179
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 106
+         }
+        },
+        {
+         "byte": {
+          "value": 87
+         }
+        },
+        {
+         "byte": {
+          "value": 241
+         }
+        },
+        {
+         "byte": {
+          "value": 39
+         }
+        },
+        {
+         "byte": {
+          "value": 226
+         }
+        },
+        {
+         "byte": {
+          "value": 144
+         }
+        },
+        {
+         "byte": {
+          "value": 161
+         }
+        },
+        {
+         "byte": {
+          "value": 168
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 3
+         }
+        },
+        {
+         "byte": {
+          "value": 249
+         }
+        },
+        {
+         "byte": {
+          "value": 190
+         }
+        },
+        {
+         "byte": {
+          "value": 88
+         }
+        },
+        {
+         "byte": {
+          "value": 159
+         }
+        },
+        {
+         "byte": {
+          "value": 252
+         }
+        },
+        {
+         "byte": {
+          "value": 252
+         }
+        },
+        {
+         "byte": {
+          "value": 207
+         }
+        },
+        {
+         "byte": {
+          "value": 147
+         }
+        },
+        {
+         "byte": {
+          "value": 35
+         }
+        },
+        {
+         "byte": {
+          "value": 151
+         }
+        },
+        {
+         "byte": {
+          "value": 169
+         }
+        },
+        {
+         "byte": {
+          "value": 76
+         }
+        },
+        {
+         "byte": {
+          "value": 229
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        },
+        {
+         "byte": {
+          "value": 176
+         }
+        },
+        {
+         "byte": {
+          "value": 32
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 255
+         }
+        },
+        {
+         "byte": {
+          "value": 75
+         }
+        },
+        {
+         "byte": {
+          "value": 139
+         }
+        },
+        {
+         "byte": {
+          "value": 15
+         }
+        },
+        {
+         "byte": {
+          "value": 139
+         }
+        },
+        {
+         "byte": {
+          "value": 162
+         }
+        },
+        {
+         "byte": {
+          "value": 141
+         }
+        },
+        {
+         "byte": {
+          "value": 116
+         }
+        },
+        {
+         "byte": {
+          "value": 159
+         }
+        },
+        {
+         "byte": {
+          "value": 61
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 116
+         }
+        },
+        {
+         "byte": {
+          "value": 184
+         }
+        },
+        {
+         "byte": {
+          "value": 2
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        }
+       ]
+      }
+     }
+    ],
+    "step_budget": 8192
+   },
+   "expected_effects": [],
+   "prohibit_unexpected_effects": true,
+   "expected_status": "invalid_request"
+  },
+  {
+   "id": "short-signature",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.crypto_verify",
+     "function": "check_issuance"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 3
+         }
+        },
+        {
+         "byte": {
+          "value": 161
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 191
+         }
+        },
+        {
+         "byte": {
+          "value": 243
+         }
+        },
+        {
+         "byte": {
+          "value": 206
+         }
+        },
+        {
+         "byte": {
+          "value": 16
+         }
+        },
+        {
+         "byte": {
+          "value": 190
+         }
+        },
+        {
+         "byte": {
+          "value": 29
+         }
+        },
+        {
+         "byte": {
+          "value": 112
+         }
+        },
+        {
+         "byte": {
+          "value": 221
+         }
+        },
+        {
+         "byte": {
+          "value": 24
+         }
+        },
+        {
+         "byte": {
+          "value": 231
+         }
+        },
+        {
+         "byte": {
+          "value": 75
+         }
+        },
+        {
+         "byte": {
+          "value": 192
+         }
+        },
+        {
+         "byte": {
+          "value": 153
+         }
+        },
+        {
+         "byte": {
+          "value": 103
+         }
+        },
+        {
+         "byte": {
+          "value": 228
+         }
+        },
+        {
+         "byte": {
+          "value": 214
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 155
+         }
+        },
+        {
+         "byte": {
+          "value": 165
+         }
+        },
+        {
+         "byte": {
+          "value": 13
+         }
+        },
+        {
+         "byte": {
+          "value": 95
+         }
+        },
+        {
+         "byte": {
+          "value": 29
+         }
+        },
+        {
+         "byte": {
+          "value": 220
+         }
+        },
+        {
+         "byte": {
+          "value": 134
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 18
+         }
+        },
+        {
+         "byte": {
+          "value": 85
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 184
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 116
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 117
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 55
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 246
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 156
+         }
+        },
+        {
+         "byte": {
+          "value": 122
+         }
+        },
+        {
+         "byte": {
+          "value": 216
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 123
+         }
+        },
+        {
+         "byte": {
+          "value": 112
+         }
+        },
+        {
+         "byte": {
+          "value": 133
+         }
+        },
+        {
+         "byte": {
+          "value": 42
+         }
+        },
+        {
+         "byte": {
+          "value": 127
+         }
+        },
+        {
+         "byte": {
+          "value": 111
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 39
+         }
+        },
+        {
+         "byte": {
+          "value": 204
+         }
+        },
+        {
+         "byte": {
+          "value": 142
+         }
+        },
+        {
+         "byte": {
+          "value": 228
+         }
+        },
+        {
+         "byte": {
+          "value": 165
+         }
+        },
+        {
+         "byte": {
+          "value": 179
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 106
+         }
+        },
+        {
+         "byte": {
+          "value": 87
+         }
+        },
+        {
+         "byte": {
+          "value": 241
+         }
+        },
+        {
+         "byte": {
+          "value": 39
+         }
+        },
+        {
+         "byte": {
+          "value": 226
+         }
+        },
+        {
+         "byte": {
+          "value": 144
+         }
+        },
+        {
+         "byte": {
+          "value": 161
+         }
+        },
+        {
+         "byte": {
+          "value": 168
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 3
+         }
+        },
+        {
+         "byte": {
+          "value": 249
+         }
+        },
+        {
+         "byte": {
+          "value": 190
+         }
+        },
+        {
+         "byte": {
+          "value": 88
+         }
+        },
+        {
+         "byte": {
+          "value": 159
+         }
+        },
+        {
+         "byte": {
+          "value": 252
+         }
+        },
+        {
+         "byte": {
+          "value": 252
+         }
+        },
+        {
+         "byte": {
+          "value": 207
+         }
+        },
+        {
+         "byte": {
+          "value": 147
+         }
+        },
+        {
+         "byte": {
+          "value": 35
+         }
+        },
+        {
+         "byte": {
+          "value": 151
+         }
+        },
+        {
+         "byte": {
+          "value": 169
+         }
+        },
+        {
+         "byte": {
+          "value": 76
+         }
+        },
+        {
+         "byte": {
+          "value": 229
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        },
+        {
+         "byte": {
+          "value": 176
+         }
+        },
+        {
+         "byte": {
+          "value": 32
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 255
+         }
+        },
+        {
+         "byte": {
+          "value": 75
+         }
+        },
+        {
+         "byte": {
+          "value": 139
+         }
+        },
+        {
+         "byte": {
+          "value": 15
+         }
+        },
+        {
+         "byte": {
+          "value": 139
+         }
+        },
+        {
+         "byte": {
+          "value": 162
+         }
+        },
+        {
+         "byte": {
+          "value": 141
+         }
+        },
+        {
+         "byte": {
+          "value": 116
+         }
+        },
+        {
+         "byte": {
+          "value": 159
+         }
+        },
+        {
+         "byte": {
+          "value": 61
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 116
+         }
+        },
+        {
+         "byte": {
+          "value": 184
+         }
+        },
+        {
+         "byte": {
+          "value": 2
+         }
+        }
+       ]
+      }
+     }
+    ],
+    "step_budget": 8192
+   },
+   "expected_effects": [],
+   "prohibit_unexpected_effects": true,
+   "expected_status": "invalid_request"
+  }
+ ]
+}

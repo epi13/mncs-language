@@ -50,8 +50,8 @@ pub use bindings::{
     SemanticNamespace, SemanticReference, SemanticScope, SEMANTIC_BINDING_SCHEMA_VERSION,
 };
 pub use body::{
-    host_call_effect_kind, BodyBlock, BodyBoundedIteration, BodyCyclePolicy, BodyOperation,
-    BodyOperationKind, BodyParameter, BodyTerminator, BodyType, BodyValue,
+    host_call_arity, host_call_effect_kind, BodyBlock, BodyBoundedIteration, BodyCyclePolicy,
+    BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator, BodyType, BodyValue,
     BoundedIterationCompletion, BoundsEvidence, FunctionBody, GenericArg, GenericParam,
     GenericParamKind, IterationDomain, LoweringEnvelope, MachineIntentSpec, PortabilityEnvelope,
     PortabilityTarget, RealizationClass, SequenceBound, EXECUTABLE_BODY_SCHEMA_VERSION,

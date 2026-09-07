@@ -932,6 +932,12 @@ struct ExperimentOptions {
     /// backs them: the grant names the authority, and the executor
     /// observes epoch milliseconds from its own clock. Empty by default.
     time_grants: Vec<String>,
+    /// Explicit verify-only crypto grants (`capability`), one per
+    /// capability allowed to run `sha256_digest()`/`ed25519_verify()`.
+    /// No file backs them and no secrets cross: the grant names the
+    /// authority, and realization is a pure function of the operand
+    /// views through audited primitives. Empty by default.
+    crypto_grants: Vec<String>,
 }
 
 /// A `--grant-time` capability as a byte-less host grant. Time has no
@@ -944,6 +950,37 @@ fn time_host_grant(capability: &str) -> HostGrant {
         locator: "host-clock".to_owned(),
         bytes: Vec::new(),
     }
+}
+
+/// A `--grant-crypto` capability as a byte-less host grant. Crypto
+/// verification takes no secrets: the grant names the authority, and
+/// the operands carry only public data (views, keys, signatures).
+fn crypto_host_grant(capability: &str) -> HostGrant {
+    HostGrant {
+        capability: capability.to_owned(),
+        locator: "crypto-verify".to_owned(),
+        bytes: Vec::new(),
+    }
+}
+
+/// Fold byte-less time and crypto authority into loaded read grants.
+/// All three are explicit operator authority traveling together into
+/// layered validation and case execution.
+fn extend_with_named_grants(
+    host_grants: &mut Vec<HostGrant>,
+    time_grants: &[String],
+    crypto_grants: &[String],
+) {
+    host_grants.extend(
+        time_grants
+            .iter()
+            .map(|capability| time_host_grant(capability)),
+    );
+    host_grants.extend(
+        crypto_grants
+            .iter()
+            .map(|capability| crypto_host_grant(capability)),
+    );
 }
 
 /// Load `--grant-read` files into bounded host grants. Missing files,
@@ -1045,6 +1082,7 @@ where
             let mut output_dir: Option<PathBuf> = None;
             let mut grants: Vec<(String, String)> = Vec::new();
             let mut time_grants: Vec<String> = Vec::new();
+            let mut crypto_grants: Vec<String> = Vec::new();
             let mut parse_error = false;
             while let Some(option) = args.next() {
                 let mut take_value = |what: &str| -> Option<String> {
@@ -1089,6 +1127,18 @@ where
                             }
                         }
                     }
+                    "--grant-crypto" => {
+                        if let Some(capability) = take_value("--grant-crypto") {
+                            if capability.is_empty() || capability.contains('=') {
+                                eprintln!(
+                                    "error: --grant-crypto requires a capability, got {capability:?}"
+                                );
+                                parse_error = true;
+                            } else {
+                                crypto_grants.push(capability);
+                            }
+                        }
+                    }
                     other => {
                         eprintln!("error: unknown experiment execute option {other:?}");
                         parse_error = true;
@@ -1119,11 +1169,7 @@ where
                 Ok(grants) => grants,
                 Err(code) => return code,
             };
-            host_grants.extend(
-                time_grants
-                    .iter()
-                    .map(|capability| time_host_grant(capability)),
-            );
+            extend_with_named_grants(&mut host_grants, &time_grants, &crypto_grants);
             let backend_session = BackendExecutionSession::new(&artifact);
             let observations = corpus
                 .cases
@@ -1334,6 +1380,7 @@ where
     let mut validation_profile = None;
     let mut grants = Vec::new();
     let mut time_grants = Vec::new();
+    let mut crypto_grants = Vec::new();
     while let Some(option) = args.next() {
         match option.as_str() {
             "--backend" => {
@@ -1393,6 +1440,17 @@ where
                 }
                 time_grants.push(capability);
             }
+            "--grant-crypto" => {
+                let capability = args
+                    .next()
+                    .ok_or_else(|| "--grant-crypto requires a capability".to_owned())?;
+                if capability.is_empty() || capability.contains('=') {
+                    return Err(format!(
+                        "--grant-crypto requires a capability, got {capability:?}"
+                    ));
+                }
+                crypto_grants.push(capability);
+            }
             other => return Err(format!("unknown experiment option {other:?}")),
         }
     }
@@ -1417,6 +1475,7 @@ where
         validation_profile,
         grants,
         time_grants,
+        crypto_grants,
     })
 }
 
@@ -1819,11 +1878,10 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         Ok(grants) => grants,
         Err(code) => return code,
     };
-    host_grants.extend(
-        options
-            .time_grants
-            .iter()
-            .map(|capability| time_host_grant(capability)),
+    extend_with_named_grants(
+        &mut host_grants,
+        &options.time_grants,
+        &options.crypto_grants,
     );
     let validation = prepared.validation_profile.is_none().then(|| {
         validate_backend_lowering(

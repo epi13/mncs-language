@@ -734,15 +734,29 @@ pub enum BodyOperationKind {
 }
 
 /// The declared-effect kind discharged by one host-call operation id
-/// (HARNESS-PRESSURE-004/005). `blob_read` discharges `host_read`;
-/// `clock_read` discharges `clock_read`. Anything else maps to
-/// `host_read` so pre-validation lowering keeps today's shape; unknown
-/// operations still fail closed at validation (MNB123) and at every
-/// executor.
+/// (HARNESS-PRESSURE-004/005/006). `blob_read` discharges `host_read`;
+/// every other known operation discharges an effect of its own name.
+/// Anything unknown maps to `host_read` so pre-validation lowering keeps
+/// today's shape; unknown operations still fail closed at validation
+/// (MNB123) and at every executor.
 pub fn host_call_effect_kind(operation: &str) -> &'static str {
     match operation {
         "clock_read" => "clock_read",
+        "sha256_digest" => "sha256_digest",
+        "ed25519_verify" => "ed25519_verify",
         _ => "host_read",
+    }
+}
+
+/// The fixed operand arity of one host-call operation id. `None` marks
+/// an unknown operation: validation reports MNB123 and skips the arity
+/// check rather than stacking a second error on it.
+pub fn host_call_arity(operation: &str) -> Option<usize> {
+    match operation {
+        "blob_read" | "clock_read" => Some(0),
+        "sha256_digest" => Some(1),
+        "ed25519_verify" => Some(3),
+        _ => None,
     }
 }
 
@@ -2669,17 +2683,23 @@ fn validate_operation(
                 errors.push(body_diagnostic(
                     "MNB122",
                     path.to_owned(),
-                    "host calls produce exactly one value and consume no operands",
+                    "host calls produce exactly one value",
                 ));
             }
-            if !operation.operands.is_empty() {
-                errors.push(body_diagnostic(
-                    "MNB122",
-                    path.to_owned(),
-                    "host calls produce exactly one value and consume no operands",
-                ));
+            // Data operands are not authority: verify-only crypto
+            // operations consume byte views, while reads and clocks take
+            // none. Unknown operations skip this check; MNB123 covers them
+            // without stacking a second error.
+            if let Some(arity) = host_call_arity(operation_id) {
+                if operation.operands.len() != arity {
+                    errors.push(body_diagnostic(
+                        "MNB122",
+                        path.to_owned(),
+                        format!("host operation {operation_id:?} takes exactly {arity} operands"),
+                    ));
+                }
             }
-            if !matches!(operation_id.as_str(), "blob_read" | "clock_read") {
+            if host_call_arity(operation_id).is_none() {
                 errors.push(body_diagnostic(
                     "MNB123",
                     format!("{path}.kind"),

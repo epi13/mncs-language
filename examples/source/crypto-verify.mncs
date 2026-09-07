@@ -1,0 +1,30 @@
+mncs 0.10;
+
+// Positive fixture: verify-only cryptography through the
+// host-capability boundary (HARNESS-PRESSURE-006). Authority is
+// declared, never ambient: each function names its capability and its
+// crypto effect, and the executor realizes `sha256_digest()` /
+// `ed25519_verify()` from the operator's explicit `--grant-crypto` for
+// that capability. Operands carry public data only (views, keys,
+// signatures); no keygen exists in-language. Coverage is the views'
+// runtime bytes, so callers size views exactly. Without a grant the
+// calls fail closed.
+module examples.crypto_verify;
+
+fn digest_message(msg: [byte; up_to 64]) -> (result: [byte; up_to 64])
+    capability verifier
+    effect sha256_digest authorized_by verifier
+{
+    return sha256_digest(msg);
+}
+
+fn check_issuance(
+    pubkey: [byte; up_to 64],
+    msg: [byte; up_to 64],
+    sig: [byte; up_to 64]
+) -> (result: bool)
+    capability verifier
+    effect ed25519_verify authorized_by verifier
+{
+    return ed25519_verify(pubkey, msg, sig);
+}

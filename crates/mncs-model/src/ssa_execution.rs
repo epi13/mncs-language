@@ -1971,11 +1971,12 @@ fn execute_instruction(
             operation,
         } => {
             // Host-realized value-producing operation, mirroring the body
-            // reference executor (HARNESS-PRESSURE-004/005). Same
+            // reference executor (HARNESS-PRESSURE-004/005/006). Same
             // fail-closed discipline: explicit realize policy, explicit
-            // grant for the declared capability, bounded bytes (or a host
-            // clock observation for `clock_read`), recorded provenance.
-            if !matches!(operation.as_str(), "blob_read" | "clock_read") {
+            // grant for the declared capability, bounded operand views
+            // (or a host clock observation for `clock_read`), recorded
+            // provenance.
+            if crate::host_call_arity(operation).is_none() {
                 result.fail(
                     ExecutionStatus::Unsupported,
                     instruction_identity(instruction),
@@ -2042,6 +2043,85 @@ fn execute_instruction(
                     target: operation.clone(),
                     capability: capability.clone(),
                     provenance: Some("host-clock:wall".to_owned()),
+                });
+            } else if operation == "sha256_digest" {
+                let view = instruction
+                    .inputs
+                    .first()
+                    .and_then(|input| crate::execution::host_view_bytes(values.get(input)?));
+                let Some(view) = view else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "sha256_digest requires one byte-view operand",
+                    );
+                    return true;
+                };
+                let digest = crate::execution::sha256_digest_bytes(&view);
+                if let Some(output) = instruction.outputs.first() {
+                    values.insert(
+                        output.identity.clone(),
+                        ExecutionValue::Sequence {
+                            values: digest
+                                .iter()
+                                .map(|byte| ExecutionValue::Byte {
+                                    value: i128::from(*byte),
+                                })
+                                .collect::<Vec<_>>()
+                                .into(),
+                        },
+                    );
+                }
+                result.effects.push(ExecutionEffectEvent {
+                    operation: instruction_identity(instruction).unwrap_or_else(|| {
+                        crate::identity::SemanticId(format!("host-call:{capability}"))
+                    }),
+                    kind: "sha256_digest".to_owned(),
+                    target: operation.clone(),
+                    capability: capability.clone(),
+                    provenance: Some("crypto:sha256".to_owned()),
+                });
+            } else if operation == "ed25519_verify" {
+                let view_at = |position: usize| {
+                    instruction
+                        .inputs
+                        .get(position)
+                        .and_then(|input| crate::execution::host_view_bytes(values.get(input)?))
+                };
+                let (Some(key_bytes), Some(message), Some(signature_bytes)) =
+                    (view_at(0), view_at(1), view_at(2))
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "ed25519_verify requires byte-view public key, message, and signature",
+                    );
+                    return true;
+                };
+                let Some(valid) =
+                    crate::execution::ed25519_verify_bytes(&key_bytes, &message, &signature_bytes)
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "ed25519_verify requires a 32-byte public key and a 64-byte signature",
+                    );
+                    return true;
+                };
+                if let Some(output) = instruction.outputs.first() {
+                    values.insert(
+                        output.identity.clone(),
+                        ExecutionValue::Boolean { value: valid },
+                    );
+                }
+                result.effects.push(ExecutionEffectEvent {
+                    operation: instruction_identity(instruction).unwrap_or_else(|| {
+                        crate::identity::SemanticId(format!("host-call:{capability}"))
+                    }),
+                    kind: "ed25519_verify".to_owned(),
+                    target: operation.clone(),
+                    capability: capability.clone(),
+                    provenance: Some("crypto:ed25519".to_owned()),
                 });
             } else {
                 if let Some(output) = instruction.outputs.first() {

@@ -1,0 +1,24 @@
+mncs 0.8;
+
+// Negative fixture: crypto operands must be byte views
+// (MNE243/MNE246). Non-view data is rejected at elaboration, never
+// hashed or verified.
+module examples.crypto_invalid_operand;
+
+fn digest_number(n: u64) -> (result: [byte; up_to 64])
+    capability verifier
+    effect sha256_digest authorized_by verifier
+{
+    return sha256_digest(n);
+}
+
+fn check_numbered(
+    n: u64,
+    msg: [byte; up_to 64],
+    sig: [byte; up_to 64]
+) -> (result: bool)
+    capability verifier
+    effect ed25519_verify authorized_by verifier
+{
+    return ed25519_verify(n, msg, sig);
+}
