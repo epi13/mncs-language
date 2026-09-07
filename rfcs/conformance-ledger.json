@@ -666,7 +666,7 @@
         "mncs-actions proof-kernel conformance",
         "Fabric heterogeneous validation"
       ],
-      "last_validated_revision": "bfa455a5453ee36edfa3987de12b136bed95356c",
+      "last_validated_revision": "c457539df8eac22da5a150cad96f33fd8aa3abc4",
       "profiles": [
         "0.10"
       ],
