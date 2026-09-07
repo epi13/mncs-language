@@ -21,8 +21,8 @@ use mncs_syntax::{
     parse, AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstMatchArm, AstStmt,
     ConcreteSyntaxTree, DiagnosticSeverity, DiagnosticStage, LexedDocument, ParseOutput,
     SourceArtifactKind, SourceDiagnostic, SourceEnvelope, SourceSpan, SpannedText,
-    AST_SCHEMA_VERSION, CST_SCHEMA_VERSION, LEXICAL_SCHEMA_VERSION,
-    SOURCE_ENVELOPE_SCHEMA_VERSION, SOURCE_PROFILE_VERSION_0_4, SOURCE_PROFILE_VERSION_0_9,
+    AST_SCHEMA_VERSION, CST_SCHEMA_VERSION, LEXICAL_SCHEMA_VERSION, SOURCE_ENVELOPE_SCHEMA_VERSION,
+    SOURCE_PROFILE_VERSION_0_4, SOURCE_PROFILE_VERSION_0_9,
 };
 use serde::Serialize;
 
@@ -432,7 +432,7 @@ pub trait ModuleResolver {
     /// several roots override it so duplicate identities fail closed.
     fn resolve_detailed(&self, module: &str) -> ModuleResolutionOutcome {
         match self.resolve(module) {
-            Some(envelope) => ModuleResolutionOutcome::Resolved(envelope),
+            Some(envelope) => ModuleResolutionOutcome::Resolved(Box::new(envelope)),
             None => ModuleResolutionOutcome::NotFound,
         }
     }
@@ -441,8 +441,9 @@ pub trait ModuleResolver {
 /// The detailed outcome of one module-resolution query.
 #[derive(Debug, Clone)]
 pub enum ModuleResolutionOutcome {
-    /// Exactly one authoritative candidate.
-    Resolved(SourceEnvelope),
+    /// Exactly one authoritative candidate. Boxed: resolution is a cold
+    /// elaboration-time path and the envelope dwarfs the other variants.
+    Resolved(Box<SourceEnvelope>),
     /// No candidate satisfied the requested name.
     NotFound,
     /// Several distinct candidates satisfy the name. The strings identify
@@ -597,7 +598,7 @@ impl ModuleResolver for RecordingResolver<'_> {
             self.sources
                 .borrow_mut()
                 .entry(module.to_owned())
-                .or_insert_with(|| source.clone());
+                .or_insert_with(|| source.as_ref().clone());
         }
         outcome
     }
@@ -670,7 +671,7 @@ fn elaborate_import_closure(
             continue;
         }
         let dependency_envelope = match resolver.resolve_detailed(&dependency_name) {
-            ModuleResolutionOutcome::Resolved(envelope) => envelope,
+            ModuleResolutionOutcome::Resolved(envelope) => *envelope,
             ModuleResolutionOutcome::NotFound => {
                 return Err(vec![elaboration_diagnostic(
                     "MNE173",
@@ -2957,6 +2958,7 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
         | AstExpr::QualifiedPath { .. }
         | AstExpr::Integer { .. }
         | AstExpr::Boolean { .. }
+        | AstExpr::HostRead { .. }
         | AstExpr::FiniteVariant { .. } => {}
     }
 }
@@ -3995,8 +3997,7 @@ impl<'a> BodyBuilder<'a> {
         let missing = ["true", "false"]
             .into_iter()
             .filter(|name| {
-                (*name == "true" && true_arm.is_none())
-                    || (*name == "false" && false_arm.is_none())
+                (*name == "true" && true_arm.is_none()) || (*name == "false" && false_arm.is_none())
             })
             .collect::<Vec<_>>();
         if !missing.is_empty() {
@@ -4015,8 +4016,7 @@ impl<'a> BodyBuilder<'a> {
         let (Some(true_expr), Some(false_expr)) = (true_arm, false_arm) else {
             return None;
         };
-        let true_binding =
-            self.elaborate_expr(true_expr, Some(&result_type), env, diagnostics)?;
+        let true_binding = self.elaborate_expr(true_expr, Some(&result_type), env, diagnostics)?;
         if true_binding.ty != result_type {
             diagnostics.push(elaboration_diagnostic(
                 "MNE141",
@@ -4041,11 +4041,7 @@ impl<'a> BodyBuilder<'a> {
             kind: BodyOperationKind::Select {
                 operand_type: Box::new(result_type.clone()),
             },
-            operands: vec![
-                subject.id.clone(),
-                true_binding.id,
-                false_binding.id,
-            ],
+            operands: vec![subject.id.clone(), true_binding.id, false_binding.id],
             results: vec![BodyValue {
                 id: id.clone(),
                 ty: result_type.clone(),
@@ -4057,6 +4053,89 @@ impl<'a> BodyBuilder<'a> {
             portability: None,
         });
         Some(ResolvedBinding::plain(id, result_type))
+    }
+
+    /// Elaborate the `host_read()` intrinsic (HARNESS-PRESSURE-004).
+    ///
+    /// Authority comes entirely from the enclosing function's
+    /// declarations: exactly one `host_read` effect plus its authorizing
+    /// capability. The value (a `[byte; up_to 64]` view) is realized by the
+    /// executor from an explicit grant for that capability; there is no
+    /// ambient source and no argument that could smuggle one in.
+    fn elaborate_host_read(
+        &mut self,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let result_ty = BodyType::Sequence {
+            element: Box::new(BodyType::Byte),
+            bound: mncs_model::SequenceBound::UpTo(64),
+        };
+        if expected.is_some_and(|expected| expected != &result_ty) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE237",
+                format!(
+                    "host_read produces {} which does not satisfy the required type",
+                    result_ty.semantic_name()
+                ),
+                span,
+            ));
+            return None;
+        }
+        let signature = self.signatures.get(&self.function);
+        let mut granted: Vec<&Effect> = signature
+            .into_iter()
+            .flat_map(|signature| signature.effects.iter())
+            .filter(|effect| effect.kind == "host_read")
+            .collect();
+        if granted.is_empty() {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE235",
+                "host_read requires a declared host_read effect with its authorizing capability",
+                span,
+            ));
+            return None;
+        }
+        if granted.len() > 1 {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE236",
+                "host_read requires exactly one declared host_read effect per function",
+                span,
+            ));
+            return None;
+        }
+        let granted = granted.pop().expect("one host_read effect");
+        let capabilities = signature
+            .map(|signature| signature.capabilities.clone())
+            .unwrap_or_default();
+        if !capabilities.contains(&granted.capability) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE235",
+                "host_read requires a declared host_read effect with its authorizing capability",
+                span,
+            ));
+            return None;
+        }
+        let id = self.new_value("hostread");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability: granted.capability.clone(),
+                operation: "blob_read".to_owned(),
+            },
+            operands: Vec::new(),
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
     }
 
     fn elaborate_expr(
@@ -5621,6 +5700,7 @@ impl<'a> BodyBuilder<'a> {
                 env,
                 diagnostics,
             ),
+            AstExpr::HostRead { span } => self.elaborate_host_read(*span, expected, diagnostics),
             AstExpr::SequenceLiteral { elements, span } => {
                 let BodyType::Sequence {
                     element: element_type,

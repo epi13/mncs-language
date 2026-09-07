@@ -25,7 +25,15 @@ fn text_scan_executes_and_agrees_on_both_backends() {
     for backend in ["mncs-research-bytecode", "mncs-portable-wasm-mvp"] {
         let output = binary()
             .env("MNCS_LIBRARY_PATH", library_dir())
-            .args(["experiment", "run", &source, "--backend", backend, "--corpus", &corpus])
+            .args([
+                "experiment",
+                "run",
+                &source,
+                "--backend",
+                backend,
+                "--corpus",
+                &corpus,
+            ])
             .output()
             .expect("run text-scan experiment");
         assert!(

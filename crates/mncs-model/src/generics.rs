@@ -418,8 +418,7 @@ pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagn
             })
             .collect();
         for (iteration, callees) in body.bounded_iterations.iter_mut().zip(repaired) {
-            let recorded: BTreeSet<SemanticId> =
-                iteration.callees.iter().cloned().collect();
+            let recorded: BTreeSet<SemanticId> = iteration.callees.iter().cloned().collect();
             let derived: BTreeSet<SemanticId> = callees.iter().cloned().collect();
             if derived != recorded {
                 iteration.callees = callees;

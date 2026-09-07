@@ -25,7 +25,15 @@ fn json_emit_produces_golden_bytes_on_both_backends() {
     for backend in ["mncs-research-bytecode", "mncs-portable-wasm-mvp"] {
         let output = binary()
             .env("MNCS_LIBRARY_PATH", library_dir())
-            .args(["experiment", "run", &source, "--backend", backend, "--corpus", &corpus])
+            .args([
+                "experiment",
+                "run",
+                &source,
+                "--backend",
+                backend,
+                "--corpus",
+                &corpus,
+            ])
             .output()
             .expect("run json-emit experiment");
         assert!(
@@ -52,7 +60,15 @@ fn json_emit_roundtrips_through_scanner_on_both_backends() {
     for backend in ["mncs-research-bytecode", "mncs-portable-wasm-mvp"] {
         let output = binary()
             .env("MNCS_LIBRARY_PATH", library_dir())
-            .args(["experiment", "run", &source, "--backend", backend, "--corpus", &corpus])
+            .args([
+                "experiment",
+                "run",
+                &source,
+                "--backend",
+                backend,
+                "--corpus",
+                &corpus,
+            ])
             .output()
             .expect("run round-trip experiment");
         assert!(

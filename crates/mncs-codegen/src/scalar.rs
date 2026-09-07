@@ -833,6 +833,10 @@ fn lower_instruction(
         SsaInstructionKind::Effect => {
             Err("effects are unsupported on this scalar realization envelope".to_owned())
         }
+        SsaInstructionKind::HostCall { .. } => Err(
+            "host calls are unsupported on this scalar realization envelope; run on the research bytecode backend with an explicit grant"
+                .to_owned(),
+        ),
         SsaInstructionKind::RuntimeCheck { .. } => {
             Err("runtime checks have no executable condition in the current SSA subset".to_owned())
         }

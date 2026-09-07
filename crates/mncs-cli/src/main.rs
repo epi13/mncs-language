@@ -15,8 +15,8 @@ use mncs_codegen::{
     BackendExecutionSession, BackendStatefulSession,
 };
 use mncs_compiler::{
-    native_node_profile, reference_compiler_architecture, ModuleResolution, ModuleResolutionOutcome,
-    ModuleResolver, ReferenceCompiler, SourceFrontEndResult,
+    native_node_profile, reference_compiler_architecture, ModuleResolution,
+    ModuleResolutionOutcome, ModuleResolver, ReferenceCompiler, SourceFrontEndResult,
 };
 use mncs_model::{
     compare_body_and_ssa, compare_execution, execute_ssa, execute_with_policy,
@@ -24,7 +24,7 @@ use mncs_model::{
     CompilationStatus, CompilationStudyRequest, CompilationStudyResult, Confidence,
     DeterministicVerifier, DiagnosticCategory, DiagnosticObligation, EvidenceFreshness,
     EvidenceManifest, EvidenceState, ExecutionComparison, ExecutionCorpus, ExecutionProperty,
-    ExecutionRequest, ExecutionStatus, ExecutionValue, FunctionBody,
+    ExecutionRequest, ExecutionStatus, ExecutionValue, FunctionBody, HostGrant,
     LanguageExperimentCaseObservation, LanguageExperimentComparison, LanguageExperimentDefinition,
     LanguageExperimentPropertyObservation, LanguageExperimentResult,
     LanguageExperimentStatefulCaseObservation, LoweringExecutionComparison,
@@ -923,6 +923,47 @@ struct ExperimentOptions {
     output_dir: Option<PathBuf>,
     node_identity: String,
     validation_profile: Option<String>,
+    /// Explicit host-read grants (`capability=path`), each realized as a
+    /// bounded copy for the named capability. Empty by default: no ambient
+    /// filesystem access exists without a grant.
+    grants: Vec<(String, String)>,
+}
+
+/// Load `--grant-read` files into bounded host grants. Missing files,
+/// unreadable files, and payloads beyond the 64-byte executor bound are
+/// hard errors: a grant that cannot be stated exactly is refused, never
+/// truncated or skipped.
+fn load_host_grants(grants: &[(String, String)]) -> Result<Vec<HostGrant>, ExitCode> {
+    let mut loaded = Vec::new();
+    for (capability, path) in grants {
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                eprintln!("error: unable to read grant file {path:?} for capability {capability:?}: {error}");
+                return Err(ExitCode::from(2));
+            }
+        };
+        if bytes.len() > mncs_model::HOST_GRANT_MAX_BYTES {
+            eprintln!(
+                "error: grant file {path:?} for capability {capability:?} is {} bytes, beyond the {}-byte bound; refusing",
+                bytes.len(),
+                mncs_model::HOST_GRANT_MAX_BYTES
+            );
+            return Err(ExitCode::from(2));
+        }
+        loaded.push(HostGrant {
+            capability: capability.clone(),
+            locator: path.clone(),
+            bytes,
+        });
+    }
+    Ok(loaded)
+}
+
+/// Attach loaded grants to one case request and switch its effect policy
+/// to Realize. Requests without grants are untouched.
+fn request_with_grants(request: &ExecutionRequest, grants: &[HostGrant]) -> ExecutionRequest {
+    request.with_host_grants(grants)
 }
 
 struct PreparedExperiment {
@@ -985,6 +1026,7 @@ where
             };
             let mut baseline_path: Option<String> = None;
             let mut output_dir: Option<PathBuf> = None;
+            let mut grants: Vec<(String, String)> = Vec::new();
             let mut parse_error = false;
             while let Some(option) = args.next() {
                 let mut take_value = |what: &str| -> Option<String> {
@@ -1000,6 +1042,23 @@ where
                 match option.as_str() {
                     "--baseline" => baseline_path = take_value("--baseline"),
                     "--output-dir" => output_dir = take_value("--output-dir").map(PathBuf::from),
+                    "--grant-read" => {
+                        if let Some(grant) = take_value("--grant-read") {
+                            match grant.split_once('=') {
+                                Some((capability, path))
+                                    if !capability.is_empty() && !path.is_empty() =>
+                                {
+                                    grants.push((capability.to_owned(), path.to_owned()))
+                                }
+                                _ => {
+                                    eprintln!(
+                                        "error: --grant-read requires capability=path, got {grant:?}"
+                                    );
+                                    parse_error = true;
+                                }
+                            }
+                        }
+                    }
                     other => {
                         eprintln!("error: unknown experiment execute option {other:?}");
                         parse_error = true;
@@ -1026,12 +1085,17 @@ where
                 Err(code) => return code,
             };
             // Issue #108: decode and validate the artifact once for the corpus.
+            let host_grants = match load_host_grants(&grants) {
+                Ok(grants) => grants,
+                Err(code) => return code,
+            };
             let backend_session = BackendExecutionSession::new(&artifact);
             let observations = corpus
                 .cases
                 .iter()
                 .map(|case_| {
-                    let observation = backend_session.execute(&case_.request);
+                    let request = request_with_grants(&case_.request, &host_grants);
+                    let observation = backend_session.execute(&request);
                     experiment_case_observation(case_, observation)
                 })
                 .collect::<Vec<_>>();
@@ -1233,6 +1297,7 @@ where
     let mut output_dir = None;
     let mut node_identity = "local-experiment-node".to_owned();
     let mut validation_profile = None;
+    let mut grants = Vec::new();
     while let Some(option) = args.next() {
         match option.as_str() {
             "--backend" => {
@@ -1267,6 +1332,20 @@ where
                 }
                 validation_profile = Some(profile);
             }
+            "--grant-read" => {
+                let grant = args
+                    .next()
+                    .ok_or_else(|| "--grant-read requires capability=path".to_owned())?;
+                let (capability, path) = grant.split_once('=').ok_or_else(|| {
+                    format!("--grant-read requires capability=path, got {grant:?}")
+                })?;
+                if capability.is_empty() || path.is_empty() {
+                    return Err(format!(
+                        "--grant-read requires capability=path, got {grant:?}"
+                    ));
+                }
+                grants.push((capability.to_owned(), path.to_owned()));
+            }
             other => return Err(format!("unknown experiment option {other:?}")),
         }
     }
@@ -1289,6 +1368,7 @@ where
         output_dir,
         node_identity,
         validation_profile,
+        grants,
     })
 }
 
@@ -1681,19 +1761,32 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
             )
         })
         .unwrap_or_else(|| compiler.study_from_compilation(study_request, &compilation));
-    let validation = prepared
-        .validation_profile
-        .is_none()
-        .then(|| validate_backend_lowering(&prepared.program, ssa, &artifact, &definition.corpus));
-    trace_timing("cli-translation-validation", &started, &mut stage_started);
     // Issue #108: decode and validate the artifact once for the corpus.
+    // Grants load before translation validation so the layered
+    // body/SSA/backend comparison replays the same explicit host
+    // authority the experiment cases execute under.
+    let host_grants = match load_host_grants(&options.grants) {
+        Ok(grants) => grants,
+        Err(code) => return code,
+    };
+    let validation = prepared.validation_profile.is_none().then(|| {
+        validate_backend_lowering(
+            &prepared.program,
+            ssa,
+            &artifact,
+            &definition.corpus,
+            &host_grants,
+        )
+    });
+    trace_timing("cli-translation-validation", &started, &mut stage_started);
     let backend_session = BackendExecutionSession::new(&artifact);
     let cases = prepared
         .corpus
         .cases
         .iter()
         .map(|case_| {
-            let observation = backend_session.execute(&case_.request);
+            let request = request_with_grants(&case_.request, &host_grants);
+            let observation = backend_session.execute(&request);
             experiment_case_observation(case_, observation)
         })
         .collect();
@@ -2563,7 +2656,7 @@ where
         eprintln!("error: portable backend lowering did not produce an artifact");
         return ExitCode::FAILURE;
     };
-    let comparison = compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus);
+    let comparison = compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus, &[]);
     let ok = comparison.status == mncs_codegen::LayeredExecutionStatus::ConsistentOverCorpus;
     if !print_json(&comparison) {
         ExitCode::from(2)
@@ -2825,7 +2918,7 @@ where
                     return ExitCode::FAILURE;
                 }
             };
-            validate_backend_lowering(&program, &before, &artifact, &corpus)
+            validate_backend_lowering(&program, &before, &artifact, &corpus, &[])
         }
         other => {
             eprintln!("error: unknown translation kind {other:?}");
@@ -3471,7 +3564,7 @@ impl FileModuleResolver {
 impl ModuleResolver for FileModuleResolver {
     fn resolve(&self, module: &str) -> Option<SourceEnvelope> {
         match self.resolve_detailed(module) {
-            ModuleResolutionOutcome::Resolved(envelope) => Some(envelope),
+            ModuleResolutionOutcome::Resolved(envelope) => Some(*envelope),
             ModuleResolutionOutcome::NotFound | ModuleResolutionOutcome::Conflict(_) => None,
         }
     }
@@ -3512,12 +3605,9 @@ impl ModuleResolver for FileModuleResolver {
                         continue;
                     }
                     let locator = path.to_string_lossy().to_string();
-                    if authorities
-                        .iter()
-                        .any(|(known_locator, known_source)| {
-                            known_locator == &locator || known_source == &source
-                        })
-                    {
+                    if authorities.iter().any(|(known_locator, known_source)| {
+                        known_locator == &locator || known_source == &source
+                    }) {
                         continue;
                     }
                     authorities.push((locator, source));
@@ -3528,7 +3618,7 @@ impl ModuleResolver for FileModuleResolver {
             0 => ModuleResolutionOutcome::NotFound,
             1 => {
                 let (locator, source) = authorities.pop().expect("one authority");
-                ModuleResolutionOutcome::Resolved(SourceEnvelope::new(
+                ModuleResolutionOutcome::Resolved(Box::new(SourceEnvelope::new(
                     SourceArtifactKind::Program,
                     locator.clone(),
                     SourceOrigin {
@@ -3536,11 +3626,13 @@ impl ModuleResolver for FileModuleResolver {
                         locator: Some(locator),
                     },
                     source,
-                ))
+                )))
             }
             _ => {
-                let mut locators: Vec<String> =
-                    authorities.into_iter().map(|(locator, _)| locator).collect();
+                let mut locators: Vec<String> = authorities
+                    .into_iter()
+                    .map(|(locator, _)| locator)
+                    .collect();
                 locators.sort();
                 ModuleResolutionOutcome::Conflict(locators)
             }

@@ -1,0 +1,14 @@
+mncs 0.8;
+
+// Negative fixture: two `host_read` effects in one function are rejected
+// (MNE236). One call site maps to exactly one authority record.
+module examples.host_read_invalid_double;
+
+fn blob_len() -> (result: u64)
+    capability note_reader
+    effect host_read authorized_by note_reader
+    effect host_read authorized_by note_reader
+{
+    let blob: [byte; up_to 64] = host_read();
+    return blob.len;
+}

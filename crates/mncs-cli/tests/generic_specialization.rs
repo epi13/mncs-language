@@ -20,7 +20,15 @@ fn nested_generic_call_in_iteration_specializes_on_both_backends() {
     let corpus = example("execution/generic-nested-iteration-corpus.json");
     for backend in ["mncs-research-bytecode", "mncs-portable-wasm-mvp"] {
         let output = binary()
-            .args(["experiment", "run", &source, "--backend", backend, "--corpus", &corpus])
+            .args([
+                "experiment",
+                "run",
+                &source,
+                "--backend",
+                backend,
+                "--corpus",
+                &corpus,
+            ])
             .output()
             .expect("run nested-generic experiment");
         assert!(

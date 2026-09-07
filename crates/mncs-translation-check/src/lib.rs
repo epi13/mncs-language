@@ -15,10 +15,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use mncs_codegen::{compare_body_ssa_and_backend, selected_ssa_ref, LayeredExecutionStatus};
 use mncs_model::{
     execute_ssa_module, ArtifactRepresentation, BackendArtifact, CompilerArtifactRef,
-    EvidenceFreshness, ExecutionCorpus, ExecutionStatus, IntegerOperation, Program, RelationClaim,
-    SemanticId, SsaInstructionKind, SsaModule, SsaTerminator, TranslationCounterexample,
-    TranslationJudgement, TranslationValidationResult, VerifierIdentity, VerifierIndependence,
-    SSA_SCHEMA_VERSION,
+    EvidenceFreshness, ExecutionCorpus, ExecutionStatus, HostGrant, IntegerOperation, Program,
+    RelationClaim, SemanticId, SsaInstructionKind, SsaModule, SsaTerminator,
+    TranslationCounterexample, TranslationJudgement, TranslationValidationResult, VerifierIdentity,
+    VerifierIndependence, SSA_SCHEMA_VERSION,
 };
 
 pub const VALIDATOR_VERSION: &str = "0.1";
@@ -368,8 +368,9 @@ pub fn validate_backend_lowering(
     ssa: &SsaModule,
     artifact: &BackendArtifact,
     corpus: &ExecutionCorpus,
+    host_grants: &[HostGrant],
 ) -> TranslationValidationResult {
-    let comparison = compare_body_ssa_and_backend(program, ssa, artifact, corpus);
+    let comparison = compare_body_ssa_and_backend(program, ssa, artifact, corpus, host_grants);
     let (judgement, counterexample, limitations) = match comparison.status {
         LayeredExecutionStatus::ConsistentOverCorpus => (
             TranslationJudgement::Pass,
@@ -629,6 +630,7 @@ mod tests {
             ],
             step_budget: 64,
             policy: ExecutionPolicy::default(),
+            host_grants: Vec::new(),
         }
     }
 
@@ -723,7 +725,7 @@ mod tests {
         )
         .artifact
         .unwrap();
-        let result = validate_backend_lowering(&program, &ssa, &artifact, &corpus());
+        let result = validate_backend_lowering(&program, &ssa, &artifact, &corpus(), &[]);
         assert_eq!(result.judgement, TranslationJudgement::Pass);
         assert!(result
             .limitations

@@ -1574,6 +1574,7 @@ mod tests {
                 }],
                 step_budget: 10_000,
                 policy: mncs_model::ExecutionPolicy::default(),
+                host_grants: Vec::new(),
             };
             let body = mncs_model::execute_with_policy(&program, &request);
             let ssa = mncs_model::execute_ssa(&program, &request);

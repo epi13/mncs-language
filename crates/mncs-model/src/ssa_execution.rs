@@ -339,6 +339,7 @@ impl SsaExecutionSession {
             arguments,
             step_budget,
             policy,
+            host_grants,
         } = request;
         let request = crate::ExecutionRequest {
             schema_version,
@@ -346,6 +347,7 @@ impl SsaExecutionSession {
             arguments: Vec::new(),
             step_budget,
             policy,
+            host_grants,
         };
         execute_ssa_module_with_validation(
             &self.program,
@@ -1880,6 +1882,10 @@ fn execute_instruction(
                 arguments,
                 step_budget: remaining,
                 policy: request.policy.clone(),
+                // Authority flows explicitly to callees within one
+                // execution: nested calls inherit the request's grants,
+                // still bounded and still matched by capability name.
+                host_grants: request.host_grants.clone(),
             };
             // Re-share the caller-resolved identity (cheap clone) so the
             // nested call never re-fingerprints the module. Resolved here,
@@ -1955,8 +1961,85 @@ fn execute_instruction(
                                 .map(|use_| use_.capability.0.clone())
                         })
                         .unwrap_or_default(),
+                    // Record-only observations realize nothing.
+                    provenance: None,
                 });
             }
+        }
+        SsaInstructionKind::HostCall {
+            capability,
+            operation,
+        } => {
+            // Host-realized value-producing operation, mirroring the body
+            // reference executor (HARNESS-PRESSURE-004). Same fail-closed
+            // discipline: explicit realize policy, explicit grant for the
+            // declared capability, bounded bytes, recorded provenance.
+            if operation != "blob_read" {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    instruction_identity(instruction),
+                    format!("unknown host operation {operation:?}; fail closed"),
+                );
+                return true;
+            }
+            if !matches!(
+                request.policy.effects,
+                crate::EffectExecutionPolicy::Realize
+            ) {
+                result.fail(ExecutionStatus::Unsupported, instruction_identity(instruction), "host call requires the explicit realize policy with a matching grant; no external access was performed");
+                return true;
+            }
+            let Some(grant) = request
+                .host_grants
+                .iter()
+                .find(|grant| grant.capability == *capability)
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    format!("no host grant for capability {capability:?}; declared authority was not fulfilled"),
+                );
+                return true;
+            };
+            if grant.bytes.len() > crate::execution::HOST_GRANT_MAX_BYTES {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    format!(
+                        "host grant for capability {capability:?} exceeds the {}-byte bound",
+                        crate::execution::HOST_GRANT_MAX_BYTES
+                    ),
+                );
+                return true;
+            }
+            if let Some(output) = instruction.outputs.first() {
+                let delivered: Vec<ExecutionValue> = grant
+                    .bytes
+                    .iter()
+                    .map(|byte| ExecutionValue::Byte {
+                        value: *byte as i128,
+                    })
+                    .collect();
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Sequence {
+                        values: delivered.into(),
+                    },
+                );
+            }
+            result.effects.push(ExecutionEffectEvent {
+                operation: instruction_identity(instruction).unwrap_or_else(|| {
+                    crate::identity::SemanticId(format!("host-call:{capability}"))
+                }),
+                kind: "host_read".to_owned(),
+                target: operation.clone(),
+                capability: capability.clone(),
+                provenance: Some(format!(
+                    "grant:{} sha256:{}",
+                    grant.locator,
+                    crate::canonical::sha256_hex(&grant.bytes)
+                )),
+            });
         }
         SsaInstructionKind::RuntimeCheck { .. } => {
             result.fail(
@@ -2678,6 +2761,7 @@ mod tests {
             }],
             step_budget: 64,
             policy: crate::ExecutionPolicy::default(),
+            host_grants: Vec::new(),
         }
     }
 

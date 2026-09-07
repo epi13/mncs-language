@@ -181,19 +181,25 @@ fn profile09_consumer_disambiguates_duplicate_core_exports() {
 /// authority and resolve normally.
 #[test]
 fn conflicting_module_identities_are_rejected() {
-    let workspace = std::env::temp_dir().join(format!("mncs-resolution-conflict-{}", std::process::id()));
+    let workspace =
+        std::env::temp_dir().join(format!("mncs-resolution-conflict-{}", std::process::id()));
     let root_a = workspace.join("root-a");
     let root_b = workspace.join("root-b");
     let work = workspace.join("work");
     for dir in [&root_a, &root_b, &work] {
-        fs::create_dir_all(dir.join("mncs").join("core")).or_else(|_| fs::create_dir_all(dir)).expect("dir");
+        fs::create_dir_all(dir.join("mncs").join("core"))
+            .or_else(|_| fs::create_dir_all(dir))
+            .expect("dir");
     }
     // Root A carries the canonical module; root B carries a divergent copy
     // under the same declared identity.
     let canonical = fs::read_to_string(format!("{}/core/status.mncs", library_dir()))
         .expect("canonical status module");
-    fs::write(root_a.join("mncs").join("core").join("status.mncs"), &canonical)
-        .expect("write root A");
+    fs::write(
+        root_a.join("mncs").join("core").join("status.mncs"),
+        &canonical,
+    )
+    .expect("write root A");
     fs::write(
         root_b.join("mncs").join("core").join("status.mncs"),
         format!("{canonical}\n// divergent downstream copy\n"),
@@ -206,19 +212,14 @@ fn conflicting_module_identities_are_rejected() {
     )
     .expect("write consumer");
 
-    let library_path = format!(
-        "{}:{}",
-        root_a.display(),
-        root_b.display()
-    );
+    let library_path = format!("{}:{}", root_a.display(), root_b.display());
     let conflicted = binary()
         .env("MNCS_LIBRARY_PATH", &library_path)
         .args(["source-study"])
         .arg(&consumer)
         .output()
         .expect("source-study with conflicting roots");
-    let study: Value =
-        serde_json::from_slice(&conflicted.stdout).expect("source-study JSON");
+    let study: Value = serde_json::from_slice(&conflicted.stdout).expect("source-study JSON");
     let codes: Vec<&str> = study["diagnostics"]
         .as_array()
         .unwrap()
@@ -232,8 +233,11 @@ fn conflicting_module_identities_are_rejected() {
 
     // Byte-identical copies are one authority: same content in both roots
     // resolves and validates.
-    fs::write(root_b.join("mncs").join("core").join("status.mncs"), &canonical)
-        .expect("align root B");
+    fs::write(
+        root_b.join("mncs").join("core").join("status.mncs"),
+        &canonical,
+    )
+    .expect("align root B");
     let aligned = binary()
         .env("MNCS_LIBRARY_PATH", &library_path)
         .args(["validate"])

@@ -714,6 +714,18 @@ pub enum BodyOperationKind {
         effect: Effect,
         capability: String,
     },
+    /// A value-producing host-realized operation
+    /// (HARNESS-PRESSURE-004). Authority comes from the enclosing
+    /// function's declarations, never from ambient access: validation
+    /// requires the named capability in `function.capabilities` and a
+    /// matching declared effect, and executors realize the operation only
+    /// from an explicit `HostGrant` for that capability. `operation`
+    /// selects the realized primitive (`blob_read` initially); unknown
+    /// operations fail closed at every layer.
+    HostCall {
+        capability: String,
+        operation: String,
+    },
     RuntimeCheck {
         obligation: SemanticId,
         fact: Fact,
@@ -2633,6 +2645,50 @@ fn validate_operation(
                     "MNB021",
                     format!("{path}.kind"),
                     "body effect is not declared by the enclosing function",
+                ));
+            }
+        }
+        BodyOperationKind::HostCall {
+            capability,
+            operation: operation_id,
+        } => {
+            if operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB122",
+                    path.to_owned(),
+                    "host calls produce exactly one value and consume no operands",
+                ));
+            }
+            if !operation.operands.is_empty() {
+                errors.push(body_diagnostic(
+                    "MNB122",
+                    path.to_owned(),
+                    "host calls produce exactly one value and consume no operands",
+                ));
+            }
+            if operation_id != "blob_read" {
+                errors.push(body_diagnostic(
+                    "MNB123",
+                    format!("{path}.kind"),
+                    format!("unknown host operation {operation_id:?}; fail closed"),
+                ));
+            }
+            if !function.capabilities.contains(capability) {
+                errors.push(body_diagnostic(
+                    "MNB124",
+                    format!("{path}.kind"),
+                    "host call capability is not declared by the enclosing function",
+                ));
+            }
+            if !function
+                .effects
+                .iter()
+                .any(|declared| declared.kind == "host_read" && declared.capability == *capability)
+            {
+                errors.push(body_diagnostic(
+                    "MNB125",
+                    format!("{path}.kind"),
+                    "host call has no matching declared host_read effect for its capability",
                 ));
             }
         }

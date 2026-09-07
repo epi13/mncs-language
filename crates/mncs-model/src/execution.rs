@@ -105,7 +105,26 @@ pub enum EffectExecutionPolicy {
     #[default]
     Unsupported,
     Record,
+    /// Realize host-granted effects from `ExecutionRequest.host_grants`.
+    /// A value-producing host operation with no matching grant fails
+    /// closed; grants never confer ambient authority.
+    Realize,
 }
+
+/// One bounded host-granted input (HARNESS-PRESSURE-004). The executor
+/// matches grants by capability name only; the bytes are an explicit
+/// copy (at most 64) supplied with the request, never a live handle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostGrant {
+    pub capability: String,
+    /// Operator-supplied provenance for the grant (file path, fixture
+    /// name, or test provider identity). Recorded into evidence.
+    pub locator: String,
+    pub bytes: Vec<u8>,
+}
+
+/// Maximum bytes in one host grant: the executor ABI's sequence bound.
+pub const HOST_GRANT_MAX_BYTES: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPolicy {
@@ -129,6 +148,28 @@ pub struct ExecutionRequest {
     pub step_budget: u64,
     #[serde(default)]
     pub policy: ExecutionPolicy,
+    /// Bounded host-granted inputs, matched by capability name. Empty by
+    /// default, so every existing corpus and request stays Unsupported.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_grants: Vec<HostGrant>,
+}
+
+impl ExecutionRequest {
+    /// Attach explicit host authority to one request
+    /// (HARNESS-PRESSURE-004). Requests without grants are returned
+    /// unchanged; otherwise the effect policy switches to Realize and the
+    /// grants travel with the request, still bounded and still matched by
+    /// capability name. Layered validation replays these granted requests
+    /// so body, SSA, and backend observations stay comparable.
+    pub fn with_host_grants(&self, grants: &[HostGrant]) -> Self {
+        if grants.is_empty() {
+            return self.clone();
+        }
+        let mut granted = self.clone();
+        granted.policy.effects = EffectExecutionPolicy::Realize;
+        granted.host_grants = grants.to_vec();
+        granted
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +202,11 @@ pub struct ExecutionEffectEvent {
     pub kind: String,
     pub target: String,
     pub capability: String,
+    /// Provenance of the realized payload: the grant locator plus the
+    /// hex sha256 of the exact bytes delivered. Absent for record-only
+    /// observations, which realize nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -765,6 +811,7 @@ where
             arguments,
             step_budget: step.step_budget,
             policy: step.policy.clone(),
+            host_grants: Vec::new(),
         };
         let call = execute(request);
         result.calls += 1;
@@ -2455,6 +2502,10 @@ fn execute_operation(
                 arguments,
                 step_budget: remaining,
                 policy: request.policy.clone(),
+                // Authority flows explicitly to callees within one
+                // execution: nested calls inherit the request's grants,
+                // still bounded and still matched by capability name.
+                host_grants: request.host_grants.clone(),
             };
             let nested = execute_inner(session, &nested_request, record_effects);
             let trace_offset = result.steps;
@@ -2497,6 +2548,83 @@ fn execute_operation(
                 kind: effect.kind.clone(),
                 target: effect.target.clone(),
                 capability: capability.clone(),
+                // Record-only observations realize nothing.
+                provenance: None,
+            });
+        }
+        BodyOperationKind::HostCall {
+            capability,
+            operation: operation_id,
+        } => {
+            // Host-realized value-producing operation
+            // (HARNESS-PRESSURE-004). Authority is the declared
+            // capability, already checked at validation; realization
+            // needs an explicit grant for that capability, and the exact
+            // delivered bytes are recorded with their digest. Anything
+            // missing fails closed: no ambient access, no synthesized
+            // values, no silent empty reads.
+            if operation_id != "blob_read" {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    format!("unknown host operation {operation_id:?}; fail closed"),
+                );
+                return Some(result.clone());
+            }
+            if !matches!(request.policy.effects, EffectExecutionPolicy::Realize) {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    "host call requires the explicit realize policy with a matching grant; no external access was performed".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            let Some(grant) = request
+                .host_grants
+                .iter()
+                .find(|grant| grant.capability == *capability)
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    format!("no host grant for capability {capability:?}; declared authority was not fulfilled"),
+                );
+                return Some(result.clone());
+            };
+            if grant.bytes.len() > HOST_GRANT_MAX_BYTES {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    format!(
+                        "host grant for capability {capability:?} exceeds the {}-byte bound",
+                        HOST_GRANT_MAX_BYTES
+                    ),
+                );
+                return Some(result.clone());
+            }
+            let delivered: Vec<ExecutionValue> = grant
+                .bytes
+                .iter()
+                .map(|byte| ExecutionValue::Byte {
+                    value: *byte as i128,
+                })
+                .collect();
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Sequence {
+                    values: delivered.into(),
+                },
+            );
+            result.effects.push(ExecutionEffectEvent {
+                operation: identity.clone(),
+                kind: "host_read".to_owned(),
+                target: operation_id.clone(),
+                capability: capability.clone(),
+                provenance: Some(format!(
+                    "grant:{} sha256:{}",
+                    grant.locator,
+                    sha256_hex(&grant.bytes)
+                )),
             });
         }
         BodyOperationKind::RuntimeCheck { .. } => {
@@ -3611,6 +3739,7 @@ mod tests {
             arguments: Vec::new(),
             step_budget: 1,
             policy: ExecutionPolicy::default(),
+            host_grants: Vec::new(),
         });
         result.trace = (0..MAX_TRACE_ENTRIES)
             .map(|step| ExecutionTraceEntry {

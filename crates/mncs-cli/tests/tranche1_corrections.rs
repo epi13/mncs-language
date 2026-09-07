@@ -29,7 +29,15 @@ fn diagnostics(path: &str) -> Vec<String> {
 
 fn run_backend(source: &str, backend: &str, corpus: &str) -> Value {
     let output = binary()
-        .args(["experiment", "run", source, "--backend", backend, "--corpus", corpus])
+        .args([
+            "experiment",
+            "run",
+            source,
+            "--backend",
+            backend,
+            "--corpus",
+            corpus,
+        ])
         .output()
         .expect("run experiment");
     assert!(
@@ -95,7 +103,10 @@ fn capability_identifier_executes_on_both_backends() {
 fn bool_match_negatives_are_rejected_with_intended_codes() {
     let cases = [
         ("source/profile06-invalid-bool-match-missing.mncs", "MNE140"),
-        ("source/profile06-invalid-bool-match-duplicate.mncs", "MNE139"),
+        (
+            "source/profile06-invalid-bool-match-duplicate.mncs",
+            "MNE139",
+        ),
         ("source/profile06-invalid-bool-match-unknown.mncs", "MNE138"),
     ];
     for (fixture, expected_code) in cases {
@@ -112,10 +123,7 @@ fn bool_match_negatives_are_rejected_with_intended_codes() {
 #[test]
 fn malformed_iteration_and_match_headers_emit_single_diagnostics() {
     let cases = [
-        (
-            "source/profile06-invalid-iteration-bound.mncs",
-            "MNP094",
-        ),
+        ("source/profile06-invalid-iteration-bound.mncs", "MNP094"),
         (
             "source/profile06-invalid-match-missing-comma.mncs",
             "MNP192",

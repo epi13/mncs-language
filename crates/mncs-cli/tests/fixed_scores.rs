@@ -23,7 +23,15 @@ fn fixed_scores_execute_and_agree_on_both_backends() {
     for backend in ["mncs-research-bytecode", "mncs-portable-wasm-mvp"] {
         let output = binary()
             .env("MNCS_LIBRARY_PATH", library_dir())
-            .args(["experiment", "run", &source, "--backend", backend, "--corpus", &corpus])
+            .args([
+                "experiment",
+                "run",
+                &source,
+                "--backend",
+                backend,
+                "--corpus",
+                &corpus,
+            ])
             .output()
             .expect("run fixed experiment");
         assert!(

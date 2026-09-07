@@ -582,6 +582,13 @@ pub enum AstExpr {
         element: Box<AstExpr>,
         span: SourceSpan,
     },
+    /// Host-realized read `host_read()` (Profile 0.8). Authority comes
+    /// from the enclosing function's declarations (`effect host_read`
+    /// plus its capability), never from arguments: the executor realizes
+    /// the value from an explicit grant for that capability.
+    HostRead {
+        span: SourceSpan,
+    },
     /// Profile 0.8 semantic vector/mask intrinsic. The parser preserves the
     /// intrinsic identity and arguments; elaboration supplies lane/type facts.
     VectorIntrinsic {
@@ -610,6 +617,7 @@ impl AstExpr {
             | Self::Cast { span, .. }
             | Self::Select { span, .. }
             | Self::SequenceReplace { span, .. }
+            | Self::HostRead { span, .. }
             | Self::VectorIntrinsic { span, .. } => *span,
         }
     }
@@ -1683,7 +1691,7 @@ impl<'a> Parser<'a> {
                 self.expression()
             } else {
                 self.value_name("MNP015", "expected returned value name")
-                .map(AstExpr::Name)
+                    .map(AstExpr::Name)
             };
             self.expect(TokenKind::Semicolon, "MNP016", "expected ';' after return");
             let return_end = self.previous_token_index(return_start);
@@ -1800,7 +1808,7 @@ impl<'a> Parser<'a> {
                     self.expression()
                 } else {
                     self.value_name("MNP015", "expected returned value name")
-                    .map(AstExpr::Name)
+                        .map(AstExpr::Name)
                 };
                 self.expect(TokenKind::Semicolon, "MNP016", "expected ';' after return");
                 let end = self.previous_token_index(start);
@@ -1899,11 +1907,8 @@ impl<'a> Parser<'a> {
             if bound.is_none()
                 && !matches!(
                     self.current_kind(),
-                    Some(
-                        TokenKind::CarryingKeyword
-                            | TokenKind::LeftBrace
-                            | TokenKind::RightBrace
-                    ) | None
+                    Some(TokenKind::CarryingKeyword | TokenKind::LeftBrace | TokenKind::RightBrace)
+                        | None
                 )
             {
                 self.cursor += 1;
@@ -2474,8 +2479,8 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse the Profile 0.8 selection intrinsics `select(c, t, f)` and
-    /// `replace(seq, index, element)`. `name` is the already-consumed
-    /// intrinsic identifier.
+    /// `replace(seq, index, element)`, plus the host-read intrinsic
+    /// `host_read()`. `name` is the already-consumed intrinsic identifier.
     fn intrinsic_selection(&mut self, name: SpannedText) -> Option<AstExpr> {
         self.expect(
             TokenKind::LeftParen,
@@ -2535,6 +2540,15 @@ impl<'a> Parser<'a> {
                 self.error(
                     "MNP162",
                     "selection intrinsics take exactly three arguments",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("host_read", 0) => Some(AstExpr::HostRead { span }),
+            ("host_read", _) => {
+                self.error(
+                    "MNP193",
+                    "host_read takes no arguments; authority comes from the enclosing function's declarations",
                     vec![TokenKind::RightParen],
                 );
                 None
@@ -2777,9 +2791,7 @@ impl<'a> Parser<'a> {
         let mut arms = Vec::new();
         while matches!(
             self.current_kind(),
-            Some(
-                TokenKind::Identifier | TokenKind::TrueKeyword | TokenKind::FalseKeyword
-            )
+            Some(TokenKind::Identifier | TokenKind::TrueKeyword | TokenKind::FalseKeyword)
         ) {
             // Boolean patterns `true` / `false` (HARNESS-PRESSURE-013). The
             // lexer never produces these spellings as identifiers, so the
@@ -2903,9 +2915,7 @@ impl<'a> Parser<'a> {
             // follows, pin the single precise error and keep parsing arms.
             if matches!(
                 self.current_kind(),
-                Some(
-                    TokenKind::Identifier | TokenKind::TrueKeyword | TokenKind::FalseKeyword
-                )
+                Some(TokenKind::Identifier | TokenKind::TrueKeyword | TokenKind::FalseKeyword)
             ) {
                 self.error(
                     "MNP192",
@@ -3677,6 +3687,7 @@ fn is_profile08_intrinsic(name: &str) -> bool {
         name,
         "select"
             | "replace"
+            | "host_read"
             | "vector"
             | "splat"
             | "extract_lane"
