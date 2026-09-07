@@ -15,8 +15,8 @@ use mncs_codegen::{
     BackendExecutionSession, BackendStatefulSession,
 };
 use mncs_compiler::{
-    native_node_profile, reference_compiler_architecture, ModuleResolution, ModuleResolver,
-    ReferenceCompiler, SourceFrontEndResult,
+    native_node_profile, reference_compiler_architecture, ModuleResolution, ModuleResolutionOutcome,
+    ModuleResolver, ReferenceCompiler, SourceFrontEndResult,
 };
 use mncs_model::{
     compare_body_and_ssa, compare_execution, execute_ssa, execute_with_policy,
@@ -3470,6 +3470,13 @@ impl FileModuleResolver {
 
 impl ModuleResolver for FileModuleResolver {
     fn resolve(&self, module: &str) -> Option<SourceEnvelope> {
+        match self.resolve_detailed(module) {
+            ModuleResolutionOutcome::Resolved(envelope) => Some(envelope),
+            ModuleResolutionOutcome::NotFound | ModuleResolutionOutcome::Conflict(_) => None,
+        }
+    }
+
+    fn resolve_detailed(&self, module: &str) -> ModuleResolutionOutcome {
         if module.is_empty()
             || !module
                 .chars()
@@ -3478,7 +3485,7 @@ impl ModuleResolver for FileModuleResolver {
             || module.ends_with('.')
             || module.contains("..")
         {
-            return None;
+            return ModuleResolutionOutcome::NotFound;
         }
         // Deterministic layout search: the importing file's directory first,
         // then its parent (so files grouped in a subdirectory can import a
@@ -3489,6 +3496,12 @@ impl ModuleResolver for FileModuleResolver {
             roots.push(parent.to_path_buf());
         }
         roots.extend(self.libraries.iter().cloned());
+        // Collect every compatible candidate instead of first-match-wins:
+        // duplicate module identities fail closed (HARNESS-PRESSURE-008)
+        // rather than silently shadowing one authority with another.
+        // Candidates with byte-identical content (one file reachable through
+        // several roots or spellings) are one authority, not a conflict.
+        let mut authorities: Vec<(String, String)> = Vec::new();
         for root in roots {
             for path in Self::candidates(&root, module) {
                 if let Ok(source) = fs::read_to_string(&path) {
@@ -3498,19 +3511,40 @@ impl ModuleResolver for FileModuleResolver {
                     if !mncs_syntax::module_names_compatible(module, &declared) {
                         continue;
                     }
-                    return Some(SourceEnvelope::new(
-                        SourceArtifactKind::Program,
-                        path.to_string_lossy().to_string(),
-                        SourceOrigin {
-                            kind: SourceOriginKind::Path,
-                            locator: Some(path.to_string_lossy().to_string()),
-                        },
-                        source,
-                    ));
+                    let locator = path.to_string_lossy().to_string();
+                    if authorities
+                        .iter()
+                        .any(|(known_locator, known_source)| {
+                            known_locator == &locator || known_source == &source
+                        })
+                    {
+                        continue;
+                    }
+                    authorities.push((locator, source));
                 }
             }
         }
-        None
+        match authorities.len() {
+            0 => ModuleResolutionOutcome::NotFound,
+            1 => {
+                let (locator, source) = authorities.pop().expect("one authority");
+                ModuleResolutionOutcome::Resolved(SourceEnvelope::new(
+                    SourceArtifactKind::Program,
+                    locator.clone(),
+                    SourceOrigin {
+                        kind: SourceOriginKind::Path,
+                        locator: Some(locator),
+                    },
+                    source,
+                ))
+            }
+            _ => {
+                let mut locators: Vec<String> =
+                    authorities.into_iter().map(|(locator, _)| locator).collect();
+                locators.sort();
+                ModuleResolutionOutcome::Conflict(locators)
+            }
+        }
     }
 }
 

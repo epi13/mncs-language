@@ -425,6 +425,30 @@ pub fn elaborate_program(ast: &AbstractSyntaxTree) -> Result<Program, Vec<Source
 /// importing module, never silent skips.
 pub trait ModuleResolver {
     fn resolve(&self, module: &str) -> Option<SourceEnvelope>;
+
+    /// Detailed resolution distinguishing a miss from conflicting
+    /// candidates (HARNESS-PRESSURE-008). The default derives from
+    /// `resolve`, reporting no conflict information; resolvers that search
+    /// several roots override it so duplicate identities fail closed.
+    fn resolve_detailed(&self, module: &str) -> ModuleResolutionOutcome {
+        match self.resolve(module) {
+            Some(envelope) => ModuleResolutionOutcome::Resolved(envelope),
+            None => ModuleResolutionOutcome::NotFound,
+        }
+    }
+}
+
+/// The detailed outcome of one module-resolution query.
+#[derive(Debug, Clone)]
+pub enum ModuleResolutionOutcome {
+    /// Exactly one authoritative candidate.
+    Resolved(SourceEnvelope),
+    /// No candidate satisfied the requested name.
+    NotFound,
+    /// Several distinct candidates satisfy the name. The strings identify
+    /// the conflicting sources (paths or locators); resolution fails closed
+    /// rather than silently preferring one authority.
+    Conflict(Vec<String>),
 }
 
 /// A resolver that finds nothing. Programs elaborated with it must be
@@ -566,6 +590,17 @@ impl ModuleResolver for RecordingResolver<'_> {
             .or_insert_with(|| source.clone());
         Some(source)
     }
+
+    fn resolve_detailed(&self, module: &str) -> ModuleResolutionOutcome {
+        let outcome = self.inner.resolve_detailed(module);
+        if let ModuleResolutionOutcome::Resolved(source) = &outcome {
+            self.sources
+                .borrow_mut()
+                .entry(module.to_owned())
+                .or_insert_with(|| source.clone());
+        }
+        outcome
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -634,12 +669,25 @@ fn elaborate_import_closure(
         if elaborated.contains_key(&dependency_name) {
             continue;
         }
-        let Some(dependency_envelope) = resolver.resolve(&dependency_name) else {
-            return Err(vec![elaboration_diagnostic(
-                "MNE173",
-                format!("imported module '{dependency_name}' is unavailable to the resolver"),
-                use_decl.module.span,
-            )]);
+        let dependency_envelope = match resolver.resolve_detailed(&dependency_name) {
+            ModuleResolutionOutcome::Resolved(envelope) => envelope,
+            ModuleResolutionOutcome::NotFound => {
+                return Err(vec![elaboration_diagnostic(
+                    "MNE173",
+                    format!("imported module '{dependency_name}' is unavailable to the resolver"),
+                    use_decl.module.span,
+                )]);
+            }
+            ModuleResolutionOutcome::Conflict(sources) => {
+                return Err(vec![elaboration_diagnostic(
+                    "MNE234",
+                    format!(
+                        "imported module '{dependency_name}' resolves to conflicting candidates [{}]; duplicate module identities are rejected",
+                        sources.join(", ")
+                    ),
+                    use_decl.module.span,
+                )]);
+            }
         };
         let parsed = mncs_syntax::parse(&dependency_envelope);
         let Some(dependency_ast) = parsed.ast else {

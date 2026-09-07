@@ -10,8 +10,8 @@ mod resolution;
 
 pub use frontend::{
     elaborate_program, elaborate_program_with_resolutions, elaborate_program_with_resolver,
-    elaborate_program_with_resolver_and_modules, ModuleResolution, ModuleResolver, NullResolver,
-    SourceFrontEndResult, SourceStudyOutput,
+    elaborate_program_with_resolver_and_modules, ModuleResolution, ModuleResolutionOutcome,
+    ModuleResolver, NullResolver, SourceFrontEndResult, SourceStudyOutput,
 };
 pub use proof_admission::{
     admission_library_roots, admit_artifact, authorize_reuse, lower_with_proofs, AdmissionError,
