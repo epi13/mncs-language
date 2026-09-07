@@ -1971,10 +1971,11 @@ fn execute_instruction(
             operation,
         } => {
             // Host-realized value-producing operation, mirroring the body
-            // reference executor (HARNESS-PRESSURE-004). Same fail-closed
-            // discipline: explicit realize policy, explicit grant for the
-            // declared capability, bounded bytes, recorded provenance.
-            if operation != "blob_read" {
+            // reference executor (HARNESS-PRESSURE-004/005). Same
+            // fail-closed discipline: explicit realize policy, explicit
+            // grant for the declared capability, bounded bytes (or a host
+            // clock observation for `clock_read`), recorded provenance.
+            if !matches!(operation.as_str(), "blob_read" | "clock_read") {
                 result.fail(
                     ExecutionStatus::Unsupported,
                     instruction_identity(instruction),
@@ -2012,34 +2013,66 @@ fn execute_instruction(
                 );
                 return true;
             }
-            if let Some(output) = instruction.outputs.first() {
-                let delivered: Vec<ExecutionValue> = grant
-                    .bytes
-                    .iter()
-                    .map(|byte| ExecutionValue::Byte {
-                        value: *byte as i128,
-                    })
-                    .collect();
-                values.insert(
-                    output.identity.clone(),
-                    ExecutionValue::Sequence {
-                        values: delivered.into(),
-                    },
-                );
+            if operation == "clock_read" {
+                let Some(millis) = crate::execution::host_epoch_millis() else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "host clock is unavailable; no instant was observed",
+                    );
+                    return true;
+                };
+                if let Some(output) = instruction.outputs.first() {
+                    values.insert(
+                        output.identity.clone(),
+                        ExecutionValue::Integer {
+                            value: millis as i128,
+                            ty: IntegerType {
+                                bits: 64,
+                                signed: false,
+                            },
+                        },
+                    );
+                }
+                result.effects.push(ExecutionEffectEvent {
+                    operation: instruction_identity(instruction).unwrap_or_else(|| {
+                        crate::identity::SemanticId(format!("host-call:{capability}"))
+                    }),
+                    kind: "clock_read".to_owned(),
+                    target: operation.clone(),
+                    capability: capability.clone(),
+                    provenance: Some("host-clock:wall".to_owned()),
+                });
+            } else {
+                if let Some(output) = instruction.outputs.first() {
+                    let delivered: Vec<ExecutionValue> = grant
+                        .bytes
+                        .iter()
+                        .map(|byte| ExecutionValue::Byte {
+                            value: *byte as i128,
+                        })
+                        .collect();
+                    values.insert(
+                        output.identity.clone(),
+                        ExecutionValue::Sequence {
+                            values: delivered.into(),
+                        },
+                    );
+                }
+                result.effects.push(ExecutionEffectEvent {
+                    operation: instruction_identity(instruction).unwrap_or_else(|| {
+                        crate::identity::SemanticId(format!("host-call:{capability}"))
+                    }),
+                    kind: "host_read".to_owned(),
+                    target: operation.clone(),
+                    capability: capability.clone(),
+                    provenance: Some(format!(
+                        "grant:{} sha256:{}",
+                        grant.locator,
+                        crate::canonical::sha256_hex(&grant.bytes)
+                    )),
+                });
             }
-            result.effects.push(ExecutionEffectEvent {
-                operation: instruction_identity(instruction).unwrap_or_else(|| {
-                    crate::identity::SemanticId(format!("host-call:{capability}"))
-                }),
-                kind: "host_read".to_owned(),
-                target: operation.clone(),
-                capability: capability.clone(),
-                provenance: Some(format!(
-                    "grant:{} sha256:{}",
-                    grant.locator,
-                    crate::canonical::sha256_hex(&grant.bytes)
-                )),
-            });
         }
         SsaInstructionKind::RuntimeCheck { .. } => {
             result.fail(

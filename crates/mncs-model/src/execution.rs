@@ -126,6 +126,18 @@ pub struct HostGrant {
 /// Maximum bytes in one host grant: the executor ABI's sequence bound.
 pub const HOST_GRANT_MAX_BYTES: usize = 64;
 
+/// Wall-clock epoch milliseconds observed from the host
+/// (HARNESS-PRESSURE-005). `None` when the host clock is unavailable;
+/// callers fail closed. This is wall time, not a monotonic tick: hosts
+/// may adjust it, so programs must compare instants relationally with
+/// wide margins (elapsed/expired), never pin absolute values in corpora.
+pub(crate) fn host_epoch_millis() -> Option<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|elapsed| elapsed.as_millis().min(u128::from(u64::MAX)) as u64)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPolicy {
     #[serde(default)]
@@ -2557,13 +2569,15 @@ fn execute_operation(
             operation: operation_id,
         } => {
             // Host-realized value-producing operation
-            // (HARNESS-PRESSURE-004). Authority is the declared
+            // (HARNESS-PRESSURE-004/005). Authority is the declared
             // capability, already checked at validation; realization
-            // needs an explicit grant for that capability, and the exact
-            // delivered bytes are recorded with their digest. Anything
-            // missing fails closed: no ambient access, no synthesized
-            // values, no silent empty reads.
-            if operation_id != "blob_read" {
+            // needs an explicit grant for that capability. `blob_read`
+            // delivers the grant's bounded bytes with their digest;
+            // `clock_read` observes epoch milliseconds from the host
+            // clock (granted via `--grant-time`, no file backs it).
+            // Anything missing fails closed: no ambient access, no
+            // synthesized values, no silent empty reads.
+            if !matches!(operation_id.as_str(), "blob_read" | "clock_read") {
                 result.fail(
                     ExecutionStatus::Unsupported,
                     Some(identity.clone()),
@@ -2602,30 +2616,58 @@ fn execute_operation(
                 );
                 return Some(result.clone());
             }
-            let delivered: Vec<ExecutionValue> = grant
-                .bytes
-                .iter()
-                .map(|byte| ExecutionValue::Byte {
-                    value: *byte as i128,
-                })
-                .collect();
-            values.insert(
-                operation.results[0].id.clone(),
-                ExecutionValue::Sequence {
-                    values: delivered.into(),
-                },
-            );
-            result.effects.push(ExecutionEffectEvent {
-                operation: identity.clone(),
-                kind: "host_read".to_owned(),
-                target: operation_id.clone(),
-                capability: capability.clone(),
-                provenance: Some(format!(
-                    "grant:{} sha256:{}",
-                    grant.locator,
-                    sha256_hex(&grant.bytes)
-                )),
-            });
+            if operation_id == "clock_read" {
+                let Some(millis) = host_epoch_millis() else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "host clock is unavailable; no instant was observed".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                values.insert(
+                    operation.results[0].id.clone(),
+                    ExecutionValue::Integer {
+                        value: millis as i128,
+                        ty: IntegerType {
+                            bits: 64,
+                            signed: false,
+                        },
+                    },
+                );
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: "clock_read".to_owned(),
+                    target: operation_id.clone(),
+                    capability: capability.clone(),
+                    provenance: Some("host-clock:wall".to_owned()),
+                });
+            } else {
+                let delivered: Vec<ExecutionValue> = grant
+                    .bytes
+                    .iter()
+                    .map(|byte| ExecutionValue::Byte {
+                        value: *byte as i128,
+                    })
+                    .collect();
+                values.insert(
+                    operation.results[0].id.clone(),
+                    ExecutionValue::Sequence {
+                        values: delivered.into(),
+                    },
+                );
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: "host_read".to_owned(),
+                    target: operation_id.clone(),
+                    capability: capability.clone(),
+                    provenance: Some(format!(
+                        "grant:{} sha256:{}",
+                        grant.locator,
+                        sha256_hex(&grant.bytes)
+                    )),
+                });
+            }
         }
         BodyOperationKind::RuntimeCheck { .. } => {
             result.fail(

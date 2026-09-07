@@ -401,7 +401,7 @@ impl Program {
                                 // when the capability is declared, and the
                                 // executor discharges the grant at run time.
                                 let granted = Effect {
-                                    kind: "host_read".to_owned(),
+                                    kind: crate::host_call_effect_kind(operation).to_owned(),
                                     target: String::new(),
                                     capability: capability.clone(),
                                 };
@@ -437,7 +437,6 @@ impl Program {
                                     freshness: EvidenceFreshness::Current,
                                     fallback: None,
                                 });
-                                let _ = operation;
                             }
                             BodyOperationKind::RuntimeCheck { obligation, .. } => {
                                 obligations.push(ObligationRecord {

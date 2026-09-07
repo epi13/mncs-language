@@ -1,0 +1,35 @@
+mncs 0.10;
+
+// mncs.std.clock — relational wall-clock comparisons over u64 epoch
+// milliseconds (HARNESS-PRESSURE-005).
+//
+// Time enters MNCS only through the `clock_read()` intrinsic, realized by
+// the executor from its own clock under an explicit `--grant-time`
+// capability. That observation is wall time, not a monotonic tick: hosts
+// may adjust it, and corpora must never pin absolute values. Every
+// function here is therefore relational and total over all u64 pairs:
+// callers compare instants with wide margins (freshness windows,
+// timeouts), and skew reads as zero age rather than a wrap.
+//
+// No operation allocates; every function is total. Complexity is O(1).
+module mncs.std.clock.v1;
+
+// Elapsed milliseconds from `since` to `now`, floored at zero: a `since`
+// in the future (clock skew, cross-host comparison) reads as zero age,
+// never a wrap-around.
+fn elapsed(since: u64, now: u64) -> (result: u64) {
+    return select(now >= since, now -% since, 0);
+}
+
+// True when `now` has reached `deadline`. The comparison is inclusive:
+// an instant exactly at its deadline has expired.
+fn expired(deadline: u64, now: u64) -> (result: bool) {
+    return now >= deadline;
+}
+
+// True when the observation at `stored` is at most `budget` millis old
+// at `now`. Future-dated stores read as zero age (see `elapsed`), so
+// skew never reports a fresh observation as stale.
+fn fresh_within(stored: u64, now: u64, budget: u64) -> (result: bool) {
+    return elapsed(stored, now) <= budget;
+}

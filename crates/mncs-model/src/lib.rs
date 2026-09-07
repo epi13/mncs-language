@@ -50,12 +50,12 @@ pub use bindings::{
     SemanticNamespace, SemanticReference, SemanticScope, SEMANTIC_BINDING_SCHEMA_VERSION,
 };
 pub use body::{
-    BodyBlock, BodyBoundedIteration, BodyCyclePolicy, BodyOperation, BodyOperationKind,
-    BodyParameter, BodyTerminator, BodyType, BodyValue, BoundedIterationCompletion, BoundsEvidence,
-    FunctionBody, GenericArg, GenericParam, GenericParamKind, IterationDomain, LoweringEnvelope,
-    MachineIntentSpec, PortabilityEnvelope, PortabilityTarget, RealizationClass, SequenceBound,
-    EXECUTABLE_BODY_SCHEMA_VERSION, MAX_SEQUENCE_BOUND, MAX_VECTOR_LANES,
-    SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
+    host_call_effect_kind, BodyBlock, BodyBoundedIteration, BodyCyclePolicy, BodyOperation,
+    BodyOperationKind, BodyParameter, BodyTerminator, BodyType, BodyValue,
+    BoundedIterationCompletion, BoundsEvidence, FunctionBody, GenericArg, GenericParam,
+    GenericParamKind, IterationDomain, LoweringEnvelope, MachineIntentSpec, PortabilityEnvelope,
+    PortabilityTarget, RealizationClass, SequenceBound, EXECUTABLE_BODY_SCHEMA_VERSION,
+    MAX_SEQUENCE_BOUND, MAX_VECTOR_LANES, SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
 };
 pub use canonical::sha256_hex;
 pub use canonical::{CanonicalError, CanonicalForm, CANONICAL_SCHEMA_VERSION};

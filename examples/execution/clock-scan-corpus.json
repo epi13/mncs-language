@@ -1,0 +1,152 @@
+{
+ "schema_version": "0.1",
+ "name": "clock-scan",
+ "cases": [
+  {
+   "id": "past-expired",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.clock_scan",
+     "function": "past_expired"
+    },
+    "arguments": [],
+    "step_budget": 8192
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ],
+   "expected_effects": [
+    {
+     "kind": "clock_read",
+     "target": "clock_read",
+     "capability": "ticker"
+    }
+   ],
+   "prohibit_unexpected_effects": true
+  },
+  {
+   "id": "future-pending",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.clock_scan",
+     "function": "future_pending"
+    },
+    "arguments": [],
+    "step_budget": 8192
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ],
+   "expected_effects": [
+    {
+     "kind": "clock_read",
+     "target": "clock_read",
+     "capability": "ticker"
+    }
+   ],
+   "prohibit_unexpected_effects": true
+  },
+  {
+   "id": "elapsed-known",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.clock_scan",
+     "function": "elapsed_known"
+    },
+    "arguments": [],
+    "step_budget": 8192
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 100,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_effects": [],
+   "prohibit_unexpected_effects": true
+  },
+  {
+   "id": "elapsed-floored",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.clock_scan",
+     "function": "elapsed_floored"
+    },
+    "arguments": [],
+    "step_budget": 8192
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_effects": [],
+   "prohibit_unexpected_effects": true
+  },
+  {
+   "id": "fresh-window",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.clock_scan",
+     "function": "fresh_window"
+    },
+    "arguments": [],
+    "step_budget": 8192
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ],
+   "expected_effects": [],
+   "prohibit_unexpected_effects": true
+  },
+  {
+   "id": "stale-window",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.clock_scan",
+     "function": "stale_window"
+    },
+    "arguments": [],
+    "step_budget": 8192
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ],
+   "expected_effects": [],
+   "prohibit_unexpected_effects": true
+  }
+ ]
+}

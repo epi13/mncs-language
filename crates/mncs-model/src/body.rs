@@ -720,8 +720,8 @@ pub enum BodyOperationKind {
     /// requires the named capability in `function.capabilities` and a
     /// matching declared effect, and executors realize the operation only
     /// from an explicit `HostGrant` for that capability. `operation`
-    /// selects the realized primitive (`blob_read` initially); unknown
-    /// operations fail closed at every layer.
+    /// selects the realized primitive (`blob_read`, `clock_read`);
+    /// unknown operations fail closed at every layer.
     HostCall {
         capability: String,
         operation: String,
@@ -731,6 +731,19 @@ pub enum BodyOperationKind {
         fact: Fact,
         failure: FailureMode,
     },
+}
+
+/// The declared-effect kind discharged by one host-call operation id
+/// (HARNESS-PRESSURE-004/005). `blob_read` discharges `host_read`;
+/// `clock_read` discharges `clock_read`. Anything else maps to
+/// `host_read` so pre-validation lowering keeps today's shape; unknown
+/// operations still fail closed at validation (MNB123) and at every
+/// executor.
+pub fn host_call_effect_kind(operation: &str) -> &'static str {
+    match operation {
+        "clock_read" => "clock_read",
+        _ => "host_read",
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2666,7 +2679,7 @@ fn validate_operation(
                     "host calls produce exactly one value and consume no operands",
                 ));
             }
-            if operation_id != "blob_read" {
+            if !matches!(operation_id.as_str(), "blob_read" | "clock_read") {
                 errors.push(body_diagnostic(
                     "MNB123",
                     format!("{path}.kind"),
@@ -2680,15 +2693,16 @@ fn validate_operation(
                     "host call capability is not declared by the enclosing function",
                 ));
             }
-            if !function
-                .effects
-                .iter()
-                .any(|declared| declared.kind == "host_read" && declared.capability == *capability)
-            {
+            let required_kind = host_call_effect_kind(operation_id);
+            if !function.effects.iter().any(|declared| {
+                declared.kind == required_kind && declared.capability == *capability
+            }) {
                 errors.push(body_diagnostic(
                     "MNB125",
                     format!("{path}.kind"),
-                    "host call has no matching declared host_read effect for its capability",
+                    format!(
+                        "host call has no matching declared {required_kind} effect for its capability"
+                    ),
                 ));
             }
         }

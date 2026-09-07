@@ -1,0 +1,14 @@
+mncs 0.8;
+
+// Negative fixture: two declared `clock_read` effects for one function
+// are rejected (MNE239). One function names exactly one clock authority.
+module examples.clock_invalid_double;
+
+fn tick() -> (result: u64)
+    capability ticker
+    effect clock_read authorized_by ticker
+    effect clock_read authorized_by ticker
+{
+    let now: u64 = clock_read();
+    return now;
+}

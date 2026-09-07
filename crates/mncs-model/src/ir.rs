@@ -1368,12 +1368,12 @@ fn lower_executable_body(
                     capability,
                     operation,
                 } => {
-                    // The declared host_read effect is the authority
-                    // record; the call carries no other effects. The
-                    // target mirrors declaration elaboration, which
-                    // anchors declared effects to the function name.
+                    // The declared host effect is the authority record;
+                    // the call carries no other effects. The target
+                    // mirrors declaration elaboration, which anchors
+                    // declared effects to the function name.
                     let declared = crate::Effect {
-                        kind: "host_read".to_owned(),
+                        kind: crate::host_call_effect_kind(operation).to_owned(),
                         target: function.name.clone(),
                         capability: capability.clone(),
                     };

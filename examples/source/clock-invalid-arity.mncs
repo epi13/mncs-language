@@ -1,0 +1,13 @@
+mncs 0.8;
+
+// Negative fixture: `clock_read()` takes no arguments (MNP194).
+// Authority comes from declarations, never from call-site values.
+module examples.clock_invalid_arity;
+
+fn tick(seed: u64) -> (result: u64)
+    capability ticker
+    effect clock_read authorized_by ticker
+{
+    let now: u64 = clock_read(seed);
+    return now;
+}

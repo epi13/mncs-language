@@ -1,0 +1,45 @@
+mncs 0.10;
+
+// Positive fixture: a real MNCS program observes wall-clock instants
+// through the host-capability boundary and decides freshness with total
+// relational comparisons (HARNESS-PRESSURE-005). Authority is declared,
+// never ambient: the function names its capability and its `clock_read`
+// effect, and the executor realizes `clock_read()` from the operator's
+// explicit `--grant-time` for that capability. Without a grant the call
+// fails closed. Corpus expectations pin only relational booleans and
+// synthetic-argument pure results, never absolute instants.
+module examples.clock_scan;
+
+use mncs.std.clock.v1 as clock;
+
+fn past_expired() -> (result: bool)
+    capability ticker
+    effect clock_read authorized_by ticker
+{
+    let now: u64 = clock_read();
+    return clock.expired(0, now);
+}
+
+fn future_pending() -> (result: bool)
+    capability ticker
+    effect clock_read authorized_by ticker
+{
+    let now: u64 = clock_read();
+    return clock.expired(1000000000000000, now);
+}
+
+fn elapsed_known() -> (result: u64) {
+    return clock.elapsed(900, 1000);
+}
+
+fn elapsed_floored() -> (result: u64) {
+    return clock.elapsed(1000, 900);
+}
+
+fn fresh_window() -> (result: bool) {
+    return clock.fresh_within(700, 1000, 500);
+}
+
+fn stale_window() -> (result: bool) {
+    return clock.fresh_within(100, 1000, 500);
+}

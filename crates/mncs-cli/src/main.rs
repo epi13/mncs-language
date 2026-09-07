@@ -927,6 +927,23 @@ struct ExperimentOptions {
     /// bounded copy for the named capability. Empty by default: no ambient
     /// filesystem access exists without a grant.
     grants: Vec<(String, String)>,
+    /// Explicit wall-clock grants (`capability`), one per capability
+    /// allowed to observe the host clock via `clock_read()`. No file
+    /// backs them: the grant names the authority, and the executor
+    /// observes epoch milliseconds from its own clock. Empty by default.
+    time_grants: Vec<String>,
+}
+
+/// A `--grant-time` capability as a byte-less host grant. Time has no
+/// file to copy; the grant carries the operator's explicit authorization
+/// for the named capability, matched exactly like read grants at
+/// realization. Wall-clock trust stays at the host boundary.
+fn time_host_grant(capability: &str) -> HostGrant {
+    HostGrant {
+        capability: capability.to_owned(),
+        locator: "host-clock".to_owned(),
+        bytes: Vec::new(),
+    }
 }
 
 /// Load `--grant-read` files into bounded host grants. Missing files,
@@ -1027,6 +1044,7 @@ where
             let mut baseline_path: Option<String> = None;
             let mut output_dir: Option<PathBuf> = None;
             let mut grants: Vec<(String, String)> = Vec::new();
+            let mut time_grants: Vec<String> = Vec::new();
             let mut parse_error = false;
             while let Some(option) = args.next() {
                 let mut take_value = |what: &str| -> Option<String> {
@@ -1059,6 +1077,18 @@ where
                             }
                         }
                     }
+                    "--grant-time" => {
+                        if let Some(capability) = take_value("--grant-time") {
+                            if capability.is_empty() || capability.contains('=') {
+                                eprintln!(
+                                    "error: --grant-time requires a capability, got {capability:?}"
+                                );
+                                parse_error = true;
+                            } else {
+                                time_grants.push(capability);
+                            }
+                        }
+                    }
                     other => {
                         eprintln!("error: unknown experiment execute option {other:?}");
                         parse_error = true;
@@ -1085,10 +1115,15 @@ where
                 Err(code) => return code,
             };
             // Issue #108: decode and validate the artifact once for the corpus.
-            let host_grants = match load_host_grants(&grants) {
+            let mut host_grants = match load_host_grants(&grants) {
                 Ok(grants) => grants,
                 Err(code) => return code,
             };
+            host_grants.extend(
+                time_grants
+                    .iter()
+                    .map(|capability| time_host_grant(capability)),
+            );
             let backend_session = BackendExecutionSession::new(&artifact);
             let observations = corpus
                 .cases
@@ -1298,6 +1333,7 @@ where
     let mut node_identity = "local-experiment-node".to_owned();
     let mut validation_profile = None;
     let mut grants = Vec::new();
+    let mut time_grants = Vec::new();
     while let Some(option) = args.next() {
         match option.as_str() {
             "--backend" => {
@@ -1346,6 +1382,17 @@ where
                 }
                 grants.push((capability.to_owned(), path.to_owned()));
             }
+            "--grant-time" => {
+                let capability = args
+                    .next()
+                    .ok_or_else(|| "--grant-time requires a capability".to_owned())?;
+                if capability.is_empty() || capability.contains('=') {
+                    return Err(format!(
+                        "--grant-time requires a capability, got {capability:?}"
+                    ));
+                }
+                time_grants.push(capability);
+            }
             other => return Err(format!("unknown experiment option {other:?}")),
         }
     }
@@ -1369,6 +1416,7 @@ where
         node_identity,
         validation_profile,
         grants,
+        time_grants,
     })
 }
 
@@ -1764,11 +1812,19 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
     // Issue #108: decode and validate the artifact once for the corpus.
     // Grants load before translation validation so the layered
     // body/SSA/backend comparison replays the same explicit host
-    // authority the experiment cases execute under.
-    let host_grants = match load_host_grants(&options.grants) {
+    // authority the experiment cases execute under. Wall-clock grants
+    // join read grants here: both are explicit operator authority, and
+    // both travel into validation and execution together.
+    let mut host_grants = match load_host_grants(&options.grants) {
         Ok(grants) => grants,
         Err(code) => return code,
     };
+    host_grants.extend(
+        options
+            .time_grants
+            .iter()
+            .map(|capability| time_host_grant(capability)),
+    );
     let validation = prepared.validation_profile.is_none().then(|| {
         validate_backend_lowering(
             &prepared.program,

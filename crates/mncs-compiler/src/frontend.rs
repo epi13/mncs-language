@@ -2959,6 +2959,7 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
         | AstExpr::Integer { .. }
         | AstExpr::Boolean { .. }
         | AstExpr::HostRead { .. }
+        | AstExpr::ClockRead { .. }
         | AstExpr::FiniteVariant { .. } => {}
     }
 }
@@ -4057,6 +4058,90 @@ impl<'a> BodyBuilder<'a> {
 
     /// Elaborate the `host_read()` intrinsic (HARNESS-PRESSURE-004).
     ///
+    /// Elaborate the `clock_read()` intrinsic (HARNESS-PRESSURE-005).
+    ///
+    /// Authority comes entirely from the enclosing function's
+    /// declarations: exactly one `clock_read` effect plus its authorizing
+    /// capability. The value (epoch milliseconds as `u64`) is realized by
+    /// the executor from its own clock once the operator grants that
+    /// capability (`--grant-time`); no grant file backs it, so programs
+    /// must compare instants relationally, never pin absolute values.
+    fn elaborate_clock_read(
+        &mut self,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let result_ty = BodyType::Integer(IntegerType {
+            bits: 64,
+            signed: false,
+        });
+        if expected.is_some_and(|expected| expected != &result_ty) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE240",
+                format!(
+                    "clock_read produces {} which does not satisfy the required type",
+                    result_ty.semantic_name()
+                ),
+                span,
+            ));
+            return None;
+        }
+        let signature = self.signatures.get(&self.function);
+        let mut granted: Vec<&Effect> = signature
+            .into_iter()
+            .flat_map(|signature| signature.effects.iter())
+            .filter(|effect| effect.kind == "clock_read")
+            .collect();
+        if granted.is_empty() {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE238",
+                "clock_read requires a declared clock_read effect with its authorizing capability",
+                span,
+            ));
+            return None;
+        }
+        if granted.len() > 1 {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE239",
+                "clock_read requires exactly one declared clock_read effect per function",
+                span,
+            ));
+            return None;
+        }
+        let granted = granted.pop().expect("one clock_read effect");
+        let capabilities = signature
+            .map(|signature| signature.capabilities.clone())
+            .unwrap_or_default();
+        if !capabilities.contains(&granted.capability) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE238",
+                "clock_read requires a declared clock_read effect with its authorizing capability",
+                span,
+            ));
+            return None;
+        }
+        let id = self.new_value("clockread");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability: granted.capability.clone(),
+                operation: "clock_read".to_owned(),
+            },
+            operands: Vec::new(),
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
     /// Authority comes entirely from the enclosing function's
     /// declarations: exactly one `host_read` effect plus its authorizing
     /// capability. The value (a `[byte; up_to 64]` view) is realized by the
@@ -5701,6 +5786,7 @@ impl<'a> BodyBuilder<'a> {
                 diagnostics,
             ),
             AstExpr::HostRead { span } => self.elaborate_host_read(*span, expected, diagnostics),
+            AstExpr::ClockRead { span } => self.elaborate_clock_read(*span, expected, diagnostics),
             AstExpr::SequenceLiteral { elements, span } => {
                 let BodyType::Sequence {
                     element: element_type,

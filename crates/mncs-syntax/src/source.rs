@@ -589,6 +589,17 @@ pub enum AstExpr {
     HostRead {
         span: SourceSpan,
     },
+    /// Host-realized wall-clock read `clock_read()` (Profile 0.8).
+    /// Authority comes from the enclosing function's declarations
+    /// (`effect clock_read` plus its capability), never from arguments:
+    /// the executor realizes epoch milliseconds from its own clock once
+    /// the operator grants that capability (`--grant-time`). No grant
+    /// file backs it; wall-clock trust sits at the host boundary, and
+    /// programs must compare instants relationally (elapsed/expired),
+    /// never pin absolute values.
+    ClockRead {
+        span: SourceSpan,
+    },
     /// Profile 0.8 semantic vector/mask intrinsic. The parser preserves the
     /// intrinsic identity and arguments; elaboration supplies lane/type facts.
     VectorIntrinsic {
@@ -618,6 +629,7 @@ impl AstExpr {
             | Self::Select { span, .. }
             | Self::SequenceReplace { span, .. }
             | Self::HostRead { span, .. }
+            | Self::ClockRead { span, .. }
             | Self::VectorIntrinsic { span, .. } => *span,
         }
     }
@@ -2479,8 +2491,9 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse the Profile 0.8 selection intrinsics `select(c, t, f)` and
-    /// `replace(seq, index, element)`, plus the host-read intrinsic
-    /// `host_read()`. `name` is the already-consumed intrinsic identifier.
+    /// `replace(seq, index, element)`, plus the host intrinsics
+    /// `host_read()` and `clock_read()`. `name` is the already-consumed
+    /// intrinsic identifier.
     fn intrinsic_selection(&mut self, name: SpannedText) -> Option<AstExpr> {
         self.expect(
             TokenKind::LeftParen,
@@ -2549,6 +2562,15 @@ impl<'a> Parser<'a> {
                 self.error(
                     "MNP193",
                     "host_read takes no arguments; authority comes from the enclosing function's declarations",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("clock_read", 0) => Some(AstExpr::ClockRead { span }),
+            ("clock_read", _) => {
+                self.error(
+                    "MNP194",
+                    "clock_read takes no arguments; authority comes from the enclosing function's declarations",
                     vec![TokenKind::RightParen],
                 );
                 None
@@ -3688,6 +3710,7 @@ fn is_profile08_intrinsic(name: &str) -> bool {
         "select"
             | "replace"
             | "host_read"
+            | "clock_read"
             | "vector"
             | "splat"
             | "extract_lane"
