@@ -1,0 +1,2674 @@
+mncs 0.10;
+
+// mncs.core.proof_dep.v2 — the MNCS-native RFC 0007 proof kernel, tranche 0.2.
+//
+// Genuine dependency: flat `[Cell; 32]` buffers with an active prefix carry
+// a binder-edge graph. Binding uses explicit levels, not cell indices:
+// `Pi`/`Lam`/`Hyp` declare a level, `Var` names one, and levels are pairwise
+// distinct per buffer (Barendregt by construction, checked). Bodies name
+// binders above them, so self-reference is ordinary and capture is
+// impossible by construction: there is no shifting, renaming, or freshening
+// anywhere in this file.
+//
+// Substitution is environment extension (an explicit-substitution machine),
+// never buffer rewriting. Types elaborate to level-scoped values in a
+// bounded pool; definitional equality compares values structurally with
+// bounded fuel. Every rule is fail-closed: malformed is FAIL, undecided is
+// UNKNOWN, and UNKNOWN never upgrades to PASS (via mncs.core.status.v1).
+//
+// Bounds (part of kernel identity `mncs:proof-kernel:0.2`): 32 cells;
+// split-range value pool of 122 nodes (ids 6..127 across two 64-wide
+// banks: one wider array is inexpressible in MNCS 0.10); environment pools
+// of 64; nested-evaluation fuel 32 with an operation stack of 6;
+// definitional equality over a pair stack of 8 with 32 visits; value
+// substitution over a stack of 32 with a split 128-entry node map;
+// eliminator spine 16; literal rebuild cap 24. The flagship
+// dependent-elimination proof saturates a single 58-slot bank (measured)
+// and passes in the split pool. Exhaustion is UNKNOWN, never a trap and
+// never PASS. See docs/rfc-0007-tranche-02-calculus.md.
+module mncs.core.proof_dep.v2;
+
+use mncs.core.status.v1 as status;
+
+enum TermTag { Universe, Var, Pi, Lam, App, Nat, Zero, Succ, Plus, NatElim, Eq, Refl, Hyp, Cong, Unsupported }
+
+record Cell { tag: TermTag, arg0: i64, arg1: i64, arg2: i64, arg3: i64 }
+
+// Discriminants are contract: canonical artifacts and corpora encode them.
+// Shared tags keep their tranche 0.1 codes; `Hyp` and `Cong` are new.
+fn tag_code(tag: TermTag) -> (result: i64) {
+    return match tag {
+        Universe => 1,
+        Var => 2,
+        Pi => 3,
+        Lam => 4,
+        App => 5,
+        Nat => 6,
+        Zero => 7,
+        Succ => 8,
+        Plus => 9,
+        NatElim => 10,
+        Eq => 11,
+        Refl => 12,
+        Hyp => 13,
+        Cong => 14,
+        Unsupported => 0,
+    };
+}
+
+fn max_universe() -> (result: i64) {
+    return 3;
+}
+
+fn literal_cap() -> (result: i64) {
+    return 24;
+}
+
+// Value tags for the level-scoped value pool. Values never carry
+// environments: free variables are absolute levels, so values compare
+// structurally. Closures survive only under `VPi`/`VLam` binders.
+fn v_invalid() -> (result: i64) {
+    return 0;
+}
+
+fn v_universe() -> (result: i64) {
+    return 1;
+}
+
+fn v_nat() -> (result: i64) {
+    return 2;
+}
+
+fn v_zero() -> (result: i64) {
+    return 3;
+}
+
+fn v_succ() -> (result: i64) {
+    return 4;
+}
+
+fn v_plus() -> (result: i64) {
+    return 5;
+}
+
+fn v_neutral() -> (result: i64) {
+    return 6;
+}
+
+fn v_app() -> (result: i64) {
+    return 7;
+}
+
+fn v_pi() -> (result: i64) {
+    return 8;
+}
+
+fn v_lam() -> (result: i64) {
+    return 9;
+}
+
+fn v_eq() -> (result: i64) {
+    return 10;
+}
+
+fn v_elim() -> (result: i64) {
+    return 11;
+}
+
+fn v_proof() -> (result: i64) {
+    return 12;
+}
+
+// Singleton value-pool indices: `VNat`, `VZero`, and the four universes.
+// The allocator bump starts at 6; exhaustion resolves to UNKNOWN.
+fn singleton_nat() -> (result: i64) {
+    return 0;
+}
+
+fn singleton_zero() -> (result: i64) {
+    return 1;
+}
+
+fn singleton_universe(level: i64) -> (result: i64) {
+    return 2 +% level;
+}
+
+fn pool_start() -> (result: i64) {
+    return 6;
+}
+
+// Clamped, gated lookup over 32-wide tables. The index is always safe to
+// dereference; the value is trusted only when `ok` holds.
+fn at32(xs: [i64; 32], raw: i64, ok: bool, fallback: i64) -> (result: i64) {
+    let clamped: i64 = select(raw < 0, 0, select(raw > 31, 31, raw));
+    let index: u64 = clamped as u64;
+    return select(ok, xs[index], fallback);
+}
+
+// Clamped, gated lookup over 64-wide pool tables.
+fn at64(xs: [i64; 64], raw: i64, ok: bool, fallback: i64) -> (result: i64) {
+    let clamped: i64 = select(raw < 0, 0, select(raw > 63, 63, raw));
+    let index: u64 = clamped as u64;
+    return select(ok, xs[index], fallback);
+}
+
+// A child reference is usable only inside the active prefix and strictly
+// below its parent, which keeps every lookup acyclic by construction.
+fn ref_ok(child: i64, parent: i64, total: i64) -> (result: bool) {
+    return child >= 0 && child < parent && child < total;
+}
+
+fn to_status(code: i64) -> (result: status.Status) {
+    if code == 0 {
+        return status.Status.PASS;
+    }
+    if code == 1 {
+        return status.Status.FAIL;
+    }
+    return status.Status.UNKNOWN;
+}
+
+fn bnot(x: bool) -> (result: bool) {
+    return select(x, false, true);
+}
+
+fn to_code(value: status.Status) -> (result: i64) {
+    return match value {
+        PASS => 0,
+        FAIL => 1,
+        UNKNOWN => 2,
+    };
+}
+
+// Lattice join on codes. Dominance can only weaken: FAIL dominates UNKNOWN
+// dominates PASS, and no path here maps UNKNOWN to PASS.
+fn join(first: i64, second: i64) -> (result: i64) {
+    return to_code(status.dominate(to_status(first), to_status(second)));
+}
+
+// Reference-argument positions per tag code. `Hyp` references only its
+// carrier type (`arg1`); levels are immediates, never references.
+fn has_ref(code: i64, slot: i64) -> (result: bool) {
+    if code == 3 || code == 4 {
+        return slot == 0 || slot == 1;
+    }
+    if code == 5 {
+        return slot == 0 || slot == 1;
+    }
+    if code == 8 {
+        return slot == 0;
+    }
+    if code == 9 {
+        return slot == 0 || slot == 1;
+    }
+    if code == 10 {
+        return true;
+    }
+    if code == 11 {
+        return slot == 0 || slot == 1 || slot == 2;
+    }
+    if code == 12 {
+        return slot == 0;
+    }
+    if code == 13 {
+        return slot == 1;
+    }
+    if code == 14 {
+        return slot == 0 || slot == 1 || slot == 2;
+    }
+    return false;
+}
+
+fn cell_arg(cell: Cell, slot: i64) -> (result: i64) {
+    if slot == 0 {
+        return cell.arg0;
+    }
+    if slot == 1 {
+        return cell.arg1;
+    }
+    if slot == 2 {
+        return cell.arg2;
+    }
+    return cell.arg3;
+}
+
+fn is_binder_code(code: i64) -> (result: bool) {
+    return code == 3 || code == 4 || code == 13;
+}
+
+fn is_pi_lam_code(code: i64) -> (result: bool) {
+    return code == 3 || code == 4;
+}
+
+// Forward-pass memo: per-cell mention flags and local verdicts.
+record Topo {
+    mentions: [i64; 32],
+    local: [i64; 32]
+}
+
+fn initial_topo() -> (result: Topo) {
+    return Topo {
+        mentions: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        local: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    };
+}
+
+// Immediate-argument validation per tag. References are checked separately;
+// levels must lie in range, and `Hyp` cells must sit in the assumption
+// prefix, so assumptions are positional and explicit.
+fn immediate_ok(code: i64, cell: Cell) -> (result: bool) {
+    if code == 1 {
+        return cell.arg0 >= 0 && cell.arg0 <= 3;
+    }
+    if code == 2 {
+        return cell.arg0 >= 0 && cell.arg0 < 32;
+    }
+    if code == 3 || code == 4 {
+        return cell.arg2 >= 0 && cell.arg2 < 32;
+    }
+    if code == 13 {
+        return cell.arg0 >= 0 && cell.arg0 < 32;
+    }
+    return true;
+}
+
+fn child_mention(state: Topo, cells: [Cell; 32], code: i64, slot: i64, at: i64, total: i64) -> (result: i64) {
+    if has_ref(code, slot) {
+        let child: i64 = cell_arg(cells[at as u64], slot);
+        return at32(state.mentions, child, ref_ok(child, at, total), 0);
+    }
+    return 0;
+}
+
+fn adv_topo(state: Topo, cells: [Cell; 32], total: i64, index: u64) -> (result: Topo) {
+    let at: i64 = index as i64;
+    let cell: Cell = cells[index];
+    let code: i64 = tag_code(cell.tag);
+    let ok0: bool = bnot(has_ref(code, 0)) || ref_ok(cell.arg0, at, total);
+    let ok1: bool = bnot(has_ref(code, 1)) || ref_ok(cell.arg1, at, total);
+    let ok2: bool = bnot(has_ref(code, 2)) || ref_ok(cell.arg2, at, total);
+    let ok3: bool = bnot(has_ref(code, 3)) || ref_ok(cell.arg3, at, total);
+    let refs_ok: bool = ok0 && ok1 && ok2 && ok3;
+    let imm_ok: bool = immediate_ok(code, cell);
+    let m0: i64 = child_mention(state, cells, code, 0, at, total);
+    let m1: i64 = child_mention(state, cells, code, 1, at, total);
+    let m2: i64 = child_mention(state, cells, code, 2, at, total);
+    let m3: i64 = child_mention(state, cells, code, 3, at, total);
+    let mentioned: i64 = select(code == 2, 1, select(m0 +% m1 +% m2 +% m3 > 0, 1, 0));
+    let base: i64 = select(code == 0, 2, 0);
+    let local: i64 = join(base, select(refs_ok && imm_ok, 0, 1));
+    return Topo {
+        mentions: replace(state.mentions, index, mentioned),
+        local: replace(state.local, index, local)
+    };
+}
+
+fn run_topo(cells: [Cell; 32], total: i64) -> (result: Topo) {
+    iterate i over cells carrying state: Topo = initial_topo() {
+        let at: i64 = i as i64;
+        let include: bool = at < total;
+        let advanced: Topo = adv_topo(state, cells, total, i);
+        next state = select(include, advanced, state);
+    }
+    return state;
+}
+
+// Parent scan: the unique active parent of cell `i` (or (0 - 1) for roots and
+// (0 - 2) for ambiguous sharing), plus the parent count.
+record ParentInfo { parent: i64, count: i64 }
+
+record ParentStep { parent: i64, count: i64 }
+
+fn find_parent(cells: [Cell; 32], total: i64, target: i64) -> (result: ParentInfo) {
+    iterate j over cells carrying step: ParentStep = ParentStep { parent: (0 - 1), count: 0 } {
+        let at: i64 = j as i64;
+        let active: bool = at < total && at > target;
+        let cell: Cell = cells[j];
+        let code: i64 = tag_code(cell.tag);
+        let r0: bool = has_ref(code, 0) && cell.arg0 == target;
+        let r1: bool = has_ref(code, 1) && cell.arg1 == target;
+        let r2: bool = has_ref(code, 2) && cell.arg2 == target;
+        let r3: bool = has_ref(code, 3) && cell.arg3 == target;
+        let hits: i64 = (select(r0, 1, 0)) +% (select(r1, 1, 0)) +% (select(r2, 1, 0)) +% (select(r3, 1, 0));
+        let fresh: i64 = select(active && hits > 0, 1, 0);
+        next step = ParentStep {
+            parent: select(fresh > 0, at, step.parent),
+            count: step.count +% fresh
+        };
+    }
+    let parent: i64 = select(step.count == 1, step.parent, select(step.count == 0, (0 - 1), (0 - 2)));
+    return ParentInfo { parent: parent, count: step.count };
+}
+
+record Parents { par: [i64; 32], cnt: [i64; 32] }
+
+fn initial_parents() -> (result: Parents) {
+    return Parents {
+        par: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        cnt: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    };
+}
+
+fn run_parents(cells: [Cell; 32], total: i64) -> (result: Parents) {
+    iterate i over cells carrying state: Parents = initial_parents() {
+        let at: i64 = i as i64;
+        let include: bool = at < total;
+        let found: ParentInfo = find_parent(cells, total, at);
+        next state = Parents {
+            par: replace(state.par, i, select(include, found.parent, 0)),
+            cnt: replace(state.cnt, i, select(include, found.count, 0))
+        };
+    }
+    return state;
+}
+
+// Binder-level table: `binderCell[l]` is the active `Pi`/`Lam`/`Hyp` cell
+// declaring level `l`, or (0 - 1). Duplicate declarations fail closed.
+record Binders { cell: [i64; 32], dup: bool }
+
+record BinderStep { cell: [i64; 32], dup: bool }
+
+fn initial_binders() -> (result: BinderStep) {
+    return BinderStep {
+        cell: [0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1],
+        dup: false
+    };
+}
+
+fn binder_level_of(code: i64, cell: Cell) -> (result: i64) {
+    if code == 13 {
+        return cell.arg0;
+    }
+    return cell.arg2;
+}
+
+fn run_binders(cells: [Cell; 32], total: i64) -> (result: Binders) {
+    iterate i over cells carrying step: BinderStep = initial_binders() {
+        let at: i64 = i as i64;
+        let include: bool = at < total;
+        let cell: Cell = cells[i];
+        let code: i64 = tag_code(cell.tag);
+        let binder: bool = include && is_binder_code(code);
+        let level: i64 = binder_level_of(code, cell);
+        let in_range: bool = level >= 0 && level < 32;
+        let slot: u64 = (select(in_range, level, 0)) as u64;
+        let taken: bool = binder && in_range && step.cell[slot] != 0 - 1;
+        let want: bool = binder && in_range && bnot(taken);
+        next step = BinderStep {
+            cell: select(want, replace(step.cell, slot, at), step.cell),
+            dup: step.dup || taken
+        };
+    }
+    return Binders { cell: step.cell, dup: step.dup };
+}
+
+// Resolution of one variable occurrence to its binder cell, or (0 - 1) when
+// unbound. `Hyp` levels resolve buffer-globally (assumption use); `Pi`/`Lam`
+// levels resolve to the nearest ancestor binder, skipping domain edges: a
+// domain child sits outside its own binder's scope, so the walk continues
+// past it instead of capturing.
+record WalkState { cur: i64, prev: i64, found: i64 }
+
+fn resolve_var(cells: [Cell; 32], par: [i64; 32], binder: [i64; 32], total: i64, from: i64, level: i64) -> (result: i64) {
+    let declared: i64 = at32(binder, level, level >= 0 && level < 32, (0 - 1));
+    let decl_ok: bool = declared >= 0 && declared < total;
+    let decl_slot: u64 = (select(decl_ok, declared, 0)) as u64;
+    let hyp: bool = decl_ok && tag_code(cells[decl_slot].tag) == 13;
+    if hyp {
+        return declared;
+    }
+    iterate k over cells carrying walk: WalkState = WalkState { cur: from, prev: from, found: (0 - 1) } {
+        let live: bool = walk.found < 0 && walk.cur >= 0 && walk.cur < total;
+        let up: i64 = at32(par, walk.cur, live, (0 - 1));
+        let up_ok: bool = live && up >= 0 && up < total;
+        let up_cell: Cell = cells[(select(up_ok, up, 0)) as u64];
+        let up_code: i64 = select(up_ok, tag_code(up_cell.tag), (0 - 1));
+        let up_lvl: i64 = select(up_ok && is_pi_lam_code(up_code), binder_level_of(up_code, up_cell), (0 - 2));
+        let via_domain: bool = up_ok && is_pi_lam_code(up_code) && walk.prev == up_cell.arg0;
+        let hit: bool = up_ok && up_lvl == level && bnot(via_domain);
+        next walk = WalkState {
+            cur: select(live, up, walk.cur),
+            prev: walk.cur,
+            found: select(hit, up, walk.found)
+        };
+    }
+    return walk.found;
+}
+
+// Shape verdicts: every active variable must resolve, and every cell that
+// transitively mentions a variable must have at most one distinct parent,
+// so resolution is never ambiguous. Closed cells share freely. Resolution
+// targets are retained for inference (`target` holds the binder cell).
+record Shape { local: [i64; 32], target: [i64; 32] }
+
+fn initial_shape() -> (result: Shape) {
+    return Shape {
+        local: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        target: [0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1]
+    };
+}
+
+// Ancestor test by single-parent walk-up: `anc` scopes over `from` exactly
+// when the walk reaches it. Roots (`Hyp` cells, proof/proposition cells)
+// terminate the walk.
+record AncState { cur: i64, hit: bool }
+
+fn is_ancestor(par: [i64; 32], total: i64, anc: i64, from: i64) -> (result: bool) {
+    iterate k over par carrying walk: AncState = AncState { cur: from, hit: false } {
+        let live: bool = bnot(walk.hit) && walk.cur >= 0 && walk.cur < total;
+        let up: i64 = at32(par, walk.cur, live, (0 - 1));
+        next walk = AncState { cur: select(live, up, walk.cur), hit: walk.hit || (live && up == anc) };
+    }
+    return walk.hit;
+}
+
+// Nearest ancestor `Hyp` cell of `from`, or (0 - 1). A variable with a `Hyp`
+// ancestor sits inside an assumption's type, where assumption references
+// are forbidden: assumption types must be closed (dependent assumptions are
+// a recorded future boundary).
+record HypAnc { cur: i64, found: i64 }
+
+fn hyp_ancestor(cells: [Cell; 32], par: [i64; 32], total: i64, from: i64) -> (result: i64) {
+    iterate k over par carrying walk: HypAnc = HypAnc { cur: from, found: (0 - 1) } {
+        let live: bool = walk.found < 0 && walk.cur >= 0 && walk.cur < total;
+        let up: i64 = at32(par, walk.cur, live, (0 - 1));
+        let up_ok: bool = live && up >= 0 && up < total;
+        let up_cell: Cell = cells[(select(up_ok, up, 0)) as u64];
+        let is_hyp: bool = up_ok && tag_code(up_cell.tag) == 13;
+        next walk = HypAnc { cur: select(live, up, walk.cur), found: select(is_hyp, up, walk.found) };
+    }
+    return walk.found;
+}
+
+fn run_shape(cells: [Cell; 32], topo: Topo, parents: Parents, binders: Binders, total: i64) -> (result: Shape) {
+    iterate i over cells carrying state: Shape = initial_shape() {
+        let at: i64 = i as i64;
+        let include: bool = at < total;
+        let cell: Cell = cells[i];
+        let code: i64 = tag_code(cell.tag);
+        let is_var: bool = include && code == 2;
+        let resolved: i64 = resolve_var(cells, parents.par, binders.cell, total, at, cell.arg0);
+        let res_ok: bool = resolved >= 0 && resolved < total;
+        let res_cell: Cell = cells[(select(res_ok, resolved, 0)) as u64];
+        let res_hyp: bool = res_ok && tag_code(res_cell.tag) == 13;
+        let inside_type: bool = hyp_ancestor(cells, parents.par, total, at) >= 0;
+        let hyp_in_type: bool = is_var && res_hyp && inside_type;
+        let var_ok: bool = bnot(is_var) || (resolved >= 0 && bnot(hyp_in_type));
+        let shared: bool = include && at32(topo.mentions, at, true, 0) > 0 && at32(parents.cnt, at, true, 0) > 1;
+        let hyp_root_bad: bool = include && code == 13 && at32(parents.cnt, at, true, 0) > 0;
+        let local: i64 = select(var_ok && bnot(shared) && bnot(hyp_root_bad), 0, 1);
+        next state = Shape {
+            local: replace(state.local, i, select(include, local, 0)),
+            target: replace(state.target, i, select(is_var, resolved, (0 - 1)))
+        };
+    }
+    return state;
+}
+
+// Environment pool: linked frames mapping levels to value ids, or to a
+// neutral marker (`evalue == (0 - 1)`, level in `elevel`). Index 0 is the empty
+// environment. `ebump` allocates; exhaustion is UNKNOWN, never a trap.
+record Envs {
+    at: [i64; 32],
+    epar: [i64; 64],
+    elevel: [i64; 64],
+    evalue: [i64; 64],
+    ebump: i64,
+    exhausted: bool
+}
+
+fn initial_envs() -> (result: Envs) {
+    return Envs {
+        at: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        epar: [0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1],
+        elevel: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        evalue: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        ebump: 1,
+        exhausted: false
+    };
+}
+
+record Lookup { found: bool, value: i64 }
+
+record LookupState { cur: i64, found: bool, value: i64 }
+
+fn env_lookup(epar: [i64; 64], elevel: [i64; 64], evalue: [i64; 64], env: i64, level: i64) -> (result: Lookup) {
+    iterate k over epar carrying walk: LookupState = LookupState { cur: env, found: false, value: (0 - 1) } {
+        let live: bool = bnot(walk.found) && walk.cur > 0 && walk.cur < 64;
+        let slot: u64 = (select(live, walk.cur, 0)) as u64;
+        let hit: bool = live && epar[slot] != 0 - 2 && elevel[slot] == level;
+        next walk = LookupState {
+            cur: select(live, epar[slot], walk.cur),
+            found: walk.found || hit,
+            value: select(hit, evalue[slot], walk.value)
+        };
+    }
+    return Lookup { found: walk.found, value: walk.value };
+}
+
+// Static environments by mirrored pass: parents sit above their children,
+// so processing indices 31 down to 0 assigns every parent before its
+// children. A body child extends its `Pi`/`Lam` parent with a neutral for
+// the bound level; domain children and all other edges alias the parent.
+fn run_envs(cells: [Cell; 32], parents: Parents, total: i64) -> (result: Envs) {
+    iterate i over cells carrying state: Envs = initial_envs() {
+        let at: i64 = 31 -% (i as i64);
+        let include: bool = at >= 0 && at < total;
+        let slot: u64 = (select(include, at, 0)) as u64;
+        let parent: i64 = at32(parents.par, at, include, (0 - 1));
+        let parent_ok: bool = include && parent >= 0 && parent < total;
+        let parent_env: i64 = at32(state.at, parent, parent_ok, 0);
+        let parent_cell: Cell = cells[(select(parent_ok, parent, 0)) as u64];
+        let parent_code: i64 = select(parent_ok, tag_code(parent_cell.tag), (0 - 1));
+        let body_edge: bool = parent_ok && is_pi_lam_code(parent_code) && at == parent_cell.arg1;
+        let room: bool = state.ebump >= 0 && state.ebump < 64;
+        let bump_slot: u64 = (select(room, state.ebump, 0)) as u64;
+        let extended: i64 = select(room, state.ebump, (0 - 1));
+        let grown: Envs = Envs {
+            at: state.at,
+            epar: replace(state.epar, bump_slot, parent_env),
+            elevel: replace(state.elevel, bump_slot, parent_cell.arg2),
+            evalue: replace(state.evalue, bump_slot, 0 - 1),
+            ebump: state.ebump +% 1,
+            exhausted: state.exhausted
+        };
+        let placed: Envs = select(body_edge, grown, state);
+        let env_here: i64 = select(parent_ok, select(body_edge, select(room, extended, 0), parent_env), 0);
+        next state = Envs {
+            at: replace(placed.at, slot, select(include, env_here, 0)),
+            epar: placed.epar,
+            elevel: placed.elevel,
+            evalue: placed.evalue,
+            ebump: placed.ebump,
+            exhausted: placed.exhausted || (include && body_edge && bnot(room))
+        };
+    }
+    return state;
+}
+
+// Value pool: level-scoped weak-head values as flat nodes
+// `(tag, c0, c1, c2, c3)`. Indices 0..6 are singletons (`VNat`, `VZero`,
+// `VUniverse(0..3)`), so small types never allocate; the bump starts at 6.
+// Split-range value pool: ids 6..63 address the `lo` bank, ids 64..127
+// the `hi` bank, for 122 value nodes across two 64-wide tables. The bump
+// allocator fills `lo` first, then spills into `hi`; exhaustion past 127
+// is UNKNOWN exactly as before.
+record VPool {
+    tag_lo: [i64; 64],
+    c0_lo: [i64; 64],
+    c1_lo: [i64; 64],
+    c2_lo: [i64; 64],
+    c3_lo: [i64; 64],
+    tag_hi: [i64; 64],
+    c0_hi: [i64; 64],
+    c1_hi: [i64; 64],
+    c2_hi: [i64; 64],
+    c3_hi: [i64; 64],
+    bump: i64,
+    exhausted: bool
+}
+
+fn initial_vpool() -> (result: VPool) {
+    return VPool {
+        tag_lo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        c0_lo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        c1_lo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        c2_lo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        c3_lo: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        tag_hi: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        c0_hi: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        c1_hi: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        c2_hi: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        c3_hi: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        bump: 6,
+        exhausted: false
+    };
+}
+
+// Pool readers. Singleton indices never touch the arrays; anything outside
+// `0..64` reads as invalid.
+// Split-range value pool: ids 6..63 live in the `lo` bank, ids 64..127 in
+// the `hi` bank (122 value nodes across two 64-wide tables, since one
+// wider array is inexpressible). Readers dispatch on the id; ids 0..5 are
+// singletons handled before any table access, exactly as before.
+fn vtag_at(pool: VPool, id: i64, ok: bool) -> (result: i64) {
+    if bnot(ok) || id < 0 || id >= 128 {
+        return 0;
+    }
+    if id == 0 {
+        return 2;
+    }
+    if id == 1 {
+        return 3;
+    }
+    if id >= 2 && id <= 5 {
+        return 1;
+    }
+    if id < 64 {
+        return at64(pool.tag_lo, id, true, 0);
+    }
+    return at64(pool.tag_hi, id -% 64, true, 0);
+}
+
+fn vc0_at(pool: VPool, id: i64, ok: bool) -> (result: i64) {
+    if bnot(ok) || id < 0 || id >= 128 {
+        return 0;
+    }
+    if id >= 2 && id <= 5 {
+        return id -% 2;
+    }
+    if id >= 0 && id <= 1 {
+        return 0;
+    }
+    if id < 64 {
+        return at64(pool.c0_lo, id, true, 0);
+    }
+    return at64(pool.c0_hi, id -% 64, true, 0);
+}
+
+// Child-slot reader: `slot` 0..3 selects the `c` bank array, then the id
+// selects the lo/hi bank. Replaces passing four different arrays.
+fn vcn_at(pool: VPool, id: i64, slot: i64, ok: bool) -> (result: i64) {
+    if bnot(ok) || id < 6 || id >= 128 || slot < 0 || slot > 3 {
+        return 0;
+    }
+    let lo: bool = id < 64;
+    let at: i64 = select(lo, id, id -% 64);
+    if slot == 0 {
+        return select(lo, at64(pool.c0_lo, at, true, 0), at64(pool.c0_hi, at, true, 0));
+    }
+    if slot == 1 {
+        return select(lo, at64(pool.c1_lo, at, true, 0), at64(pool.c1_hi, at, true, 0));
+    }
+    if slot == 2 {
+        return select(lo, at64(pool.c2_lo, at, true, 0), at64(pool.c2_hi, at, true, 0));
+    }
+    return select(lo, at64(pool.c3_lo, at, true, 0), at64(pool.c3_hi, at, true, 0));
+}
+
+// Closed-literal reading: `VZero`/`VSucc` chains to an integer, or (0 - 1) for
+// anything else (neutrals, stuck nodes, non-Nat constructors). Stuck
+// `VPlus` nodes deliberately read as non-literal: `plusVal` below unfolds
+// `Succ` spines eagerly, so a stuck head is rigid, never a hidden literal.
+record IntWalk { cur: i64, acc: i64, ok: bool }
+
+fn intval(pool: VPool, id: i64) -> (result: i64) {
+    let lane: [i64; 64] = pool.tag_lo;
+    iterate k over lane carrying walk: IntWalk = IntWalk { cur: id, acc: 0, ok: true } {
+        let head: i64 = vtag_at(pool, walk.cur, walk.ok && walk.cur >= 0);
+        let live: bool = walk.ok && walk.cur >= 0 && (head == 3 || head == 4);
+        let child: i64 = vc0_at(pool, walk.cur, live && head == 4);
+        next walk = IntWalk {
+            cur: select(live && head == 4, child, walk.cur),
+            acc: select(live, walk.acc +% select(head == 4, 1, 0), walk.acc),
+            ok: walk.ok && (bnot(live) || head == 4 || head == 3)
+        };
+    }
+    let done_zero: bool = walk.ok && vtag_at(pool, walk.cur, true) == 3;
+    return select(done_zero, walk.acc, 0 - 1);
+}
+
+// `Plus` on values: `Zero` is the base, `Succ` spines unfold symbolically
+// (open recursion is honest computation, not an axiom), anything else is a
+// rigid stuck node. Rebuilds beyond `literal_cap` resolve to UNKNOWN: the
+// pool cannot represent them, so the kernel abstains instead of trapping.
+// Invalid inputs resolve to UNKNOWN, never to a garbage node.
+record PlusSpine { cur: i64, count: i64, kind: i64, head: i64 }
+
+record PlusRes { pool: VPool, id: i64, status: i64 }
+
+record PlusBuild { base: i64, left: i64, bad: i64, pool: VPool }
+
+fn plusVal(pool: VPool, a: i64, b: i64, lane: [Cell; 32]) -> (result: PlusRes) {
+    if a < 0 || b < 0 {
+        return PlusRes { pool: pool, id: (0 - 1), status: 2 };
+    }
+    iterate k over lane carrying walk: PlusSpine = PlusSpine { cur: a, count: 0, kind: 0, head: (0 - 1) } {
+        let live: bool = walk.kind == 0;
+        let head: i64 = vtag_at(pool, walk.cur, live);
+        let child: i64 = vc0_at(pool, walk.cur, live && head == 4);
+        let grown: bool = live && head == 4 && walk.count < literal_cap();
+        let overflow: bool = live && head == 4 && walk.count >= literal_cap();
+        let zeroed: bool = live && head == 3;
+        let stucked: bool = live && head != 4 && head != 3;
+        next walk = PlusSpine {
+            cur: select(grown, child, walk.cur),
+            count: select(grown, walk.count +% 1, walk.count),
+            kind: select(live, select(grown, 0, select(overflow, 3, select(zeroed, 1, 2))), walk.kind),
+            head: select(stucked, walk.cur, walk.head)
+        };
+    }
+    if walk.kind == 0 || walk.kind == 3 {
+        return PlusRes { pool: pool, id: (0 - 1), status: 2 };
+    }
+    let made_base: VAlloc = valloc(pool, 5, walk.head, b, 0, 0);
+    let base_ok: bool = walk.kind == 1 || made_base.id >= 0;
+    iterate j over lane carrying build: PlusBuild = PlusBuild {
+        base: select(walk.kind == 1, b, made_base.id),
+        left: walk.count,
+        bad: select(base_ok, 0, 1),
+        pool: select(walk.kind == 1, pool, made_base.pool)
+    } {
+        let stepping: bool = build.left > 0 && build.bad == 0;
+        let made: VAlloc = valloc(build.pool, 4, build.base, 0, 0, 0);
+        next build = PlusBuild {
+            base: select(stepping, made.id, build.base),
+            left: select(stepping, build.left -% 1, build.left),
+            bad: select(stepping && made.id < 0, 1, build.bad),
+            pool: select(stepping, made.pool, build.pool)
+        };
+    }
+    let ok: bool = build.bad == 0 && build.left == 0 && build.base >= 0;
+    return PlusRes { pool: build.pool, id: select(ok, build.base, (0 - 1)), status: select(ok, 0, 2) };
+}
+
+// One eliminator unfolding over values, inside out: walk the target down
+// its `Succ` spine (at most 16), then rebuild `App(App(s, n), rec)` layers
+// around the zero branch (or a honestly stuck node).
+record ElimWalk { cur: i64, depth: i64, done: bool, stuck: bool, s0: i64, s1: i64, s2: i64, s3: i64, s4: i64, s5: i64, s6: i64, s7: i64, s8: i64, s9: i64, s10: i64, s11: i64, s12: i64, s13: i64, s14: i64, s15: i64 }
+
+record ElimRes { pool: VPool, id: i64, status: i64 }
+
+fn elim_push_slot(walk: ElimWalk, depth: i64, value: i64) -> (result: ElimWalk) {
+    return ElimWalk {
+        cur: walk.cur, depth: walk.depth, done: walk.done, stuck: walk.stuck,
+        s0: select(depth == 0, value, walk.s0),
+        s1: select(depth == 1, value, walk.s1),
+        s2: select(depth == 2, value, walk.s2),
+        s3: select(depth == 3, value, walk.s3),
+        s4: select(depth == 4, value, walk.s4),
+        s5: select(depth == 5, value, walk.s5),
+        s6: select(depth == 6, value, walk.s6),
+        s7: select(depth == 7, value, walk.s7),
+        s8: select(depth == 8, value, walk.s8),
+        s9: select(depth == 9, value, walk.s9),
+        s10: select(depth == 10, value, walk.s10),
+        s11: select(depth == 11, value, walk.s11),
+        s12: select(depth == 12, value, walk.s12),
+        s13: select(depth == 13, value, walk.s13),
+        s14: select(depth == 14, value, walk.s14),
+        s15: select(depth == 15, value, walk.s15)
+    };
+}
+
+fn elim_slot_at(walk: ElimWalk, depth: i64) -> (result: i64) {
+    if depth == 0 {
+        return walk.s0;
+    }
+    if depth == 1 {
+        return walk.s1;
+    }
+    if depth == 2 {
+        return walk.s2;
+    }
+    if depth == 3 {
+        return walk.s3;
+    }
+    if depth == 4 {
+        return walk.s4;
+    }
+    if depth == 5 {
+        return walk.s5;
+    }
+    if depth == 6 {
+        return walk.s6;
+    }
+    if depth == 7 {
+        return walk.s7;
+    }
+    if depth == 8 {
+        return walk.s8;
+    }
+    if depth == 9 {
+        return walk.s9;
+    }
+    if depth == 10 {
+        return walk.s10;
+    }
+    if depth == 11 {
+        return walk.s11;
+    }
+    if depth == 12 {
+        return walk.s12;
+    }
+    if depth == 13 {
+        return walk.s13;
+    }
+    if depth == 14 {
+        return walk.s14;
+    }
+    return walk.s15;
+}
+
+record ElimUnfold { pool: VPool, id: i64, status: i64 }
+
+record ElimBuild { rec: i64, bad: i64, pool: VPool }
+
+fn elim_unfold(pool: VPool, mv: i64, zv: i64, sv: i64, tv: i64, lane: [Cell; 32]) -> (result: ElimUnfold) {
+    if mv < 0 || zv < 0 || sv < 0 || tv < 0 {
+        return ElimUnfold { pool: pool, id: (0 - 1), status: 2 };
+    }
+    iterate k over lane carrying walk: ElimWalk = ElimWalk { cur: tv, depth: 0, done: false, stuck: false, s0: (0 - 1), s1: (0 - 1), s2: (0 - 1), s3: (0 - 1), s4: (0 - 1), s5: (0 - 1), s6: (0 - 1), s7: (0 - 1), s8: (0 - 1), s9: (0 - 1), s10: (0 - 1), s11: (0 - 1), s12: (0 - 1), s13: (0 - 1), s14: (0 - 1), s15: (0 - 1) } {
+        let live: bool = bnot(walk.done) && bnot(walk.stuck);
+        let head: i64 = vtag_at(pool, walk.cur, live);
+        let child: i64 = vc0_at(pool, walk.cur, live && head == 4);
+        let room: bool = walk.depth >= 0 && walk.depth < 16;
+        let grown: bool = live && head == 4 && room;
+        let overflow: bool = live && head == 4 && bnot(room);
+        let zeroed: bool = live && head == 3;
+        let stucked: bool = live && head != 4 && head != 3;
+        let pushed: ElimWalk = elim_push_slot(walk, walk.depth, child);
+        next walk = ElimWalk {
+            cur: select(grown, child, walk.cur),
+            depth: select(grown, walk.depth +% 1, walk.depth),
+            done: walk.done || zeroed,
+            stuck: walk.stuck || stucked || overflow,
+            s0: pushed.s0, s1: pushed.s1, s2: pushed.s2, s3: pushed.s3,
+            s4: pushed.s4, s5: pushed.s5, s6: pushed.s6, s7: pushed.s7,
+            s8: pushed.s8, s9: pushed.s9, s10: pushed.s10, s11: pushed.s11,
+            s12: pushed.s12, s13: pushed.s13, s14: pushed.s14, s15: pushed.s15
+        };
+    }
+    if bnot(walk.done) && bnot(walk.stuck) {
+        return ElimUnfold { pool: pool, id: (0 - 1), status: 2 };
+    }
+    let cur_head: i64 = vtag_at(pool, walk.cur, walk.stuck);
+    if walk.stuck && cur_head == 4 {
+        return ElimUnfold { pool: pool, id: (0 - 1), status: 2 };
+    }
+    let made_node: VAlloc = valloc(pool, 11, mv, zv, sv, walk.cur);
+    let rec0: i64 = select(walk.done, zv, made_node.id);
+    let pool0: VPool = select(walk.done, pool, made_node.pool);
+    let bad0: bool = bnot(walk.done) && made_node.id < 0;
+    iterate j over lane carrying build: ElimBuild = ElimBuild { rec: rec0, bad: select(bad0, 1, 0), pool: pool0 } {
+        let at: i64 = j as i64;
+        let stepping: bool = at < walk.depth && build.bad == 0;
+        let pred: i64 = elim_slot_at(walk, walk.depth -% 1 -% at);
+        let inner: VAlloc = valloc(build.pool, 7, sv, pred, 0, 0);
+        let inner_ok: bool = inner.id >= 0;
+        let outer: VAlloc = valloc(select(inner_ok, inner.pool, build.pool), 7, inner.id, build.rec, 0, 0);
+        let step_ok: bool = inner_ok && outer.id >= 0 && pred >= 0;
+        next build = ElimBuild {
+            rec: select(stepping, select(step_ok, outer.id, (0 - 1)), build.rec),
+            bad: select(stepping && bnot(step_ok), 1, build.bad),
+            pool: select(stepping, outer.pool, build.pool)
+        };
+    }
+    let ok: bool = build.bad == 0 && build.rec >= 0;
+    return ElimUnfold { pool: build.pool, id: select(ok, build.rec, (0 - 1)), status: select(ok, 0, 2) };
+}
+
+// Nested evaluator: full weak-head evaluation of one `(term, env)` closure
+// with an explicit operation stack and bounded fuel. Inferred types and term
+// values in the forward pass are already weak-head normal, so this machine
+// runs only for genuine substitution (beta bodies, motive applications,
+// codomain comparisons): environment extension IS substitution here.
+// Operation codes: 1 AppF, 2 AppBeta, 3 AppStuck, 4 PlusA, 5 PlusB,
+// 6 ElimM, 7 ElimZ, 8 ElimS2, 9 ElimT2, 10 SuccF, 11 PiD, 12 LamD,
+// 13 EqC, 14 EqL, 15 EqR, 16 ReflF, 17 CongF.
+record NEState {
+    fterm: i64, fenv: i64, fmode: i64, fval: i64,
+    nops: i64,
+    ok: [i64; 6], oa: [i64; 6], ob: [i64; 6], oc: [i64; 6], od: [i64; 6], oe: [i64; 6],
+    fuel: i64, status: i64,
+    epar: [i64; 64], elevel: [i64; 64], evalue: [i64; 64], ebump: i64,
+    pool: VPool
+}
+
+record NEval { pool: VPool, id: i64, status: i64 }
+
+fn initial_nestate(term: i64, env: i64, epar: [i64; 64], elevel: [i64; 64], evalue: [i64; 64], ebump: i64, pool: VPool) -> (result: NEState) {
+    return NEState {
+        fterm: term, fenv: env, fmode: 0, fval: (0 - 1),
+        nops: 0,
+        ok: [0, 0, 0, 0, 0, 0], oa: [0, 0, 0, 0, 0, 0], ob: [0, 0, 0, 0, 0, 0], oc: [0, 0, 0, 0, 0, 0], od: [0, 0, 0, 0, 0, 0], oe: [0, 0, 0, 0, 0, 0],
+        fuel: 32, status: 0,
+        epar: epar, elevel: elevel, evalue: evalue, ebump: ebump,
+        pool: pool
+    };
+}
+
+fn ne_push(st: NEState, kind: i64, a: i64, b: i64, c: i64, d: i64, e: i64) -> (result: NEState) {
+    let full: bool = st.nops < 0 || st.nops >= 6;
+    let slot: u64 = (select(full, 0, st.nops)) as u64;
+    return NEState {
+        fterm: st.fterm, fenv: st.fenv, fmode: st.fmode, fval: st.fval,
+        nops: select(full, st.nops, st.nops +% 1),
+        ok: replace(st.ok, slot, select(full, 0, kind)),
+        oa: replace(st.oa, slot, a), ob: replace(st.ob, slot, b),
+        oc: replace(st.oc, slot, c), od: replace(st.od, slot, d), oe: replace(st.oe, slot, e),
+        fuel: st.fuel, status: select(full, 2, st.status),
+        epar: st.epar, elevel: st.elevel, evalue: st.evalue, ebump: st.ebump,
+        pool: st.pool
+    };
+}
+
+record NEOp { kind: i64, a: i64, b: i64, c: i64, d: i64, e: i64, nops: i64 }
+
+fn ne_pop(st: NEState) -> (result: NEOp) {
+    let empty: bool = st.nops <= 0;
+    let slot: u64 = (select(empty, 0, st.nops -% 1)) as u64;
+    return NEOp {
+        kind: select(empty, 0, st.ok[slot]),
+        a: st.oa[slot], b: st.ob[slot], c: st.oc[slot], d: st.od[slot], e: st.oe[slot],
+        nops: select(empty, 0, st.nops -% 1)
+    };
+}
+
+fn ne_set_focus(st: NEState, term: i64, env: i64) -> (result: NEState) {
+    return NEState {
+        fterm: term, fenv: env, fmode: 0, fval: (0 - 1),
+        nops: st.nops,
+        ok: st.ok, oa: st.oa, ob: st.ob, oc: st.oc, od: st.od, oe: st.oe,
+        fuel: st.fuel, status: st.status,
+        epar: st.epar, elevel: st.elevel, evalue: st.evalue, ebump: st.ebump,
+        pool: st.pool
+    };
+}
+
+fn ne_with_nops(st: NEState, nops: i64) -> (result: NEState) {
+    return NEState {
+        fterm: st.fterm, fenv: st.fenv, fmode: st.fmode, fval: st.fval,
+        nops: nops,
+        ok: st.ok, oa: st.oa, ob: st.ob, oc: st.oc, od: st.od, oe: st.oe,
+        fuel: st.fuel, status: st.status,
+        epar: st.epar, elevel: st.elevel, evalue: st.evalue, ebump: st.ebump,
+        pool: st.pool
+    };
+}
+
+fn ne_set_value(st: NEState, value: i64, nops: i64) -> (result: NEState) {
+    return NEState {
+        fterm: st.fterm, fenv: st.fenv, fmode: 1, fval: value,
+        nops: nops,
+        ok: st.ok, oa: st.oa, ob: st.ob, oc: st.oc, od: st.od, oe: st.oe,
+        fuel: st.fuel, status: st.status,
+        epar: st.epar, elevel: st.elevel, evalue: st.evalue, ebump: st.ebump,
+        pool: st.pool
+    };
+}
+
+fn ne_halt_unknown(st: NEState) -> (result: NEState) {
+    return NEState {
+        fterm: st.fterm, fenv: st.fenv, fmode: 1, fval: (0 - 1),
+        nops: 0,
+        ok: st.ok, oa: st.oa, ob: st.ob, oc: st.oc, od: st.od, oe: st.oe,
+        fuel: st.fuel, status: 2,
+        epar: st.epar, elevel: st.elevel, evalue: st.evalue, ebump: st.ebump,
+        pool: st.pool
+    };
+}
+
+fn ne_extend(st: NEState, base: i64, level: i64, value: i64) -> (result: NEState) {
+    let room: bool = st.ebump >= 0 && st.ebump < 64;
+    let slot: u64 = (select(room, st.ebump, 0)) as u64;
+    let grown: NEState = NEState {
+        fterm: st.fterm, fenv: select(room, st.ebump, (0 - 1)), fmode: st.fmode, fval: st.fval,
+        nops: st.nops,
+        ok: st.ok, oa: st.oa, ob: st.ob, oc: st.oc, od: st.od, oe: st.oe,
+        fuel: st.fuel, status: st.status,
+        epar: replace(st.epar, slot, base),
+        elevel: replace(st.elevel, slot, level),
+        evalue: replace(st.evalue, slot, value),
+        ebump: st.ebump +% 1,
+        pool: st.pool
+    };
+    return select(room, grown, ne_halt_unknown(st));
+}
+
+record NEAlloc { st: NEState, id: i64 }
+
+fn ne_alloc(st: NEState, tag: i64, a: i64, b: i64, c: i64, d: i64) -> (result: NEAlloc) {
+    let out: VAlloc = valloc(st.pool, tag, a, b, c, d);
+    let placed: NEState = NEState {
+        fterm: st.fterm, fenv: st.fenv, fmode: st.fmode, fval: st.fval,
+        nops: st.nops,
+        ok: st.ok, oa: st.oa, ob: st.ob, oc: st.oc, od: st.od, oe: st.oe,
+        fuel: st.fuel, status: st.status,
+        epar: st.epar, elevel: st.elevel, evalue: st.evalue, ebump: st.ebump,
+        pool: out.pool
+    };
+    if out.id < 0 {
+        return NEAlloc { st: ne_halt_unknown(placed), id: (0 - 1) };
+    }
+    return NEAlloc { st: placed, id: out.id };
+}
+
+fn ne_give(st: NEState, pool: VPool, id: i64, ok: bool) -> (result: NEState) {
+    if bnot(ok) || id < 0 {
+        return ne_halt_unknown(st);
+    }
+    let placed: NEState = NEState {
+        fterm: st.fterm, fenv: st.fenv, fmode: st.fmode, fval: st.fval,
+        nops: st.nops,
+        ok: st.ok, oa: st.oa, ob: st.ob, oc: st.oc, od: st.od, oe: st.oe,
+        fuel: st.fuel, status: st.status,
+        epar: st.epar, elevel: st.elevel, evalue: st.evalue, ebump: st.ebump,
+        pool: pool
+    };
+    return ne_set_value(placed, id, st.nops);
+}
+
+// Dive step: focus is a `(term, env)` closure. Terminal forms produce a
+// value; compound forms push one operation and descend. Invalid foci halt
+// UNKNOWN (the typing rules, not evaluation, report FAIL).
+fn ne_dive(st: NEState, cells: [Cell; 32], total: i64) -> (result: NEState) {
+    let t_ok: bool = st.fterm >= 0 && st.fterm < total;
+    if bnot(t_ok) {
+        return ne_halt_unknown(st);
+    }
+    let cell: Cell = cells[st.fterm as u64];
+    let code: i64 = tag_code(cell.tag);
+    let env_ok: bool = st.fenv >= 0 && st.fenv < 64;
+    if bnot(env_ok) {
+        return ne_halt_unknown(st);
+    }
+    if code == 1 {
+        let level: i64 = cell.arg0;
+        if level < 0 || level > 3 {
+            return ne_halt_unknown(st);
+        }
+        return ne_set_value(st, singleton_universe(level), st.nops);
+    }
+    if code == 6 {
+        return ne_set_value(st, singleton_nat(), st.nops);
+    }
+    if code == 7 {
+        return ne_set_value(st, singleton_zero(), st.nops);
+    }
+    if code == 2 {
+        let level: i64 = cell.arg0;
+        let found: Lookup = env_lookup(st.epar, st.elevel, st.evalue, st.fenv, level);
+        if found.found && found.value >= 0 {
+            return ne_set_value(st, found.value, st.nops);
+        }
+        if found.found {
+            let made: NEAlloc = ne_alloc(st, 6, level, 0, 0, 0);
+            return ne_set_value(made.st, made.id, st.nops);
+        }
+        return ne_halt_unknown(st);
+    }
+    if code == 3 || code == 4 {
+        let pushed: NEState = ne_push(st, select(code == 3, 11, 12), cell.arg1, st.fenv, cell.arg2, 0, 0);
+        return ne_set_focus(pushed, cell.arg0, st.fenv);
+    }
+    if code == 5 {
+        let pushed: NEState = ne_push(st, 1, cell.arg1, st.fenv, 0, 0, 0);
+        return ne_set_focus(pushed, cell.arg0, st.fenv);
+    }
+    if code == 8 {
+        let pushed: NEState = ne_push(st, 10, 0, 0, 0, 0, 0);
+        return ne_set_focus(pushed, cell.arg0, st.fenv);
+    }
+    if code == 9 {
+        let pushed: NEState = ne_push(st, 4, cell.arg1, st.fenv, 0, 0, 0);
+        return ne_set_focus(pushed, cell.arg0, st.fenv);
+    }
+    if code == 10 {
+        let pushed: NEState = ne_push(st, 6, cell.arg1, cell.arg2, cell.arg3, st.fenv, 0);
+        return ne_set_focus(pushed, cell.arg0, st.fenv);
+    }
+    if code == 11 {
+        let pushed: NEState = ne_push(st, 13, cell.arg1, cell.arg2, st.fenv, 0, 0);
+        return ne_set_focus(pushed, cell.arg0, st.fenv);
+    }
+    if code == 12 {
+        let pushed: NEState = ne_push(st, 16, 0, 0, 0, 0, 0);
+        return ne_set_focus(pushed, cell.arg0, st.fenv);
+    }
+    if code == 14 {
+        let pushed: NEState = ne_push(st, 17, 0, 0, 0, 0, 0);
+        return ne_set_focus(pushed, cell.arg0, st.fenv);
+    }
+    return ne_halt_unknown(st);
+}
+
+// Apply step: a value is ready and an operation awaits it. Validity of the
+// operation (applying a genuine function, eliminating a genuine Nat) is a
+// typing question answered by inference from value heads; evaluation alone
+// abstains on ill-shaped combinations instead of failing.
+fn ne_apply(st: NEState, lane: [Cell; 32]) -> (result: NEState) {
+    let op: NEOp = ne_pop(st);
+    let base: NEState = ne_with_nops(st, op.nops);
+    if op.kind == 1 {
+        let ftag: i64 = vtag_at(base.pool, st.fval, st.fval >= 0);
+        if ftag == 9 && st.fval >= 0 {
+            let bt: i64 = vcn_at(base.pool, st.fval, 1, true);
+            let be: i64 = vcn_at(base.pool, st.fval, 2, true);
+            let lvl: i64 = vcn_at(base.pool, st.fval, 3, true);
+            let pushed: NEState = ne_push(base, 2, bt, be, lvl, 0, 0);
+            return ne_set_focus(pushed, op.a, op.b);
+        }
+        if (ftag == 6 || ftag == 7 || ftag == 5 || ftag == 11) && st.fval >= 0 {
+            let pushed: NEState = ne_push(base, 3, st.fval, 0, 0, 0, 0);
+            return ne_set_focus(pushed, op.a, op.b);
+        }
+        return ne_halt_unknown(base);
+    }
+    if op.kind == 2 {
+        if st.fval < 0 {
+            return ne_halt_unknown(base);
+        }
+        let grown: NEState = ne_extend(base, op.b, op.c, st.fval);
+        if grown.status != 0 {
+            return grown;
+        }
+        return ne_set_focus(grown, op.a, grown.fenv);
+    }
+    if op.kind == 3 {
+        if st.fval < 0 || op.a < 0 {
+            return ne_halt_unknown(base);
+        }
+        let made: NEAlloc = ne_alloc(base, 7, op.a, st.fval, 0, 0);
+        return ne_set_value(made.st, made.id, op.nops);
+    }
+    if op.kind == 4 {
+        let pushed: NEState = ne_push(base, 5, st.fval, 0, 0, 0, 0);
+        return ne_set_focus(pushed, op.a, op.b);
+    }
+    if op.kind == 5 {
+        let out: PlusRes = plusVal(base.pool, op.a, st.fval, lane);
+        return ne_give(base, out.pool, out.id, out.status == 0);
+    }
+    if op.kind == 6 {
+        let pushed: NEState = ne_push(base, 7, st.fval, op.b, op.c, op.d, 0);
+        return ne_set_focus(pushed, op.a, op.d);
+    }
+    if op.kind == 7 {
+        let pushed: NEState = ne_push(base, 8, op.a, st.fval, op.c, op.d, 0);
+        return ne_set_focus(pushed, op.b, op.d);
+    }
+    if op.kind == 8 {
+        let pushed: NEState = ne_push(base, 9, op.a, op.b, st.fval, op.d, 0);
+        return ne_set_focus(pushed, op.c, op.d);
+    }
+    if op.kind == 9 {
+        let out: ElimUnfold = elim_unfold(base.pool, op.a, op.b, op.c, st.fval, lane);
+        return ne_give(base, out.pool, out.id, out.status == 0);
+    }
+    if op.kind == 10 {
+        if st.fval < 0 {
+            return ne_halt_unknown(base);
+        }
+        let made: NEAlloc = ne_alloc(base, 4, st.fval, 0, 0, 0);
+        return ne_set_value(made.st, made.id, op.nops);
+    }
+    if op.kind == 11 || op.kind == 12 {
+        if st.fval < 0 {
+            return ne_halt_unknown(base);
+        }
+        let made: NEAlloc = ne_alloc(base, select(op.kind == 11, 8, 9), st.fval, op.a, op.b, op.c);
+        return ne_set_value(made.st, made.id, op.nops);
+    }
+    if op.kind == 13 {
+        let pushed: NEState = ne_push(base, 14, st.fval, op.b, op.c, 0, 0);
+        return ne_set_focus(pushed, op.a, op.c);
+    }
+    if op.kind == 14 {
+        let pushed: NEState = ne_push(base, 15, op.a, st.fval, 0, 0, 0);
+        return ne_set_focus(pushed, op.b, op.c);
+    }
+    if op.kind == 15 {
+        if st.fval < 0 || op.a < 0 || op.b < 0 {
+            return ne_halt_unknown(base);
+        }
+        let made: NEAlloc = ne_alloc(base, 10, op.a, op.b, st.fval, 0);
+        return ne_set_value(made.st, made.id, op.nops);
+    }
+    if op.kind == 16 || op.kind == 17 {
+        if st.fval < 0 {
+            return ne_halt_unknown(base);
+        }
+        return ne_set_value(base, st.fval, op.nops);
+    }
+    return ne_halt_unknown(base);
+}
+
+// One machine step: finish when a value stands with no operations pending,
+// run out of fuel honestly, and dispatch dive versus apply. `if` control
+// flow keeps exactly one branch live per step.
+fn ne_step(st: NEState, cells: [Cell; 32], total: i64, lane: [Cell; 32]) -> (result: NEState) {
+    if st.status != 0 {
+        return st;
+    }
+    if st.fmode == 1 && st.nops == 0 {
+        return NEState {
+            fterm: st.fterm, fenv: st.fenv, fmode: st.fmode, fval: st.fval,
+            nops: st.nops,
+            ok: st.ok, oa: st.oa, ob: st.ob, oc: st.oc, od: st.od, oe: st.oe,
+            fuel: st.fuel, status: 1,
+            epar: st.epar, elevel: st.elevel, evalue: st.evalue, ebump: st.ebump,
+            pool: st.pool
+        };
+    }
+    if st.fuel <= 0 {
+        return ne_halt_unknown(st);
+    }
+    let burning: NEState = NEState {
+        fterm: st.fterm, fenv: st.fenv, fmode: st.fmode, fval: st.fval,
+        nops: st.nops,
+        ok: st.ok, oa: st.oa, ob: st.ob, oc: st.oc, od: st.od, oe: st.oe,
+        fuel: st.fuel -% 1, status: st.status,
+        epar: st.epar, elevel: st.elevel, evalue: st.evalue, ebump: st.ebump,
+        pool: st.pool
+    };
+    if st.fmode == 0 {
+        return ne_dive(burning, cells, total);
+    }
+    if st.nops <= 0 {
+        return ne_halt_unknown(burning);
+    }
+    return ne_apply(burning, lane);
+}
+
+fn neval(cells: [Cell; 32], total: i64, term: i64, env: i64, epar: [i64; 64], elevel: [i64; 64], evalue: [i64; 64], ebump: i64, pool: VPool, lane: [Cell; 32]) -> (result: NEval) {
+    if term < 0 || term >= total || env < 0 || env >= 64 {
+        return NEval { pool: pool, id: (0 - 1), status: 2 };
+    }
+    iterate k over lane carrying st: NEState = initial_nestate(term, env, epar, elevel, evalue, ebump, pool) {
+        next st = ne_step(st, cells, total, lane);
+    }
+    if st.status == 0 {
+        return NEval { pool: st.pool, id: (0 - 1), status: 2 };
+    }
+    if st.status == 1 && st.fval >= 0 {
+        return NEval { pool: st.pool, id: st.fval, status: 0 };
+    }
+    return NEval { pool: st.pool, id: (0 - 1), status: 2 };
+}
+
+// Definitional equality: structural comparison of weak-head values with an
+// explicit pair stack. Literals compare by integer reading; binders compare
+// domains then codomains under a shared fresh neutral (`32 + stack depth`,
+// disjoint from every buffer level by construction); everything undecided
+// (proof opacity, stack overflow, unfinished work) is UNKNOWN, never PASS.
+// Cross-tag mismatch of weak-head forms is FAIL: both sides are fully
+// reduced, so difference is decided.
+record DEState {
+    n: i64,
+    pa: [i64; 8], pb: [i64; 8],
+    verdict: i64, halted: bool,
+    pool: VPool
+}
+
+record DefRes { pool: VPool, verdict: i64 }
+
+fn initial_destate(pool: VPool, a: i64, b: i64) -> (result: DEState) {
+    return DEState {
+        n: 1,
+        pa: [a, (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1)],
+        pb: [b, (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1)],
+        verdict: 0, halted: false,
+        pool: pool
+    };
+}
+
+fn de_push(st: DEState, a: i64, b: i64) -> (result: DEState) {
+    let full: bool = st.n < 0 || st.n >= 8;
+    let slot: u64 = (select(full, 0, st.n)) as u64;
+    return DEState {
+        n: select(full, st.n, st.n +% 1),
+        pa: replace(st.pa, slot, select(full, (0 - 1), a)),
+        pb: replace(st.pb, slot, select(full, (0 - 1), b)),
+        verdict: select(full, 2, st.verdict),
+        halted: st.halted || full,
+        pool: st.pool
+    };
+}
+
+fn de_step(st: DEState, cells: [Cell; 32], total: i64, epar: [i64; 64], elevel: [i64; 64], evalue: [i64; 64], ebump: i64, lane: [Cell; 32]) -> (result: DEState) {
+    if st.halted || st.verdict == 1 {
+        return st;
+    }
+    if st.n <= 0 {
+        return DEState {
+            n: 0, pa: st.pa, pb: st.pb, verdict: st.verdict, halted: true, pool: st.pool
+        };
+    }
+    let slot: u64 = ((st.n -% 1)) as u64;
+    let x: i64 = st.pa[slot];
+    let y: i64 = st.pb[slot];
+    let rest: DEState = DEState {
+        n: st.n -% 1, pa: st.pa, pb: st.pb, verdict: st.verdict, halted: st.halted, pool: st.pool
+    };
+    if x == y && x >= 0 {
+        return rest;
+    }
+    if x < 0 || y < 0 {
+        return DEState {
+            n: rest.n, pa: rest.pa, pb: rest.pb, verdict: 2, halted: true, pool: rest.pool
+        };
+    }
+    let tx: i64 = vtag_at(rest.pool, x, true);
+    let ty: i64 = vtag_at(rest.pool, y, true);
+    let small_heads: bool = (tx == 3 || tx == 4) && (ty == 3 || ty == 4);
+    if small_heads {
+        let ix: i64 = intval(rest.pool, x);
+        let iy: i64 = intval(rest.pool, y);
+        if ix >= 0 && iy >= 0 {
+            if ix == iy {
+                return rest;
+            }
+            return DEState {
+                n: rest.n, pa: rest.pa, pb: rest.pb, verdict: 1, halted: true, pool: rest.pool
+            };
+        }
+    }
+    if tx != ty {
+        return DEState {
+            n: rest.n, pa: rest.pa, pb: rest.pb, verdict: 1, halted: true, pool: rest.pool
+        };
+    }
+    if tx == 1 {
+        let same: bool = vc0_at(rest.pool, x, true) == vc0_at(rest.pool, y, true);
+        if same {
+            return rest;
+        }
+        return DEState {
+            n: rest.n, pa: rest.pa, pb: rest.pb, verdict: 1, halted: true, pool: rest.pool
+        };
+    }
+    if tx == 2 || tx == 3 {
+        return rest;
+    }
+    if tx == 6 {
+        let same: bool = vc0_at(rest.pool, x, true) == vc0_at(rest.pool, y, true);
+        if same {
+            return rest;
+        }
+        return DEState {
+            n: rest.n, pa: rest.pa, pb: rest.pb, verdict: 1, halted: true, pool: rest.pool
+        };
+    }
+    if tx == 12 {
+        return DEState {
+            n: rest.n, pa: rest.pa, pb: rest.pb, verdict: 2, halted: true, pool: rest.pool
+        };
+    }
+    if tx == 0 {
+        return DEState {
+            n: rest.n, pa: rest.pa, pb: rest.pb, verdict: 1, halted: true, pool: rest.pool
+        };
+    }
+    if tx == 8 || tx == 9 {
+        return de_pi_pair(rest, cells, total, epar, elevel, evalue, ebump, lane, x, y);
+    }
+    return de_children(rest, x, y, tx);
+}
+
+fn de_children(st: DEState, x: i64, y: i64, tag: i64) -> (result: DEState) {
+    if tag == 4 {
+        let a0: i64 = vcn_at(st.pool, x, 0, true);
+        let b0: i64 = vcn_at(st.pool, y, 0, true);
+        return de_push(st, a0, b0);
+    }
+    if tag == 5 || tag == 7 {
+        let s1: DEState = de_push(st, vcn_at(st.pool, x, 1, true), vcn_at(st.pool, y, 1, true));
+        return de_push(s1, vcn_at(s1.pool, x, 0, true), vcn_at(s1.pool, y, 0, true));
+    }
+    if tag == 10 {
+        let s2: DEState = de_push(st, vcn_at(st.pool, x, 2, true), vcn_at(st.pool, y, 2, true));
+        let s1: DEState = de_push(s2, vcn_at(s2.pool, x, 1, true), vcn_at(s2.pool, y, 1, true));
+        return de_push(s1, vcn_at(s1.pool, x, 0, true), vcn_at(s1.pool, y, 0, true));
+    }
+    if tag == 11 {
+        let s3: DEState = de_push(st, vcn_at(st.pool, x, 3, true), vcn_at(st.pool, y, 3, true));
+        let s2: DEState = de_push(s3, vcn_at(s3.pool, x, 2, true), vcn_at(s3.pool, y, 2, true));
+        let s1: DEState = de_push(s2, vcn_at(s2.pool, x, 1, true), vcn_at(s2.pool, y, 1, true));
+        return de_push(s1, vcn_at(s1.pool, x, 0, true), vcn_at(s1.pool, y, 0, true));
+    }
+    return DEState {
+        n: st.n, pa: st.pa, pb: st.pb, verdict: 1, halted: true, pool: st.pool
+    };
+}
+
+record EExt { epar: [i64; 64], elevel: [i64; 64], evalue: [i64; 64], ebump: i64, env: i64, ok: bool }
+
+fn eenv_extend(epar: [i64; 64], elevel: [i64; 64], evalue: [i64; 64], ebump: i64, base: i64, level: i64, value: i64) -> (result: EExt) {
+    let room: bool = ebump >= 0 && ebump < 64 && base >= 0 && base < 64;
+    let slot: u64 = (select(room, ebump, 0)) as u64;
+    return EExt {
+        epar: select(room, replace(epar, slot, base), epar),
+        elevel: select(room, replace(elevel, slot, level), elevel),
+        evalue: select(room, replace(evalue, slot, value), evalue),
+        ebump: select(room, ebump +% 1, ebump),
+        env: select(room, ebump, (0 - 1)),
+        ok: room
+    };
+}
+
+// One binder pair: domains compare directly; codomains open under a shared
+// rigid variable (the binders' own level when they agree, otherwise a fresh
+// level disjoint from the buffer). Term-form codomains evaluate under the
+// extended environment; value-form codomains (from `Lam`) substitute at the
+// value level. Either side may use either form.
+record CODRes { pool: VPool, id: i64, ok: bool }
+
+fn de_cod(pool: VPool, cells: [Cell; 32], total: i64, epar: [i64; 64], elevel: [i64; 64], evalue: [i64; 64], ebump: i64, lane: [Cell; 32], vpi: i64, lvl: i64, neutral: i64) -> (result: CODRes) {
+    let bad: CODRes = CODRes { pool: pool, id: (0 - 1), ok: false };
+    let bterm: i64 = vcn_at(pool, vpi, 1, true);
+    let benv: i64 = vcn_at(pool, vpi, 2, true);
+    if bterm == (0 - 2) {
+        let sub: VSRes = vsubst(pool, benv, lvl, neutral, lane);
+        if sub.status != 0 || sub.id < 0 {
+            return CODRes { pool: sub.pool, id: (0 - 1), ok: false };
+        }
+        return CODRes { pool: sub.pool, id: sub.id, ok: true };
+    }
+    let ext: EExt = eenv_extend(epar, elevel, evalue, ebump, benv, lvl, neutral);
+    if bnot(ext.ok) {
+        return bad;
+    }
+    let eva: NEval = neval(cells, total, bterm, ext.env, ext.epar, ext.elevel, ext.evalue, ext.ebump, pool, lane);
+    if eva.status != 0 || eva.id < 0 {
+        return CODRes { pool: eva.pool, id: (0 - 1), ok: false };
+    }
+    return CODRes { pool: eva.pool, id: eva.id, ok: true };
+}
+
+fn de_pi_pair(st: DEState, cells: [Cell; 32], total: i64, epar: [i64; 64], elevel: [i64; 64], evalue: [i64; 64], ebump: i64, lane: [Cell; 32], x: i64, y: i64) -> (result: DEState) {
+    let stuck: DEState = DEState {
+        n: st.n, pa: st.pa, pb: st.pb, verdict: 2, halted: true, pool: st.pool
+    };
+    let lvl_a: i64 = vcn_at(st.pool, x, 3, true);
+    let lvl_b: i64 = vcn_at(st.pool, y, 3, true);
+    if lvl_a < 0 || lvl_b < 0 {
+        return stuck;
+    }
+    let level: i64 = select(lvl_a == lvl_b, lvl_a, 32 +% st.n);
+    let made: VAlloc = valloc(st.pool, 6, level, 0, 0, 0);
+    if made.id < 0 {
+        return stuck;
+    }
+    let ca: CODRes = de_cod(made.pool, cells, total, epar, elevel, evalue, ebump, lane, x, lvl_a, made.id);
+    if bnot(ca.ok) {
+        return DEState {
+            n: st.n, pa: st.pa, pb: st.pb, verdict: 2, halted: true, pool: ca.pool
+        };
+    }
+    let cb: CODRes = de_cod(ca.pool, cells, total, epar, elevel, evalue, ebump, lane, y, lvl_b, made.id);
+    if bnot(cb.ok) {
+        return DEState {
+            n: st.n, pa: st.pa, pb: st.pb, verdict: 2, halted: true, pool: cb.pool
+        };
+    }
+    let with_cod: DEState = de_push(DEState {
+        n: st.n, pa: st.pa, pb: st.pb, verdict: st.verdict, halted: st.halted, pool: cb.pool
+    }, ca.id, cb.id);
+    return de_push(with_cod, vcn_at(with_cod.pool, x, 0, true), vcn_at(with_cod.pool, y, 0, true));
+}
+
+fn defeq(cells: [Cell; 32], total: i64, epar: [i64; 64], elevel: [i64; 64], evalue: [i64; 64], ebump: i64, pool: VPool, a: i64, b: i64, lane: [Cell; 32]) -> (result: DefRes) {
+    if a < 0 || b < 0 {
+        return DefRes { pool: pool, verdict: 2 };
+    }
+    iterate k over lane carrying st: DEState = initial_destate(pool, a, b) {
+        next st = de_step(st, cells, total, epar, elevel, evalue, ebump, lane);
+    }
+    let done: bool = st.halted || st.n <= 0;
+    return DefRes { pool: st.pool, verdict: join(st.verdict, select(done, 0, 2)) };
+}
+
+// Value substitution: rebuild the value tree `v` with `arg` for the rigid
+// variable `lvl`. Binder levels are globally unique per buffer, so no
+// binder inside `v` can capture `arg`'s free levels: substitution is a
+// selective rebuild, never a renaming. Shared nodes are mapped once
+// (`midx`) and `arg` is aliased, never copied, so there is no blowup.
+// Leaves alias themselves; only internal nodes allocate.
+record VSState {
+    sp: i64,
+    sk_id: [i64; 32], sk_ph: [i64; 32],
+    midx_lo: [i64; 64],
+    midx_hi: [i64; 64],
+    bad: bool,
+    pool: VPool
+}
+
+record VSRes { pool: VPool, id: i64, status: i64 }
+
+fn vchild_count(tag: i64) -> (result: i64) {
+    if tag == 4 {
+        return 1;
+    }
+    if tag == 5 || tag == 7 {
+        return 2;
+    }
+    if tag == 8 || tag == 9 {
+        return 1;
+    }
+    if tag == 10 {
+        return 3;
+    }
+    if tag == 11 {
+        return 4;
+    }
+    return 0;
+}
+
+fn vchild_pool_at(pool: VPool, s: i64, slot: i64) -> (result: i64) {
+    return vcn_at(pool, s, slot, true);
+}
+
+fn initial_vsstate(pool: VPool, v: i64) -> (result: VSState) {
+    return VSState {
+        sp: 1,
+        sk_id: [v, (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1), (0 - 1)],
+        sk_ph: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        midx_lo: [0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1],
+        midx_hi: [0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1],
+        bad: false,
+        pool: pool
+    };
+}
+
+// Substitution node map over the split pool: ids below 64 address the lo
+// bank, the rest the hi bank. `midx_put` rebuilds the state with the
+// addressed bank updated.
+fn midx_at(lo: [i64; 64], hi: [i64; 64], id: i64, ok: bool, fallback: i64) -> (result: i64) {
+    if id < 64 {
+        return at64(lo, id, ok, fallback);
+    }
+    return at64(hi, id -% 64, ok, fallback);
+}
+
+fn midx_put(st: VSState, id: i64, val: i64) -> (result: VSState) {
+    if id < 64 {
+        return VSState {
+            sp: st.sp, sk_id: st.sk_id, sk_ph: st.sk_ph,
+            midx_lo: replace(st.midx_lo, id as u64, val), midx_hi: st.midx_hi,
+            bad: st.bad, pool: st.pool
+        };
+    }
+    return VSState {
+        sp: st.sp, sk_id: st.sk_id, sk_ph: st.sk_ph,
+        midx_lo: st.midx_lo, midx_hi: replace(st.midx_hi, (id -% 64) as u64, val),
+        bad: st.bad, pool: st.pool
+    };
+}
+
+fn vs_visit(st: VSState, s: i64, lvl: i64, arg: i64) -> (result: VSState) {
+    let known: bool = s >= 0 && s < 128;
+    let mapped: i64 = midx_at(st.midx_lo, st.midx_hi, s, known, (0 - 2));
+    if bnot(known) || mapped != (0 - 1) {
+        return st;
+    }
+    let tag: i64 = vtag_at(st.pool, s, true);
+    let is_target: bool = tag == 6 && vc0_at(st.pool, s, true) == lvl;
+    if is_target {
+        return midx_put(st, s, arg);
+    }
+    let leaves: bool = tag == 6 || tag == 1 || tag == 2 || tag == 3 || tag == 12 || tag == 0;
+    if leaves {
+        return midx_put(st, s, s);
+    }
+    let bterm: i64 = vcn_at(st.pool, s, 1, tag == 8 || tag == 9);
+    let valform: bool = (tag == 8 || tag == 9) && bterm == (0 - 2);
+    let count: i64 = vchild_count(tag) +% select(valform, 1, 0);
+    let room: bool = st.sp >= 0 && st.sp +% 1 +% count < 32;
+    if bnot(room) {
+        return VSState {
+            sp: st.sp, sk_id: st.sk_id, sk_ph: st.sk_ph, midx_lo: st.midx_lo, midx_hi: st.midx_hi,
+            bad: true, pool: st.pool
+        };
+    }
+    let c0: i64 = vchild_pool_at(st.pool, s, 0);
+    let c1raw: i64 = vchild_pool_at(st.pool, s, 1);
+    let c1: i64 = select(valform, vchild_pool_at(st.pool, s, 2), c1raw);
+    let c2: i64 = vchild_pool_at(st.pool, s, 2);
+    let c3: i64 = vchild_pool_at(st.pool, s, 3);
+    let base: i64 = st.sp +% 1;
+    let self_slot: u64 = (select(st.sp >= 0 && st.sp < 32, st.sp, 0)) as u64;
+    let slot0: u64 = (select(base >= 0 && base < 32, base, 0)) as u64;
+    let slot1: u64 = (select(base >= (0 - 1) && base < 31, base +% 1, 0)) as u64;
+    let slot2: u64 = (select(base >= (0 - 2) && base < 30, base +% 2, 0)) as u64;
+    let slot3: u64 = (select(base >= (0 - 3) && base < 29, base +% 3, 0)) as u64;
+    let ids0: [i64; 32] = replace(st.sk_id, self_slot, s);
+    let ph0: [i64; 32] = replace(st.sk_ph, self_slot, 1);
+    let ids1: [i64; 32] = select(count > 0, replace(ids0, slot0, c0), ids0);
+    let ph1: [i64; 32] = select(count > 0, replace(ph0, slot0, 0), ph0);
+    let ids2: [i64; 32] = select(count > 1, replace(ids1, slot1, c1), ids1);
+    let ph2: [i64; 32] = select(count > 1, replace(ph1, slot1, 0), ph1);
+    let ids3: [i64; 32] = select(count > 2, replace(ids2, slot2, c2), ids2);
+    let ph3: [i64; 32] = select(count > 2, replace(ph2, slot2, 0), ph2);
+    let ids4: [i64; 32] = select(count > 3, replace(ids3, slot3, c3), ids3);
+    let ph4: [i64; 32] = select(count > 3, replace(ph3, slot3, 0), ph3);
+    let marked: VSState = midx_put(st, s, (0 - 2));
+    return VSState {
+        sp: base +% count,
+        sk_id: ids4, sk_ph: ph4,
+        midx_lo: marked.midx_lo, midx_hi: marked.midx_hi,
+        bad: st.bad, pool: st.pool
+    };
+}
+
+fn vs_emit(st: VSState, s: i64) -> (result: VSState) {
+    let tag: i64 = vtag_at(st.pool, s, s >= 0);
+    let is_vf: bool = (tag == 8 || tag == 9) && vcn_at(st.pool, s, 1, true) == (0 - 2);
+    let m0: i64 = midx_at(st.midx_lo, st.midx_hi, vchild_pool_at(st.pool, s, 0), tag == 4 || tag == 5 || tag == 7 || tag == 8 || tag == 9 || tag == 10 || tag == 11, (0 - 1));
+    let m1: i64 = midx_at(st.midx_lo, st.midx_hi, vchild_pool_at(st.pool, s, 1), tag == 5 || tag == 7 || tag == 10 || tag == 11, (0 - 1));
+    let m2: i64 = midx_at(st.midx_lo, st.midx_hi, vchild_pool_at(st.pool, s, 2), tag == 10 || tag == 11, (0 - 1));
+    let m3: i64 = midx_at(st.midx_lo, st.midx_hi, vchild_pool_at(st.pool, s, 3), tag == 11, (0 - 1));
+    let m_vf: i64 = midx_at(st.midx_lo, st.midx_hi, vcn_at(st.pool, s, 2, true), is_vf, (0 - 1));
+    let kids_ok: bool = m0 >= 0 && (tag != 5 && tag != 7 && tag != 10 && tag != 11 || m1 >= 0) && (tag != 10 && tag != 11 || m2 >= 0) && (tag != 11 || m3 >= 0) && (bnot(is_vf) || m_vf >= 0);
+    if bnot(kids_ok) {
+        return VSState {
+            sp: st.sp, sk_id: st.sk_id, sk_ph: st.sk_ph, midx_lo: st.midx_lo, midx_hi: st.midx_hi,
+            bad: true, pool: st.pool
+        };
+    }
+    let keep1: i64 = vcn_at(st.pool, s, 1, true);
+    let keep2: i64 = vcn_at(st.pool, s, 2, true);
+    let keep3: i64 = vcn_at(st.pool, s, 3, true);
+    let rc2: i64 = select(is_vf, m_vf, select(tag == 8 || tag == 9, keep2, select(tag == 10 || tag == 11, m2, 0)));
+    let made: VAlloc = valloc(st.pool, tag, m0, select(tag == 8 || tag == 9, keep1, m1), rc2, select(tag == 8 || tag == 9 || tag == 11, keep3, 0));
+    if made.id < 0 {
+        return VSState {
+            sp: st.sp, sk_id: st.sk_id, sk_ph: st.sk_ph, midx_lo: st.midx_lo, midx_hi: st.midx_hi,
+            bad: true, pool: made.pool
+        };
+    }
+    let recorded: VSState = midx_put(st, s, made.id);
+    return VSState {
+        sp: st.sp, sk_id: st.sk_id, sk_ph: st.sk_ph,
+        midx_lo: recorded.midx_lo, midx_hi: recorded.midx_hi,
+        bad: st.bad, pool: made.pool
+    };
+}
+
+fn vsubst(pool: VPool, v: i64, lvl: i64, arg: i64, lane: [Cell; 32]) -> (result: VSRes) {
+    if v < 0 || arg < 0 || lvl < 0 {
+        return VSRes { pool: pool, id: (0 - 1), status: 2 };
+    }
+    iterate k over lane carrying st: VSState = initial_vsstate(pool, v) {
+        let empty: bool = st.sp <= 0 || st.bad;
+        let slot: u64 = (select(empty, 0, st.sp -% 1)) as u64;
+        let s: i64 = st.sk_id[slot];
+        let ph: i64 = st.sk_ph[slot];
+        let popped: VSState = VSState {
+            sp: select(empty, st.sp, st.sp -% 1),
+            sk_id: st.sk_id, sk_ph: st.sk_ph, midx_lo: st.midx_lo, midx_hi: st.midx_hi, bad: st.bad, pool: st.pool
+        };
+        next st = select(empty, st, select(ph == 0, vs_visit(popped, s, lvl, arg), vs_emit(popped, s)));
+    }
+    let done: i64 = midx_at(st.midx_lo, st.midx_hi, v, v >= 0 && v < 128, (0 - 1));
+    let ok: bool = bnot(st.bad) && done >= 0;
+    return VSRes { pool: st.pool, id: select(ok, done, (0 - 1)), status: select(ok, 0, 2) };
+}
+
+// Inference: every active cell synthesizes a term value (`tval`) and a
+// type value (`ival`) with a local verdict. Values are always weak-head
+// normal by construction, so premise checks are structural definitional
+// equalities, never normalization puzzles. `Lam` synthesizes its `Pi`
+// (value-form codomain, marked `(0 - 2)`); `Refl` synthesizes its equation;
+// `Cong` turns `Eq(Nat, a, b)` into `Eq(Nat, Succ a, Succ b)`. All premise
+// failures join into the global verdict; values are valid exactly when the
+// local verdict is PASS.
+record Infer {
+    tval: [i64; 32],
+    ival: [i64; 32],
+    local: [i64; 32],
+    pool: VPool
+}
+
+fn initial_infer() -> (result: Infer) {
+    return Infer {
+        tval: [0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1],
+        ival: [0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1, 0 - 1],
+        local: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        pool: initial_vpool()
+    };
+}
+
+// Universe-headed type values: `(is_univ, level, stuck)`. Stuck heads
+// (neutrals and stuck eliminations, applications, additions) are undecided;
+// any other constructor head is decidedly not a universe.
+record UnivHead { is_univ: bool, level: i64, stuck: bool }
+
+fn univ_head(pool: VPool, v: i64) -> (result: UnivHead) {
+    let tag: i64 = vtag_at(pool, v, v >= 0);
+    if tag == 1 {
+        return UnivHead { is_univ: true, level: vc0_at(pool, v, true), stuck: false };
+    }
+    if tag == 6 || tag == 7 || tag == 5 || tag == 11 {
+        return UnivHead { is_univ: false, level: (0 - 1), stuck: true };
+    }
+    return UnivHead { is_univ: false, level: (0 - 1), stuck: false };
+}
+
+// Classifier-headed values (things that can classify a term): universes,
+// `Nat`, `Pi`, and `Eq`. Stuck heads are undecided; anything else fails.
+record ClassHead { ok: bool, stuck: bool }
+
+fn classifier_head(pool: VPool, v: i64) -> (result: ClassHead) {
+    let tag: i64 = vtag_at(pool, v, v >= 0);
+    if tag == 1 || tag == 2 || tag == 8 || tag == 10 {
+        return ClassHead { ok: true, stuck: false };
+    }
+    if tag == 6 || tag == 7 || tag == 5 || tag == 11 {
+        return ClassHead { ok: false, stuck: true };
+    }
+    return ClassHead { ok: false, stuck: false };
+}
+
+// Stuck-head test for application/elimination subjects: neutrals and stuck
+// nodes may still turn out functional; constructors cannot.
+fn is_stuck_head(pool: VPool, v: i64) -> (result: bool) {
+    let tag: i64 = vtag_at(pool, v, v >= 0);
+    return tag == 6 || tag == 7 || tag == 5 || tag == 11;
+}
+
+record AdvOut { tval: i64, ival: i64, local: i64, pool: VPool, ebump: i64 }
+
+fn adv_var(cells: [Cell; 32], total: i64, envs: Envs, target: [i64; 32], tval: [i64; 32], pool: VPool, at: i64, level: i64, lane: [Cell; 32]) -> (result: AdvOut) {
+    let bad: AdvOut = AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: pool, ebump: envs.ebump };
+    let b: i64 = at32(target, at, at >= 0 && at < total, (0 - 1));
+    if b < 0 || b >= total {
+        return bad;
+    }
+    let bcell: Cell = cells[b as u64];
+    let bcode: i64 = tag_code(bcell.tag);
+    if bcode != 3 && bcode != 4 && bcode != 13 {
+        return bad;
+    }
+    let dom: i64 = select(bcode == 13, bcell.arg1, bcell.arg0);
+    let found: Lookup = env_lookup(envs.epar, envs.elevel, envs.evalue, at32(envs.at, at, true, 0), level);
+    // Assumption levels never sit in a lexical environment (`Hyp` cells are
+    // roots, so no body edge extends them): a use resolves to the carrier
+    // type below and mints a rigid variable, exactly as an unbound binder
+    // level does. Anything else unbound is still malformed.
+    if bnot(found.found) && bcode != 13 {
+        return bad;
+    }
+    let term_val: i64 = found.value;
+    let pool_a: VPool = pool;
+    if found.value < 0 {
+        let made: VAlloc = valloc(pool, 6, level, 0, 0, 0);
+        if made.id < 0 {
+            return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: made.pool, ebump: envs.ebump };
+        }
+        return adv_var_type(cells, total, envs, tval, made.pool, at, b, dom, made.id, lane);
+    }
+    return adv_var_type(cells, total, envs, tval, pool_a, at, b, dom, term_val, lane);
+}
+
+fn adv_var_type(cells: [Cell; 32], total: i64, envs: Envs, tval: [i64; 32], pool: VPool, at: i64, b: i64, dom: i64, term_val: i64, lane: [Cell; 32]) -> (result: AdvOut) {
+    if dom >= 0 && dom < at {
+        let domval: i64 = at32(tval, dom, true, (0 - 1));
+        if domval < 0 {
+            return AdvOut { tval: term_val, ival: (0 - 1), local: 2, pool: pool, ebump: envs.ebump };
+        }
+        return AdvOut { tval: term_val, ival: domval, local: 0, pool: pool, ebump: envs.ebump };
+    }
+    let ity: NEval = neval(cells, total, dom, at32(envs.at, b, b >= 0 && b < total, 0), envs.epar, envs.elevel, envs.evalue, envs.ebump, pool, lane);
+    if ity.status != 0 || ity.id < 0 {
+        return AdvOut { tval: term_val, ival: (0 - 1), local: 2, pool: ity.pool, ebump: envs.ebump };
+    }
+    return AdvOut { tval: term_val, ival: ity.id, local: 0, pool: ity.pool, ebump: envs.ebump };
+}
+
+// Motive/codomain application `P(a)`: value-form codomains (`cox == (0 - 2)`,
+// synthesized by `Lam`) substitute at the value level; term-form codomains
+// evaluate the body under an extended environment. Both are substitution;
+// neither rebuilds buffers.
+record MARes { pool: VPool, id: i64, status: i64 }
+
+fn motive_apply(cells: [Cell; 32], total: i64, envs: Envs, pool: VPool, cox: i64, coenv: i64, lvl: i64, arg: i64, lane: [Cell; 32]) -> (result: MARes) {
+    if arg < 0 || lvl < 0 {
+        return MARes { pool: pool, id: (0 - 1), status: 2 };
+    }
+    if cox == 0 - 2 {
+        let sub: VSRes = vsubst(pool, coenv, lvl, arg, lane);
+        return MARes { pool: sub.pool, id: sub.id, status: sub.status };
+    }
+    let ext: EExt = eenv_extend(envs.epar, envs.elevel, envs.evalue, envs.ebump, coenv, lvl, arg);
+    if bnot(ext.ok) {
+        return MARes { pool: pool, id: (0 - 1), status: 2 };
+    }
+    let eva: NEval = neval(cells, total, cox, ext.env, ext.epar, ext.elevel, ext.evalue, ext.ebump, pool, lane);
+    return MARes { pool: eva.pool, id: eva.id, status: eva.status };
+}
+
+fn adv_pi(cells: [Cell; 32], total: i64, envs: Envs, tval: [i64; 32], ival: [i64; 32], pool: VPool, at: i64, dom: i64, body: i64, lvl: i64, lane: [Cell; 32]) -> (result: AdvOut) {
+    let incomplete: AdvOut = AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: pool, ebump: envs.ebump };
+    let idom: i64 = at32(ival, dom, dom >= 0 && dom < at, (0 - 1));
+    let ibody: i64 = at32(ival, body, body >= 0 && body < at, (0 - 1));
+    if idom < 0 || ibody < 0 {
+        return incomplete;
+    }
+    let hd: UnivHead = univ_head(pool, idom);
+    let hb: UnivHead = univ_head(pool, ibody);
+    let dom_bad: bool = bnot(hd.is_univ) && bnot(hd.stuck);
+    let body_bad: bool = bnot(hb.is_univ) && bnot(hb.stuck);
+    if dom_bad || body_bad {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: pool, ebump: envs.ebump };
+    }
+    if hd.stuck || hb.stuck {
+        return incomplete;
+    }
+    let joined: i64 = select(hd.level > hb.level, hd.level, hb.level);
+    if joined > max_universe() {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: pool, ebump: envs.ebump };
+    }
+    let tdom: i64 = at32(tval, dom, dom >= 0 && dom < at, (0 - 1));
+    if tdom < 0 {
+        return incomplete;
+    }
+    let made: VAlloc = valloc(pool, 8, tdom, body, at32(envs.at, body, body >= 0 && body < total, 0), lvl);
+    if made.id < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: made.pool, ebump: envs.ebump };
+    }
+    return AdvOut { tval: made.id, ival: singleton_universe(joined), local: 0, pool: made.pool, ebump: envs.ebump };
+}
+
+fn adv_lam(cells: [Cell; 32], total: i64, envs: Envs, tval: [i64; 32], ival: [i64; 32], pool: VPool, at: i64, dom: i64, body: i64, lvl: i64, lane: [Cell; 32]) -> (result: AdvOut) {
+    let incomplete: AdvOut = AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: pool, ebump: envs.ebump };
+    let idom: i64 = at32(ival, dom, dom >= 0 && dom < at, (0 - 1));
+    let ibody: i64 = at32(ival, body, body >= 0 && body < at, (0 - 1));
+    if idom < 0 || ibody < 0 {
+        return incomplete;
+    }
+    let hd: UnivHead = univ_head(pool, idom);
+    if bnot(hd.is_univ) && bnot(hd.stuck) {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: pool, ebump: envs.ebump };
+    }
+    if hd.stuck {
+        return incomplete;
+    }
+    let cb: ClassHead = classifier_head(pool, ibody);
+    if bnot(cb.ok) && bnot(cb.stuck) {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: pool, ebump: envs.ebump };
+    }
+    if cb.stuck {
+        return incomplete;
+    }
+    let tdom: i64 = at32(tval, dom, dom >= 0 && dom < at, (0 - 1));
+    if tdom < 0 {
+        return incomplete;
+    }
+    let made_lam: VAlloc = valloc(pool, 9, tdom, body, at32(envs.at, body, body >= 0 && body < total, 0), lvl);
+    let made_pi: VAlloc = valloc(made_lam.pool, 8, tdom, 0 - 2, ibody, lvl);
+    if made_lam.id < 0 || made_pi.id < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: made_pi.pool, ebump: envs.ebump };
+    }
+    return AdvOut { tval: made_lam.id, ival: made_pi.id, local: 0, pool: made_pi.pool, ebump: envs.ebump };
+}
+
+fn adv_app(cells: [Cell; 32], total: i64, envs: Envs, tval: [i64; 32], ival: [i64; 32], pool: VPool, at: i64, fun: i64, arg: i64, lane: [Cell; 32]) -> (result: AdvOut) {
+    let incomplete: AdvOut = AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: pool, ebump: envs.ebump };
+    let ft: i64 = at32(ival, fun, fun >= 0 && fun < at, (0 - 1));
+    let atv: i64 = at32(tval, arg, arg >= 0 && arg < at, (0 - 1));
+    let ativ: i64 = at32(ival, arg, arg >= 0 && arg < at, (0 - 1));
+    if ft < 0 || atv < 0 || ativ < 0 {
+        return incomplete;
+    }
+    let fhead: i64 = vtag_at(pool, ft, true);
+    if fhead != 8 {
+        if is_stuck_head(pool, ft) {
+            return incomplete;
+        }
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: pool, ebump: envs.ebump };
+    }
+    let dom_v: i64 = vcn_at(pool, ft, 0, true);
+    let cox: i64 = vcn_at(pool, ft, 1, true);
+    let coenv: i64 = vcn_at(pool, ft, 2, true);
+    let lvl: i64 = vcn_at(pool, ft, 3, true);
+    let dq: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, pool, ativ, dom_v, lane);
+    if dq.verdict == 1 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: dq.pool, ebump: envs.ebump };
+    }
+    if dq.verdict != 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: dq.pool, ebump: envs.ebump };
+    }
+    let applied: MARes = motive_apply(cells, total, envs, dq.pool, cox, coenv, lvl, atv, lane);
+    if applied.status != 0 || applied.id < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: applied.pool, ebump: envs.ebump };
+    }
+    let fv: i64 = at32(tval, fun, fun >= 0 && fun < at, (0 - 1));
+    if fv < 0 {
+        return AdvOut { tval: (0 - 1), ival: applied.id, local: 2, pool: applied.pool, ebump: envs.ebump };
+    }
+    let ftag: i64 = vtag_at(applied.pool, fv, true);
+    if ftag == 9 {
+        let bt: i64 = vcn_at(applied.pool, fv, 1, true);
+        let be: i64 = vcn_at(applied.pool, fv, 2, true);
+        let flvl: i64 = vcn_at(applied.pool, fv, 3, true);
+        let ext: EExt = eenv_extend(envs.epar, envs.elevel, envs.evalue, envs.ebump, be, flvl, atv);
+        if bnot(ext.ok) {
+            return AdvOut { tval: (0 - 1), ival: applied.id, local: 2, pool: applied.pool, ebump: envs.ebump };
+        }
+        let eva: NEval = neval(cells, total, bt, ext.env, ext.epar, ext.elevel, ext.evalue, ext.ebump, applied.pool, lane);
+        if eva.status != 0 || eva.id < 0 {
+            return AdvOut { tval: (0 - 1), ival: applied.id, local: 2, pool: eva.pool, ebump: envs.ebump };
+        }
+        return AdvOut { tval: eva.id, ival: applied.id, local: 0, pool: eva.pool, ebump: envs.ebump };
+    }
+    if ftag == 6 || ftag == 7 {
+        let made: VAlloc = valloc(applied.pool, 7, fv, atv, 0, 0);
+        if made.id < 0 {
+            return AdvOut { tval: (0 - 1), ival: applied.id, local: 2, pool: made.pool, ebump: envs.ebump };
+        }
+        return AdvOut { tval: made.id, ival: applied.id, local: 0, pool: made.pool, ebump: envs.ebump };
+    }
+    return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: applied.pool, ebump: envs.ebump };
+}
+
+fn adv_nat(pool: VPool, ebump: i64) -> (result: AdvOut) {
+    return AdvOut { tval: singleton_nat(), ival: singleton_universe(0), local: 0, pool: pool, ebump: ebump };
+}
+
+fn adv_zero(pool: VPool, ebump: i64) -> (result: AdvOut) {
+    return AdvOut { tval: singleton_zero(), ival: singleton_nat(), local: 0, pool: pool, ebump: ebump };
+}
+
+fn adv_succ(cells: [Cell; 32], total: i64, envs: Envs, tval: [i64; 32], ival: [i64; 32], pool: VPool, at: i64, pred: i64, lane: [Cell; 32]) -> (result: AdvOut) {
+    let incomplete: AdvOut = AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: pool, ebump: envs.ebump };
+    let pt: i64 = at32(ival, pred, pred >= 0 && pred < at, (0 - 1));
+    let pv: i64 = at32(tval, pred, pred >= 0 && pred < at, (0 - 1));
+    if pt < 0 || pv < 0 {
+        return incomplete;
+    }
+    let dq: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, pool, pt, singleton_nat(), lane);
+    if dq.verdict == 1 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: dq.pool, ebump: envs.ebump };
+    }
+    if dq.verdict != 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: dq.pool, ebump: envs.ebump };
+    }
+    let made: VAlloc = valloc(dq.pool, 4, pv, 0, 0, 0);
+    if made.id < 0 {
+        return AdvOut { tval: (0 - 1), ival: singleton_nat(), local: 2, pool: made.pool, ebump: envs.ebump };
+    }
+    return AdvOut { tval: made.id, ival: singleton_nat(), local: 0, pool: made.pool, ebump: envs.ebump };
+}
+
+fn adv_plus(cells: [Cell; 32], total: i64, envs: Envs, tval: [i64; 32], ival: [i64; 32], pool: VPool, at: i64, left: i64, right: i64, lane: [Cell; 32]) -> (result: AdvOut) {
+    let incomplete: AdvOut = AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: pool, ebump: envs.ebump };
+    let lt: i64 = at32(ival, left, left >= 0 && left < at, (0 - 1));
+    let rt: i64 = at32(ival, right, right >= 0 && right < at, (0 - 1));
+    let lv: i64 = at32(tval, left, left >= 0 && left < at, (0 - 1));
+    let rv: i64 = at32(tval, right, right >= 0 && right < at, (0 - 1));
+    if lt < 0 || rt < 0 || lv < 0 || rv < 0 {
+        return incomplete;
+    }
+    let dq0: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, pool, lt, singleton_nat(), lane);
+    if dq0.verdict == 1 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: dq0.pool, ebump: envs.ebump };
+    }
+    if dq0.verdict != 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: dq0.pool, ebump: envs.ebump };
+    }
+    let dq1: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, dq0.pool, rt, singleton_nat(), lane);
+    if dq1.verdict == 1 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: dq1.pool, ebump: envs.ebump };
+    }
+    if dq1.verdict != 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: dq1.pool, ebump: envs.ebump };
+    }
+    let sum: PlusRes = plusVal(dq1.pool, lv, rv, lane);
+    if sum.status != 0 || sum.id < 0 {
+        return AdvOut { tval: (0 - 1), ival: singleton_nat(), local: 2, pool: sum.pool, ebump: envs.ebump };
+    }
+    return AdvOut { tval: sum.id, ival: singleton_nat(), local: 0, pool: sum.pool, ebump: envs.ebump };
+}
+
+fn adv_eq(cells: [Cell; 32], total: i64, envs: Envs, tval: [i64; 32], ival: [i64; 32], pool: VPool, at: i64, carrier: i64, left: i64, right: i64, lane: [Cell; 32]) -> (result: AdvOut) {
+    let incomplete: AdvOut = AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: pool, ebump: envs.ebump };
+    let ct: i64 = at32(ival, carrier, carrier >= 0 && carrier < at, (0 - 1));
+    let cv: i64 = at32(tval, carrier, carrier >= 0 && carrier < at, (0 - 1));
+    let lv: i64 = at32(tval, left, left >= 0 && left < at, (0 - 1));
+    let rv: i64 = at32(tval, right, right >= 0 && right < at, (0 - 1));
+    let li: i64 = at32(ival, left, left >= 0 && left < at, (0 - 1));
+    let ri: i64 = at32(ival, right, right >= 0 && right < at, (0 - 1));
+    if ct < 0 || cv < 0 || lv < 0 || rv < 0 || li < 0 || ri < 0 {
+        return incomplete;
+    }
+    let hc: UnivHead = univ_head(pool, ct);
+    if bnot(hc.is_univ) && bnot(hc.stuck) {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: pool, ebump: envs.ebump };
+    }
+    if hc.stuck {
+        return incomplete;
+    }
+    let dq0: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, pool, li, cv, lane);
+    if dq0.verdict != 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: select(dq0.verdict == 1, 1, 2), pool: dq0.pool, ebump: envs.ebump };
+    }
+    let dq1: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, dq0.pool, ri, cv, lane);
+    if dq1.verdict != 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: select(dq1.verdict == 1, 1, 2), pool: dq1.pool, ebump: envs.ebump };
+    }
+    let made: VAlloc = valloc(dq1.pool, 10, cv, lv, rv, 0);
+    if made.id < 0 {
+        return AdvOut { tval: (0 - 1), ival: singleton_universe(hc.level), local: 2, pool: made.pool, ebump: envs.ebump };
+    }
+    return AdvOut { tval: made.id, ival: singleton_universe(hc.level), local: 0, pool: made.pool, ebump: envs.ebump };
+}
+
+fn adv_refl(cells: [Cell; 32], total: i64, envs: Envs, tval: [i64; 32], ival: [i64; 32], pool: VPool, at: i64, witness: i64, lane: [Cell; 32]) -> (result: AdvOut) {
+    let incomplete: AdvOut = AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: pool, ebump: envs.ebump };
+    let wt: i64 = at32(ival, witness, witness >= 0 && witness < at, (0 - 1));
+    let wv: i64 = at32(tval, witness, witness >= 0 && witness < at, (0 - 1));
+    if wt < 0 || wv < 0 {
+        return incomplete;
+    }
+    let cw: ClassHead = classifier_head(pool, wt);
+    if bnot(cw.ok) && bnot(cw.stuck) {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: pool, ebump: envs.ebump };
+    }
+    if cw.stuck {
+        return incomplete;
+    }
+    let made_eq: VAlloc = valloc(pool, 10, wt, wv, wv, 0);
+    let made_pf: VAlloc = valloc(made_eq.pool, 12, wv, 0, 0, 0);
+    if made_eq.id < 0 || made_pf.id < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: made_pf.pool, ebump: envs.ebump };
+    }
+    return AdvOut { tval: made_pf.id, ival: made_eq.id, local: 0, pool: made_pf.pool, ebump: envs.ebump };
+}
+
+fn adv_cong(cells: [Cell; 32], total: i64, envs: Envs, tval: [i64; 32], ival: [i64; 32], pool: VPool, at: i64, pf: i64, succ_a: i64, succ_b: i64, lane: [Cell; 32]) -> (result: AdvOut) {
+    let incomplete: AdvOut = AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: pool, ebump: envs.ebump };
+    let cell_a: Cell = cells[(select(succ_a >= 0 && succ_a < total, succ_a, 0)) as u64];
+    let cell_b: Cell = cells[(select(succ_b >= 0 && succ_b < total, succ_b, 0)) as u64];
+    let succ_ok: bool = succ_a >= 0 && succ_a < at && succ_b >= 0 && succ_b < at && tag_code(cell_a.tag) == 8 && tag_code(cell_b.tag) == 8;
+    let pt: i64 = at32(ival, pf, pf >= 0 && pf < at, (0 - 1));
+    let pv: i64 = at32(tval, pf, pf >= 0 && pf < at, (0 - 1));
+    if bnot(succ_ok) || pt < 0 || pv < 0 {
+        if bnot(succ_ok) {
+            return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: pool, ebump: envs.ebump };
+        }
+        return incomplete;
+    }
+    let phead: i64 = vtag_at(pool, pt, true);
+    if phead != 10 {
+        if is_stuck_head(pool, pt) {
+            return incomplete;
+        }
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: pool, ebump: envs.ebump };
+    }
+    let car: i64 = vcn_at(pool, pt, 0, true);
+    let side_l: i64 = vcn_at(pool, pt, 1, true);
+    let side_r: i64 = vcn_at(pool, pt, 2, true);
+    let dq0: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, pool, car, singleton_nat(), lane);
+    if dq0.verdict != 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: select(dq0.verdict == 1, 1, 2), pool: dq0.pool, ebump: envs.ebump };
+    }
+    let pred_a: i64 = cell_a.arg0;
+    let pred_b: i64 = cell_b.arg0;
+    let tav: i64 = at32(tval, pred_a, pred_a >= 0 && pred_a < at, (0 - 1));
+    let tbv: i64 = at32(tval, pred_b, pred_b >= 0 && pred_b < at, (0 - 1));
+    if tav < 0 || tbv < 0 {
+        return AdvOut { tval: pv, ival: (0 - 1), local: 2, pool: dq0.pool, ebump: envs.ebump };
+    }
+    let dq1: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, dq0.pool, side_l, tav, lane);
+    if dq1.verdict != 0 {
+        return AdvOut { tval: pv, ival: (0 - 1), local: select(dq1.verdict == 1, 1, 2), pool: dq1.pool, ebump: envs.ebump };
+    }
+    let dq2: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, dq1.pool, side_r, tbv, lane);
+    if dq2.verdict != 0 {
+        return AdvOut { tval: pv, ival: (0 - 1), local: select(dq2.verdict == 1, 1, 2), pool: dq2.pool, ebump: envs.ebump };
+    }
+    let sav: i64 = at32(tval, succ_a, true, (0 - 1));
+    let sbv: i64 = at32(tval, succ_b, true, (0 - 1));
+    let made: VAlloc = valloc(dq2.pool, 10, singleton_nat(), sav, sbv, 0);
+    if made.id < 0 || sav < 0 || sbv < 0 {
+        return AdvOut { tval: pv, ival: (0 - 1), local: 2, pool: made.pool, ebump: envs.ebump };
+    }
+    return AdvOut { tval: pv, ival: made.id, local: 0, pool: made.pool, ebump: envs.ebump };
+}
+
+// Motive application for elimination: `P(a)` through the motive VALUE.
+// A `VLam` motive evaluates its body under the extended environment (the
+// body is a type-term, so its value is the instantiated family); a stuck
+// motive stays stuck. Constructor-valued motives contradict a `Pi` motive
+// type and fail, exactly like misapplied functions in `adv_app`.
+fn elim_apply(cells: [Cell; 32], total: i64, envs: Envs, pool: VPool, mval: i64, arg: i64, lane: [Cell; 32]) -> (result: MARes) {
+    if arg < 0 || mval < 0 {
+        return MARes { pool: pool, id: (0 - 1), status: 2 };
+    }
+    let mtag: i64 = vtag_at(pool, mval, true);
+    if mtag == 9 {
+        let bt: i64 = vcn_at(pool, mval, 1, true);
+        let be: i64 = vcn_at(pool, mval, 2, true);
+        let flvl: i64 = vcn_at(pool, mval, 3, true);
+        let ext: EExt = eenv_extend(envs.epar, envs.elevel, envs.evalue, envs.ebump, be, flvl, arg);
+        if bnot(ext.ok) {
+            return MARes { pool: pool, id: (0 - 1), status: 2 };
+        }
+        let eva: NEval = neval(cells, total, bt, ext.env, ext.epar, ext.elevel, ext.evalue, ext.ebump, pool, lane);
+        return MARes { pool: eva.pool, id: eva.id, status: eva.status };
+    }
+    if mtag == 6 || mtag == 7 {
+        let made: VAlloc = valloc(pool, 7, mval, arg, 0, 0);
+        return MARes { pool: made.pool, id: made.id, status: select(made.id < 0, 2, 0) };
+    }
+    if is_stuck_head(pool, mval) {
+        return MARes { pool: pool, id: (0 - 1), status: 1 };
+    }
+    return MARes { pool: pool, id: (0 - 1), status: 1 };
+}
+
+// Motive codomain check: the family must land in a classifier (a universe
+// or a type). Value-form codomains (from `Lam` motives) are already values
+// and inspect directly; term-form codomains evaluate once under a rigid
+// variable. No universe level flows out: elimination needs inhabitation,
+// not stratification.
+record CORes { pool: VPool, verdict: i64 }
+
+fn elim_cod_ok(cells: [Cell; 32], total: i64, envs: Envs, pool: VPool, cox: i64, coenv: i64, lvl: i64, lane: [Cell; 32]) -> (result: CORes) {
+    if cox == (0 - 2) {
+        let hc: ClassHead = classifier_head(pool, coenv);
+        if bnot(hc.ok) && bnot(hc.stuck) {
+            return CORes { pool: pool, verdict: 1 };
+        }
+        if hc.stuck {
+            return CORes { pool: pool, verdict: 2 };
+        }
+        return CORes { pool: pool, verdict: 0 };
+    }
+    let rigid: VAlloc = valloc(pool, 6, lvl, 0, 0, 0);
+    if rigid.id < 0 || lvl < 0 {
+        return CORes { pool: rigid.pool, verdict: 2 };
+    }
+    let ext: EExt = eenv_extend(envs.epar, envs.elevel, envs.evalue, envs.ebump, coenv, lvl, rigid.id);
+    if bnot(ext.ok) {
+        return CORes { pool: rigid.pool, verdict: 2 };
+    }
+    let eva: NEval = neval(cells, total, cox, ext.env, ext.epar, ext.elevel, ext.evalue, ext.ebump, rigid.pool, lane);
+    if eva.status != 0 || eva.id < 0 {
+        return CORes { pool: eva.pool, verdict: 2 };
+    }
+    let hc: ClassHead = classifier_head(eva.pool, eva.id);
+    if bnot(hc.ok) && bnot(hc.stuck) {
+        return CORes { pool: eva.pool, verdict: 1 };
+    }
+    if hc.stuck {
+        return CORes { pool: eva.pool, verdict: 2 };
+    }
+    return CORes { pool: eva.pool, verdict: 0 };
+}
+
+fn adv_hyp(ival: [i64; 32], pool: VPool, ebump: i64, at: i64, ty: i64) -> (result: AdvOut) {
+    let ht: i64 = at32(ival, ty, ty >= 0 && ty < at, (0 - 1));
+    if ht < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: pool, ebump: ebump };
+    }
+    let hc: UnivHead = univ_head(pool, ht);
+    if bnot(hc.is_univ) && bnot(hc.stuck) {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: pool, ebump: ebump };
+    }
+    if hc.stuck {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: pool, ebump: ebump };
+    }
+    return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 0, pool: pool, ebump: ebump };
+}
+
+fn adv_elim(cells: [Cell; 32], total: i64, envs: Envs, tval: [i64; 32], ival: [i64; 32], pool: VPool, at: i64, motive: i64, zero: i64, succ: i64, target: i64, lane: [Cell; 32]) -> (result: AdvOut) {
+    let incomplete: AdvOut = AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: pool, ebump: envs.ebump };
+    let mt: i64 = at32(ival, motive, motive >= 0 && motive < at, (0 - 1));
+    let zt: i64 = at32(ival, zero, zero >= 0 && zero < at, (0 - 1));
+    let st2: i64 = at32(ival, succ, succ >= 0 && succ < at, (0 - 1));
+    let tt: i64 = at32(ival, target, target >= 0 && target < at, (0 - 1));
+    if mt < 0 || zt < 0 || st2 < 0 || tt < 0 {
+        return incomplete;
+    }
+    let mhead: i64 = vtag_at(pool, mt, true);
+    if mhead != 8 {
+        if is_stuck_head(pool, mt) {
+            return incomplete;
+        }
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: pool, ebump: envs.ebump };
+    }
+    let dom_v: i64 = vcn_at(pool, mt, 0, true);
+    let cox: i64 = vcn_at(pool, mt, 1, true);
+    let coenv: i64 = vcn_at(pool, mt, 2, true);
+    let lvl: i64 = vcn_at(pool, mt, 3, true);
+    let dq_dom: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, pool, dom_v, singleton_nat(), lane);
+    if dq_dom.verdict != 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: select(dq_dom.verdict == 1, 1, 2), pool: dq_dom.pool, ebump: envs.ebump };
+    }
+    let mv0: i64 = at32(tval, motive, motive >= 0 && motive < at, (0 - 1));
+    if mv0 < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: dq_dom.pool, ebump: envs.ebump };
+    }
+    let codm: CORes = elim_cod_ok(cells, total, envs, dq_dom.pool, cox, coenv, lvl, lane);
+    if codm.verdict != 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: select(codm.verdict == 1, 1, 2), pool: codm.pool, ebump: envs.ebump };
+    }
+    let dq_t: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, codm.pool, tt, singleton_nat(), lane);
+    if dq_t.verdict != 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: select(dq_t.verdict == 1, 1, 2), pool: dq_t.pool, ebump: envs.ebump };
+    }
+    let exp0: MARes = elim_apply(cells, total, envs, dq_t.pool, mv0, singleton_zero(), lane);
+    if exp0.status != 0 || exp0.id < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: exp0.pool, ebump: envs.ebump };
+    }
+    let dq_z: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, exp0.pool, zt, exp0.id, lane);
+    if dq_z.verdict != 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: select(dq_z.verdict == 1, 1, 2), pool: dq_z.pool, ebump: envs.ebump };
+    }
+    let shead: i64 = vtag_at(dq_z.pool, st2, true);
+    if shead != 8 {
+        if is_stuck_head(dq_z.pool, st2) {
+            return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: dq_z.pool, ebump: envs.ebump };
+        }
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: dq_z.pool, ebump: envs.ebump };
+    }
+    let d1: i64 = vcn_at(dq_z.pool, st2, 0, true);
+    let cx1: i64 = vcn_at(dq_z.pool, st2, 1, true);
+    let ce1: i64 = vcn_at(dq_z.pool, st2, 2, true);
+    let l1: i64 = vcn_at(dq_z.pool, st2, 3, true);
+    let dq_k: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, dq_z.pool, d1, singleton_nat(), lane);
+    if dq_k.verdict != 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: select(dq_k.verdict == 1, 1, 2), pool: dq_k.pool, ebump: envs.ebump };
+    }
+    let kn: VAlloc = valloc(dq_k.pool, 6, l1, 0, 0, 0);
+    if kn.id < 0 || l1 < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: kn.pool, ebump: envs.ebump };
+    }
+    let cod1: MARes = motive_apply(cells, total, envs, kn.pool, cx1, ce1, l1, kn.id, lane);
+    if cod1.status != 0 || cod1.id < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: cod1.pool, ebump: envs.ebump };
+    }
+    let c1head: i64 = vtag_at(cod1.pool, cod1.id, true);
+    if c1head != 8 {
+        if is_stuck_head(cod1.pool, cod1.id) {
+            return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: cod1.pool, ebump: envs.ebump };
+        }
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: cod1.pool, ebump: envs.ebump };
+    }
+    let d2: i64 = vcn_at(cod1.pool, cod1.id, 0, true);
+    let cx2: i64 = vcn_at(cod1.pool, cod1.id, 1, true);
+    let ce2: i64 = vcn_at(cod1.pool, cod1.id, 2, true);
+    let l2: i64 = vcn_at(cod1.pool, cod1.id, 3, true);
+    let pk: MARes = elim_apply(cells, total, envs, cod1.pool, mv0, kn.id, lane);
+    if pk.status != 0 || pk.id < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: pk.pool, ebump: envs.ebump };
+    }
+    let dq_ih: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, pk.pool, d2, pk.id, lane);
+    if dq_ih.verdict != 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: select(dq_ih.verdict == 1, 1, 2), pool: dq_ih.pool, ebump: envs.ebump };
+    }
+    let skn: VAlloc = valloc(dq_ih.pool, 4, kn.id, 0, 0, 0);
+    if skn.id < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: skn.pool, ebump: envs.ebump };
+    }
+    let psk: MARes = elim_apply(cells, total, envs, skn.pool, mv0, skn.id, lane);
+    if psk.status != 0 || psk.id < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: psk.pool, ebump: envs.ebump };
+    }
+    let ihn: VAlloc = valloc(psk.pool, 6, l2, 0, 0, 0);
+    if ihn.id < 0 || l2 < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: ihn.pool, ebump: envs.ebump };
+    }
+    let cod2: MARes = motive_apply(cells, total, envs, ihn.pool, cx2, ce2, l2, ihn.id, lane);
+    if cod2.status != 0 || cod2.id < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: cod2.pool, ebump: envs.ebump };
+    }
+    let dq_step: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, cod2.pool, cod2.id, psk.id, lane);
+    if dq_step.verdict != 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: select(dq_step.verdict == 1, 1, 2), pool: dq_step.pool, ebump: envs.ebump };
+    }
+    let mv: i64 = at32(tval, motive, motive >= 0 && motive < at, (0 - 1));
+    let zv: i64 = at32(tval, zero, zero >= 0 && zero < at, (0 - 1));
+    let sv: i64 = at32(tval, succ, succ >= 0 && succ < at, (0 - 1));
+    let tv2: i64 = at32(tval, target, target >= 0 && target < at, (0 - 1));
+    if mv < 0 || zv < 0 || sv < 0 || tv2 < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: dq_step.pool, ebump: envs.ebump };
+    }
+    let result: MARes = elim_apply(cells, total, envs, dq_step.pool, mv0, tv2, lane);
+    if result.status != 0 || result.id < 0 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: result.pool, ebump: envs.ebump };
+    }
+    let folded: ElimUnfold = elim_unfold(result.pool, mv, zv, sv, tv2, lane);
+    if folded.status != 0 || folded.id < 0 {
+        return AdvOut { tval: (0 - 1), ival: result.id, local: 2, pool: folded.pool, ebump: envs.ebump };
+    }
+    return AdvOut { tval: folded.id, ival: result.id, local: 0, pool: folded.pool, ebump: envs.ebump };
+}
+
+fn adv_universe(pool: VPool, ebump: i64, level: i64) -> (result: AdvOut) {
+    if level < 0 || level > 3 {
+        return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 1, pool: pool, ebump: ebump };
+    }
+    if level >= 3 {
+        return AdvOut { tval: singleton_universe(level), ival: (0 - 1), local: 1, pool: pool, ebump: ebump };
+    }
+    return AdvOut { tval: singleton_universe(level), ival: singleton_universe(level +% 1), local: 0, pool: pool, ebump: ebump };
+}
+
+fn adv_infer(st: Infer, cells: [Cell; 32], total: i64, envs: Envs, target: [i64; 32], index: u64, lane: [Cell; 32]) -> (result: Infer) {
+    let at: i64 = index as i64;
+    let cell: Cell = cells[index];
+    let code: i64 = tag_code(cell.tag);
+    let out: AdvOut = adv_dispatch(st.pool, cells, total, envs, st.tval, st.ival, at, cell, code, target, lane);
+    return Infer {
+        tval: replace(st.tval, index, out.tval),
+        ival: replace(st.ival, index, out.ival),
+        local: replace(st.local, index, out.local),
+        pool: out.pool
+    };
+}
+
+fn adv_dispatch(pool: VPool, cells: [Cell; 32], total: i64, envs: Envs, tval: [i64; 32], ival: [i64; 32], at: i64, cell: Cell, code: i64, target: [i64; 32], lane: [Cell; 32]) -> (result: AdvOut) {
+    if code == 1 {
+        return adv_universe(pool, envs.ebump, cell.arg0);
+    }
+    if code == 2 {
+        return adv_var(cells, total, envs, target, tval, pool, at, cell.arg0, lane);
+    }
+    if code == 3 {
+        return adv_pi(cells, total, envs, tval, ival, pool, at, cell.arg0, cell.arg1, cell.arg2, lane);
+    }
+    if code == 4 {
+        return adv_lam(cells, total, envs, tval, ival, pool, at, cell.arg0, cell.arg1, cell.arg2, lane);
+    }
+    if code == 5 {
+        return adv_app(cells, total, envs, tval, ival, pool, at, cell.arg0, cell.arg1, lane);
+    }
+    if code == 6 {
+        return adv_nat(pool, envs.ebump);
+    }
+    if code == 7 {
+        return adv_zero(pool, envs.ebump);
+    }
+    if code == 8 {
+        return adv_succ(cells, total, envs, tval, ival, pool, at, cell.arg0, lane);
+    }
+    if code == 9 {
+        return adv_plus(cells, total, envs, tval, ival, pool, at, cell.arg0, cell.arg1, lane);
+    }
+    if code == 10 {
+        return adv_elim(cells, total, envs, tval, ival, pool, at, cell.arg0, cell.arg1, cell.arg2, cell.arg3, lane);
+    }
+    if code == 11 {
+        return adv_eq(cells, total, envs, tval, ival, pool, at, cell.arg0, cell.arg1, cell.arg2, lane);
+    }
+    if code == 12 {
+        return adv_refl(cells, total, envs, tval, ival, pool, at, cell.arg0, lane);
+    }
+    if code == 13 {
+        return adv_hyp(ival, pool, envs.ebump, at, cell.arg1);
+    }
+    if code == 14 {
+        return adv_cong(cells, total, envs, tval, ival, pool, at, cell.arg0, cell.arg1, cell.arg2, lane);
+    }
+    return AdvOut { tval: (0 - 1), ival: (0 - 1), local: 2, pool: pool, ebump: envs.ebump };
+}
+
+fn run_infer(cells: [Cell; 32], total: i64, envs: Envs, target: [i64; 32], lane: [Cell; 32]) -> (result: Infer) {
+    iterate i over cells carrying state: Infer = initial_infer() {
+        let at: i64 = i as i64;
+        let include: bool = at < total;
+        let advanced: Infer = adv_infer(state, cells, total, envs, target, i, lane);
+        next state = select(include, advanced, state);
+    }
+    return state;
+}
+
+fn join_all(local: [i64; 32], total: i64, lane: [Cell; 32]) -> (result: i64) {
+    iterate i over lane carrying acc: i64 = 0 {
+        let at: i64 = i as i64;
+        next acc = select(at < total, join(acc, at32(local, at, true, 0)), acc);
+    }
+    return acc;
+}
+
+// Claim check: `Refl` proofs use the v1-style equation rule (the claimed
+// `Eq` cell's sides must equal the witness value, and the witness must
+// inhabit the carrier); every other proof's inferred type must equal the
+// proposition value definitionally.
+record ClaimRes { pool: VPool, verdict: i64 }
+
+fn check_claim(cells: [Cell; 32], total: i64, envs: Envs, infer: Infer, proof: i64, prop: i64, lane: [Cell; 32]) -> (result: ClaimRes) {
+    let bad: ClaimRes = ClaimRes { pool: infer.pool, verdict: 1 };
+    let unknown: ClaimRes = ClaimRes { pool: infer.pool, verdict: 2 };
+    let proof_cell: Cell = cells[proof as u64];
+    let prop_cell: Cell = cells[prop as u64];
+    if tag_code(proof_cell.tag) == 12 {
+        if tag_code(prop_cell.tag) != 11 {
+            return bad;
+        }
+        let wv: i64 = at32(infer.tval, proof_cell.arg0, true, (0 - 1));
+        let wt: i64 = at32(infer.ival, proof_cell.arg0, true, (0 - 1));
+        let pv0: i64 = at32(infer.tval, prop_cell.arg0, true, (0 - 1));
+        let pv1: i64 = at32(infer.tval, prop_cell.arg1, true, (0 - 1));
+        let pv2: i64 = at32(infer.tval, prop_cell.arg2, true, (0 - 1));
+        if wv < 0 || wt < 0 || pv0 < 0 || pv1 < 0 || pv2 < 0 {
+            return unknown;
+        }
+        let dq0: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, infer.pool, pv1, wv, lane);
+        if dq0.verdict == 1 {
+            return ClaimRes { pool: dq0.pool, verdict: 1 };
+        }
+        if dq0.verdict != 0 {
+            return ClaimRes { pool: dq0.pool, verdict: 2 };
+        }
+        let dq1: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, dq0.pool, pv2, wv, lane);
+        if dq1.verdict == 1 {
+            return ClaimRes { pool: dq1.pool, verdict: 1 };
+        }
+        if dq1.verdict != 0 {
+            return ClaimRes { pool: dq1.pool, verdict: 2 };
+        }
+        let dq2: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, dq1.pool, wt, pv0, lane);
+        if dq2.verdict == 1 {
+            return ClaimRes { pool: dq2.pool, verdict: 1 };
+        }
+        if dq2.verdict != 0 {
+            return ClaimRes { pool: dq2.pool, verdict: 2 };
+        }
+        return ClaimRes { pool: dq2.pool, verdict: 0 };
+    }
+    let pt: i64 = at32(infer.ival, proof, true, (0 - 1));
+    let pv: i64 = at32(infer.tval, prop, true, (0 - 1));
+    if pt < 0 || pv < 0 {
+        return unknown;
+    }
+    let dq: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, infer.pool, pt, pv, lane);
+    return ClaimRes { pool: dq.pool, verdict: dq.verdict };
+}
+
+record CheckRes { verdict: i64, pool: VPool, infer: Infer, envs: Envs, shape: Shape }
+
+fn check_proof_inner(cells: [Cell; 32], total: i64, proof: i64, prop: i64, lane: [Cell; 32]) -> (result: CheckRes) {
+    let topo: Topo = run_topo(cells, total);
+    let parents: Parents = run_parents(cells, total);
+    let binders: Binders = run_binders(cells, total);
+    let shape: Shape = run_shape(cells, topo, parents, binders, total);
+    let envs: Envs = run_envs(cells, parents, total);
+    let infer: Infer = run_infer(cells, total, envs, shape.target, lane);
+    let claim: ClaimRes = check_claim(cells, total, envs, infer, proof, prop, lane);
+    let structural: i64 = join(join(join_all(topo.local, total, lane), join_all(shape.local, total, lane)), select(binders.dup, 1, 0));
+    let resource: i64 = join(select(envs.exhausted, 2, 0), select(claim.pool.exhausted, 2, 0));
+    let verdict: i64 = join(join(join(structural, join_all(infer.local, total, lane)), resource), claim.verdict);
+    return CheckRes { verdict: verdict, pool: claim.pool, infer: infer, envs: envs, shape: shape };
+}
+
+fn indices_ok(total: i64, proof: i64, prop: i64) -> (result: bool) {
+    return total > 0 && total <= 32 && proof >= 0 && proof < total && prop >= 0 && prop < total;
+}
+
+// `Hyp` cells are declarations, not terms: naming one as the proof or the
+// proposition is a malformed query (FAIL), never a checked judgment.
+fn check_proof_code(cells: [Cell; 32], count: byte, proof: byte, prop: byte) -> (result: i64) {
+    let total: i64 = count as i64;
+    let proof_index: i64 = proof as i64;
+    let prop_index: i64 = prop as i64;
+    if bnot(indices_ok(total, proof_index, prop_index)) {
+        return 1;
+    }
+    if tag_code(cells[proof_index as u64].tag) == 13 || tag_code(cells[prop_index as u64].tag) == 13 {
+        return 1;
+    }
+    let checked: CheckRes = check_proof_inner(cells, total, proof_index, prop_index, cells);
+    return checked.verdict;
+}
+
+// Reachability from a root downward. Parents sit above children, so the
+// mirrored pass assigns every parent before its children. Ambiguous ((0 - 2))
+// and missing ((0 - 1)) parents contribute nothing.
+fn run_reach(cells: [Cell; 32], par: [i64; 32], total: i64, root: i64) -> (result: [i64; 32]) {
+    iterate i over cells carrying reach: [i64; 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] {
+        let at: i64 = 31 -% (i as i64);
+        let include: bool = at >= 0 && at < total;
+        let slot: u64 = (select(include, at, 0)) as u64;
+        let parent: i64 = at32(par, at, include, (0 - 1));
+        let pok: bool = include && parent >= 0 && parent < total;
+        let above: i64 = at32(reach, parent, pok, 0);
+        let here: bool = include && (at == root || (pok && above > 0));
+        next reach = replace(reach, slot, select(here, 1, 0));
+    }
+    return reach;
+}
+
+fn hyp_used(cells: [Cell; 32], target: [i64; 32], reach_p: [i64; 32], reach_q: [i64; 32], total: i64, hyp: i64) -> (result: bool) {
+    iterate i over cells carrying hit: bool = false {
+        let at: i64 = i as i64;
+        let active: bool = at < total;
+        let cell: Cell = cells[i];
+        let uses: bool = active && tag_code(cell.tag) == 2 && at32(target, at, true, (0 - 2)) == hyp;
+        let inside: bool = at32(reach_p, at, active, 0) > 0 || at32(reach_q, at, active, 0) > 0;
+        next hit = hit || (uses && inside);
+    }
+    return hit;
+}
+
+// Canonical assumption code: base-33 number over the declared hypotheses in
+// buffer order (digit `level + 1` when used by the proof or proposition, 0
+// when unused). Closed proofs identify the empty set (`0`). Non-PASS
+// verdicts report (0 - 1): assumptions are observable only for checked proofs.
+// Packing wraps past ~10 hypotheses; artifact identity always uses the full
+// buffer, never this code.
+fn assumptions_code(cells: [Cell; 32], count: byte, proof: byte, prop: byte) -> (result: i64) {
+    let total: i64 = count as i64;
+    let proof_index: i64 = proof as i64;
+    let prop_index: i64 = prop as i64;
+    if bnot(indices_ok(total, proof_index, prop_index)) {
+        return 0 - 1;
+    }
+    if tag_code(cells[proof_index as u64].tag) == 13 || tag_code(cells[prop_index as u64].tag) == 13 {
+        return 0 - 1;
+    }
+    let checked: CheckRes = check_proof_inner(cells, total, proof_index, prop_index, cells);
+    if checked.verdict != 0 {
+        return 0 - 1;
+    }
+    let parents: Parents = run_parents(cells, total);
+    let reach_p: [i64; 32] = run_reach(cells, parents.par, total, proof_index);
+    let reach_q: [i64; 32] = run_reach(cells, parents.par, total, prop_index);
+    iterate h over cells carrying acc: i64 = 0 {
+        let at: i64 = h as i64;
+        let active: bool = at < total;
+        let cell: Cell = cells[h];
+        let used: bool = active && tag_code(cell.tag) == 13 && hyp_used(cells, checked.shape.target, reach_p, reach_q, total, at);
+        let digit: i64 = select(used, cell.arg0 +% 1, 0);
+        next acc = select(active, acc *% 33 +% digit, acc);
+    }
+    return acc;
+}
+
+// Evaluation probe: head tag of the value of one cell (0..12), 100 when
+// evaluation abstains, 101 when the buffer is structurally malformed.
+// Exists so substitution and reduction are independently testable through
+// the normal execution path.
+fn probe_eval_code(cells: [Cell; 32], count: byte, index: byte) -> (result: i64) {
+    let total: i64 = count as i64;
+    let at: i64 = index as i64;
+    if total <= 0 || total > 32 || at < 0 || at >= total {
+        return 101;
+    }
+    let topo: Topo = run_topo(cells, total);
+    let parents: Parents = run_parents(cells, total);
+    let binders: Binders = run_binders(cells, total);
+    let shape: Shape = run_shape(cells, topo, parents, binders, total);
+    let structural: i64 = join(join(join_all(topo.local, total, cells), join_all(shape.local, total, cells)), select(binders.dup, 1, 0));
+    if structural == 1 {
+        return 101;
+    }
+    let envs: Envs = run_envs(cells, parents, total);
+    let infer: Infer = run_infer(cells, total, envs, shape.target, cells);
+    let eva: NEval = neval(cells, total, at, at32(envs.at, at, true, 0), envs.epar, envs.elevel, envs.evalue, envs.ebump, infer.pool, cells);
+    if eva.status != 0 || eva.id < 0 {
+        return 100;
+    }
+    return vtag_at(eva.pool, eva.id, true);
+}
+
+// Definitional-equality probe over two term values: 0/1/2 verdict, 3 when
+// the buffer is structurally malformed or an index is out of range.
+fn probe_defeq_code(cells: [Cell; 32], count: byte, left: byte, right: byte) -> (result: i64) {
+    let total: i64 = count as i64;
+    let a: i64 = left as i64;
+    let b: i64 = right as i64;
+    if total <= 0 || total > 32 || a < 0 || a >= total || b < 0 || b >= total {
+        return 3;
+    }
+    let topo: Topo = run_topo(cells, total);
+    let parents: Parents = run_parents(cells, total);
+    let binders: Binders = run_binders(cells, total);
+    let shape: Shape = run_shape(cells, topo, parents, binders, total);
+    let structural: i64 = join(join(join_all(topo.local, total, cells), join_all(shape.local, total, cells)), select(binders.dup, 1, 0));
+    if structural == 1 {
+        return 3;
+    }
+    let envs: Envs = run_envs(cells, parents, total);
+    let infer: Infer = run_infer(cells, total, envs, shape.target, cells);
+    let dq: DefRes = defeq(cells, total, envs.epar, envs.elevel, envs.evalue, envs.ebump, infer.pool, at32(infer.tval, a, true, (0 - 1)), at32(infer.tval, b, true, (0 - 1)), cells);
+    return dq.verdict;
+}
+
+record VAlloc { pool: VPool, id: i64 }
+
+fn valloc(pool: VPool, tag: i64, a: i64, b: i64, c: i64, d: i64) -> (result: VAlloc) {
+    let room: bool = pool.bump >= 6 && pool.bump < 128;
+    let lo: bool = pool.bump < 64;
+    let slot: u64 = (select(room, select(lo, pool.bump, pool.bump -% 64), 0)) as u64;
+    let grown_lo: VPool = VPool {
+        tag_lo: replace(pool.tag_lo, slot, tag),
+        c0_lo: replace(pool.c0_lo, slot, a),
+        c1_lo: replace(pool.c1_lo, slot, b),
+        c2_lo: replace(pool.c2_lo, slot, c),
+        c3_lo: replace(pool.c3_lo, slot, d),
+        tag_hi: pool.tag_hi,
+        c0_hi: pool.c0_hi,
+        c1_hi: pool.c1_hi,
+        c2_hi: pool.c2_hi,
+        c3_hi: pool.c3_hi,
+        bump: pool.bump +% 1,
+        exhausted: pool.exhausted
+    };
+    let grown_hi: VPool = VPool {
+        tag_lo: pool.tag_lo,
+        c0_lo: pool.c0_lo,
+        c1_lo: pool.c1_lo,
+        c2_lo: pool.c2_lo,
+        c3_lo: pool.c3_lo,
+        tag_hi: replace(pool.tag_hi, slot, tag),
+        c0_hi: replace(pool.c0_hi, slot, a),
+        c1_hi: replace(pool.c1_hi, slot, b),
+        c2_hi: replace(pool.c2_hi, slot, c),
+        c3_hi: replace(pool.c3_hi, slot, d),
+        bump: pool.bump +% 1,
+        exhausted: pool.exhausted
+    };
+    let grown: VPool = select(lo, grown_lo, grown_hi);
+    let placed: VPool = select(room, grown, pool);
+    return VAlloc {
+        pool: VPool {
+            tag_lo: placed.tag_lo,
+            c0_lo: placed.c0_lo,
+            c1_lo: placed.c1_lo,
+            c2_lo: placed.c2_lo,
+            c3_lo: placed.c3_lo,
+            tag_hi: placed.tag_hi,
+            c0_hi: placed.c0_hi,
+            c1_hi: placed.c1_hi,
+            c2_hi: placed.c2_hi,
+            c3_hi: placed.c3_hi,
+            bump: placed.bump,
+            exhausted: placed.exhausted || bnot(room)
+        },
+        id: select(room, pool.bump, (0 - 1))
+    };
+}

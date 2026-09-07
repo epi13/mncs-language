@@ -437,7 +437,7 @@
       "file": "rfcs/0007-proof-carrying-dependent-core.md",
       "design_status": "DRAFT",
       "implementation_status": "BOUNDED_IMPLEMENTATION",
-      "implementation_scope": "Tranche 0.1: flat topological proof buffers, bounded universes, dependent Pi formation, Nat family with closed computation, propositional equality, deterministic dual checkers (MNCS-native plus independent reference), obligation binding with invalidation, proof-gated SSA elision, and proof-bound lowering certificates. Dependent application/substitution, erasure, and full proof transport remain explicit gaps.",
+      "implementation_scope": "Tranche 0.2: genuine dependency over flat binder-edge buffers with explicit levels (Pi/Lam/App with capture-safe substitution by environment extension, beta and weak-head evaluation with fuel, structural defeq with rigid levels), dependent NatElim with motive application, propositional Eq with Refl/Cong, assumption declarations with usage accounting, dual checkers (MNCS-native mncs.core.proof_dep.v2 plus independent recursive reference) in exact differential agreement over a 15-case corpus on five backends, sealed artifacts with assumption-aware bindings. Full proof transport through every compiler stage, file-based ingestion, and erasure remain explicit gaps.",
       "normativity": "experimental",
       "acceptance_criteria": [
         {
@@ -470,9 +470,12 @@
         {
           "id": "0007-C4",
           "text": "Dependent function types beyond monomorphized generics",
-          "state": "partial",
+          "state": "satisfied",
           "evidence": [
-            "library/core/proof_check.mncs"
+            "library/core/proof_dep.mncs",
+            "crates/mncs-model/src/proof_dep.rs",
+            "examples/execution/proof-dep-corpus.json",
+            "docs/rfc-0007-tranche-02-calculus.md"
           ]
         },
         {
@@ -481,7 +484,9 @@
           "state": "satisfied",
           "evidence": [
             "library/core/proof_check.mncs",
-            "examples/execution/proof-kernel-corpus.json"
+            "examples/execution/proof-kernel-corpus.json",
+            "library/core/proof_dep.mncs",
+            "examples/execution/proof-dep-corpus.json"
           ]
         },
         {
@@ -543,7 +548,8 @@
           "state": "satisfied",
           "evidence": [
             "crates/mncs-model/src/proof_kernel.rs",
-            "crates/mncs-cli/tests/proof_kernel.rs"
+            "crates/mncs-cli/tests/proof_kernel.rs",
+            "crates/mncs-model/src/proof_dep.rs"
           ]
         },
         {
@@ -552,7 +558,8 @@
           "state": "satisfied",
           "evidence": [
             "examples/execution/proof-kernel-corpus.json",
-            "examples/execution/proof-kernel-fuzz-corpus.json"
+            "examples/execution/proof-kernel-fuzz-corpus.json",
+            "examples/execution/proof-dep-corpus.json"
           ]
         },
         {
@@ -619,11 +626,13 @@
       ],
       "evidence_artifacts": [
         "docs/rfc-0007-evidence.md",
-        "docs/rfc-conformance.md"
+        "docs/rfc-conformance.md",
+        "docs/rfc-0007-tranche-02-calculus.md"
       ],
       "tests": [
         "crates/mncs-cli/tests/proof_kernel.rs",
-        "crates/mncs-model proof_kernel unit tests"
+        "crates/mncs-model proof_kernel unit tests",
+        "crates/mncs-model proof_dep unit tests"
       ],
       "dependents": [
         "0003",
@@ -649,13 +658,9 @@
         "0027"
       ],
       "gaps": [
-        "0007-G1 dependent application needs substitution (UNKNOWN boundary)",
-        "0007-G2 NatElim over Succ-literals and stuck scrutinees (UNKNOWN boundary)",
-        "0007-G3 open proof terms need assumption accounting (UNKNOWN boundary)",
         "0007-G4 proof transport through every compiler stage unresolved",
         "0007-G5 file-based proof ingestion into mncs compile is a follow-up",
-        "0007-G6 proof erasure semantics unimplemented",
-        "0007-G7 one-step beta reduction deferred"
+        "0007-G6 proof erasure semantics unimplemented"
       ],
       "pressure_sources": [
         "mncs-actions proof-kernel conformance",
