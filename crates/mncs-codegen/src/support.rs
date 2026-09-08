@@ -134,16 +134,28 @@ pub(crate) fn export_name(identity: &str) -> String {
     )
 }
 
-/// Native symbol for an MNCS function base name. C reserves `main` for the
-/// process entry point, but `fn main` is the natural MNCS entry shape, so
-/// the native backends (C11, LLVM, Cranelift via the shared C driver)
-/// define and call it as `mncs_main`. The driver maps through this same
-/// function, so module and driver always agree.
+/// Native symbol for an MNCS function base name.
+///
+/// All MNCS-generated function symbols live under the `mncs_` namespace so
+/// they cannot collide with libc/libm (`trunc`, `min`, `exp`, `log`, ...),
+/// compiler/runtime support symbols, or platform names. `fn main` is the
+/// natural MNCS entry shape but C reserves `main`, so it maps to
+/// `mncs_main` like every other function. Names already under `mncs_` keep
+/// their spelling (idempotent); everything else gains the prefix. The C11,
+/// LLVM, and Cranelift drivers map through this same function, so module
+/// and driver always agree. This is hygienic by construction, not a
+/// blacklist: any present or future libc name is namespaced away.
 pub(crate) fn c_symbol(name: &str) -> String {
-    if name == "main" {
+    if name == "main" || name == "mncs_main" {
         "mncs_main".to_owned()
+    } else if let Some(stripped) = name.strip_prefix("mncs_") {
+        // Already namespaced. Re-prefix only if the remainder would still
+        // collide with the runtime helper surface is unnecessary: the full
+        // `mncs_` spelling is already reserved for generated symbols, and
+        // keeping it stable preserves artifact determinism.
+        format!("mncs_{stripped}")
     } else {
-        name.to_owned()
+        format!("mncs_{name}")
     }
 }
 
