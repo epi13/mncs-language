@@ -1,0 +1,65 @@
+mncs 0.12;
+
+// Pressure: coherent [f64; N] representation across every executable backend.
+// Lengths 2/4/6/8, local arrays, array parameters, indexed reads,
+// iteration/reduction. Values ride bit-carried (never numerically
+// converted) through cells, call returns, and select blends.
+
+module examples.pressure.f64arrays;
+
+fn fsum2(a: [f64; 2]) -> (result: f64) {
+    iterate i over a carrying s: f64 = 0.0 {
+        next s = s + a[i];
+    }
+    return s;
+}
+
+fn entry_f2(a0: f64, a1: f64) -> (result: f64) {
+    return fsum2([a0, a1]);
+}
+
+fn fsum4(a: [f64; 4]) -> (result: f64) {
+    iterate i over a carrying s: f64 = 0.0 {
+        next s = s + a[i];
+    }
+    return s;
+}
+
+fn entry_f4(a0: f64, a1: f64, a2: f64, a3: f64) -> (result: f64) {
+    return fsum4([a0, a1, a2, a3]);
+}
+
+fn fsum6(a: [f64; 6]) -> (result: f64) {
+    iterate i over a carrying s: f64 = 0.0 {
+        next s = s + a[i];
+    }
+    return s;
+}
+
+fn entry_f6(a0: f64, a1: f64, a2: f64, a3: f64, a4: f64, a5: f64) -> (result: f64) {
+    return fsum6([a0, a1, a2, a3, a4, a5]);
+}
+
+fn fsum8(a: [f64; 8]) -> (result: f64) {
+    iterate i over a carrying s: f64 = 0.0 {
+        next s = s + a[i];
+    }
+    return s;
+}
+
+fn entry_f8(a0: f64, a1: f64, a2: f64, a3: f64, a4: f64, a5: f64, a6: f64, a7: f64) -> (result: f64) {
+    return fsum8([a0, a1, a2, a3, a4, a5, a6, a7]);
+}
+
+fn entry_local6(a0: f64, a1: f64, a2: f64, a3: f64, a4: f64, a5: f64) -> (result: f64) {
+    let xs: [f64; 6] = [a0, a1, a2, a3, a4, a5];
+    iterate i over xs carrying s: f64 = 0.0 {
+        next s = s + xs[i];
+    }
+    return s;
+}
+
+fn entry_index4(a0: f64, a1: f64, a2: f64, a3: f64) -> (result: f64) {
+    let xs: [f64; 4] = [a0, a1, a2, a3];
+    return xs[0] + xs[3];
+}

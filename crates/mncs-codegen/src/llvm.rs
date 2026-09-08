@@ -543,6 +543,9 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
     // honors them; every other target lowers all functions as ordinary
     // callable definitions. Options (not target facts) carry the selection
     // so the request/plan target identity stays exact.
+    // Kernel entries arrive as logical MNCS names; native symbols live under
+    // `mncs_` (see `support::c_symbol`), so map before comparing against the
+    // physical export names.
     let kernel_entries: std::collections::BTreeSet<String> = plan
         .backend
         .as_ref()
@@ -551,7 +554,7 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
             list.split(',')
                 .map(str::trim)
                 .filter(|name| !name.is_empty())
-                .map(str::to_owned)
+                .map(crate::support::c_symbol)
                 .collect()
         })
         .unwrap_or_default();
