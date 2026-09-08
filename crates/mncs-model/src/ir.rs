@@ -111,6 +111,9 @@ pub enum IrOperationKind {
     FloatCompare {
         predicate: String,
     },
+    FloatIntrinsic {
+        function: String,
+    },
     BooleanOp {
         operator: String,
     },
@@ -1005,6 +1008,17 @@ fn lower_executable_body(
                 BodyOperationKind::FloatCompare { predicate } => (
                     IrOperationKind::FloatCompare {
                         predicate: predicate.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    Some(machine_intent_links(program, function, block, operation)),
+                    None,
+                ),
+                BodyOperationKind::FloatIntrinsic {
+                    function: intrinsic,
+                } => (
+                    IrOperationKind::FloatIntrinsic {
+                        function: intrinsic.clone(),
                     },
                     Vec::new(),
                     Vec::new(),

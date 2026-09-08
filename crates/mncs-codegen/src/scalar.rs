@@ -92,6 +92,11 @@ pub enum ScalarInst {
         lhs: SemanticId,
         rhs: SemanticId,
     },
+    FloatIntrinsic {
+        dest: ScalarValue,
+        function: String,
+        src: SemanticId,
+    },
     Boolean {
         dest: ScalarValue,
         operator: String,
@@ -488,6 +493,16 @@ fn lower_instruction(
                 predicate: predicate.clone(),
                 lhs: operand(instruction, 0)?,
                 rhs: operand(instruction, 1)?,
+            })
+        }
+        SsaInstructionKind::FloatIntrinsic { function } => {
+            if !matches!(function.as_str(), "sin" | "cos") {
+                return Err(format!("unsupported float intrinsic {function}"));
+            }
+            Ok(ScalarInst::FloatIntrinsic {
+                dest,
+                function: function.clone(),
+                src: operand(instruction, 0)?,
             })
         }
         SsaInstructionKind::FiniteConstruct {

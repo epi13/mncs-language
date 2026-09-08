@@ -538,6 +538,41 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
             );
             let _ = writeln!(out, "    ok_fl_{dest_n}:");
         }
+        ScalarInst::FloatIntrinsic {
+            dest,
+            function,
+            src,
+        } => {
+            // Text form only; the JIT/AOT builder lowers the same guard
+            // and call shape through the declared `sin`/`cos` import.
+            let dest_n = names.value(&dest.id);
+            let src_n = names.value(src);
+            let call = match function.as_str() {
+                "sin" => "call sin",
+                "cos" => "call cos",
+                _ => "call mncs_unknown_float_intrinsic",
+            };
+            let _ = writeln!(out, "        {dest_n}_l = bitcast.f64 {src_n}");
+            let _ = writeln!(out, "        {dest_n}_z = f64const 0x0000000000000000");
+            let _ = writeln!(out, "        {dest_n}_d = fsub {dest_n}_l, {dest_n}_l");
+            let _ = writeln!(out, "        {dest_n}_b = fcmp une {dest_n}_d, {dest_n}_z");
+            let _ = writeln!(out, "        brnz {dest_n}_b, fail_fl_{dest_n}");
+            let _ = writeln!(out, "        {dest_n}_f = {call} {dest_n}_l");
+            let _ = writeln!(out, "        {dest_n}_dr = fsub {dest_n}_f, {dest_n}_f");
+            let _ = writeln!(
+                out,
+                "        {dest_n}_br = fcmp une {dest_n}_dr, {dest_n}_z"
+            );
+            let _ = writeln!(out, "        brnz {dest_n}_br, fail_fl_{dest_n}");
+            let _ = writeln!(out, "        {dest_n} = bitcast.i64 {dest_n}_f");
+            let _ = writeln!(out, "        jump ok_fl_{dest_n}");
+            let _ = writeln!(out, "    fail_fl_{dest_n}:");
+            out.push_str("        v_bad = iconst.i32 1\n        v_z = iconst.i64 0\n");
+            out.push_str(
+                "        store.i32 v_bad, st\n        store.i64 v_z, val\n        return\n",
+            );
+            let _ = writeln!(out, "    ok_fl_{dest_n}:");
+        }
         ScalarInst::FloatCompare {
             dest,
             predicate,
@@ -1301,6 +1336,7 @@ fn scalar_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
         ScalarInst::Const { dest, .. }
         | ScalarInst::FloatConst { dest, .. }
         | ScalarInst::Float { dest, .. }
+        | ScalarInst::FloatIntrinsic { dest, .. }
         | ScalarInst::FloatCompare { dest, .. }
         | ScalarInst::Integer { dest, .. }
         | ScalarInst::Boolean { dest, .. }
@@ -1696,6 +1732,49 @@ pub fn aot_object_bytes(scalar: &ScalarModule) -> Result<Vec<u8>, String> {
 ///   mncs_cell_alloc(bytes) -> offset
 ///   mncs_slot_store32/64(at, value)
 ///   mncs_slot_load32/64(at) -> zero-extended value
+/// Trigonometry shims (Profile 0.12): same-process libm, exactly like
+/// the reference executor. Registered under the plain C library names so
+/// AOT objects resolve them from libm at link time with no driver change.
+extern "C" fn mncs_sin_shim(x: f64) -> f64 {
+    x.sin()
+}
+
+/// Trigonometry shims (Profile 0.12): same-process libm, exactly like
+/// the reference executor. Registered under the plain C library names so
+/// AOT objects resolve them from libm at link time with no driver change.
+extern "C" fn mncs_cos_shim(x: f64) -> f64 {
+    x.cos()
+}
+
+fn module_uses_trig(module: &ScalarModule) -> bool {
+    module.functions.iter().any(|function| {
+        function.blocks.iter().any(|block| {
+            block
+                .insts
+                .iter()
+                .any(|inst| matches!(inst, ScalarInst::FloatIntrinsic { .. }))
+        })
+    })
+}
+
+/// Declare (once per function build) one of the trigonometry entry
+/// points. Both share the uniform binary64 signature `sin/cos(f64)`.
+fn trig_libcall<M: cranelift_module::Module>(
+    module: &mut M,
+    func: &mut cranelift_codegen::ir::Function,
+    name: &str,
+) -> cranelift_codegen::ir::FuncRef {
+    use cranelift_codegen::ir::{types, AbiParam, Signature};
+    use cranelift_module::Linkage;
+    let mut sig = Signature::new(module.target_config().default_call_conv);
+    sig.params.push(AbiParam::new(types::F64));
+    sig.returns.push(AbiParam::new(types::F64));
+    let id = module
+        .declare_function(name, Linkage::Import, &sig)
+        .expect("declare trig libcall");
+    module.declare_func_in_func(id, func)
+}
+
 fn cell_libcall<M: cranelift_module::Module>(
     module: &mut M,
     func: &mut cranelift_codegen::ir::Function,
@@ -1888,6 +1967,61 @@ where
                                 // unknown float operators first.
                                 _ => builder.ins().fadd(left, right),
                             };
+                            let diff = builder.ins().fsub(computed, computed);
+                            let bad = builder.ins().fcmp(FloatCC::NotEqual, diff, zero);
+                            let cont = builder.create_block();
+                            builder.ins().brif(
+                                bad,
+                                fail,
+                                &[] as &[BlockArg],
+                                cont,
+                                &[] as &[BlockArg],
+                            );
+                            builder.switch_to_block(cont);
+                            builder.seal_block(cont);
+                            let produced = jit_f64_to_bits(&mut builder, f64slot, computed);
+                            values.insert(dest.id.clone(), produced);
+                        }
+                        ScalarInst::FloatIntrinsic {
+                            dest,
+                            function,
+                            src,
+                        } => {
+                            // Uniform i64 cells bitcast at use; the operand
+                            // and result guard finite into the shared `fail`
+                            // block. The call reaches same-process libm
+                            // through the declared import (JIT shims; AOT
+                            // resolves `sin`/`cos` from libm at link time).
+                            if !matches!(function.as_str(), "sin" | "cos") {
+                                let always = builder.ins().iconst(types::I8, 1);
+                                let dead = builder.create_block();
+                                builder.ins().brif(
+                                    always,
+                                    fail,
+                                    &[] as &[BlockArg],
+                                    dead,
+                                    &[] as &[BlockArg],
+                                );
+                                builder.switch_to_block(dead);
+                                builder.seal_block(dead);
+                            }
+                            let input = jit_bits_to_f64(&mut builder, f64slot, values[src]);
+                            let zero = builder.ins().f64const(Ieee64::with_bits(0));
+                            let diff = builder.ins().fsub(input, input);
+                            let bad = builder.ins().fcmp(FloatCC::NotEqual, diff, zero);
+                            let cont = builder.create_block();
+                            builder.ins().brif(
+                                bad,
+                                fail,
+                                &[] as &[BlockArg],
+                                cont,
+                                &[] as &[BlockArg],
+                            );
+                            builder.switch_to_block(cont);
+                            builder.seal_block(cont);
+                            let callee = trig_libcall(module, builder.func, function.as_str());
+                            let call = builder.ins().call(callee, &[input]);
+                            let computed = builder.inst_results(call)[0];
                             let diff = builder.ins().fsub(computed, computed);
                             let bad = builder.ins().fcmp(FloatCC::NotEqual, diff, zero);
                             let cont = builder.create_block();
@@ -3047,6 +3181,10 @@ impl JitSession {
 
         let isa = host_isa()?;
         let mut jit_builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+        if module_uses_trig(scalar) {
+            jit_builder.symbol("sin", mncs_sin_shim as *const u8);
+            jit_builder.symbol("cos", mncs_cos_shim as *const u8);
+        }
         if module_uses_cells(scalar) {
             jit_builder.symbol("mncs_cell_alloc", host_cell_alloc as *const u8);
             jit_builder.symbol("mncs_slot_store32", host_slot_store32 as *const u8);

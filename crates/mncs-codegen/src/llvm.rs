@@ -532,6 +532,11 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
             );
         }
     }
+    // Trigonometry lowers to the LLVM sin/cos intrinsics, which reach the
+    // same host libm as every other backend (bit-exact agreement).
+    for name in ["sin", "cos"] {
+        let _ = writeln!(out, "declare double @llvm.{name}.f64(double)");
+    }
     out.push('\n');
     // PTX kernel entries are explicit per-compilation selections carried in
     // the plan backend options (`ptx-kernel-entries`). Only the NVPTX triple
@@ -794,6 +799,26 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             *split += 1;
             let tmp = format!("fbin{split}");
             let _ = writeln!(out, "  %{tmp} = {llvm_op} double %{left}, %{right}");
+            store_dest(out, names, dest, &tmp);
+            emit_float_finite_guard(out, &tmp, split);
+        }
+        ScalarInst::FloatIntrinsic {
+            dest,
+            function,
+            src,
+        } => {
+            if !matches!(function.as_str(), "sin" | "cos") {
+                let _ = writeln!(out, "  br label %mncs_fail");
+                return;
+            }
+            let input = load_value(out, names, src, "fi", split);
+            emit_float_finite_guard(out, &input, split);
+            *split += 1;
+            let tmp = format!("fintrin{split}");
+            let _ = writeln!(
+                out,
+                "  %{tmp} = call double @llvm.{function}.f64(double %{input})"
+            );
             store_dest(out, names, dest, &tmp);
             emit_float_finite_guard(out, &tmp, split);
         }
@@ -1798,6 +1823,7 @@ fn scalar_inst_dest(inst: &ScalarInst) -> Option<&ScalarValue> {
         | ScalarInst::FloatConst { dest, .. }
         | ScalarInst::Float { dest, .. }
         | ScalarInst::FloatCompare { dest, .. }
+        | ScalarInst::FloatIntrinsic { dest, .. }
         | ScalarInst::Integer { dest, .. }
         | ScalarInst::Boolean { dest, .. }
         | ScalarInst::Compare { dest, .. }

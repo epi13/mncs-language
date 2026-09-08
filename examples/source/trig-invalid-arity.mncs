@@ -1,0 +1,8 @@
+mncs 0.12;
+
+// Negative fixture: `sin` takes exactly one float argument (MNP199).
+module examples.trig_invalid_arity;
+
+fn bad(x: f64, y: f64) -> (result: f64) {
+    return sin(x, y);
+}

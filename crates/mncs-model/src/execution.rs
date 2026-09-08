@@ -1757,6 +1757,53 @@ fn execute_operation(
                 ExecutionValue::Boolean { value },
             );
         }
+        BodyOperationKind::FloatIntrinsic { function } => {
+            let Some(input) = float_operand(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "float intrinsic operand was unavailable or not a float value".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            if !input.is_finite() {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    format!("float {function} trapped on a non-finite input"),
+                );
+                return Some(result.clone());
+            }
+            // Same-process libm: the reference evaluation every backend
+            // must agree with bit-exactly.
+            let value = match function.as_str() {
+                "sin" => input.sin(),
+                "cos" => input.cos(),
+                _ => {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        Some(identity.clone()),
+                        format!("unsupported float intrinsic {function:?}"),
+                    );
+                    return Some(result.clone());
+                }
+            };
+            if !value.is_finite() {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    format!("float {function} trapped on a non-finite result"),
+                );
+                return Some(result.clone());
+            }
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Float {
+                    bits: value.to_bits(),
+                    ty: FloatType::f64(),
+                },
+            );
+        }
         BodyOperationKind::BooleanOp { operator } => {
             let Some((left, right)) = boolean_operands(operation, values) else {
                 result.fail(
@@ -3471,6 +3518,19 @@ fn integer_operands(
         return None;
     };
     Some((*left, *right))
+}
+
+fn float_operand(
+    operation: &BodyOperation,
+    values: &BTreeMap<String, ExecutionValue>,
+) -> Option<f64> {
+    let [input] = operation.operands.as_slice() else {
+        return None;
+    };
+    let Some(ExecutionValue::Float { bits, .. }) = values.get(input) else {
+        return None;
+    };
+    Some(f64::from_bits(*bits))
 }
 
 fn float_operands(

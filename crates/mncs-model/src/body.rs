@@ -575,6 +575,13 @@ pub enum BodyOperationKind {
     FloatCompare {
         predicate: String,
     },
+    /// Binary64 trigonometry (Profile 0.12): `sin` | `cos`. Same-process
+    /// libm on every backend, so layers agree bit-exactly. The operand
+    /// must be finite and the result is finite for finite inputs; both
+    /// are guarded like arithmetic.
+    FloatIntrinsic {
+        function: String,
+    },
     /// Strict boolean conjunction/disjunction (Profile 0.6). Both operands
     /// are total values; evaluation is not short-circuited.
     BooleanOp {
@@ -1570,6 +1577,46 @@ fn validate_operation(
                     "MNB042",
                     format!("{path}.results"),
                     "float comparison result must have boolean type",
+                ));
+            }
+        }
+        BodyOperationKind::FloatIntrinsic { function } => {
+            if !matches!(function.as_str(), "sin" | "cos") {
+                errors.push(body_diagnostic(
+                    "MNB134",
+                    format!("{path}.kind"),
+                    format!("unsupported float intrinsic {function:?}"),
+                ));
+            }
+            if operation.operands.len() != 1 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB135",
+                    path.to_owned(),
+                    "float intrinsics require one operand and one result",
+                ));
+            }
+            for operand in &operation.operands {
+                if !matches!(
+                    available.get(operand),
+                    Some(BodyType::Float(ty)) if ty.is_supported()
+                ) {
+                    errors.push(body_diagnostic(
+                        "MNB136",
+                        format!("{path}.operands"),
+                        "float intrinsic operand type must be binary64",
+                    ));
+                }
+            }
+            if operation.results.first().is_some_and(|result| {
+                !matches!(
+                    result.ty,
+                    BodyType::Float(ty) if ty.is_supported()
+                )
+            }) {
+                errors.push(body_diagnostic(
+                    "MNB137",
+                    format!("{path}.results"),
+                    "float intrinsic result type must be binary64",
                 ));
             }
         }

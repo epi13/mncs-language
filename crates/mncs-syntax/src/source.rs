@@ -620,6 +620,15 @@ pub enum AstExpr {
         view: Box<AstExpr>,
         span: SourceSpan,
     },
+    /// Binary64 trigonometry `sin(x)` / `cos(x)` (Profile 0.12). The
+    /// parser preserves the intrinsic name and operand; elaboration
+    /// supplies the float facts and the non-finite trap obligation.
+    /// Same-process libm on every backend, so layers agree bit-exactly.
+    FloatIntrinsic {
+        name: SpannedText,
+        argument: Box<AstExpr>,
+        span: SourceSpan,
+    },
     /// Verify-only Ed25519 check
     /// `ed25519_verify(pubkey, message, signature)` (Profile 0.8).
     /// Authority comes from the enclosing function's declarations
@@ -652,6 +661,7 @@ impl AstExpr {
             | Self::Boolean { text: name, .. } => name.span,
             Self::QualifiedPath { span, .. } => *span,
             Self::FiniteVariant { span, .. }
+            | Self::FloatIntrinsic { span, .. }
             | Self::Call { span, .. }
             | Self::Match { span, .. }
             | Self::Binary { span, .. }
@@ -2573,7 +2583,8 @@ impl<'a> Parser<'a> {
 
     /// Parse the Profile 0.8 selection intrinsics `select(c, t, f)` and
     /// `replace(seq, index, element)`, plus the host intrinsics
-    /// `host_read()` and `clock_read()`. `name` is the already-consumed
+    /// `host_read()` and `clock_read()`, plus the Profile 0.12 float
+    /// intrinsics `sin(x)` and `cos(x)`. `name` is the already-consumed
     /// intrinsic identifier.
     fn intrinsic_selection(&mut self, name: SpannedText) -> Option<AstExpr> {
         self.expect(
@@ -2652,6 +2663,41 @@ impl<'a> Parser<'a> {
                 self.error(
                     "MNP194",
                     "clock_read takes no arguments; authority comes from the enclosing function's declarations",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("sin", 1) | ("cos", 1) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_12) {
+                    self.error(
+                        "MNP201",
+                        "float intrinsics require source profile 0.12 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(argument),) = (iter.next(),) else {
+                    return None;
+                };
+                Some(AstExpr::FloatIntrinsic {
+                    name,
+                    argument: Box::new(argument),
+                    span,
+                })
+            }
+            ("sin", _) => {
+                self.error(
+                    "MNP199",
+                    "sin takes exactly one float argument",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("cos", _) => {
+                self.error(
+                    "MNP200",
+                    "cos takes exactly one float argument",
                     vec![TokenKind::RightParen],
                 );
                 None
@@ -3873,6 +3919,8 @@ fn is_profile08_intrinsic(name: &str) -> bool {
             | "reduce_sum_checked"
             | "reduce_min"
             | "reduce_max"
+            | "sin"
+            | "cos"
     )
 }
 

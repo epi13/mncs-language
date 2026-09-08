@@ -312,7 +312,8 @@ impl Program {
                                 });
                             }
                             BodyOperationKind::Float { .. }
-                            | BodyOperationKind::FloatCompare { .. } => {
+                            | BodyOperationKind::FloatCompare { .. }
+                            | BodyOperationKind::FloatIntrinsic { .. } => {
                                 // Binary64 operators and comparisons trap on
                                 // non-finite inputs (and operators on
                                 // non-finite results); the trap is the

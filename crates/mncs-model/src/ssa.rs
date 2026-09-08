@@ -68,6 +68,9 @@ pub enum SsaInstructionKind {
     FloatCompare {
         predicate: String,
     },
+    FloatIntrinsic {
+        function: String,
+    },
     BooleanOp {
         operator: String,
     },
@@ -2098,6 +2101,9 @@ fn ssa_kind(kind: &IrOperationKind) -> SsaInstructionKind {
         IrOperationKind::FloatCompare { predicate } => SsaInstructionKind::FloatCompare {
             predicate: predicate.clone(),
         },
+        IrOperationKind::FloatIntrinsic { function } => SsaInstructionKind::FloatIntrinsic {
+            function: function.clone(),
+        },
         IrOperationKind::HostCall {
             capability,
             operation,
@@ -2149,6 +2155,9 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
         },
         BodyOperationKind::FloatCompare { predicate } => SsaInstructionKind::FloatCompare {
             predicate: predicate.clone(),
+        },
+        BodyOperationKind::FloatIntrinsic { function } => SsaInstructionKind::FloatIntrinsic {
+            function: function.clone(),
         },
         BodyOperationKind::BooleanOp { operator } => SsaInstructionKind::BooleanOp {
             operator: operator.clone(),

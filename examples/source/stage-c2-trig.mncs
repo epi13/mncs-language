@@ -1,0 +1,39 @@
+mncs 0.12;
+
+// Stage C2: binary64 trigonometry on every executable backend.
+// `sin(x)` and `cos(x)` take a binary64 radian operand and produce a
+// binary64 result; the operand is guarded finite before the call and
+// the result is guarded finite after it (the float trap rule), so a
+// non-finite operand traps. Every backend reaches the same host libm,
+// so finite results agree bit-for-bit. Chained and nested forms below
+// exercise multiple intrinsics and mixed intrinsic/arithmetic bodies.
+
+module examples.stage.trig;
+
+fn fsin(x: f64) -> (result: f64) {
+    return sin(x);
+}
+
+fn fcos(x: f64) -> (result: f64) {
+    return cos(x);
+}
+
+fn sincos(x: f64) -> (result: f64) {
+    return sin(x) + cos(x);
+}
+
+fn sin_of_cos(x: f64) -> (result: f64) {
+    return sin(cos(x));
+}
+
+fn pythag(x: f64) -> (result: f64) {
+    let s: f64 = sin(x);
+    let c: f64 = cos(x);
+    return s * s + c * c;
+}
+
+// The natural entry shape also lowers on the native backends
+// (`fn main` maps to the `mncs_main` C symbol).
+fn main() -> (result: f64) {
+    return sin(0.5) + cos(0.5);
+}

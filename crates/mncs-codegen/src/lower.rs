@@ -7,7 +7,7 @@ use mncs_model::{
     SsaModule, SsaTerminator, SsaValue,
 };
 
-use crate::wasm::{Instr, ValType, WasmFunction, WasmModule};
+use crate::wasm::{Instr, ValType, WasmFunction, WasmImport, WasmModule};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoweringOutcome {
@@ -34,18 +34,35 @@ pub fn lower_module(
     let mut functions = Vec::new();
     let mut exports = Vec::new();
     let mut unsupported = Vec::new();
+    // Trigonometry imports come first in index space (`0..imports.len()`),
+    // so every defined-function index shifts by the import count. The set
+    // is fixed up front by scanning the whole module: deterministic and
+    // independent of lowering order.
+    let trig_imports = trig_import_list(ssa);
+    let import_shift = trig_imports.len() as u32;
     let function_indices = ssa
         .functions
         .iter()
         .enumerate()
-        .map(|(index, function)| (function.semantic_identity.clone(), index as u32))
+        .map(|(index, function)| {
+            (
+                function.semantic_identity.clone(),
+                import_shift + index as u32,
+            )
+        })
         .collect::<BTreeMap<_, _>>();
     for (index, function) in ssa.functions.iter().enumerate() {
         let name = names
             .get(index)
             .cloned()
             .unwrap_or_else(|| export_name(&function.semantic_identity));
-        match lower_function(function, name, &function_indices, &composites) {
+        match lower_function(
+            function,
+            name,
+            &function_indices,
+            &trig_imports,
+            &composites,
+        ) {
             Ok(wasm) => {
                 exports.push(wasm.name.clone());
                 functions.push(wasm);
@@ -53,9 +70,19 @@ pub fn lower_module(
             Err(reason) => unsupported.push(format!("{}: {reason}", function.identity.0)),
         }
     }
+    let imports = trig_imports
+        .iter()
+        .map(|name| WasmImport {
+            module: "mncs".to_owned(),
+            name: name.clone(),
+            params: vec![ValType::F64],
+            results: vec![ValType::F64],
+        })
+        .collect::<Vec<_>>();
     let module = if unsupported.is_empty() && !functions.is_empty() {
         Some(if composites.uses_composites {
             WasmModule {
+                imports: imports.clone(),
                 globals: vec![crate::wasm::WasmGlobal {
                     valtype: ValType::I32,
                     mutable: true,
@@ -72,6 +99,7 @@ pub fn lower_module(
             }
         } else {
             WasmModule {
+                imports,
                 globals: Vec::new(),
                 memory: None,
                 functions,
@@ -85,6 +113,24 @@ pub fn lower_module(
         exports,
         unsupported,
     }
+}
+
+/// Sorted trigonometry imports used anywhere in the module (Profile
+/// 0.12). Fixed up front so import indices are deterministic and
+/// independent of lowering order; defined-function indices shift by the
+/// import count.
+fn trig_import_list(ssa: &SsaModule) -> Vec<String> {
+    let mut names = BTreeSet::new();
+    for function in &ssa.functions {
+        for block in &function.blocks {
+            for instruction in &block.instructions {
+                if let SsaInstructionKind::FloatIntrinsic { function } = &instruction.kind {
+                    names.insert(function.clone());
+                }
+            }
+        }
+    }
+    names.into_iter().collect()
 }
 
 /// Logical slot width of one composite field cell in linear memory.
@@ -219,6 +265,7 @@ fn lower_function(
     function: &SsaFunction,
     name: String,
     function_indices: &BTreeMap<SemanticId, u32>,
+    trig_imports: &[String],
     composites: &CompositeInfo,
 ) -> Result<WasmFunction, String> {
     if function.outputs.len() != 1 {
@@ -257,7 +304,7 @@ fn lower_function(
         body.push(Instr::I32Eq);
         body.push(Instr::If);
         for instruction in &block.instructions {
-            lower_instruction(&layout, instruction, &mut body, composites)?;
+            lower_instruction(&layout, instruction, &mut body, trig_imports, composites)?;
         }
         lower_terminator(&layout, &block.terminator, &mut body)?;
         body.push(Instr::End);
@@ -348,6 +395,7 @@ fn lower_instruction(
     layout: &FunctionLayout,
     instruction: &mncs_model::SsaInstruction,
     body: &mut Vec<Instr>,
+    trig_imports: &[String],
     composites: &CompositeInfo,
 ) -> Result<(), String> {
     match &instruction.kind {
@@ -492,6 +540,25 @@ fn lower_instruction(
             body.push(Instr::LocalGet(left));
             body.push(Instr::LocalGet(right));
             body.push(instruction_op);
+            body.push(Instr::LocalSet(dest));
+            emit_finite_guard(body, dest);
+        }
+        SsaInstructionKind::FloatIntrinsic { function } => {
+            if !matches!(function.as_str(), "sin" | "cos") {
+                return Err(format!("unsupported float intrinsic {function}"));
+            }
+            let dest = dest_local(layout, instruction)?;
+            let src = operand_local(layout, instruction, 0)?;
+            // The non-finite trap rule, realized as the conservative
+            // fallback: guard the input and the result around the host
+            // call, exactly like arithmetic.
+            emit_finite_guard(body, src);
+            body.push(Instr::LocalGet(src));
+            let import = trig_imports
+                .iter()
+                .position(|import| import == function)
+                .ok_or_else(|| format!("float intrinsic {function} was not imported"))?;
+            body.push(Instr::Call(import as u32));
             body.push(Instr::LocalSet(dest));
             emit_finite_guard(body, dest);
         }
@@ -2268,7 +2335,9 @@ pub fn emit_alloc_helpers(module: &mut WasmModule) {
                 Instr::LocalGet(1),
             ],
         });
-        let alloc_index = (module.functions.len() - 1) as u32;
+        // Defined-function indices follow the imports, so the helper
+        // index shifts by the import count.
+        let alloc_index = (module.imports.len() + module.functions.len() - 1) as u32;
         for function in &mut module.functions {
             rewrite_alloc_calls(function, alloc_index);
         }
