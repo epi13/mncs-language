@@ -16,8 +16,53 @@ use crate::canonical::{canonical_json_value, sha256_hex};
 use crate::identity::{function_id, SemanticId};
 use crate::{
     ArithmeticIntent, BodyBlock, BodyOperation, BodyOperationKind, BodyTerminator, BodyType,
-    BoundsEvidence, Function, FunctionBody, IntegerType, Program, SequenceBound,
+    BoundsEvidence, FloatType, Function, FunctionBody, IntegerType, Program, SequenceBound,
 };
+
+/// Recover the `f64` of a float boundary value.
+pub fn float_value(value: &ExecutionValue) -> Option<f64> {
+    match value {
+        ExecutionValue::Float { bits, .. } => Some(f64::from_bits(*bits)),
+        _ => None,
+    }
+}
+
+/// IEEE-754 binary64 arithmetic with the fail-closed trap rule: a
+/// non-finite input or result evaluates to `None` (runtime failure),
+/// so NaN payloads never cross backend boundaries and every backend
+/// agrees on every produced value.
+pub fn evaluate_float(operator: &str, left: f64, right: f64) -> Option<f64> {
+    if !left.is_finite() || !right.is_finite() {
+        return None;
+    }
+    let value = match operator {
+        "add" => left + right,
+        "sub" => left - right,
+        "mul" => left * right,
+        "div" => left / right,
+        _ => return None,
+    };
+    value.is_finite().then_some(value)
+}
+
+/// Binary64 comparison with the fail-closed trap rule: non-finite
+/// operands evaluate to `None` (runtime failure), since only `Float`
+/// results (trapped) and finite constants otherwise reach this point —
+/// except for float-typed parameters, which cross the boundary unchecked.
+pub fn compare_floats(predicate: &str, left: f64, right: f64) -> Option<bool> {
+    if !left.is_finite() || !right.is_finite() {
+        return None;
+    }
+    Some(match predicate {
+        "eq" => left == right,
+        "ne" => left != right,
+        "lt" => left < right,
+        "le" => left <= right,
+        "gt" => left > right,
+        "ge" => left >= right,
+        _ => return None,
+    })
+}
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 
@@ -58,6 +103,14 @@ pub enum ExecutionValue {
         value: i128,
         #[serde(rename = "type")]
         ty: IntegerType,
+    },
+    /// IEEE-754 binary64 (Profile 0.12). Bits (not `f64`) keep `Eq` and
+    /// make every serialization exact; boundary values are always finite
+    /// by the float trap rule. `float_value` recovers the `f64`.
+    Float {
+        bits: u64,
+        #[serde(rename = "type")]
+        ty: FloatType,
     },
     Boolean {
         value: bool,
@@ -1632,6 +1685,78 @@ fn execute_operation(
                 ExecutionValue::Boolean { value },
             );
         }
+        BodyOperationKind::FloatConstant { bits, ty } => {
+            if !ty.is_supported() {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    "only binary64 float constants are supported".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Float {
+                    bits: *bits,
+                    ty: *ty,
+                },
+            );
+        }
+        BodyOperationKind::Float { operator } => {
+            let Some((left, right)) = float_operands(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "float operation operands were unavailable or not float values".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(value) = evaluate_float(operator, left, right) else {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    format!("float {operator} trapped on a non-finite input or result"),
+                );
+                return Some(result.clone());
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Float {
+                    bits: value.to_bits(),
+                    ty: FloatType::f64(),
+                },
+            );
+        }
+        BodyOperationKind::FloatCompare { predicate } => {
+            let Some((left, right)) = float_operands(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "float comparison operands were unavailable or not float values".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            if !left.is_finite() || !right.is_finite() {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    "float comparison trapped on a non-finite input".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            let Some(value) = compare_floats(predicate, left, right) else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    format!("unsupported float comparison predicate {predicate:?}"),
+                );
+                return Some(result.clone());
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Boolean { value },
+            );
+        }
         BodyOperationKind::BooleanOp { operator } => {
             let Some((left, right)) = boolean_operands(operation, values) else {
                 result.fail(
@@ -1737,48 +1862,27 @@ fn execute_operation(
                 );
                 return Some(result.clone());
             };
-            let converted = match (operand_value, from, to) {
-                (
-                    ExecutionValue::Integer { value, .. },
-                    BodyType::Integer(_),
-                    BodyType::Integer(target),
-                ) => wrap_to_bits(*value, target.bits, target.signed)
-                    .map(|value| ExecutionValue::Integer { value, ty: *target }),
-                (ExecutionValue::Integer { value, .. }, BodyType::Integer(_), BodyType::Byte) => {
-                    wrap_to_bits(*value, 8, false).map(|value| ExecutionValue::Byte { value })
+            match convert_scalar_value(operand_value, from, to) {
+                Ok(converted) => {
+                    values.insert(operation.results[0].id.clone(), converted);
                 }
-                (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Integer(target)) => {
-                    wrap_to_bits(*value, target.bits, target.signed)
-                        .map(|value| ExecutionValue::Integer { value, ty: *target })
+                Err(ExecutionStatus::RuntimeFailure) => {
+                    result.fail(
+                        ExecutionStatus::RuntimeFailure,
+                        Some(identity.clone()),
+                        "float conversion trapped on a non-finite or out-of-range input".to_owned(),
+                    );
+                    return Some(result.clone());
                 }
-                (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Byte) => {
-                    Some(ExecutionValue::Byte { value: *value })
+                Err(_) => {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        Some(identity.clone()),
+                        "conversion operands do not match the declared conversion".to_owned(),
+                    );
+                    return Some(result.clone());
                 }
-                // Booleans convert outward as 0/1; never inward.
-                (
-                    ExecutionValue::Boolean { value },
-                    BodyType::Named(name),
-                    BodyType::Integer(target),
-                ) if name == "bool" => wrap_to_bits(i128::from(*value), target.bits, target.signed)
-                    .map(|value| ExecutionValue::Integer { value, ty: *target }),
-                (ExecutionValue::Boolean { value }, BodyType::Named(name), BodyType::Byte)
-                    if name == "bool" =>
-                {
-                    Some(ExecutionValue::Byte {
-                        value: i128::from(*value),
-                    })
-                }
-                _ => None,
-            };
-            let Some(converted) = converted else {
-                result.fail(
-                    ExecutionStatus::Unsupported,
-                    Some(identity.clone()),
-                    "conversion operands do not match the declared conversion".to_owned(),
-                );
-                return Some(result.clone());
-            };
-            values.insert(operation.results[0].id.clone(), converted);
+            }
         }
         BodyOperationKind::SequenceConstruct { length, .. } => {
             let mut element_values = Vec::with_capacity(operation.operands.len());
@@ -2902,6 +3006,9 @@ fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) 
         (ExecutionValue::Mask { lanes: bits }, BodyType::Mask { lanes }) => {
             bits.len() == *lanes as usize
         }
+        // Binary64 arguments match by type only: finiteness is a runtime
+        // trap (the guards check inputs), not a request rejection.
+        (ExecutionValue::Float { ty: actual, .. }, BodyType::Float(expected)) => actual == expected,
         _ => false,
     }
 }
@@ -3056,6 +3163,154 @@ fn constant_value(value: i128, ty: &BodyType) -> Option<ExecutionValue> {
     }
 }
 
+/// Shared scalar conversion for both interpreters (Profile 0.12 adds the
+/// float edges). `Ok` is the converted value; `Err(status)` is either
+/// `Unsupported` (no such conversion) or `RuntimeFailure` (the float
+/// fail-closed trap: non-finite or out-of-range).
+pub(crate) fn convert_scalar_value(
+    operand_value: &ExecutionValue,
+    from: &BodyType,
+    to: &BodyType,
+) -> Result<ExecutionValue, ExecutionStatus> {
+    if matches!(from, BodyType::Float(_)) || matches!(to, BodyType::Float(_)) {
+        return convert_float_edge(operand_value, from, to);
+    }
+    convert_scalar_inner(operand_value, from, to).ok_or(ExecutionStatus::Unsupported)
+}
+
+/// Float conversion edges. Int/byte/bool to float rounds per IEEE-754;
+/// float to int/byte truncates toward zero and traps on non-finite or
+/// out-of-range inputs. Same-width float to float is identity.
+fn convert_float_edge(
+    operand_value: &ExecutionValue,
+    from: &BodyType,
+    to: &BodyType,
+) -> Result<ExecutionValue, ExecutionStatus> {
+    let unsupported = Err(ExecutionStatus::Unsupported);
+    let trap = Err(ExecutionStatus::RuntimeFailure);
+    match (operand_value, from, to) {
+        (ExecutionValue::Integer { value, .. }, BodyType::Integer(_), BodyType::Float(ty))
+            if ty.is_supported() =>
+        {
+            let rounded = *value as f64;
+            if rounded.is_finite() {
+                Ok(ExecutionValue::Float {
+                    bits: rounded.to_bits(),
+                    ty: *ty,
+                })
+            } else {
+                trap
+            }
+        }
+        (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Float(ty))
+            if ty.is_supported() =>
+        {
+            Ok(ExecutionValue::Float {
+                bits: (*value as f64).to_bits(),
+                ty: *ty,
+            })
+        }
+        (ExecutionValue::Boolean { value }, BodyType::Named(name), BodyType::Float(ty))
+            if name == "bool" && ty.is_supported() =>
+        {
+            Ok(ExecutionValue::Float {
+                bits: (if *value { 1.0 } else { 0.0f64 }).to_bits(),
+                ty: *ty,
+            })
+        }
+        (ExecutionValue::Float { bits, .. }, BodyType::Float(_), BodyType::Float(to))
+            if to.is_supported() =>
+        {
+            Ok(ExecutionValue::Float {
+                bits: *bits,
+                ty: *to,
+            })
+        }
+        (ExecutionValue::Float { bits, .. }, BodyType::Float(_), BodyType::Integer(target)) => {
+            let truncated = f64::from_bits(*bits);
+            if !truncated.is_finite() {
+                return trap;
+            }
+            let truncated = truncated.trunc();
+            // Range-check in f64 before casting: `as` saturates instead of
+            // trapping, which would hide the failure the rule requires.
+            let (lo, hi_exclusive) = integer_domain_bounds(target.bits, target.signed);
+            if truncated < lo || truncated >= hi_exclusive {
+                return trap;
+            }
+            Ok(ExecutionValue::Integer {
+                value: truncated as i128,
+                ty: *target,
+            })
+        }
+        (ExecutionValue::Float { bits, .. }, BodyType::Float(_), BodyType::Byte) => {
+            let truncated = f64::from_bits(*bits);
+            if !truncated.is_finite() {
+                return trap;
+            }
+            let truncated = truncated.trunc();
+            if !(0.0..256.0).contains(&truncated) {
+                return trap;
+            }
+            Ok(ExecutionValue::Byte {
+                value: truncated as i128,
+            })
+        }
+        _ => unsupported,
+    }
+}
+
+/// Exclusive-upper-bound domain of an integer type as exact `f64`
+/// bounds. All supported widths are exactly representable.
+fn integer_domain_bounds(bits: u16, signed: bool) -> (f64, f64) {
+    if signed {
+        let half = 2f64.powi(i32::from(bits) - 1);
+        (-half, half)
+    } else {
+        (0.0, 2f64.powi(i32::from(bits)))
+    }
+}
+
+fn convert_scalar_inner(
+    operand_value: &ExecutionValue,
+    from: &BodyType,
+    to: &BodyType,
+) -> Option<ExecutionValue> {
+    match (operand_value, from, to) {
+        (
+            ExecutionValue::Integer { value, .. },
+            BodyType::Integer(_),
+            BodyType::Integer(target),
+        ) => wrap_to_bits(*value, target.bits, target.signed)
+            .map(|value| ExecutionValue::Integer { value, ty: *target }),
+        (ExecutionValue::Integer { value, .. }, BodyType::Integer(_), BodyType::Byte) => {
+            wrap_to_bits(*value, 8, false).map(|value| ExecutionValue::Byte { value })
+        }
+        (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Integer(target)) => {
+            wrap_to_bits(*value, target.bits, target.signed)
+                .map(|value| ExecutionValue::Integer { value, ty: *target })
+        }
+        (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Byte) => {
+            Some(ExecutionValue::Byte { value: *value })
+        }
+        // Booleans convert outward as 0/1; never inward.
+        (ExecutionValue::Boolean { value }, BodyType::Named(name), BodyType::Integer(target))
+            if name == "bool" =>
+        {
+            wrap_to_bits(i128::from(*value), target.bits, target.signed)
+                .map(|value| ExecutionValue::Integer { value, ty: *target })
+        }
+        (ExecutionValue::Boolean { value }, BodyType::Named(name), BodyType::Byte)
+            if name == "bool" =>
+        {
+            Some(ExecutionValue::Byte {
+                value: i128::from(*value),
+            })
+        }
+        _ => None,
+    }
+}
+
 fn normalize_value(
     program: &Program,
     value: &ExecutionValue,
@@ -3108,6 +3363,16 @@ fn normalize_value(
         }
         (ExecutionValue::Byte { value }, BodyType::Byte) if (0..=255).contains(value) => {
             Some(ExecutionValue::Byte { value: *value })
+        }
+        // Binary64 arguments normalize to themselves: bits are already the
+        // canonical form, and finiteness is enforced by runtime guards.
+        (ExecutionValue::Float { bits, ty: actual }, BodyType::Float(expected))
+            if actual == expected =>
+        {
+            Some(ExecutionValue::Float {
+                bits: *bits,
+                ty: *actual,
+            })
         }
         (
             ExecutionValue::Sequence { values },
@@ -3206,6 +3471,22 @@ fn integer_operands(
         return None;
     };
     Some((*left, *right))
+}
+
+fn float_operands(
+    operation: &BodyOperation,
+    values: &BTreeMap<String, ExecutionValue>,
+) -> Option<(f64, f64)> {
+    let [left, right] = operation.operands.as_slice() else {
+        return None;
+    };
+    let Some(ExecutionValue::Float { bits: left, .. }) = values.get(left) else {
+        return None;
+    };
+    let Some(ExecutionValue::Float { bits: right, .. }) = values.get(right) else {
+        return None;
+    };
+    Some((f64::from_bits(*left), f64::from_bits(*right)))
 }
 
 fn byte_operands(

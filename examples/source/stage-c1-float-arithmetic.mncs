@@ -1,0 +1,133 @@
+mncs 0.12;
+
+// Stage C1: binary64 float arithmetic on every executable backend.
+// `+ - * /` and the six comparisons are total over finite values; any
+// non-finite input or result traps (the float trap rule), including
+// division by zero, `0.0 / 0.0`, and overflow to infinity. Float
+// literals are `digits.digits` spellings (always finite); boundary
+// values below are computed, never spelled. Conversions round
+// float-to-int by truncation (trapping on non-finite or out-of-range
+// inputs) and int-to-float per IEEE-754.
+
+module examples.stage.floats;
+
+fn fadd(a: f64, b: f64) -> (result: f64) {
+    return a + b;
+}
+
+fn fsub(a: f64, b: f64) -> (result: f64) {
+    return a - b;
+}
+
+fn fmul(a: f64, b: f64) -> (result: f64) {
+    return a * b;
+}
+
+fn fdiv(a: f64, b: f64) -> (result: f64) {
+    return a / b;
+}
+
+fn fchained(x: f64) -> (result: f64) {
+    let square: f64 = x * x;
+    return square + x;
+}
+
+fn flt(a: f64, b: f64) -> (result: bool) {
+    return a < b;
+}
+
+fn fle(a: f64, b: f64) -> (result: bool) {
+    return a <= b;
+}
+
+fn fgt(a: f64, b: f64) -> (result: bool) {
+    return a > b;
+}
+
+fn fge(a: f64, b: f64) -> (result: bool) {
+    return a >= b;
+}
+
+fn feq(a: f64, b: f64) -> (result: bool) {
+    return a == b;
+}
+
+fn fne(a: f64, b: f64) -> (result: bool) {
+    return a != b;
+}
+
+fn f2i(x: f64) -> (result: i64) {
+    return (x as i64);
+}
+
+fn i2f(x: i64) -> (result: f64) {
+    return (x as f64);
+}
+
+fn f2u(x: f64) -> (result: u64) {
+    return (x as u64);
+}
+
+fn u2f(x: u64) -> (result: f64) {
+    return (x as f64);
+}
+
+// A large finite value built by squaring: 1e20^2^2^2 = 1e160.
+fn big() -> (result: f64) {
+    let step: f64 = 100000000000000000000.0;
+    let s2: f64 = step * step;
+    let s4: f64 = s2 * s2;
+    return s4 * s4;
+}
+
+// One more squaring overflows to infinity, so the trap rule fires.
+fn overflow() -> (result: f64) {
+    let step: f64 = 100000000000000000000.0;
+    let s2: f64 = step * step;
+    let s4: f64 = s2 * s2;
+    let s8: f64 = s4 * s4;
+    return s8 * s8;
+}
+
+// Gradual underflow: 1e-20^2^2^2 = 1e-160, then 1e-320 (subnormal,
+// still finite), then 0.0.
+fn tiny() -> (result: f64) {
+    return 0.00000000000000000001;
+}
+
+fn under() -> (result: f64) {
+    let step: f64 = 0.00000000000000000001;
+    let s2: f64 = step * step;
+    let s4: f64 = s2 * s2;
+    let s8: f64 = s4 * s4;
+    return s8 * s8;
+}
+
+fn under_to_zero() -> (result: f64) {
+    let step: f64 = 0.00000000000000000001;
+    let s2: f64 = step * step;
+    let s4: f64 = s2 * s2;
+    let s8: f64 = s4 * s4;
+    let s16: f64 = s8 * s8;
+    return s16 * s16;
+}
+
+// Negative zero: finite with a distinct bit pattern.
+fn negzero() -> (result: f64) {
+    return (0.0 - 1.0) * 0.0;
+}
+
+// Division by zero and zero-by-zero trap on every backend.
+fn divzero(x: f64) -> (result: f64) {
+    return x / 0.0;
+}
+
+fn zerozero() -> (result: f64) {
+    return 0.0 / 0.0;
+}
+
+// The natural entry shape also lowers on the native backends
+// (`fn main` maps to the `mncs_main` C symbol).
+fn main() -> (result: f64) {
+    return 1.5 * 2.0 + 0.5;
+}

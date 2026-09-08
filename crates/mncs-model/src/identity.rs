@@ -259,7 +259,15 @@ impl Program {
                                     &operation_identity,
                                 ))
                             }
+                            crate::BodyOperationKind::Float { .. }
+                            | crate::BodyOperationKind::FloatCompare { .. } => {
+                                Some(crate::obligations::body_obligation_id(
+                                    "float-finite",
+                                    &operation_identity,
+                                ))
+                            }
                             crate::BodyOperationKind::IntegerCompare { .. }
+                            | crate::BodyOperationKind::FloatConstant { .. }
                             | crate::BodyOperationKind::BooleanOp { .. }
                             | crate::BodyOperationKind::FiniteConstruct { .. }
                             | crate::BodyOperationKind::FinitePayloadProject { .. }

@@ -622,28 +622,43 @@ fn emit_block(
         ScalarTerm::Return { value } => {
             let loaded = load_value(out, names, value, "retv", split);
             let ty = names.ty(value);
-            let bits = abi_bits(ty);
-            if bits < 64 {
-                // Unsigned narrow values extend by zero so a wrapping edge
-                // value (u16 `0xFFFF`) decodes as its declared magnitude.
-                let ext = if matches!(ty, ScalarTy::Int(integer) if !integer.signed) {
-                    "zext"
-                } else {
-                    "sext"
-                };
+            // Float results cross as bit-carried words: bitcast the double
+            // into the i64 cell (a converting store would truncate).
+            if matches!(ty, ScalarTy::Float) {
                 let _ = writeln!(
                     out,
-                    "  %ret_ext_{} = {ext} {} %{loaded} to i64",
-                    names.value(value),
-                    llvm_type(ty)
+                    "  %ret_bits_{} = bitcast double %{loaded} to i64",
+                    names.value(value)
                 );
                 let _ = writeln!(
                     out,
-                    "  store i64 %ret_ext_{}, ptr %mncs_value",
+                    "  store i64 %ret_bits_{}, ptr %mncs_value",
                     names.value(value)
                 );
             } else {
-                let _ = writeln!(out, "  store i64 %{loaded}, ptr %mncs_value");
+                let bits = abi_bits(ty);
+                if bits < 64 {
+                    // Unsigned narrow values extend by zero so a wrapping edge
+                    // value (u16 `0xFFFF`) decodes as its declared magnitude.
+                    let ext = if matches!(ty, ScalarTy::Int(integer) if !integer.signed) {
+                        "zext"
+                    } else {
+                        "sext"
+                    };
+                    let _ = writeln!(
+                        out,
+                        "  %ret_ext_{} = {ext} {} %{loaded} to i64",
+                        names.value(value),
+                        llvm_type(ty)
+                    );
+                    let _ = writeln!(
+                        out,
+                        "  store i64 %ret_ext_{}, ptr %mncs_value",
+                        names.value(value)
+                    );
+                } else {
+                    let _ = writeln!(out, "  store i64 %{loaded}, ptr %mncs_value");
+                }
             }
             out.push_str("  store i32 0, ptr %mncs_status\n");
             out.push_str("  ret void\n");
@@ -746,6 +761,76 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 llvm_const(*value, dest.ty)
             );
             store_dest(out, names, dest, &tmp);
+        }
+        ScalarInst::FloatConst { dest, bits } => {
+            *split += 1;
+            let tmp = format!("fk{split}");
+            // Exact hexadecimal float literal; always finite.
+            let _ = writeln!(out, "  %{tmp} = fadd double 0x{bits:016X}, 0.0");
+            store_dest(out, names, dest, &tmp);
+        }
+        ScalarInst::Float {
+            dest,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            let llvm_op = match operator.as_str() {
+                "add" => "fadd",
+                "sub" => "fsub",
+                "mul" => "fmul",
+                "div" => "fdiv",
+                // Unreachable: scalar lowering rejects unknown float
+                // operators before LLVM emission. Fail loudly anyway.
+                _ => {
+                    let _ = writeln!(out, "  br label %mncs_fail");
+                    return;
+                }
+            };
+            let left = load_value(out, names, lhs, "fl", split);
+            let right = load_value(out, names, rhs, "fr", split);
+            emit_float_finite_guard(out, &left, split);
+            emit_float_finite_guard(out, &right, split);
+            *split += 1;
+            let tmp = format!("fbin{split}");
+            let _ = writeln!(out, "  %{tmp} = {llvm_op} double %{left}, %{right}");
+            store_dest(out, names, dest, &tmp);
+            emit_float_finite_guard(out, &tmp, split);
+        }
+        ScalarInst::FloatCompare {
+            dest,
+            predicate,
+            lhs,
+            rhs,
+        } => {
+            // Ordered comparisons: operands are guarded finite first, so
+            // `oeq` et al never observe NaN (which would make every
+            // predicate but `ne` false).
+            let llvm_pred = match predicate.as_str() {
+                "eq" => "oeq",
+                "ne" => "une",
+                "lt" => "olt",
+                "le" => "ole",
+                "gt" => "ogt",
+                "ge" => "oge",
+                // Unreachable: scalar lowering rejects unknown float
+                // operators before LLVM emission. Fail loudly anyway.
+                _ => {
+                    let _ = writeln!(out, "  br label %mncs_fail");
+                    return;
+                }
+            };
+            let left = load_value(out, names, lhs, "fl", split);
+            let right = load_value(out, names, rhs, "fr", split);
+            emit_float_finite_guard(out, &left, split);
+            emit_float_finite_guard(out, &right, split);
+            *split += 1;
+            let tmp = format!("fcmp{split}");
+            let _ = writeln!(out, "  %{tmp} = fcmp {llvm_pred} double %{left}, %{right}");
+            *split += 1;
+            let ext = format!("fx{split}");
+            let _ = writeln!(out, "  %{ext} = zext i1 %{tmp} to i32");
+            store_dest(out, names, dest, &ext);
         }
         ScalarInst::Integer {
             dest,
@@ -1083,6 +1168,61 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let to_ty = llvm_type(*to);
             let converted = if from_ty == to_ty {
                 srcv
+            } else if matches!(to, crate::scalar::ScalarTy::Float) {
+                // Integer, byte, and boolean domains convert to binary64
+                // exactly rounded by hardware (`sitofp`/`uitofp`); every
+                // source value is finite, so no guard is needed.
+                *split += 1;
+                let tmp = format!("cv{split}");
+                if signed_of(*from) {
+                    let _ = writeln!(out, "  %{tmp} = sitofp {from_ty} %{srcv} to {to_ty}");
+                } else {
+                    let _ = writeln!(out, "  %{tmp} = uitofp {from_ty} %{srcv} to {to_ty}");
+                }
+                tmp
+            } else if matches!(from, crate::scalar::ScalarTy::Float) {
+                // Float to integer truncates toward zero and traps on
+                // non-finite or out-of-range inputs (the float trap rule).
+                // The range check runs first: `fptosi`/`fptoui` on a bad
+                // value is poison, and ordered comparisons reject NaN. The
+                // check runs on the untruncated value with sliver-safe
+                // bounds: the upper bound is exact as-is, while the lower
+                // bound admits the fractional sliver `(lo - 1, lo)` whose
+                // truncation still lands in domain (`v > -1` for unsigned
+                // covers `-0.0`, which truncates to zero).
+                let (bits, signed) = match to {
+                    crate::scalar::ScalarTy::Int(integer) => (integer.bits, integer.signed),
+                    crate::scalar::ScalarTy::Byte => (8, false),
+                    _ => {
+                        // No float-to-bool cast exists in the language: fail
+                        // closed with an unreachable trap rather than a
+                        // meaningless conversion.
+                        *split += 1;
+                        let tag = *split;
+                        let _ = writeln!(out, "  br label %mncs_fail");
+                        let _ = writeln!(out, "cv{tag}_dead:");
+                        (8, false)
+                    }
+                };
+                let (lo_pred, lo, hi) = float_domain_guard(bits, signed);
+                *split += 1;
+                let tag = *split;
+                let _ = writeln!(out, "  %cv{tag}_lo = fcmp {lo_pred} double %{srcv}, {lo}");
+                let _ = writeln!(out, "  %cv{tag}_hi = fcmp olt double %{srcv}, {hi}");
+                let _ = writeln!(out, "  %cv{tag}_ok = and i1 %cv{tag}_lo, %cv{tag}_hi");
+                let _ = writeln!(
+                    out,
+                    "  br i1 %cv{tag}_ok, label %cv{tag}_go, label %mncs_fail"
+                );
+                let _ = writeln!(out, "cv{tag}_go:");
+                *split += 1;
+                let tmp = format!("cv{split}");
+                if signed {
+                    let _ = writeln!(out, "  %{tmp} = fptosi double %{srcv} to {to_ty}");
+                } else {
+                    let _ = writeln!(out, "  %{tmp} = fptoui double %{srcv} to {to_ty}");
+                }
+                tmp
             } else {
                 *split += 1;
                 let tmp = format!("cv{split}");
@@ -1547,6 +1687,22 @@ fn emit_checked(
     store_dest(out, names, dest, &format!("{tmp}_v"));
 }
 
+/// Non-finite trap guard for one f64 register (Profile 0.12): `x - x == 0`
+/// holds exactly for finite values (same operand, no rounding) and is NaN
+/// otherwise. Guards branch to mncs_fail so statuses match the reference
+/// executors exactly.
+fn emit_float_finite_guard(out: &mut String, reg: &str, split: &mut u32) {
+    *split += 1;
+    let tag = *split;
+    let _ = writeln!(out, "  %fsub{tag} = fsub double %{reg}, %{reg}");
+    let _ = writeln!(out, "  %ffinite{tag} = fcmp oeq double %fsub{tag}, 0.0");
+    let _ = writeln!(
+        out,
+        "  br i1 %ffinite{tag}, label %ffinite{tag}_ok, label %mncs_fail"
+    );
+    let _ = writeln!(out, "ffinite{tag}_ok:");
+}
+
 /// Guarded division/remainder: a zero divisor always fails; signed division
 /// by MIN / -1 fails under checked intent. Guards branch to mncs_fail so
 /// statuses match the reference executors exactly.
@@ -1639,6 +1795,9 @@ fn flatten_scalar_insts(insts: &[ScalarInst]) -> Vec<&ScalarInst> {
 fn scalar_inst_dest(inst: &ScalarInst) -> Option<&ScalarValue> {
     match inst {
         ScalarInst::Const { dest, .. }
+        | ScalarInst::FloatConst { dest, .. }
+        | ScalarInst::Float { dest, .. }
+        | ScalarInst::FloatCompare { dest, .. }
         | ScalarInst::Integer { dest, .. }
         | ScalarInst::Boolean { dest, .. }
         | ScalarInst::Compare { dest, .. }
@@ -1682,7 +1841,36 @@ fn bits_of(ty: ScalarTy) -> u16 {
         ScalarTy::Byte => 8,
         ScalarTy::Int(integer) => integer.bits,
         ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => 64,
+        ScalarTy::Float => 64,
     }
+}
+
+/// Sliver-safe lower predicate and exact bounds for a guarded
+/// float-to-integer conversion (Profile 0.12), checked against the
+/// *untruncated* value. The upper bound is exact as-is; the lower bound
+/// admits the fractional sliver `(lo - 1, lo)` whose truncation still
+/// lands in domain. The i64 sliver is empty (no double lies strictly
+/// between `-2^63 - 1` and `-2^63`), so `oge` is exact there; narrower
+/// signed domains spell `lo - 1` exactly; unsigned uses `v > -1`, which
+/// also admits `-0.0` (truncates to zero, in domain). Every spelling is
+/// exactly representable in binary64.
+fn float_domain_guard(bits: u16, signed: bool) -> (String, String, String) {
+    let hi: u128 = if signed {
+        1_u128 << (bits - 1)
+    } else {
+        1_u128 << bits
+    };
+    let (predicate, lo) = if signed && bits == 64 {
+        ("oge".to_owned(), format!("-{}.0", 1_u128 << 63))
+    } else if signed {
+        (
+            "ogt".to_owned(),
+            format!("-{}.0", (1_u128 << (bits - 1)) + 1),
+        )
+    } else {
+        ("ogt".to_owned(), "-1.0".to_owned())
+    };
+    (predicate, lo, format!("{hi}.0"))
 }
 
 /// Signedness of a scalar realization kind for widening decisions.

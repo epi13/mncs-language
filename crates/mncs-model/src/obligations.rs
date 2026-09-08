@@ -191,9 +191,11 @@ impl Program {
                             | BodyOperationKind::RecordProject { .. }
                             | BodyOperationKind::FinitePayloadProject { .. }
                             | BodyOperationKind::BooleanOp { .. }
-                            // Byte bitwise/shift/compare and explicit
-                            // conversions are total by definition; sequence
-                            // construction and length observations cannot fail.
+                            // Byte bitwise/shift/compare, float constants, and
+                            // explicit conversions are total by definition;
+                            // sequence construction and length observations
+                            // cannot fail.
+                            | BodyOperationKind::FloatConstant { .. }
                             | BodyOperationKind::ByteBitwise { .. }
                             | BodyOperationKind::ByteShift { .. }
                             | BodyOperationKind::ByteCompare { .. }
@@ -305,6 +307,38 @@ impl Program {
                                     freshness: EvidenceFreshness::Unknown,
                                     fallback: Some(
                                         "the view value exists only on the successful range-check path"
+                                            .to_owned(),
+                                    ),
+                                });
+                            }
+                            BodyOperationKind::Float { .. }
+                            | BodyOperationKind::FloatCompare { .. } => {
+                                // Binary64 operators and comparisons trap on
+                                // non-finite inputs (and operators on
+                                // non-finite results); the trap is the
+                                // conservative fallback, exactly like checked
+                                // division's zero guard, so the obligation
+                                // stays unknown until finiteness is proven
+                                // upstream.
+                                let requirement = requirement_id("float-finite", &subject);
+                                obligations.push(ObligationRecord {
+                                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                    identity: body_obligation_id("float-finite", &subject),
+                                    subject: subject.clone(),
+                                    requirement,
+                                    status: ObligationStatus::Unknown,
+                                    method: "symbolic-float-finite".to_owned(),
+                                    assumptions: function
+                                        .assumptions
+                                        .iter()
+                                        .map(|assumption| {
+                                            assumption_id(namespace, assumption)
+                                        })
+                                        .collect(),
+                                    dependencies: vec![function_identity.clone(), subject],
+                                    freshness: EvidenceFreshness::Unknown,
+                                    fallback: Some(
+                                        "retain the non-finite trap or prove finiteness upstream"
                                             .to_owned(),
                                     ),
                                 });

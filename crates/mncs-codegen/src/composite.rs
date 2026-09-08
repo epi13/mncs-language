@@ -161,6 +161,7 @@ fn slot_width(semantic_type: &str, program: &mncs_model::Program) -> SlotWidth {
     }
     match mncs_model::BodyType::from_semantic_name(semantic_type) {
         mncs_model::BodyType::Integer(ty) if ty.bits == 64 => SlotWidth::W64,
+        mncs_model::BodyType::Float(ty) if ty.is_supported() => SlotWidth::W64,
         mncs_model::BodyType::Sequence { .. }
         | mncs_model::BodyType::Vector { .. }
         | mncs_model::BodyType::Mask { .. } => SlotWidth::W64,
@@ -191,6 +192,7 @@ fn slot_width_registry(
     }
     match mncs_model::BodyType::from_semantic_name(semantic_type) {
         mncs_model::BodyType::Integer(ty) if ty.bits == 64 => SlotWidth::W64,
+        mncs_model::BodyType::Float(ty) if ty.is_supported() => SlotWidth::W64,
         mncs_model::BodyType::Sequence { .. }
         | mncs_model::BodyType::Vector { .. }
         | mncs_model::BodyType::Mask { .. } => SlotWidth::W64,
@@ -368,6 +370,9 @@ impl ArenaWriter {
             (_, Value::Integer { value, .. }) => Ok(BoundaryValue::Bits(*value as u64)),
             (_, Value::Boolean { value }) => Ok(BoundaryValue::Bits(u64::from(*value))),
             (_, Value::Byte { value }) => Ok(BoundaryValue::Bits(*value as u64)),
+            // Floats cross every boundary bit-carried; finiteness is
+            // enforced by producers, so encoding never invents NaN.
+            (_, Value::Float { bits, .. }) => Ok(BoundaryValue::Bits(*bits)),
             (
                 _,
                 Value::Finite {
@@ -516,6 +521,10 @@ impl ArenaWriter {
             }
             Value::Byte { value } => {
                 self.put32(offset, *value as u32);
+                Ok(())
+            }
+            Value::Float { bits, .. } => {
+                self.put64(offset, *bits);
                 Ok(())
             }
             Value::Sequence { values } => {
@@ -842,6 +851,13 @@ impl<'a> ArenaReader<'a> {
                     value: integer_from_slot_bits(raw, ty),
                     ty,
                 })
+            }
+            BodyType::Float(ty) if ty.is_supported() => {
+                let bits = self.get64(offset)?;
+                if !f64::from_bits(bits).is_finite() {
+                    return Err("decoded float field is not finite".to_owned());
+                }
+                Ok(mncs_model::ExecutionValue::Float { bits, ty })
             }
             BodyType::Named(name) if name == "bool" => Ok(mncs_model::ExecutionValue::Boolean {
                 value: self.get32(offset)? == 1,

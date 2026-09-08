@@ -21,6 +21,8 @@ use crate::promises::{
 pub enum ScalarTy {
     Bool,
     Int(IntegerType),
+    /// IEEE-754 binary64 (Profile 0.12), realized in one 64-bit cell.
+    Float,
     /// A byte-oriented 8-bit unsigned logical value (Profile 0.7),
     /// realized in one unsigned 8-bit cell.
     Byte,
@@ -69,6 +71,24 @@ pub enum ScalarInst {
         dest: ScalarValue,
         predicate: String,
         operand: IntegerType,
+        lhs: SemanticId,
+        rhs: SemanticId,
+    },
+    FloatConst {
+        dest: ScalarValue,
+        bits: u64,
+    },
+    /// Binary64 arithmetic with the non-finite trap rule; backends emit
+    /// the input/result finiteness guards as the conservative fallback.
+    Float {
+        dest: ScalarValue,
+        operator: String,
+        lhs: SemanticId,
+        rhs: SemanticId,
+    },
+    FloatCompare {
+        dest: ScalarValue,
+        predicate: String,
         lhs: SemanticId,
         rhs: SemanticId,
     },
@@ -439,6 +459,37 @@ fn lower_instruction(
             lhs: operand(instruction, 0)?,
             rhs: operand(instruction, 1)?,
         }),
+        SsaInstructionKind::FloatConstant { bits, ty } => {
+            if !ty.is_supported() {
+                return Err("only binary64 float constants are supported".to_owned());
+            }
+            Ok(ScalarInst::FloatConst { dest, bits: *bits })
+        }
+        SsaInstructionKind::Float { operator } => {
+            if !matches!(operator.as_str(), "add" | "sub" | "mul" | "div") {
+                return Err(format!("unsupported float operator {operator}"));
+            }
+            Ok(ScalarInst::Float {
+                dest,
+                operator: operator.clone(),
+                lhs: operand(instruction, 0)?,
+                rhs: operand(instruction, 1)?,
+            })
+        }
+        SsaInstructionKind::FloatCompare { predicate } => {
+            if !matches!(
+                predicate.as_str(),
+                "eq" | "ne" | "lt" | "le" | "gt" | "ge"
+            ) {
+                return Err(format!("unsupported float comparison predicate {predicate}"));
+            }
+            Ok(ScalarInst::FloatCompare {
+                dest,
+                predicate: predicate.clone(),
+                lhs: operand(instruction, 0)?,
+                rhs: operand(instruction, 1)?,
+            })
+        }
         SsaInstructionKind::FiniteConstruct {
             type_identity,
             discriminant,
@@ -1392,6 +1443,7 @@ pub fn scalar_ty_in(ty: &IrType, layout: &CompositeLayout) -> Result<ScalarTy, S
             BodyType::Integer(integer) if matches!(integer.bits, 8 | 16 | 32 | 64) => {
                 Ok(ScalarTy::Int(integer))
             }
+            BodyType::Float(float) if float.is_supported() => Ok(ScalarTy::Float),
             // Bytes realize as unsigned 8-bit cells.
             BodyType::Byte => Ok(ScalarTy::Byte),
             // Exact sequences are canonical cells; bounded views are packed
@@ -1418,6 +1470,7 @@ pub fn abi_bits(ty: ScalarTy) -> u16 {
         ScalarTy::Bool | ScalarTy::Finite => 32,
         ScalarTy::Byte => 8,
         ScalarTy::Int(integer) => integer.bits.clamp(32, 64),
+        ScalarTy::Float => 64,
     }
 }
 
@@ -1427,6 +1480,7 @@ pub fn c_type(ty: ScalarTy) -> &'static str {
         // descriptors pack offset and length into one unsigned word.
         ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => "uint64_t",
         ScalarTy::Byte => "uint8_t",
+        ScalarTy::Float => "double",
         _ => match abi_bits(ty) {
             64 => "int64_t",
             _ => "int32_t",
@@ -1440,6 +1494,7 @@ pub fn llvm_type(ty: ScalarTy) -> String {
         ScalarTy::Bool | ScalarTy::Finite => "i32".to_owned(),
         ScalarTy::Byte => "i8".to_owned(),
         ScalarTy::Int(integer) => format!("i{}", integer.bits),
+        ScalarTy::Float => "double".to_owned(),
     }
 }
 

@@ -98,7 +98,7 @@ pub(crate) fn function_names(program: &Program, ssa: &SsaModule) -> Vec<String> 
     ssa.functions
         .iter()
         .map(|ssa_function| {
-            program
+            let base = program
                 .functions
                 .iter()
                 .find(|function| {
@@ -108,25 +108,43 @@ pub(crate) fn function_names(program: &Program, ssa: &SsaModule) -> Vec<String> 
                     ) == ssa_function.semantic_identity
                 })
                 .map(|function| function.name.clone())
-                .unwrap_or_else(|| export_name(&ssa_function.semantic_identity.0))
+                .unwrap_or_else(|| export_name(&ssa_function.semantic_identity.0));
+            // Module symbols follow the native-symbol rule (`main` is
+            // reserved by C), matching what the driver declares and calls.
+            c_symbol(&base)
         })
         .collect()
 }
 
 pub(crate) fn export_name(identity: &str) -> String {
-    identity
-        .rsplit(':')
-        .next()
-        .unwrap_or(identity)
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '_' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect()
+    c_symbol(
+        &identity
+            .rsplit(':')
+            .next()
+            .unwrap_or(identity)
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>(),
+    )
+}
+
+/// Native symbol for an MNCS function base name. C reserves `main` for the
+/// process entry point, but `fn main` is the natural MNCS entry shape, so
+/// the native backends (C11, LLVM, Cranelift via the shared C driver)
+/// define and call it as `mncs_main`. The driver maps through this same
+/// function, so module and driver always agree.
+pub(crate) fn c_symbol(name: &str) -> String {
+    if name == "main" {
+        "mncs_main".to_owned()
+    } else {
+        name.to_owned()
+    }
 }
 
 /// Logical composite types (records and payload-bearing finite variants) used
@@ -356,6 +374,10 @@ pub(crate) fn argument_bits(value: &ExecutionValue) -> i128 {
         ExecutionValue::Finite { discriminant, .. } => i128::from(*discriminant),
         // Bytes marshal through their unsigned 8-bit domain.
         ExecutionValue::Byte { value } => *value,
+        // Floats marshal through their bit pattern (lossless: i128 holds
+        // every u64). The argv front door uses the decimal spelling
+        // instead; this arm serves bit-exact callers.
+        ExecutionValue::Float { bits, .. } => i128::from(*bits),
         // Collection and record values cross through the canonical call
         // file, never as a scalar argv word. Reaching this arm is a
         // driver-selection bug, not a representation choice.
@@ -381,6 +403,10 @@ pub(crate) fn argument_argv(value: &ExecutionValue) -> Result<String, String> {
         ExecutionValue::Finite { payload, .. } if !payload.is_empty() => Err(
             "composite or collection value requires the canonical call-file boundary".to_owned(),
         ),
+        // Float words are shortest round-trip decimals (exact through
+        // `strtod`); boundary values are finite by the trap rule, so the
+        // spelling always parses.
+        ExecutionValue::Float { bits, .. } => Ok(format!("{}", f64::from_bits(*bits))),
         other => Ok(argument_bits(other).to_string()),
     }
 }
@@ -436,6 +462,19 @@ pub(crate) fn contract_is_cell(contract: &BackendValueContract) -> bool {
         | BackendValueContract::View { .. }
         | BackendValueContract::Mask { .. } => false,
     }
+}
+
+/// Whether one value contract crosses the boundary as a binary64 float
+/// word (decimal argv spelling, bit-carried JIT word).
+pub(crate) fn contract_is_float(contract: &BackendValueContract) -> bool {
+    matches!(
+        contract,
+        BackendValueContract::Scalar { semantic_type }
+            if matches!(
+                mncs_model::BodyType::from_semantic_name(semantic_type),
+                mncs_model::BodyType::Float(float) if float.is_supported()
+            )
+    )
 }
 
 /// Whether executing this contract requires the canonical arena image.
@@ -578,7 +617,9 @@ pub(crate) fn process_driver_cell_runtime(
     inputs: &[BackendValueContract],
     _output: Option<&BackendValueContract>,
 ) -> String {
-    let base = process_driver_full(function, inputs);
+    // Same native-symbol rule as the scalar driver: module and driver
+    // must agree on `mncs_main`.
+    let base = process_driver_full(&c_symbol(function), inputs);
     // Replace the extern declarations with local definitions of the same
     // names so imported cell libcalls resolve against this driver.
     let pattern = format!(
@@ -686,12 +727,15 @@ pub(crate) fn process_driver(
     inputs: &[mncs_model::BackendValueContract],
     output: Option<&mncs_model::BackendValueContract>,
 ) -> String {
+    // The driver declares and calls the module symbol, so it maps through
+    // the same native-symbol rule as lowering (notably `main`).
+    let symbol = c_symbol(function);
     let uses_call_file =
         inputs.iter().any(contract_uses_call_file) || output.is_some_and(contract_uses_call_file);
     if !uses_call_file {
-        return process_driver_scalar_only(function, inputs);
+        return process_driver_scalar_only(&symbol, inputs);
     }
-    process_driver_full(function, inputs)
+    process_driver_full(&symbol, inputs)
 }
 
 fn uses_uint64_abi(contract: &mncs_model::BackendValueContract) -> bool {
@@ -713,6 +757,7 @@ fn process_driver_scalar_only(
             mncs_model::BackendValueContract::Scalar { semantic_type } => {
                 match mncs_model::BodyType::from_semantic_name(semantic_type) {
                     mncs_model::BodyType::Integer(ty) if ty.bits == 64 => "int64_t",
+                    mncs_model::BodyType::Float(ty) if ty.is_supported() => "double",
                     _ => "int32_t",
                 }
             }
@@ -722,11 +767,25 @@ fn process_driver_scalar_only(
             _ => "int64_t",
         }
     }
+    fn is_float_contract(contract: &mncs_model::BackendValueContract) -> bool {
+        matches!(
+            contract,
+            mncs_model::BackendValueContract::Scalar { semantic_type }
+                if matches!(
+                    mncs_model::BodyType::from_semantic_name(semantic_type),
+                    mncs_model::BodyType::Float(ty) if ty.is_supported()
+                )
+        )
+    }
     let parse_and_args = inputs
         .iter()
         .enumerate()
         .map(|(index, ty)| {
-            (
+            // Float words parse with `strtod` (shortest round-trip decimal
+            // is exact); integers keep the `strtoull` bit-exact path.
+            let parse = if is_float_contract(ty) {
+                format!("  double a{index} = strtod(argv[{}], 0);", index + 1)
+            } else {
                 // Full-range argv words: `strtoll` saturates u64 values
                 // above i64::MAX to LLONG_MAX, so full-range integers
                 // parse with `strtoull` and narrow by cast (bit-exact on
@@ -735,9 +794,9 @@ fn process_driver_scalar_only(
                 format!(
                     "  unsigned long long a{index} = strtoull(argv[{}], 0, 10);",
                     index + 1
-                ),
-                format!("({})a{index}", scalar_c_type(ty)),
-            )
+                )
+            };
+            (parse, format!("({})a{index}", scalar_c_type(ty)))
         })
         .collect::<Vec<_>>();
     let parse = parse_and_args
@@ -790,6 +849,7 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
             mncs_model::BackendValueContract::Scalar { semantic_type } => {
                 match mncs_model::BodyType::from_semantic_name(semantic_type) {
                     mncs_model::BodyType::Integer(ty) if ty.bits == 64 => "int64_t",
+                    mncs_model::BodyType::Float(ty) if ty.is_supported() => "double",
                     _ => "int32_t",
                 }
             }
@@ -800,6 +860,16 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
             }
             _ => "int64_t",
         }
+    }
+    fn is_float_contract(contract: &mncs_model::BackendValueContract) -> bool {
+        matches!(
+            contract,
+            mncs_model::BackendValueContract::Scalar { semantic_type }
+                if matches!(
+                    mncs_model::BodyType::from_semantic_name(semantic_type),
+                    mncs_model::BodyType::Float(ty) if ty.is_supported()
+                )
+        )
     }
     fn arg_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
         if uses_uint64_abi(contract) {
@@ -813,21 +883,35 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
         .enumerate()
         .map(|(index, ty)| {
             // Every parameter crosses through the call file in this mode:
-            // scalar bits and cell roots share the same entry array.
-            let ctype = arg_c_type(ty);
-            format!(
-                "  {ctype} a{index} = (arg_count > {index}) ? ({ctype})values[{index}] : ({ctype})0;"
-            )
+            // scalar bits and cell roots share the same entry array. Float
+            // entries are bit patterns, so they reinterpret (never convert)
+            // into doubles.
+            if is_float_contract(ty) {
+                format!(
+                    "  double a{index} = (arg_count > {index}) ? mncs_bits_to_double(values[{index}]) : 0.0;"
+                )
+            } else {
+                let ctype = arg_c_type(ty);
+                format!(
+                    "  {ctype} a{index} = (arg_count > {index}) ? ({ctype})values[{index}] : ({ctype})0;"
+                )
+            }
         })
         .collect::<Vec<_>>();
     let parse = prepare.join("\n");
     let prepare_legacy = inputs
         .iter()
         .enumerate()
-        .map(|(index, _ty)| {
-            format!(
-                "  unsigned long long a{index} = ({index} < scalar_argc) ? strtoull(scalar_argv[{index}], 0, 10) : 0;"
-            )
+        .map(|(index, ty)| {
+            if is_float_contract(ty) {
+                format!(
+                    "  double a{index} = ({index} < scalar_argc) ? strtod(scalar_argv[{index}], 0) : 0.0;"
+                )
+            } else {
+                format!(
+                    "  unsigned long long a{index} = ({index} < scalar_argc) ? strtoull(scalar_argv[{index}], 0, 10) : 0;"
+                )
+            }
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -860,6 +944,12 @@ extern unsigned char mncs_arena[{NATIVE_ARENA_BYTES}];
 extern uint64_t mncs_bump;
 
 void {function}({proto});
+
+static double mncs_bits_to_double(uint64_t bits) {{
+  double value = 0.0;
+  memcpy(&value, &bits, 8);
+  return value;
+}}
 
 static unsigned char *mncs_read_file(const char *path, long *out_len) {{
   FILE *f = fopen(path, "rb");

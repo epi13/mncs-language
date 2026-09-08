@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use mncs_model::{ExecutionStatus, ExecutionValue, IntegerType, SemanticId};
+use mncs_model::{ExecutionStatus, ExecutionValue, FloatType, IntegerType, SemanticId};
 
 pub const WASM_MAGIC: [u8; 4] = [0x00, 0x61, 0x73, 0x6d];
 pub const WASM_VERSION: [u8; 4] = [0x01, 0x00, 0x00, 0x00];
@@ -14,6 +14,7 @@ pub const WASM_VERSION: [u8; 4] = [0x01, 0x00, 0x00, 0x00];
 pub enum ValType {
     I32,
     I64,
+    F64,
 }
 
 impl ValType {
@@ -21,6 +22,7 @@ impl ValType {
         match self {
             Self::I32 => 0x7f,
             Self::I64 => 0x7e,
+            Self::F64 => 0x7c,
         }
     }
 
@@ -28,6 +30,7 @@ impl ValType {
         match byte {
             0x7f => Some(Self::I32),
             0x7e => Some(Self::I64),
+            0x7c => Some(Self::F64),
             _ => None,
         }
     }
@@ -49,6 +52,8 @@ pub enum Instr {
     LocalSet(u32),
     I32Const(i32),
     I64Const(i64),
+    /// f64 constant as raw bits (Profile 0.12); always finite.
+    F64Const(u64),
     I32Eqz,
     I32Eq,
     I32Ne,
@@ -93,11 +98,26 @@ pub enum Instr {
     I32WrapI64,
     I64ExtendI32S,
     I64ExtendI32U,
+    /// Float conversions (Profile 0.12). Truncations trap on NaN or
+    /// out-of-range inputs exactly like the validated WASM operators
+    /// (the float trap rule); integer-to-float rounds per IEEE-754.
+    F64ConvertI32S,
+    F64ConvertI32U,
+    F64ConvertI64S,
+    F64ConvertI64U,
+    I32TruncF64S,
+    I32TruncF64U,
+    I64TruncF64S,
+    I64TruncF64U,
     I32Load,
     I32Load8U,
     I64Load,
+    /// Binary64 memory access (Profile 0.12). Memory holds raw bits; the
+    /// interpreter stack carries the f64 payload as its u64 bit pattern.
+    F64Load,
     I32Store,
     I64Store,
+    F64Store,
     GlobalGet(u32),
     GlobalSet(u32),
     I32DivS,
@@ -108,6 +128,18 @@ pub enum Instr {
     I64DivU,
     I64RemS,
     I64RemU,
+    /// Binary64 arithmetic (Profile 0.12). The interpreter is pure IEEE;
+    /// lowering emits finiteness guards around every use (the trap rule).
+    F64Add,
+    F64Sub,
+    F64Mul,
+    F64Div,
+    F64Eq,
+    F64Ne,
+    F64Lt,
+    F64Le,
+    F64Gt,
+    F64Ge,
     /// Lowering-time marker for the arena allocator call; never encoded.
     AllocCall,
 }
@@ -196,6 +228,10 @@ pub fn encode_module(module: &WasmModule) -> Vec<u8> {
                     ValType::I64 => {
                         section.push(0x42);
                         encode_i64(section, global.init);
+                    }
+                    ValType::F64 => {
+                        section.push(0x44);
+                        section.extend_from_slice(&(global.init as u64).to_le_bytes());
                     }
                 }
                 section.push(0x0b);
@@ -723,6 +759,72 @@ fn execute_raw(
                 let value = pop_i32(&mut stack)? as u32;
                 stack.push(i64::from(value));
             }
+            Instr::F64ConvertI32S => {
+                let value = pop_i32(&mut stack)?;
+                stack.push((f64::from(value)).to_bits() as i64);
+            }
+            Instr::F64ConvertI32U => {
+                let value = pop_i32(&mut stack)? as u32;
+                stack.push((f64::from(value)).to_bits() as i64);
+            }
+            Instr::F64ConvertI64S => {
+                let value = pop(&mut stack)?;
+                stack.push((value as f64).to_bits() as i64);
+            }
+            Instr::F64ConvertI64U => {
+                let value = pop(&mut stack)? as u64;
+                stack.push((value as f64).to_bits() as i64);
+            }
+            Instr::I32TruncF64S => {
+                let raw = pop(&mut stack)?;
+                let truncated = f64::from_bits(raw as u64).trunc();
+                // NaN fails every comparison, so finiteness is checked
+                // explicitly, exactly like the reference conversion.
+                if !truncated.is_finite() || !(-2147483648.0..2147483648.0).contains(&truncated) {
+                    return Err(trap(
+                        ExecutionStatus::RuntimeFailure,
+                        "backend trap: f64 to i32 out of range",
+                    ));
+                }
+                stack.push(i64::from(truncated as i32));
+            }
+            Instr::I32TruncF64U => {
+                let raw = pop(&mut stack)?;
+                let truncated = f64::from_bits(raw as u64).trunc();
+                if !truncated.is_finite() || !(0.0..4294967296.0).contains(&truncated) {
+                    return Err(trap(
+                        ExecutionStatus::RuntimeFailure,
+                        "backend trap: f64 to u32 out of range",
+                    ));
+                }
+                stack.push(i64::from(truncated as u32 as i32));
+            }
+            Instr::I64TruncF64S => {
+                let raw = pop(&mut stack)?;
+                let truncated = f64::from_bits(raw as u64).trunc();
+                if !truncated.is_finite()
+                    || !(-9223372036854775808.0..9223372036854775808.0).contains(&truncated)
+                {
+                    return Err(trap(
+                        ExecutionStatus::RuntimeFailure,
+                        "backend trap: f64 to i64 out of range",
+                    ));
+                }
+                stack.push(truncated as i64);
+            }
+            Instr::I64TruncF64U => {
+                let raw = pop(&mut stack)?;
+                let truncated = f64::from_bits(raw as u64).trunc();
+                if !truncated.is_finite() || !(0.0..18446744073709551616.0).contains(&truncated) {
+                    return Err(trap(
+                        ExecutionStatus::RuntimeFailure,
+                        "backend trap: f64 to u64 out of range",
+                    ));
+                }
+                // In range: the value fits u64, so going through u64 is
+                // exact (a direct `as i64` would saturate instead).
+                stack.push(truncated as u64 as i64);
+            }
             Instr::I32Load => {
                 let address = pop_i32(&mut stack)?;
                 let raw = runtime.load(i64::from(address), 4)?;
@@ -744,6 +846,16 @@ fn execute_raw(
                 runtime.store(i64::from(address), 4, u64::from(value as u32))?;
             }
             Instr::I64Store => {
+                let value = pop(&mut stack)?;
+                let address = pop_i32(&mut stack)?;
+                runtime.store(i64::from(address), 8, value as u64)?;
+            }
+            Instr::F64Load => {
+                let address = pop_i32(&mut stack)?;
+                let raw = runtime.load(i64::from(address), 8)?;
+                stack.push(raw as i64);
+            }
+            Instr::F64Store => {
                 let value = pop(&mut stack)?;
                 let address = pop_i32(&mut stack)?;
                 runtime.store(i64::from(address), 8, value as u64)?;
@@ -848,6 +960,17 @@ fn execute_raw(
                 }
                 Ok((left as u64 % right as u64) as i64)
             })?,
+            Instr::F64Const(bits) => stack.push(*bits as i64),
+            Instr::F64Add => bin_f64(&mut stack, |left, right| left + right)?,
+            Instr::F64Sub => bin_f64(&mut stack, |left, right| left - right)?,
+            Instr::F64Mul => bin_f64(&mut stack, |left, right| left * right)?,
+            Instr::F64Div => bin_f64(&mut stack, |left, right| left / right)?,
+            Instr::F64Eq => cmp_f64(&mut stack, |left, right| left == right)?,
+            Instr::F64Ne => cmp_f64(&mut stack, |left, right| left != right)?,
+            Instr::F64Lt => cmp_f64(&mut stack, |left, right| left < right)?,
+            Instr::F64Le => cmp_f64(&mut stack, |left, right| left <= right)?,
+            Instr::F64Gt => cmp_f64(&mut stack, |left, right| left > right)?,
+            Instr::F64Ge => cmp_f64(&mut stack, |left, right| left >= right)?,
             Instr::AllocCall => {
                 return Err(trap(
                     ExecutionStatus::InvalidRequest,
@@ -992,6 +1115,25 @@ fn bin_try_i64(
     Ok(())
 }
 
+/// Binary64 stack operation over bit-carried `f64` cells. Pure IEEE-754;
+/// the non-finite trap rule is enforced by lowering-time guards, never
+/// by the operator itself.
+fn bin_f64(stack: &mut Vec<i64>, op: impl Fn(f64, f64) -> f64) -> Result<(), WasmTrap> {
+    let right = pop(stack)?;
+    let left = pop(stack)?;
+    let value = op(f64::from_bits(left as u64), f64::from_bits(right as u64));
+    stack.push(value.to_bits() as i64);
+    Ok(())
+}
+
+fn cmp_f64(stack: &mut Vec<i64>, op: impl Fn(f64, f64) -> bool) -> Result<(), WasmTrap> {
+    let right = pop(stack)?;
+    let left = pop(stack)?;
+    let value = op(f64::from_bits(left as u64), f64::from_bits(right as u64));
+    stack.push(i64::from(value));
+    Ok(())
+}
+
 fn bin_i32(stack: &mut Vec<i64>, op: impl Fn(i32, i32) -> i32) -> Result<(), WasmTrap> {
     let right = pop_i32(stack)?;
     let left = pop_i32(stack)?;
@@ -1041,6 +1183,9 @@ fn rel_u64(stack: &mut Vec<i64>, op: impl Fn(u64, u64) -> bool) -> Result<(), Wa
 pub enum MarshalTy {
     Bool,
     Int(IntegerType),
+    /// IEEE-754 binary64 cell (Profile 0.12), bit-carried in one 64-bit
+    /// slot. Boundary values are always finite by the trap rule.
+    Float(FloatType),
     /// Payload-free finite value carried directly as its discriminant.
     BareFinite {
         type_identity: SemanticId,
@@ -1117,6 +1262,15 @@ fn write_marshal(
                 ));
             }
             Ok(*value as i64)
+        }
+        (ExecutionValue::Float { bits, .. }, MarshalTy::Float(ty)) => {
+            if !ty.is_supported() || !f64::from_bits(*bits).is_finite() {
+                return Err(trap(
+                    ExecutionStatus::InvalidRequest,
+                    "float argument is not a finite binary64 value",
+                ));
+            }
+            Ok(*bits as i64)
         }
         // Bytes marshal through their unsigned 8-bit domain.
         (ExecutionValue::Byte { value }, MarshalTy::Int(integer))
@@ -1376,6 +1530,16 @@ fn read_slot(runtime: &Runtime, ty: &MarshalTy, address: i64) -> Result<Executio
                 ty: *integer,
             })
         }
+        MarshalTy::Float(ty) => {
+            let raw = runtime.load(address, 8)?;
+            if !ty.is_supported() || !f64::from_bits(raw).is_finite() {
+                return Err(trap(
+                    ExecutionStatus::InvalidRequest,
+                    "float cell is not a finite binary64 value",
+                ));
+            }
+            Ok(ExecutionValue::Float { bits: raw, ty: *ty })
+        }
         MarshalTy::BareFinite {
             type_identity,
             variants,
@@ -1610,6 +1774,19 @@ pub fn execute_function_typed(
                 value: crate::composite::integer_from_slot_bits(*raw as u64, *integer),
                 ty: *integer,
             },
+            MarshalTy::Float(ty) => {
+                let bits = *raw as u64;
+                // Lowering emits finiteness guards around every float
+                // operator, so a non-finite result here is a backend defect,
+                // surfaced loudly rather than laundered into a value.
+                if !ty.is_supported() || !f64::from_bits(bits).is_finite() {
+                    return Err(trap(
+                        ExecutionStatus::Unsupported,
+                        "backend produced a non-finite float result",
+                    ));
+                }
+                ExecutionValue::Float { bits, ty: *ty }
+            }
             MarshalTy::BareFinite {
                 type_identity,
                 variants,
@@ -1759,6 +1936,20 @@ fn encode_instr(out: &mut Vec<u8>, instr: &Instr) {
         Instr::I64LeU => out.push(0x58),
         Instr::I64GeS => out.push(0x59),
         Instr::I64GeU => out.push(0x5a),
+        Instr::F64Const(bits) => {
+            out.push(0x44);
+            out.extend_from_slice(&bits.to_le_bytes());
+        }
+        Instr::F64Eq => out.push(0x61),
+        Instr::F64Ne => out.push(0x62),
+        Instr::F64Lt => out.push(0x63),
+        Instr::F64Gt => out.push(0x64),
+        Instr::F64Le => out.push(0x65),
+        Instr::F64Ge => out.push(0x66),
+        Instr::F64Add => out.push(0xa0),
+        Instr::F64Sub => out.push(0xa1),
+        Instr::F64Mul => out.push(0xa2),
+        Instr::F64Div => out.push(0xa3),
         Instr::I32Add => out.push(0x6a),
         Instr::I32Sub => out.push(0x6b),
         Instr::I32Mul => out.push(0x6c),
@@ -1780,11 +1971,21 @@ fn encode_instr(out: &mut Vec<u8>, instr: &Instr) {
         Instr::I32WrapI64 => out.push(0xa7),
         Instr::I64ExtendI32S => out.push(0xac),
         Instr::I64ExtendI32U => out.push(0xad),
+        Instr::F64ConvertI32S => out.push(0xb0),
+        Instr::F64ConvertI32U => out.push(0xb1),
+        Instr::F64ConvertI64S => out.push(0xb2),
+        Instr::F64ConvertI64U => out.push(0xb3),
+        Instr::I32TruncF64S => out.push(0xaa),
+        Instr::I32TruncF64U => out.push(0xab),
+        Instr::I64TruncF64S => out.push(0xae),
+        Instr::I64TruncF64U => out.push(0xaf),
         Instr::I32Load => mem_instr(out, 0x28, 2),
         Instr::I32Load8U => mem_instr(out, 0x2d, 0),
         Instr::I64Load => mem_instr(out, 0x29, 2),
+        Instr::F64Load => mem_instr(out, 0x2b, 3),
         Instr::I32Store => mem_instr(out, 0x36, 2),
         Instr::I64Store => mem_instr(out, 0x37, 2),
+        Instr::F64Store => mem_instr(out, 0x39, 3),
         Instr::GlobalGet(index) => {
             out.push(0x23);
             encode_u32(out, *index);
@@ -2136,6 +2337,31 @@ fn decode_instr(payload: &[u8], cursor: usize) -> Result<(Instr, usize), WasmTra
         0x58 => Instr::I64LeU,
         0x59 => Instr::I64GeS,
         0x5a => Instr::I64GeU,
+        0x61 => Instr::F64Eq,
+        0x62 => Instr::F64Ne,
+        0x63 => Instr::F64Lt,
+        0x64 => Instr::F64Gt,
+        0x65 => Instr::F64Le,
+        0x66 => Instr::F64Ge,
+        0xa0 => Instr::F64Add,
+        0xa1 => Instr::F64Sub,
+        0xa2 => Instr::F64Mul,
+        0xa3 => Instr::F64Div,
+        0x44 => {
+            let raw = payload.get(cursor..cursor + 8).ok_or_else(|| {
+                trap(
+                    ExecutionStatus::InvalidRequest,
+                    "truncated WASM f64 constant",
+                )
+            })?;
+            cursor += 8;
+            Instr::F64Const(u64::from_le_bytes(raw.try_into().map_err(|_| {
+                trap(
+                    ExecutionStatus::InvalidRequest,
+                    "truncated WASM f64 constant",
+                )
+            })?))
+        }
         0x6a => Instr::I32Add,
         0x6b => Instr::I32Sub,
         0x6c => Instr::I32Mul,
@@ -2166,6 +2392,10 @@ fn decode_instr(payload: &[u8], cursor: usize) -> Result<(Instr, usize), WasmTra
             cursor = skip_memarg(payload, cursor)?;
             Instr::I64Load
         }
+        0x2b => {
+            cursor = skip_memarg(payload, cursor)?;
+            Instr::F64Load
+        }
         0x36 => {
             cursor = skip_memarg(payload, cursor)?;
             Instr::I32Store
@@ -2173,6 +2403,10 @@ fn decode_instr(payload: &[u8], cursor: usize) -> Result<(Instr, usize), WasmTra
         0x37 => {
             cursor = skip_memarg(payload, cursor)?;
             Instr::I64Store
+        }
+        0x39 => {
+            cursor = skip_memarg(payload, cursor)?;
+            Instr::F64Store
         }
         0x23 => {
             let (index, next) = read_u32(payload, cursor)?;
@@ -2195,6 +2429,14 @@ fn decode_instr(payload: &[u8], cursor: usize) -> Result<(Instr, usize), WasmTra
         0xa7 => Instr::I32WrapI64,
         0xac => Instr::I64ExtendI32S,
         0xad => Instr::I64ExtendI32U,
+        0xb0 => Instr::F64ConvertI32S,
+        0xb1 => Instr::F64ConvertI32U,
+        0xb2 => Instr::F64ConvertI64S,
+        0xb3 => Instr::F64ConvertI64U,
+        0xaa => Instr::I32TruncF64S,
+        0xab => Instr::I32TruncF64U,
+        0xae => Instr::I64TruncF64S,
+        0xaf => Instr::I64TruncF64U,
         other => {
             return Err(trap(
                 ExecutionStatus::Unsupported,

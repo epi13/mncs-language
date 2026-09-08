@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::identity::{block_id, body_id, operation_id, value_id};
 use crate::{
-    ArithmeticIntent, Diagnostic, Effect, Fact, FailureMode, Function, IntegerType, Intent,
-    MachinePreference, Obligation, Program, Requirement, SemanticId,
+    ArithmeticIntent, Diagnostic, Effect, Fact, FailureMode, FloatType, Function, IntegerType,
+    Intent, MachinePreference, Obligation, Program, Requirement, SemanticId,
 };
 
 pub const EXECUTABLE_BODY_SCHEMA_VERSION: &str = "0.2";
@@ -251,6 +251,11 @@ pub struct BodyValue {
 pub enum BodyType {
     Named(String),
     Integer(IntegerType),
+    /// IEEE-754 binary64 floating point (Profile 0.12). The only float
+    /// width; NaN and infinities never cross operation boundaries (float
+    /// operators trap on non-finite inputs and results, like checked
+    /// division traps on its singular inputs).
+    Float(FloatType),
     /// A byte-oriented 8-bit unsigned logical value (Profile 0.7). Distinct
     /// from `u8`: bytes support byte-appropriate operations only.
     Byte,
@@ -302,6 +307,15 @@ impl BodyType {
         }
         if name == "byte" {
             return Self::Byte;
+        }
+        if let Some(digits) = name.strip_prefix('f') {
+            // `f32` parses (so validation, not name resolution, reports
+            // the single-width rule) but only binary64 is supported.
+            if let Ok(bits) = digits.parse::<u16>() {
+                if bits > 0 {
+                    return Self::Float(FloatType { bits });
+                }
+            }
         }
         let (signed, digits) = if let Some(digits) = name.strip_prefix('i') {
             (true, digits)
@@ -436,6 +450,7 @@ impl BodyType {
             Self::Integer(integer) => {
                 format!("{}{}", if integer.signed { 'i' } else { 'u' }, integer.bits)
             }
+            Self::Float(float) => format!("f{}", float.bits),
             Self::Byte => "byte".to_owned(),
             Self::Sequence { element, bound } => {
                 format!("[{}; {}]", element.semantic_name(), bound.canonical_text())
@@ -461,6 +476,7 @@ impl BodyType {
                 if integer.signed { "signed" } else { "unsigned" },
                 integer.bits
             ),
+            Self::Float(float) => format!("float:{}", float.bits),
             Self::Byte => "byte".to_owned(),
             Self::Sequence { element, bound } => format!(
                 "sequence<{};{}>",
@@ -539,6 +555,25 @@ pub enum BodyOperationKind {
     IntegerCompare {
         predicate: String,
         operand_type: IntegerType,
+    },
+    /// A binary64 float literal (Profile 0.12). Bits keep the payload
+    /// exact through every serialization; literals are always finite
+    /// (the parser refuses non-finite spellings).
+    FloatConstant {
+        bits: u64,
+        ty: FloatType,
+    },
+    /// Binary64 arithmetic (Profile 0.12): `add` | `sub` | `mul` | `div`.
+    /// IEEE-754 binary64 semantics; a non-finite input or result is a
+    /// runtime failure (fail-closed, like checked division's singular
+    /// inputs), so NaN payloads never cross backend boundaries.
+    Float {
+        operator: String,
+    },
+    /// Binary64 comparison (Profile 0.12): `eq` | `ne` | `lt` | `le` |
+    /// `gt` | `ge`. Operands are always finite by the `Float` trap rule.
+    FloatCompare {
+        predicate: String,
     },
     /// Strict boolean conjunction/disjunction (Profile 0.6). Both operands
     /// are total values; evaluation is not short-circuited.
@@ -1435,6 +1470,109 @@ fn validate_operation(
                 ));
             }
         }
+        BodyOperationKind::FloatConstant { ty, .. } => {
+            if !ty.is_supported() {
+                errors.push(body_diagnostic(
+                    "MNB126",
+                    format!("{path}.kind"),
+                    "only binary64 float constants are supported",
+                ));
+            }
+            if operation.operands.is_empty() && operation.results.len() == 1 {
+                if operation.results[0].ty != BodyType::Float(*ty) {
+                    errors.push(body_diagnostic(
+                        "MNB013",
+                        format!("{path}.results"),
+                        "constant result type does not match the constant type",
+                    ));
+                }
+            } else {
+                errors.push(body_diagnostic(
+                    "MNB014",
+                    path.to_owned(),
+                    "constant operations require one result and no operands",
+                ));
+            }
+        }
+        BodyOperationKind::Float { operator } => {
+            if !matches!(operator.as_str(), "add" | "sub" | "mul" | "div") {
+                errors.push(body_diagnostic(
+                    "MNB127",
+                    format!("{path}.kind"),
+                    format!("unsupported symbolic float operator {operator:?}"),
+                ));
+            }
+            if operation.operands.len() != 2 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB128",
+                    path.to_owned(),
+                    "float operations require two operands and one result",
+                ));
+            }
+            for operand in &operation.operands {
+                if !matches!(
+                    available.get(operand),
+                    Some(BodyType::Float(ty)) if ty.is_supported()
+                ) {
+                    errors.push(body_diagnostic(
+                        "MNB129",
+                        format!("{path}.operands"),
+                        "float operand type must be binary64",
+                    ));
+                }
+            }
+            if operation.results.first().is_some_and(|result| {
+                !matches!(
+                    result.ty,
+                    BodyType::Float(ty) if ty.is_supported()
+                )
+            }) {
+                errors.push(body_diagnostic(
+                    "MNB130",
+                    format!("{path}.results"),
+                    "float result type must be binary64",
+                ));
+            }
+        }
+        BodyOperationKind::FloatCompare { predicate } => {
+            if !matches!(predicate.as_str(), "eq" | "ne" | "lt" | "le" | "gt" | "ge") {
+                errors.push(body_diagnostic(
+                    "MNB131",
+                    format!("{path}.kind.predicate"),
+                    format!("unsupported float comparison predicate {predicate:?}"),
+                ));
+            }
+            if operation.operands.len() != 2 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB132",
+                    path.to_owned(),
+                    "float comparison requires two operands and one result",
+                ));
+            }
+            for operand in &operation.operands {
+                if !matches!(
+                    available.get(operand),
+                    Some(BodyType::Float(ty)) if ty.is_supported()
+                ) {
+                    errors.push(body_diagnostic(
+                        "MNB133",
+                        format!("{path}.operands"),
+                        "float comparison operand type must be binary64",
+                    ));
+                }
+            }
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| !result.ty.is_boolean())
+            {
+                errors.push(body_diagnostic(
+                    "MNB042",
+                    format!("{path}.results"),
+                    "float comparison result must have boolean type",
+                ));
+            }
+        }
         BodyOperationKind::BooleanOp { operator } => {
             if !matches!(operator.as_str(), "and" | "or") {
                 errors.push(body_diagnostic(
@@ -1540,7 +1678,7 @@ fn validate_operation(
                 errors.push(body_diagnostic(
                     "MNB077",
                     format!("{path}.kind"),
-                    "explicit conversions require scalar integer or byte types",
+                    "explicit conversions require scalar integer, byte, or binary64 float types",
                 ));
             }
             if operation.operands.len() != 1 || operation.results.len() != 1 {
@@ -3289,6 +3427,7 @@ fn is_convertible_scalar(ty: &BodyType) -> bool {
     matches!(ty, BodyType::Byte)
         || matches!(ty, BodyType::Integer(integer) if matches!(integer.bits, 1..=64))
         || matches!(ty, BodyType::Named(name) if name == "bool")
+        || matches!(ty, BodyType::Float(float) if float.is_supported())
 }
 
 fn body_diagnostic(code: &str, path: String, message: impl Into<String>) -> Diagnostic {

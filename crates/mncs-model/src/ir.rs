@@ -101,6 +101,16 @@ pub enum IrOperationKind {
         predicate: String,
         operand_type: crate::IntegerType,
     },
+    FloatConstant {
+        bits: u64,
+        ty: crate::FloatType,
+    },
+    Float {
+        operator: String,
+    },
+    FloatCompare {
+        predicate: String,
+    },
     BooleanOp {
         operator: String,
     },
@@ -967,6 +977,34 @@ fn lower_executable_body(
                     IrOperationKind::IntegerCompare {
                         predicate: predicate.clone(),
                         operand_type: *operand_type,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    Some(machine_intent_links(program, function, block, operation)),
+                    None,
+                ),
+                BodyOperationKind::FloatConstant { bits, ty } => (
+                    IrOperationKind::FloatConstant {
+                        bits: *bits,
+                        ty: *ty,
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::Float { operator } => (
+                    IrOperationKind::Float {
+                        operator: operator.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    Some(machine_intent_links(program, function, block, operation)),
+                    None,
+                ),
+                BodyOperationKind::FloatCompare { predicate } => (
+                    IrOperationKind::FloatCompare {
+                        predicate: predicate.clone(),
                     },
                     Vec::new(),
                     Vec::new(),

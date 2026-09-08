@@ -11,7 +11,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::execution::{
-    compare_integers, evaluate_integer, integer_operator_supported, ExecutionEffectEvent,
+    compare_floats, compare_integers, evaluate_float, evaluate_integer, integer_operator_supported,
+    ExecutionEffectEvent,
 };
 use crate::identity::{function_id, program_id};
 use crate::{
@@ -903,6 +904,89 @@ fn execute_instruction(
                 values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
             }
         }
+        SsaInstructionKind::FloatConstant { bits, ty } => {
+            if !ty.is_supported() {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    instruction_identity(instruction),
+                    "only binary64 float constants are supported",
+                );
+                return true;
+            }
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Float {
+                        bits: *bits,
+                        ty: *ty,
+                    },
+                );
+            }
+        }
+        SsaInstructionKind::Float { operator } => {
+            if !matches!(operator.as_str(), "add" | "sub" | "mul" | "div") {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    instruction_identity(instruction),
+                    format!("unsupported float operator {operator:?}"),
+                );
+                return true;
+            }
+            let Some((left, right)) = float_operands(instruction, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "float operation operands were unavailable or not float values",
+                );
+                return true;
+            };
+            let Some(value) = evaluate_float(operator, left, right) else {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    instruction_identity(instruction),
+                    format!("float {operator} trapped on a non-finite input or result"),
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Float {
+                        bits: value.to_bits(),
+                        ty: crate::FloatType::f64(),
+                    },
+                );
+            }
+        }
+        SsaInstructionKind::FloatCompare { predicate } => {
+            let Some((left, right)) = float_operands(instruction, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "float comparison operands were unavailable or not float values",
+                );
+                return true;
+            };
+            if !left.is_finite() || !right.is_finite() {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    instruction_identity(instruction),
+                    "float comparison trapped on a non-finite input",
+                );
+                return true;
+            }
+            let Some(value) = compare_floats(predicate, left, right) else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    instruction_identity(instruction),
+                    format!("unsupported float comparison predicate {predicate:?}"),
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
+            }
+        }
         SsaInstructionKind::BooleanOp { operator } => {
             let Some((left, right)) = boolean_operands(instruction, values) else {
                 result.fail(
@@ -1002,51 +1086,28 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let converted = match (operand_value, from, to) {
-                (
-                    ExecutionValue::Integer { value, .. },
-                    BodyType::Integer(_),
-                    BodyType::Integer(target),
-                ) => crate::execution::wrap_to_bits(*value, target.bits, target.signed)
-                    .map(|value| ExecutionValue::Integer { value, ty: *target }),
-                (ExecutionValue::Integer { value, .. }, BodyType::Integer(_), BodyType::Byte) => {
-                    crate::execution::wrap_to_bits(*value, 8, false)
-                        .map(|value| ExecutionValue::Byte { value })
+            match crate::execution::convert_scalar_value(operand_value, from, to) {
+                Ok(converted) => {
+                    if let Some(output) = instruction.outputs.first() {
+                        values.insert(output.identity.clone(), converted);
+                    }
                 }
-                (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Integer(target)) => {
-                    crate::execution::wrap_to_bits(*value, target.bits, target.signed)
-                        .map(|value| ExecutionValue::Integer { value, ty: *target })
+                Err(ExecutionStatus::RuntimeFailure) => {
+                    result.fail(
+                        ExecutionStatus::RuntimeFailure,
+                        instruction_identity(instruction),
+                        "float conversion trapped on a non-finite or out-of-range input",
+                    );
+                    return true;
                 }
-                (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Byte) => {
-                    Some(ExecutionValue::Byte { value: *value })
+                Err(_) => {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        instruction_identity(instruction),
+                        "conversion operands do not match the declared conversion",
+                    );
+                    return true;
                 }
-                (
-                    ExecutionValue::Boolean { value },
-                    BodyType::Named(name),
-                    BodyType::Integer(target),
-                ) if name == "bool" => {
-                    crate::execution::wrap_to_bits(i128::from(*value), target.bits, target.signed)
-                        .map(|value| ExecutionValue::Integer { value, ty: *target })
-                }
-                (ExecutionValue::Boolean { value }, BodyType::Named(name), BodyType::Byte)
-                    if name == "bool" =>
-                {
-                    Some(ExecutionValue::Byte {
-                        value: i128::from(*value),
-                    })
-                }
-                _ => None,
-            };
-            let Some(converted) = converted else {
-                result.fail(
-                    ExecutionStatus::Unsupported,
-                    instruction_identity(instruction),
-                    "conversion operands do not match the declared conversion",
-                );
-                return true;
-            };
-            if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), converted);
             }
         }
         SsaInstructionKind::SequenceConstruct { length, .. } => {
@@ -2361,6 +2422,22 @@ fn boolean_operands(
     Some((*left, *right))
 }
 
+fn float_operands(
+    instruction: &SsaInstruction,
+    values: &BTreeMap<SemanticId, ExecutionValue>,
+) -> Option<(f64, f64)> {
+    let [left, right] = instruction.inputs.as_slice() else {
+        return None;
+    };
+    let ExecutionValue::Float { bits: left, .. } = values.get(left)? else {
+        return None;
+    };
+    let ExecutionValue::Float { bits: right, .. } = values.get(right)? else {
+        return None;
+    };
+    Some((f64::from_bits(*left), f64::from_bits(*right)))
+}
+
 fn integer_operands(
     instruction: &SsaInstruction,
     values: &BTreeMap<SemanticId, ExecutionValue>,
@@ -2557,6 +2634,9 @@ fn value_matches_type(value: &ExecutionValue, ty: &BodyType) -> bool {
         (ExecutionValue::Mask { lanes: bits }, BodyType::Mask { lanes }) => {
             bits.len() == *lanes as usize
         }
+        // Binary64 arguments match by type only: finiteness is a runtime
+        // trap (the guards check inputs), not a request rejection.
+        (ExecutionValue::Float { ty: actual, .. }, BodyType::Float(expected)) => actual == expected,
         _ => false,
     }
 }
@@ -2602,6 +2682,16 @@ fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionVal
         }
         (ExecutionValue::Byte { value }, BodyType::Byte) if (0..=255).contains(value) => {
             Some(ExecutionValue::Byte { value: *value })
+        }
+        // Binary64 arguments normalize to themselves: bits are already the
+        // canonical form, and finiteness is enforced by runtime guards.
+        (ExecutionValue::Float { bits, ty: actual }, BodyType::Float(expected))
+            if actual == expected =>
+        {
+            Some(ExecutionValue::Float {
+                bits: *bits,
+                ty: *actual,
+            })
         }
         (
             ExecutionValue::Sequence { values },
