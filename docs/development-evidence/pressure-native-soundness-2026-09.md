@@ -125,10 +125,22 @@ measured optimization after correctness.
 - `cargo test --test pressure_native_soundness`: 3/3 (each ×5 backends).
 - `cargo test --test pressure_frontend`: 5/5.
 - `cargo test --test backend_evidence`: 8/8.
-- `cargo test --workspace --no-fail-fast`: all green except pre-existing
-  `backend_family::core_status_module_envelope_per_backend` (expects PASS,
-  gets UNKNOWN on bytecode; reproduces on untouched base `2b57eee`, unrelated
-  to this tranche — integer-overflow/iteration-cost obligations predate it).
+- `cargo test --test backend_family`: 10/10 (including
+  `core_status_module_envelope_per_backend` PASS on all five backends).
+- `cargo test --workspace --no-fail-fast`: green except
+  `backend_family::core_status_module_envelope_per_backend`, which this
+  tranche briefly regressed (PASS→UNKNOWN): the `$mncs$` temp rename broke
+  the `iteration_decrement` prefix match that discharges bounded-counter
+  obligations (`obligations.rs`). Fixed by matching the hygienic
+  `$mncs$iteration_decrement$` shape (`is_iteration_decrement`), which is
+  additionally sounder than the old bare-prefix match (source can no longer
+  spell a colliding ID). Verified PASS again post-fix.
+- CI (`rust` job) initially failed on that same regression; the fix commit
+  re-greens it. Windows `abi_boundary` C11 link failures (`LNK1181`,
+  cannot-open-input-file) are environmental and pre-existing: the
+  `Compiler platform portability` workflow also fails on `main`
+  (both recent main pushes), with identical link-stage errors untouched by
+  this tranche's symbol or codegen changes.
 - `cargo fmt`, `cargo clippy --workspace --all-targets`: clean.
 - Consumer (read-only, unmodified): `float`/`scalar`/`rational`/`modular`/
   `deterministic` green on bytecode/wasm/C11/LLVM (+ float/scalar/rational
