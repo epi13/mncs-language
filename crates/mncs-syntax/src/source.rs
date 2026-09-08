@@ -2150,6 +2150,89 @@ impl<'a> Parser<'a> {
     }
 
     fn primary_atom(&mut self) -> Option<AstExpr> {
+        // Unary-negative numeric literals (MNP064): `-5`, `-2.0` as single
+        // expression atoms. Only directly before integer/float literals, so
+        // binary subtraction (`a - b`, `a-b`, `a - -5`) stays unambiguous:
+        // the binary loop consumes the operator, then this prefix handles a
+        // negated literal on the right. General negation (`-x`, `-(a+b)`,
+        // `--5`) stays refused; spell it `(0 - x)`.
+        if self.current_kind() == Some(TokenKind::Minus)
+            && matches!(
+                self.peek_kind(1),
+                Some(TokenKind::IntegerLiteral | TokenKind::Version)
+            )
+        {
+            let minus = self.spanned(TokenKind::Minus, "MNP064", "expected expression")?;
+            match self.current_kind() {
+                Some(TokenKind::IntegerLiteral) => {
+                    let lit = self.spanned(
+                        TokenKind::IntegerLiteral,
+                        "MNP063",
+                        "expected integer literal",
+                    )?;
+                    let magnitude: i128 = lit.text.parse().unwrap_or(0);
+                    let value = -magnitude;
+                    let span = SourceSpan::covering(&self.envelope.text, minus.span, lit.span);
+                    let text = SpannedText {
+                        text: format!("-{}", lit.text),
+                        span,
+                    };
+                    return Some(AstExpr::Integer { text, value });
+                }
+                Some(TokenKind::Version) => {
+                    let lit =
+                        self.spanned(TokenKind::Version, "MNP197", "expected float literal")?;
+                    if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_12) {
+                        self.error(
+                            "MNP197",
+                            "float literals require source profile 0.12 or later",
+                            vec![TokenKind::Version],
+                        );
+                        return None;
+                    }
+                    let mut parts = lit.text.split('.');
+                    let shape = matches!(
+                        (parts.next(), parts.next(), parts.next()),
+                        (Some(whole), Some(frac), None)
+                            if !whole.is_empty()
+                                && !frac.is_empty()
+                                && whole.bytes().all(|byte| byte.is_ascii_digit())
+                                && frac.bytes().all(|byte| byte.is_ascii_digit())
+                    );
+                    if !shape {
+                        self.error(
+                            "MNP197",
+                            "float literal requires digits on both sides of one dot",
+                            vec![TokenKind::Version],
+                        );
+                        return None;
+                    }
+                    let magnitude: f64 = lit.text.parse().unwrap_or(f64::NAN);
+                    let value = -magnitude;
+                    if !value.is_finite() {
+                        self.error(
+                            "MNP198",
+                            "float literal is not finite",
+                            vec![TokenKind::Version],
+                        );
+                        return None;
+                    }
+                    let span = SourceSpan::covering(&self.envelope.text, minus.span, lit.span);
+                    let text = SpannedText {
+                        text: format!("-{}", lit.text),
+                        span,
+                    };
+                    return Some(AstExpr::Float {
+                        text,
+                        bits: value.to_bits(),
+                    });
+                }
+                _ => {
+                    // Peek guaranteed a literal; unreachable on valid input.
+                    return None;
+                }
+            }
+        }
         match self.current_kind() {
             Some(TokenKind::Identifier | TokenKind::CapabilityKeyword) => {
                 if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_9)
