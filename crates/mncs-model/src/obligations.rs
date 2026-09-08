@@ -12,6 +12,15 @@ use crate::{
 
 pub const OBLIGATION_SCHEMA_VERSION: &str = "0.2";
 
+/// Whether a body operation identity names the elaborator's bounded-loop
+/// counter decrement. Elaborator temporaries live under the unspellable
+/// `$mncs$` namespace, so no source binding can match this shape; matching
+/// the hygienic form (rather than a bare `iteration_decrement` prefix, which
+/// source code could once spell) keeps the discharge both total and sound.
+fn is_iteration_decrement(id: &str) -> bool {
+    id.starts_with("$mncs$iteration_decrement$")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObligationRecord {
     pub schema_version: String,
@@ -350,7 +359,7 @@ impl Program {
                                 let bounded_counter_step =
                                     body.bounded_iterations.iter().any(|iteration| {
                                         iteration.backedge == block.id
-                                            && operation.id.starts_with("iteration_decrement")
+                                            && is_iteration_decrement(&operation.id)
                                     });
                                 let total_by_semantics = matches!(
                                     intent,

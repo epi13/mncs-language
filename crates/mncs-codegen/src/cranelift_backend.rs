@@ -735,27 +735,33 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                 ArithmeticIntent::Checked | ArithmeticIntent::Trapping
             ) && !promise.decision.permitted
             {
-                let max = match dest.ty {
-                    ScalarTy::Int(integer) if integer.signed => (1i128 << (integer.bits - 1)) - 1,
-                    ScalarTy::Int(integer) => (1i128 << integer.bits) - 1,
-                    _ => i128::from(i32::MAX),
+                // Unsigned cells zero-extend (u64 MAX rides as `-1` bits);
+                // signed cells sign-extend. Comparisons match the domain.
+                let signed = matches!(dest.ty, ScalarTy::Int(integer) if integer.signed);
+                let bits = match dest.ty {
+                    ScalarTy::Int(integer) => integer.bits,
+                    ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => 64,
+                    _ => 32,
                 };
-                let min = match dest.ty {
-                    ScalarTy::Int(integer) if integer.signed => -(1i128 << (integer.bits - 1)),
-                    _ => 0,
+                let (min, max) = integer_bounds(bits, signed);
+                let ext = if signed { "sextend" } else { "uextend" };
+                let (hi_cc, lo_cc) = if signed {
+                    ("sgt", "slt")
+                } else {
+                    ("ugt", "ult")
                 };
-                let _ = writeln!(out, "        {dest_n}_l = sextend.i64 {lhs_n}");
-                let _ = writeln!(out, "        {dest_n}_r = sextend.i64 {rhs_n}");
+                let _ = writeln!(out, "        {dest_n}_l = {ext}.i64 {lhs_n}");
+                let _ = writeln!(out, "        {dest_n}_r = {ext}.i64 {rhs_n}");
                 let _ = writeln!(out, "        {dest_n}_w = {op} {dest_n}_l, {dest_n}_r");
                 let _ = writeln!(out, "        {dest_n}_max = iconst.i64 {max}");
                 let _ = writeln!(out, "        {dest_n}_min = iconst.i64 {min}");
                 let _ = writeln!(
                     out,
-                    "        {dest_n}_hi = icmp sgt {dest_n}_w, {dest_n}_max"
+                    "        {dest_n}_hi = icmp {hi_cc} {dest_n}_w, {dest_n}_max"
                 );
                 let _ = writeln!(
                     out,
-                    "        {dest_n}_lo = icmp slt {dest_n}_w, {dest_n}_min"
+                    "        {dest_n}_lo = icmp {lo_cc} {dest_n}_w, {dest_n}_min"
                 );
                 let _ = writeln!(out, "        {dest_n}_ov = bor {dest_n}_hi, {dest_n}_lo");
                 let _ = writeln!(out, "        brnz {dest_n}_ov, fail_{dest_n}");
@@ -1178,7 +1184,13 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                 .collect::<Vec<_>>()
                 .join(", ");
             let _ = writeln!(out, "        call %{callee}({list})");
-            let _ = writeln!(out, "        {} = load.i32 val", names.value(&dest.id));
+            // The shared `val` cell is 64 bits; 64-bit results (including
+            // bit-carried floats) must load the full word, not the low 32.
+            let load = match clif_ty(dest.ty) {
+                "i64" => "load.i64",
+                _ => "load.i32",
+            };
+            let _ = writeln!(out, "        {} = {load} val", names.value(&dest.id));
         }
     }
 }
@@ -1644,7 +1656,12 @@ fn integer_bounds(bits: u16, signed: bool) -> (i64, i64) {
         return (0, 0);
     }
     if !signed {
-        if bits >= 63 {
+        // u64 values ride in signed i64 cells, so the upper bound is the
+        // all-ones bit pattern (`-1` as i64, `2^64 - 1` unsigned). Callers
+        // widen through `uextend`, which recovers the true magnitude.
+        if bits >= 64 {
+            (0, -1)
+        } else if bits >= 63 {
             (0, i64::MAX)
         } else {
             (0, (1i64 << bits) - 1)
@@ -3286,11 +3303,8 @@ impl JitSession {
                     );
                 }
                 _ => {
-                    let trampoline_id = self
-                        .host_trampolines
-                        .get(function_name)
-                        .copied()
-                        .ok_or_else(|| {
+                    let trampoline_id =
+                        self.host_trampolines.get(&symbol).copied().ok_or_else(|| {
                             "requested Cranelift host trampoline is missing".to_owned()
                         })?;
                     let trampoline = self.module.get_finalized_function(trampoline_id);

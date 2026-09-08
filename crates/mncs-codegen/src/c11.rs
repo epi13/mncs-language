@@ -712,12 +712,19 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 // Division by zero is undefined behavior in C, so every
                 // intent guards it explicitly and fails exactly like the
                 // reference executors; checked division also guards MIN/-1.
-                // Unsigned operands divide in their own modular domain, not
-                // through the signed C variable type.
+                // MNCS pins `MIN % -1 == 0` without trapping (only `MIN / -1`
+                // traps), so signed remainder guards the same edge into a
+                // total zero instead of a SIGFPE. Unsigned operands divide in
+                // their own modular domain, not through the signed C type.
                 let slash = if operator == "div" { "/" } else { "%" };
                 let overflow_guard = if operator == "div" && signed {
                     format!(
                         "if ({lhs_n} == INT{bits}_MIN && {rhs_n} == -1) {{ *mncs_status = 1; *mncs_value = 0; return; }} "
+                    )
+                } else if operator == "mod" && signed {
+                    format!(
+                        "if ({lhs_n} == INT{bits}_MIN && {rhs_n} == -1) {{ {dest_n} = ({})0; }} else ",
+                        c_type(dest.ty)
                     )
                 } else {
                     String::new()
@@ -773,29 +780,51 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 // still exactly detectable; narrower operands cannot overflow
                 // an int128/uint128 intermediate at all, but the guard stays
                 // uniform so failure semantics are identical at every width.
+                // Unsigned MNCS values ride in signed `int64_t` C cells, so
+                // the widening must zero-extend through `(uint64_t)` first:
+                // a direct `(unsigned __int128)` of the signed cell would
+                // sign-extend and mistrap every operand >= 2^63.
                 let wide_ty = if signed {
                     "__int128"
                 } else {
                     "unsigned __int128"
                 };
+                let (lhs_w, rhs_w) = if signed {
+                    (format!("({wide_ty}){lhs_n}"), format!("({wide_ty}){rhs_n}"))
+                } else {
+                    (
+                        format!("({wide_ty})(uint64_t){lhs_n}"),
+                        format!("({wide_ty})(uint64_t){rhs_n}"),
+                    )
+                };
                 let _ = writeln!(
                     out,
-                    "      {{ {wide_ty} mncs_wide = ({wide_ty}){lhs_n} {op} ({wide_ty}){rhs_n}; if (mncs_wide > {max} || mncs_wide < {min}) {{ *mncs_status = 1; *mncs_value = 0; return; }} {dest_n} = ({})mncs_wide; }}",
+                    "      {{ {wide_ty} mncs_wide = {lhs_w} {op} {rhs_w}; if (mncs_wide > {max} || mncs_wide < {min}) {{ *mncs_status = 1; *mncs_value = 0; return; }} {dest_n} = ({})mncs_wide; }}",
                     c_type(dest.ty),
                     max = max_text,
                     min = min_text,
                 );
             } else if matches!(intent, ArithmeticIntent::Saturating) {
                 // Total by definition: compute in the wide domain, then clamp
-                // into the declared representable range.
+                // into the declared representable range. Unsigned cells
+                // zero-extend through `(uint64_t)` for the same reason as
+                // the checked path above.
                 let wide_ty = if signed {
                     "__int128"
                 } else {
                     "unsigned __int128"
                 };
+                let (lhs_w, rhs_w) = if signed {
+                    (format!("({wide_ty}){lhs_n}"), format!("({wide_ty}){rhs_n}"))
+                } else {
+                    (
+                        format!("({wide_ty})(uint64_t){lhs_n}"),
+                        format!("({wide_ty})(uint64_t){rhs_n}"),
+                    )
+                };
                 let _ = writeln!(
                     out,
-                    "      {{ {wide_ty} mncs_wide = ({wide_ty}){lhs_n} {op} ({wide_ty}){rhs_n}; if (mncs_wide > {max}) {{ mncs_wide = {max}; }} if (mncs_wide < {min}) {{ mncs_wide = {min}; }} {dest_n} = ({})mncs_wide; }}",
+                    "      {{ {wide_ty} mncs_wide = {lhs_w} {op} {rhs_w}; if (mncs_wide > {max}) {{ mncs_wide = {max}; }} if (mncs_wide < {min}) {{ mncs_wide = {min}; }} {dest_n} = ({})mncs_wide; }}",
                     c_type(dest.ty),
                     max = max_text,
                     min = min_text,
@@ -980,12 +1009,23 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 );
             }
             SlotWidth::W64 => {
-                let _ = writeln!(
-                    out,
-                    "      mncs_slot_store64(mncs_arena, {} + {byte_offset}, (uint64_t){});",
-                    names.value(cell),
-                    names.value(value)
-                );
+                // Floats ride bit-carried: a numeric `(uint64_t)double`
+                // conversion would truncate. Copy the 64-bit pattern.
+                if matches!(names.ty(value), ScalarTy::Float) {
+                    let _ = writeln!(
+                        out,
+                        "      {{ uint64_t mncs_bits; memcpy(&mncs_bits, &{}, sizeof(mncs_bits)); mncs_slot_store64(mncs_arena, {} + {byte_offset}, mncs_bits); }}",
+                        names.value(value),
+                        names.value(cell),
+                    );
+                } else {
+                    let _ = writeln!(
+                        out,
+                        "      mncs_slot_store64(mncs_arena, {} + {byte_offset}, (uint64_t){});",
+                        names.value(cell),
+                        names.value(value)
+                    );
+                }
             }
         },
         ScalarInst::CellLoad {
@@ -1004,13 +1044,24 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 );
             }
             SlotWidth::W64 => {
-                let _ = writeln!(
-                    out,
-                    "      {} = ({})mncs_slot_load64(mncs_arena, {} + {byte_offset});",
-                    names.value(&dest.id),
-                    c_type(dest.ty),
-                    names.value(cell)
-                );
+                // Floats ride bit-carried: a numeric `(double)bits`
+                // conversion would reinterpret magnitude. Copy the pattern.
+                if matches!(dest.ty, ScalarTy::Float) {
+                    let _ = writeln!(
+                        out,
+                        "      {{ uint64_t mncs_bits = mncs_slot_load64(mncs_arena, {} + {byte_offset}); memcpy(&{}, &mncs_bits, sizeof(mncs_bits)); }}",
+                        names.value(cell),
+                        names.value(&dest.id),
+                    );
+                } else {
+                    let _ = writeln!(
+                        out,
+                        "      {} = ({})mncs_slot_load64(mncs_arena, {} + {byte_offset});",
+                        names.value(&dest.id),
+                        c_type(dest.ty),
+                        names.value(cell)
+                    );
+                }
             }
         },
         ScalarInst::ByteBitwise {
@@ -1156,15 +1207,29 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
             // domain so the C source itself contains no conditional operator
             // or candidate-dependent control flow. Native branchlessness is
             // still an artifact-level claim, not inferred from this source.
-            let _ = writeln!(
-                out,
-                "      {{ uint64_t mncs_mask = 0u - (uint64_t){}; uint64_t mncs_t = (uint64_t){}; uint64_t mncs_f = (uint64_t){}; {} = ({})((mncs_t & mncs_mask) | (mncs_f & ~mncs_mask)); }}",
-                names.value(condition),
-                names.value(when_true),
-                names.value(when_false),
-                names.value(&dest.id),
-                c_type(dest.ty),
-            );
+            // Float arms ride bit-carried: blend the 64-bit patterns, then
+            // copy the winner into the `double` (numeric casts would trap
+            // or reinterpret the magnitude).
+            if matches!(dest.ty, ScalarTy::Float) {
+                let _ = writeln!(
+                    out,
+                    "      {{ uint64_t mncs_mask = 0u - (uint64_t){}; uint64_t mncs_t; uint64_t mncs_f; memcpy(&mncs_t, &{}, sizeof(mncs_t)); memcpy(&mncs_f, &{}, sizeof(mncs_f)); uint64_t mncs_r = (mncs_t & mncs_mask) | (mncs_f & ~mncs_mask); memcpy(&{}, &mncs_r, sizeof(mncs_r)); }}",
+                    names.value(condition),
+                    names.value(when_true),
+                    names.value(when_false),
+                    names.value(&dest.id),
+                );
+            } else {
+                let _ = writeln!(
+                    out,
+                    "      {{ uint64_t mncs_mask = 0u - (uint64_t){}; uint64_t mncs_t = (uint64_t){}; uint64_t mncs_f = (uint64_t){}; {} = ({})((mncs_t & mncs_mask) | (mncs_f & ~mncs_mask)); }}",
+                    names.value(condition),
+                    names.value(when_true),
+                    names.value(when_false),
+                    names.value(&dest.id),
+                    c_type(dest.ty),
+                );
+            }
         }
         ScalarInst::SequenceReplace {
             dest,
@@ -1212,11 +1277,20 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                     );
                 }
                 SlotWidth::W64 => {
-                    let _ = writeln!(
-                        out,
-                        "      mncs_slot_store64(mncs_arena, {dest_n} + (uint64_t){index_n} * 8u, (uint64_t){});",
-                        names.value(element)
-                    );
+                    // Float elements ride bit-carried (see CellStore).
+                    if matches!(names.ty(element), ScalarTy::Float) {
+                        let _ = writeln!(
+                            out,
+                            "      {{ uint64_t mncs_bits; memcpy(&mncs_bits, &{}, sizeof(mncs_bits)); mncs_slot_store64(mncs_arena, {dest_n} + (uint64_t){index_n} * 8u, mncs_bits); }}",
+                            names.value(element),
+                        );
+                    } else {
+                        let _ = writeln!(
+                            out,
+                            "      mncs_slot_store64(mncs_arena, {dest_n} + (uint64_t){index_n} * 8u, (uint64_t){});",
+                            names.value(element)
+                        );
+                    }
                 }
             }
         }
@@ -1374,12 +1448,24 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 .join(", ");
             let _ = writeln!(out, "      {callee}({list});");
             out.push_str("      if (*mncs_status != 0) { return; }\n");
-            let _ = writeln!(
-                out,
-                "      {} = ({})*mncs_value;",
-                names.value(&dest.id),
-                c_type(dest.ty)
-            );
+            // Float results cross as bit-carried words (see Return): a
+            // numeric `(double)*mncs_value` conversion would reinterpret
+            // the magnitude. Copy the 64-bit pattern instead.
+            if matches!(dest.ty, ScalarTy::Float) {
+                let _ = writeln!(
+                    out,
+                    "      memcpy(&{}, mncs_value, sizeof({}));",
+                    names.value(&dest.id),
+                    names.value(&dest.id),
+                );
+            } else {
+                let _ = writeln!(
+                    out,
+                    "      {} = ({})*mncs_value;",
+                    names.value(&dest.id),
+                    c_type(dest.ty)
+                );
+            }
         }
     }
 }
@@ -1414,6 +1500,9 @@ fn inst_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
 }
 
 /// Emit one slot load at a computed byte address inside the canonical arena.
+///
+/// Float destinations ride bit-carried (see CellLoad): the 64-bit arena
+/// pattern is memcopied into the `double`, never numerically converted.
 fn emit_slot_load(
     out: &mut String,
     dest_name: &str,
@@ -1430,11 +1519,18 @@ fn emit_slot_load(
             );
         }
         SlotWidth::W64 => {
-            let _ = writeln!(
-                out,
-                "      {dest_name} = ({})mncs_slot_load64(mncs_arena, {address});",
-                c_type(dest_ty)
-            );
+            if matches!(dest_ty, crate::scalar::ScalarTy::Float) {
+                let _ = writeln!(
+                    out,
+                    "      {{ uint64_t mncs_bits = mncs_slot_load64(mncs_arena, {address}); memcpy(&{dest_name}, &mncs_bits, sizeof(mncs_bits)); }}",
+                );
+            } else {
+                let _ = writeln!(
+                    out,
+                    "      {dest_name} = ({})mncs_slot_load64(mncs_arena, {address});",
+                    c_type(dest_ty)
+                );
+            }
         }
     }
 }

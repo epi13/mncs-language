@@ -543,6 +543,9 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
     // honors them; every other target lowers all functions as ordinary
     // callable definitions. Options (not target facts) carry the selection
     // so the request/plan target identity stays exact.
+    // Kernel entries arrive as logical MNCS names; native symbols live under
+    // `mncs_` (see `support::c_symbol`), so map before comparing against the
+    // physical export names.
     let kernel_entries: std::collections::BTreeSet<String> = plan
         .backend
         .as_ref()
@@ -551,7 +554,7 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
             list.split(',')
                 .map(str::trim)
                 .filter(|name| !name.is_empty())
-                .map(str::to_owned)
+                .map(crate::support::c_symbol)
                 .collect()
         })
         .unwrap_or_default();
@@ -1583,6 +1586,11 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let dest_ty = llvm_type(dest.ty);
             if dest_ty == "i64" {
                 let _ = writeln!(out, "  %{tmp}_v = add i64 %{tmp}_raw, 0");
+            } else if dest_ty == "double" {
+                // Float results cross as bit-carried words (see Return):
+                // `trunc` is int-to-int only and clang rejects it; the
+                // 64-bit pattern must be bitcast into the `double`.
+                let _ = writeln!(out, "  %{tmp}_v = bitcast i64 %{tmp}_raw to double");
             } else {
                 let _ = writeln!(out, "  %{tmp}_v = trunc i64 %{tmp}_raw to {dest_ty}");
             }
@@ -1729,8 +1737,11 @@ fn emit_float_finite_guard(out: &mut String, reg: &str, split: &mut u32) {
 }
 
 /// Guarded division/remainder: a zero divisor always fails; signed division
-/// by MIN / -1 fails under checked intent. Guards branch to mncs_fail so
-/// statuses match the reference executors exactly.
+/// by MIN / -1 fails under checked intent. MNCS pins `MIN % -1 == 0`
+/// without trapping (only `MIN / -1` traps), so signed remainder guards
+/// the same edge into a total zero instead of `srem` poison. Guards branch
+/// to mncs_fail (or to the zero fast-path) so statuses match the reference
+/// executors exactly.
 fn emit_checked_division(
     out: &mut String,
     dest: &ScalarValue,
@@ -1765,6 +1776,40 @@ fn emit_checked_division(
             "  br i1 %ov{inner}, label %mncs_fail, label %dv{inner}_ok"
         );
         let _ = writeln!(out, "dv{inner}_ok:");
+    }
+    if operator == "mod" && signed {
+        let min = match dest.ty {
+            ScalarTy::Int(integer) => {
+                let magnitude = 1_i128 << (integer.bits.max(1) - 1);
+                format!("-{magnitude}")
+            }
+            _ => "-2147483648".to_owned(),
+        };
+        *split += 1;
+        let inner = *split;
+        let _ = writeln!(out, "  %mm1{inner} = icmp eq {ty} %{rhs}, -1");
+        let _ = writeln!(out, "  %mmn{inner} = icmp eq {ty} %{lhs}, {min}");
+        let _ = writeln!(out, "  %mov{inner} = and i1 %mm1{inner}, %mmn{inner}");
+        let _ = writeln!(
+            out,
+            "  br i1 %mov{inner}, label %modzero{inner}, label %modcalc{inner}"
+        );
+        let _ = writeln!(out, "modzero{inner}:");
+        *split += 1;
+        let zero_tmp = format!("q{}", *split);
+        let _ = writeln!(out, "  %{zero_tmp} = add {ty} 0, 0");
+        store_dest(out, names, dest, &zero_tmp);
+        *split += 1;
+        let cont = *split;
+        let _ = writeln!(out, "  br label %modcont{cont}");
+        let _ = writeln!(out, "modcalc{inner}:");
+        *split += 1;
+        let calc_tmp = format!("q{}", *split);
+        let _ = writeln!(out, "  %{calc_tmp} = srem {ty} %{lhs}, %{rhs}");
+        store_dest(out, names, dest, &calc_tmp);
+        let _ = writeln!(out, "  br label %modcont{cont}");
+        let _ = writeln!(out, "modcont{cont}:");
+        return;
     }
     let native = match (operator, signed) {
         ("div", false) => "udiv",

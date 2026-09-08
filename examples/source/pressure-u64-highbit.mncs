@@ -1,0 +1,60 @@
+mncs 0.10;
+
+// Pressure: u64 high-bit correctness. Values ride in signed cells; checked
+// arithmetic must zero-extend through (uint64_t), never sign-extend.
+// Covers MAX, 2^63, 2^63+1, boundary neighbors, checked add/sub, wrapping
+// add, comparisons, and argument/return marshalling.
+
+module examples.pressure.u64highbit;
+
+fn checked_add(x: u64, y: u64) -> (result: u64) {
+    return x + y;
+}
+
+fn entry_add(x: u64, y: u64) -> (result: u64) {
+    return checked_add(x, y);
+}
+
+fn checked_sub(x: u64, y: u64) -> (result: u64) {
+    return x - y;
+}
+
+fn entry_sub(x: u64, y: u64) -> (result: u64) {
+    return checked_sub(x, y);
+}
+
+fn wrap_add(x: u64, y: u64) -> (result: u64) {
+    return x +% y;
+}
+
+fn entry_wrap(x: u64, y: u64) -> (result: u64) {
+    return wrap_add(x, y);
+}
+
+fn cmp_ge(x: u64, y: u64) -> (result: bool) {
+    return x >= y;
+}
+
+fn entry_ge(x: u64, y: u64) -> (result: bool) {
+    return cmp_ge(x, y);
+}
+
+fn addm(x: u64, y: u64, m: u64) -> (result: u64) {
+    let room: u64 = m - y;
+    if x >= room {
+        return x - room;
+    }
+    return x + y;
+}
+
+fn entry_addm(x: u64, y: u64, m: u64) -> (result: u64) {
+    return addm(x, y, m);
+}
+
+fn min_mod(x: i64, y: i64) -> (result: i64) {
+    return x % y;
+}
+
+fn entry_minmod(x: i64, y: i64) -> (result: i64) {
+    return min_mod(x, y);
+}

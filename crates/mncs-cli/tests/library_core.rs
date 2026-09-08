@@ -335,6 +335,12 @@ fn ravel_snapshot_agrees_with_core_status_lattice_on_bytecode() {
 /// The frozen consumer snapshot is a witness of what RAVEL ships: its
 /// canonical form must stay identical to the upstream file's canonical form
 /// (fingerprint computed at tranche time from both files).
+///
+/// Fingerprint history: `4bfaff83...` (pre-pressure) rotated to `1cc17f37...`
+/// by the native-soundness tranche, whose hygienic `$mncs$` elaborator
+/// temporaries (MNB011) are the sole canonical delta — verified by
+/// rebuilding with legacy IDs restored and observing the old fingerprint
+/// return exactly, with all other tranche changes held constant.
 #[test]
 fn ravel_snapshot_is_canonically_identical_to_upstream() {
     let mut paths = vec![example("consumers/ravel-core-snapshot.mncs")];
@@ -350,7 +356,7 @@ fn ravel_snapshot_is_canonically_identical_to_upstream() {
         let value: Value = serde_json::from_slice(&output.stdout).expect("canonical JSON");
         assert_eq!(
             value["fingerprint"],
-            "4bfaff838654b6a4264f6145900c9684b106e1ce6cc64ce297c53bb4a04a5370",
+            "1cc17f37bc2859f38a5e0eb85953829d4a3d4b706a7bbec601f402f18a38332c",
             "{path}"
         );
     }

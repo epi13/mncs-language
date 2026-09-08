@@ -7404,8 +7404,24 @@ impl<'a> BodyBuilder<'a> {
         ResolvedBinding::plain(id, field_type)
     }
 
+    /// Hygienic compiler temporary identity, by construction.
+    ///
+    /// Source identifiers start with `[A-Za-z_]` and continue with
+    /// `[A-Za-z0-9_]` (`mncs-syntax`), so no source binding can spell a
+    /// `$`-prefixed identity. Every elaborator temporary therefore lives in
+    /// a namespace user code cannot name, and short prefixes like `c`/`b`
+    /// can never alias user bindings such as `c0`/`b3` (MNB011). The counter
+    /// keeps emission deterministic.
+    /// Hygienic compiler temporary identity, by construction.
+    ///
+    /// Source identifiers start with `[A-Za-z_]` and continue with
+    /// `[A-Za-z0-9_]` (`mncs-syntax`), so no source binding can spell a
+    /// `$`-prefixed identity. Every elaborator temporary therefore lives in
+    /// a namespace user code cannot name, and short prefixes like `c`/`b`
+    /// can never alias user bindings such as `c0`/`b3` (MNB011). The counter
+    /// keeps emission deterministic.
     fn new_value(&mut self, prefix: &str) -> String {
-        let id = format!("{prefix}{}", self.next_value);
+        let id = format!("$mncs${prefix}${}", self.next_value);
         self.next_value += 1;
         id
     }

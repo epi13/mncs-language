@@ -1206,15 +1206,17 @@ fn validate_bounded_iterations(
                         ),
                     ));
                 }
-                let expected_counter = BodyType::Integer(IntegerType {
-                    bits: 64,
-                    signed: false,
-                });
+                // Any ordinary scalar element type traverses: all integer
+                // widths in both signednesses, binary64, bytes, and bools.
+                // The traversal index is always an abstract u64 counter, so
+                // a `u64` element type is a legitimate domain, not a missing
+                // resolution (MNB101). Only truly unresolvable nominal types
+                // fail here; generic parameters resolve through substitution.
                 let unresolved_named = matches!(
                     element_type.as_ref(),
                     BodyType::Named(name) if name != "bool"
                 );
-                if **element_type == expected_counter || unresolved_named {
+                if unresolved_named {
                     errors.push(body_diagnostic(
                         "MNB101",
                         format!("{path}.domain"),

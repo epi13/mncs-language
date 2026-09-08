@@ -606,7 +606,10 @@ pub fn lower_external(
             .map(str::trim)
             .filter(|name| !name.is_empty())
         {
-            if !export_names.iter().any(|export| export == entry) {
+            // Entries arrive as logical MNCS names; exports are physical
+            // `mncs_` symbols (see `support::c_symbol`).
+            let physical = crate::support::c_symbol(entry);
+            if !export_names.iter().any(|export| export == &physical) {
                 unknown.push(entry.to_owned());
             }
         }

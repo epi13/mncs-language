@@ -280,6 +280,10 @@ pub fn lower_to_scalar(program: &Program, ssa: &SsaModule, names: &[String]) -> 
     let mut features = Vec::new();
     let mut promise_decisions = Vec::new();
     let layout = CompositeLayout::from_program(program);
+    // Native symbols are hygienic by construction (`support::c_symbol`):
+    // every lowered entry gains the `mncs_` namespace so generated symbols
+    // cannot collide with libc/libm. The mapping is idempotent, so already
+    // namespaced inputs keep their spelling and artifact bytes stay stable.
     let callees: BTreeMap<SemanticId, String> = ssa
         .functions
         .iter()
@@ -289,15 +293,15 @@ pub fn lower_to_scalar(program: &Program, ssa: &SsaModule, names: &[String]) -> 
                 function.semantic_identity.clone(),
                 names
                     .get(index)
-                    .cloned()
-                    .unwrap_or_else(|| function.semantic_identity.0.clone()),
+                    .map(|name| crate::support::c_symbol(name))
+                    .unwrap_or_else(|| crate::support::export_name(&function.semantic_identity.0)),
             )
         })
         .collect();
     for (index, function) in ssa.functions.iter().enumerate() {
         let name = names
             .get(index)
-            .cloned()
+            .map(|name| crate::support::c_symbol(name))
             .unwrap_or_else(|| crate::support::export_name(&function.semantic_identity.0));
         match lower_function(ssa, function, name, &callees, &layout) {
             Ok(lowered) => {
@@ -1531,9 +1535,16 @@ fn ir_type_of(ty: &mncs_model::BodyType) -> IrType {
 }
 
 /// Canonical slot width for a sequence element inside an exact cell.
+///
+/// Every exact-sequence element occupies one 8-byte canonical slot. 64-bit
+/// integers, cell/view/mask descriptors, and binary64 floats all ride as
+/// full 64-bit patterns (floats bit-carried, never numerically converted);
+/// narrower scalars stay in 32-bit slots. This is the single MNCS
+/// representation contract shared by all executable backends.
 pub fn slot_width_of(ty: ScalarTy) -> SlotWidth {
     match ty {
         ScalarTy::Int(integer) if integer.bits == 64 => SlotWidth::W64,
+        ScalarTy::Float => SlotWidth::W64,
         ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => SlotWidth::W64,
         _ => SlotWidth::W32,
     }
