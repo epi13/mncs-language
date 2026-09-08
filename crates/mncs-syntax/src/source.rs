@@ -14,6 +14,7 @@ pub const SOURCE_PROFILE_VERSION_0_7: &str = "0.7";
 pub const SOURCE_PROFILE_VERSION_0_8: &str = "0.8";
 pub const SOURCE_PROFILE_VERSION_0_9: &str = "0.9";
 pub const SOURCE_PROFILE_VERSION_0_10: &str = "0.10";
+pub const SOURCE_PROFILE_VERSION_0_11: &str = "0.11";
 pub const SOURCE_PROFILE_VERSION_1_0: &str = "1.0";
 
 /// True when the active source profile declares at least `version`. Profile
@@ -3768,6 +3769,7 @@ pub fn source_profile_supported(version: &str) -> bool {
             | SOURCE_PROFILE_VERSION_0_8
             | SOURCE_PROFILE_VERSION_0_9
             | SOURCE_PROFILE_VERSION_0_10
+            | SOURCE_PROFILE_VERSION_0_11
             | SOURCE_PROFILE_VERSION_1_0
     )
 }
@@ -3828,6 +3830,7 @@ fn infer_source_profile(text: &str) -> &'static str {
     });
     match header {
         Some(line) if line.trim_start().starts_with("mncs 1.0") => SOURCE_PROFILE_VERSION_1_0,
+        Some(line) if line.trim_start().starts_with("mncs 0.11") => SOURCE_PROFILE_VERSION_0_11,
         Some(line) if line.trim_start().starts_with("mncs 0.10") => SOURCE_PROFILE_VERSION_0_10,
         Some(line) if line.trim_start().starts_with("mncs 0.9") => SOURCE_PROFILE_VERSION_0_9,
         Some(line) if line.trim_start().starts_with("mncs 0.8") => SOURCE_PROFILE_VERSION_0_8,

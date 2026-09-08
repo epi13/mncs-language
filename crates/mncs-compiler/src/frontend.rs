@@ -2664,6 +2664,11 @@ fn elaborate_function(
                 namespace_aliases,
                 direct_imports,
                 generic_map.clone(),
+                // ---- Profile 0.11: nested bounded iteration ----
+                mncs_syntax::profile_at_least(
+                    &ast.language_version.text,
+                    mncs_syntax::SOURCE_PROFILE_VERSION_0_11,
+                ),
             );
             builder.elaborate_statements(&function.body.statements, &mut env, &mut diagnostics);
             if let Some(returned) = builder.elaborate_expr(
@@ -3039,6 +3044,10 @@ enum BoundNameKind {
     /// The index binding of an enclosing bounded sequence traversal; element
     /// projections through it are discharged by traversal semantics.
     TraversalIndex,
+    /// The index binding of an enclosing counted loop (Profile 0.11). It
+    /// carries the 0-based position but never discharges element
+    /// projections: only traversal semantics prove positions in bounds.
+    CountedIndex,
 }
 
 impl BoundNameKind {
@@ -3046,7 +3055,9 @@ impl BoundNameKind {
         match self {
             Self::Parameter => ResolvedNameKind::Parameter,
             Self::Binding => ResolvedNameKind::Binding,
-            Self::IterationState | Self::TraversalIndex => ResolvedNameKind::IterationState,
+            Self::IterationState | Self::TraversalIndex | Self::CountedIndex => {
+                ResolvedNameKind::IterationState
+            }
         }
     }
 
@@ -3055,7 +3066,7 @@ impl BoundNameKind {
             Self::Parameter => "parameter",
             Self::Binding => "local",
             Self::IterationState => "iteration-state",
-            Self::TraversalIndex => "iteration-index",
+            Self::TraversalIndex | Self::CountedIndex => "iteration-index",
         }
     }
 }
@@ -3239,7 +3250,11 @@ struct BodyBuilder<'a> {
     direct_imports: &'a BTreeSet<String>,
     generic_map: BTreeMap<String, mncs_model::GenericParamKind>,
     resolutions: Vec<NameResolution>,
-    in_iteration: bool,
+    iteration_depth: usize,
+    /// Profile 0.11: two-level nested bounded iteration and the
+    /// counted-loop index binding. Older profiles keep the historical
+    /// refusals (MNE147 for any nesting, unbound counted index).
+    profile_nested_iteration: bool,
 }
 
 impl<'a> BodyBuilder<'a> {
@@ -3255,6 +3270,7 @@ impl<'a> BodyBuilder<'a> {
         namespace_aliases: &'a BTreeMap<String, String>,
         direct_imports: &'a BTreeSet<String>,
         generic_map: BTreeMap<String, mncs_model::GenericParamKind>,
+        profile_nested_iteration: bool,
     ) -> Self {
         let owner = function_id(&namespace, &function);
         Self {
@@ -3280,7 +3296,8 @@ impl<'a> BodyBuilder<'a> {
             direct_imports,
             generic_map,
             resolutions: Vec::new(),
-            in_iteration: false,
+            iteration_depth: 0,
+            profile_nested_iteration,
         }
     }
 
@@ -3530,10 +3547,24 @@ impl<'a> BodyBuilder<'a> {
         else {
             unreachable!("bounded iteration helper requires iteration statement")
         };
-        if self.in_iteration {
+        // Profile 0.11 permits two levels of nested bounded iterations
+        // (bit-steps within byte-steps, the natural checksum shape) with
+        // distinct iteration identities; the per-loop bound (1..=32) keeps
+        // the dynamic step product within the step budget. Older profiles
+        // keep the historical refusal, and depth three or more stays
+        // refused on every profile.
+        if self.iteration_depth >= 1 && !self.profile_nested_iteration {
             diagnostics.push(elaboration_diagnostic(
                 "MNE147",
                 "Source Profile 0.4 does not permit nested bounded iterations",
+                *span,
+            ));
+            return;
+        }
+        if self.iteration_depth >= 2 {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE147",
+                "Source Profile 0.11 permits at most two levels of nested bounded iterations",
                 *span,
             ));
             return;
@@ -3702,7 +3733,7 @@ impl<'a> BodyBuilder<'a> {
         ];
         self.blocks[self.current].terminator = BodyTerminator::Branch {
             target: header.clone(),
-            arguments: vec![initial_value.id.clone(), bound_id],
+            arguments: vec![initial_value.id.clone(), bound_id.clone()],
         };
         self.current = header_index;
         let zero_id = self.new_value("iteration_zero");
@@ -3760,7 +3791,7 @@ impl<'a> BodyBuilder<'a> {
 
         let blocks_before_body = self.blocks.len();
         self.current = self.index_of(&body_entry);
-        self.in_iteration = true;
+        self.iteration_depth += 1;
         env.push();
         // Bounded traversal binds the loop index in the body scope. The
         // index is derived from the countdown counter so the traversal
@@ -3802,6 +3833,48 @@ impl<'a> BodyBuilder<'a> {
                 BoundNameKind::TraversalIndex,
                 diagnostics,
             );
+        } else if self.profile_nested_iteration {
+            // Profile 0.11 binds the counted-loop index in the body scope:
+            // the 0-based position `bound - remaining`, typed u64 like the
+            // counter. Older profiles leave it unbound (MNE102). The
+            // counted position proves nothing about sequence bounds, so it
+            // binds as CountedIndex, never as TraversalIndex.
+            let index_id = self.new_value("counted_index");
+            self.blocks[self.current].operations.push(BodyOperation {
+                id: index_id.clone(),
+                kind: BodyOperationKind::Integer {
+                    operator: "sub".to_owned(),
+                    operand_type: IntegerType {
+                        bits: 64,
+                        signed: false,
+                    },
+                    intent: ArithmeticIntent::Wrapping,
+                },
+                operands: vec![bound_id.clone(), header_counter.clone()],
+                results: vec![BodyValue {
+                    id: index_id.clone(),
+                    ty: BodyType::Integer(IntegerType {
+                        bits: 64,
+                        signed: false,
+                    }),
+                }],
+                contracts: Vec::new(),
+                assumptions: Vec::new(),
+                machine_intent: None,
+                lowering: None,
+                portability: None,
+            });
+            env.bind(
+                name.text.clone(),
+                index_id,
+                BodyType::Integer(IntegerType {
+                    bits: 64,
+                    signed: false,
+                }),
+                name.span,
+                BoundNameKind::CountedIndex,
+                diagnostics,
+            );
         }
         env.bind(
             state.text.clone(),
@@ -3819,7 +3892,7 @@ impl<'a> BodyBuilder<'a> {
                 next_value.span(),
             ));
             env.pop();
-            self.in_iteration = false;
+            self.iteration_depth -= 1;
             return;
         }
         if next_state.text != state.text {
@@ -3832,7 +3905,7 @@ impl<'a> BodyBuilder<'a> {
         let Some(next) = self.elaborate_expr(next_value, Some(&carried_type), env, diagnostics)
         else {
             env.pop();
-            self.in_iteration = false;
+            self.iteration_depth -= 1;
             return;
         };
         if next.ty != carried_type {
@@ -3888,7 +3961,7 @@ impl<'a> BodyBuilder<'a> {
             arguments: vec![next.id, decremented],
         };
         env.pop();
-        self.in_iteration = false;
+        self.iteration_depth -= 1;
         let mut body_blocks = vec![body_entry.clone()];
         body_blocks.extend(
             self.blocks[blocks_before_body..]

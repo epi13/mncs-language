@@ -1,0 +1,46 @@
+mncs 0.11;
+
+// Stage B3: two-level nested bounded iteration with bound counted
+// indices (Profile 0.11). Each level carries its own identity;
+// indices are 0-based u64 positions (bound - remaining).
+module examples.stage.nested;
+
+fn index_sum_n(n: u64) -> (result: u64) {
+    iterate step up_to 8 carrying total: u64 = 0 {
+        next total = total +% select(step < n, step, 0);
+    }
+    return total;
+}
+
+fn nested_grid() -> (result: u64) {
+    iterate outer up_to 3 carrying acc: u64 = 0 {
+        iterate inner up_to 4 carrying acc2: u64 = acc {
+            next acc2 = acc2 +% (outer *% 10 +% inner);
+        }
+        next acc = acc2;
+    }
+    return acc;
+}
+
+fn checksum_bit(crc: u32, bit: u32) -> (result: u32) {
+    let mixed: u32 = crc ^ bit;
+    let shifted: u32 = mixed >> (1 as u64);
+    if mixed % (2 as u32) == (1 as u32) {
+        return (3988292384 as u32) ^ shifted;
+    }
+    return shifted;
+}
+
+fn checksum_word(crc_in: u32, word: u32) -> (result: u32) {
+    iterate bit up_to 8 carrying crc: u32 = crc_in {
+        next crc = checksum_bit(crc, (word >> bit) & (1 as u32));
+    }
+    return crc;
+}
+
+fn checksum_words(a: u32, b: u32) -> (result: u32) {
+    iterate byte up_to 2 carrying crc: u32 = 4294967295 {
+        next crc = checksum_word(crc, select(byte == 0, a, b));
+    }
+    return crc;
+}
