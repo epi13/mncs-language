@@ -1048,6 +1048,11 @@ fn backend_input_matches(
                 }
                 // Bytes marshal through their unsigned 8-bit domain.
                 (BodyType::Byte, ExecutionValue::Byte { value }) => (0..=255).contains(value),
+                // Binary64 arguments match by type: finiteness is a
+                // runtime trap, not a request rejection.
+                (BodyType::Float(expected), ExecutionValue::Float { ty: actual, .. }) => {
+                    expected.is_supported() && actual.is_supported() && expected == *actual
+                }
                 _ => false,
             }
         }
@@ -1190,6 +1195,31 @@ pub(crate) fn backend_output_value(
                         ty: expected,
                     })
                 }
+                // Float results cross the native boundary as bit-carried
+                // words (the driver prints the i64 cell holding the bits);
+                // finiteness is rechecked because only finite values are
+                // language-owned float results.
+                (BodyType::Float(expected), ExecutionValue::Integer { value, .. })
+                    if expected.is_supported() =>
+                {
+                    let bits = value as u64;
+                    if !f64::from_bits(bits).is_finite() {
+                        return Err("backend returned a non-finite float result".to_owned());
+                    }
+                    Ok(ExecutionValue::Float { bits, ty: expected })
+                }
+                // Backends with native binary64 realizations (WASM MVP,
+                // Cranelift) return the float value itself instead of a
+                // bit-carried integer word; finiteness is rechecked at the
+                // boundary either way.
+                (BodyType::Float(expected), ExecutionValue::Float { bits, ty: observed })
+                    if expected.is_supported() && observed.is_supported() =>
+                {
+                    if !f64::from_bits(bits).is_finite() {
+                        return Err("backend returned a non-finite float result".to_owned());
+                    }
+                    Ok(ExecutionValue::Float { bits, ty: expected })
+                }
                 // Byte results normalize through the unsigned byte domain.
                 (BodyType::Byte, ExecutionValue::Integer { value, .. })
                 | (BodyType::Byte, ExecutionValue::Byte { value }) => {
@@ -1291,6 +1321,7 @@ fn marshal_ty(
             match BodyType::from_semantic_name(semantic_type) {
                 BodyType::Named(name) if name == "bool" => MarshalTy::Bool,
                 BodyType::Integer(ty) => MarshalTy::Int(ty),
+                BodyType::Float(ty) if ty.is_supported() => MarshalTy::Float(ty),
                 // Bytes marshal as unsigned 8-bit scalar cells.
                 BodyType::Byte => MarshalTy::Int(IntegerType {
                     bits: 8,
@@ -2245,6 +2276,20 @@ fn values_agree(left: &[ExecutionValue], right: &[ExecutionValue]) -> bool {
             (ExecutionValue::Byte { value: left }, ExecutionValue::Byte { value: right }) => {
                 left == right
             }
+            // Binary64 values agree on exact bit patterns: bits (not
+            // `f64`) are the serialized form, so bitwise equality is the
+            // language-owned comparison. Boundary values are finite by
+            // the float trap rule, so no NaN-bit ambiguity reaches here.
+            (
+                ExecutionValue::Float {
+                    bits: left_bits,
+                    ty: left_ty,
+                },
+                ExecutionValue::Float {
+                    bits: right_bits,
+                    ty: right_ty,
+                },
+            ) => left_ty.bits == right_ty.bits && left_bits == right_bits,
             // A byte returned from a scalar realization may surface as an
             // integer observation; agree through the byte domain when the
             // value fits.

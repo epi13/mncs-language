@@ -24,6 +24,7 @@ use crate::support::{
     unknown, validate_realizable_ssa, validate_selected_ssa,
 };
 use crate::{BackendAdapter, BackendExecutionResult};
+use cranelift_codegen::ir::InstBuilder as _;
 
 pub const CRANELIFT_BACKEND_NAME: &str = "mncs-cranelift";
 pub const CRANELIFT_BACKEND_VERSION: &str = "0.1";
@@ -344,6 +345,32 @@ pub fn lower_cranelift(
     }
 }
 
+/// Reinterpret i64 bits as f64 through one explicit stack slot (Profile
+/// 0.12). This Cranelift version exposes only the memory `bitcast`, so
+/// value reinterpretation round-trips through a reserved 8-byte slot.
+fn jit_bits_to_f64(
+    builder: &mut cranelift_frontend::FunctionBuilder,
+    slot: cranelift_codegen::ir::StackSlot,
+    bits: cranelift_codegen::ir::Value,
+) -> cranelift_codegen::ir::Value {
+    builder.ins().stack_store(bits, slot, 0);
+    builder
+        .ins()
+        .stack_load(cranelift_codegen::ir::types::F64, slot, 0)
+}
+
+/// Reinterpret an f64 value as i64 bits through the reserved slot.
+fn jit_f64_to_bits(
+    builder: &mut cranelift_frontend::FunctionBuilder,
+    slot: cranelift_codegen::ir::StackSlot,
+    value: cranelift_codegen::ir::Value,
+) -> cranelift_codegen::ir::Value {
+    builder.ins().stack_store(value, slot, 0);
+    builder
+        .ins()
+        .stack_load(cranelift_codegen::ir::types::I64, slot, 0)
+}
+
 fn emit_clif(module: &ScalarModule) -> String {
     let mut out = String::from("; MNCS Cranelift CLIF 0.1. Not MNCS semantics.\n");
     for function in &module.functions {
@@ -452,6 +479,104 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                 clif_ty(dest.ty),
                 clif_constant(*value, dest.ty)
             );
+        }
+        ScalarInst::FloatConst { dest, bits } => {
+            // Bit-carried in the uniform i64 cell; use sites bitcast.
+            let _ = writeln!(
+                out,
+                "        {} = iconst.i64 {}",
+                names.value(&dest.id),
+                *bits as i64
+            );
+        }
+        ScalarInst::Float {
+            dest,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            let native = match operator.as_str() {
+                "add" => "fadd",
+                "sub" => "fsub",
+                "mul" => "fmul",
+                "div" => "fdiv",
+                _ => "fadd",
+            };
+            let dest_n = names.value(&dest.id);
+            let lhs_n = names.value(lhs);
+            let rhs_n = names.value(rhs);
+            // Uniform i64 cells bitcast at use; each operand and the
+            // result carries a finiteness guard into the shared failure
+            // shape, identical to the division guards.
+            let _ = writeln!(out, "        {dest_n}_l = bitcast.f64 {lhs_n}");
+            let _ = writeln!(out, "        {dest_n}_r = bitcast.f64 {rhs_n}");
+            let _ = writeln!(out, "        {dest_n}_z = f64const 0x0000000000000000");
+            for side in ["l", "r"] {
+                let _ = writeln!(
+                    out,
+                    "        {dest_n}_d{side} = fsub {dest_n}_{side}, {dest_n}_{side}"
+                );
+                let _ = writeln!(
+                    out,
+                    "        {dest_n}_b{side} = fcmp une {dest_n}_d{side}, {dest_n}_z"
+                );
+                let _ = writeln!(out, "        brnz {dest_n}_b{side}, fail_fl_{dest_n}");
+            }
+            let _ = writeln!(out, "        {dest_n}_f = {native} {dest_n}_l, {dest_n}_r");
+            let _ = writeln!(out, "        {dest_n}_dr = fsub {dest_n}_f, {dest_n}_f");
+            let _ = writeln!(
+                out,
+                "        {dest_n}_br = fcmp une {dest_n}_dr, {dest_n}_z"
+            );
+            let _ = writeln!(out, "        brnz {dest_n}_br, fail_fl_{dest_n}");
+            let _ = writeln!(out, "        {dest_n} = bitcast.i64 {dest_n}_f");
+            let _ = writeln!(out, "        jump ok_fl_{dest_n}");
+            let _ = writeln!(out, "    fail_fl_{dest_n}:");
+            out.push_str("        v_bad = iconst.i32 1\n        v_z = iconst.i64 0\n");
+            out.push_str(
+                "        store.i32 v_bad, st\n        store.i64 v_z, val\n        return\n",
+            );
+            let _ = writeln!(out, "    ok_fl_{dest_n}:");
+        }
+        ScalarInst::FloatCompare {
+            dest,
+            predicate,
+            lhs,
+            rhs,
+        } => {
+            let cc = match predicate.as_str() {
+                "eq" => "eq",
+                "ne" => "ne",
+                "lt" => "lt",
+                "le" => "le",
+                "gt" => "gt",
+                _ => "ge",
+            };
+            let dest_n = names.value(&dest.id);
+            let lhs_n = names.value(lhs);
+            let rhs_n = names.value(rhs);
+            let _ = writeln!(out, "        {dest_n}_l = bitcast.f64 {lhs_n}");
+            let _ = writeln!(out, "        {dest_n}_r = bitcast.f64 {rhs_n}");
+            let _ = writeln!(out, "        {dest_n}_z = f64const 0x0000000000000000");
+            for side in ["l", "r"] {
+                let _ = writeln!(
+                    out,
+                    "        {dest_n}_d{side} = fsub {dest_n}_{side}, {dest_n}_{side}"
+                );
+                let _ = writeln!(
+                    out,
+                    "        {dest_n}_b{side} = fcmp une {dest_n}_d{side}, {dest_n}_z"
+                );
+                let _ = writeln!(out, "        brnz {dest_n}_b{side}, fail_fc_{dest_n}");
+            }
+            let _ = writeln!(out, "        {dest_n} = fcmp {cc} {dest_n}_l, {dest_n}_r");
+            let _ = writeln!(out, "        jump ok_fc_{dest_n}");
+            let _ = writeln!(out, "    fail_fc_{dest_n}:");
+            out.push_str("        v_bad = iconst.i32 1\n        v_z = iconst.i64 0\n");
+            out.push_str(
+                "        store.i32 v_bad, st\n        store.i64 v_z, val\n        return\n",
+            );
+            let _ = writeln!(out, "    ok_fc_{dest_n}:");
         }
         ScalarInst::Boolean {
             dest,
@@ -748,26 +873,57 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
             }
             let _ = writeln!(out, "        {d} = band {d}_s, 255");
         }
-        ScalarInst::Convert { dest, to, src, .. } => {
+        ScalarInst::Convert {
+            dest,
+            from,
+            to,
+            src,
+            ..
+        } => {
             // The source cell is normalized to its own width/signedness, so
             // conversion is renormalization into the target parameters:
             // truncation drops high bits; widening keeps the value exactly.
+            // Float edges mirror the JIT builder: int sources convert
+            // exactly rounded, float sources guard finite and range-guard
+            // with sliver-safe bounds before converting.
             let d = names.value(&dest.id);
-            let bits = bits_of(*to);
-            let signed = signed_of(*to);
-            if bits >= 64 && !signed {
-                let _ = writeln!(out, "        {d} = {}", names.value(src));
-            } else if signed {
-                let shift = 64 - i64::from(bits);
-                let _ = writeln!(
-                    out,
-                    "        {d} = ishl_imm.i64 {}, {shift}",
-                    names.value(src)
-                );
-                let _ = writeln!(out, "        {d} = sshr_imm.i64 {d}, {shift}");
+            if matches!(to, ScalarTy::Float) {
+                let op = if signed_of(*from) {
+                    "fcvt_from_sint.f64"
+                } else {
+                    "fcvt_from_uint.f64"
+                };
+                let _ = writeln!(out, "        {d} = {op} {}", names.value(src));
             } else {
-                let mask = ((1_i128 << bits) - 1) as i64;
-                let _ = writeln!(out, "        {d} = band {}, {mask}", names.value(src));
+                // Float sources convert through a guarded intermediate;
+                // integer sources renormalize directly.
+                let mut source = names.value(src).to_owned();
+                if matches!(from, ScalarTy::Float) {
+                    let (cc, lo, hi) = float_guard_bounds(*to);
+                    let cc_text = match cc {
+                        cranelift_codegen::ir::condcodes::FloatCC::LessThan => "flt",
+                        _ => "fle",
+                    };
+                    let conv = if signed_of(*to) { "sint" } else { "uint" };
+                    let _ = writeln!(out, "        {d}_v = bitcast.f64 {}", names.value(src));
+                    let _ = writeln!(out, "        {d}_bad = {cc_text} {d}_v, {lo:?}");
+                    let _ = writeln!(out, "        {d}_bad2 = fge {d}_v, {hi:?}");
+                    let _ = writeln!(out, "        {d}_raw = fcvt_to_{conv}.i64 {d}_v");
+                    let _ = writeln!(out, "        trapz {d}_bad ; trapz {d}_bad2");
+                    source = format!("{d}_raw");
+                }
+                let bits = bits_of(*to);
+                let signed = signed_of(*to);
+                if bits >= 64 && !signed {
+                    let _ = writeln!(out, "        {d} = {source}");
+                } else if signed {
+                    let shift = 64 - i64::from(bits);
+                    let _ = writeln!(out, "        {d} = ishl_imm.i64 {source}, {shift}");
+                    let _ = writeln!(out, "        {d} = sshr_imm.i64 {d}, {shift}");
+                } else {
+                    let mask = ((1_i128 << bits) - 1) as i64;
+                    let _ = writeln!(out, "        {d} = band {source}, {mask}");
+                }
             }
         }
         ScalarInst::Select {
@@ -1008,6 +1164,8 @@ fn clif_ty(ty: ScalarTy) -> &'static str {
     match ty {
         ScalarTy::Int(integer) if integer.bits == 64 => "i64",
         ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => "i64",
+        // Floats ride bit-carried in uniform i64 cells; use sites bitcast.
+        ScalarTy::Float => "i64",
         _ => "i32",
     }
 }
@@ -1019,6 +1177,7 @@ fn bits_of(ty: ScalarTy) -> u16 {
         ScalarTy::Byte => 8,
         ScalarTy::Int(integer) => integer.bits,
         ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => 64,
+        ScalarTy::Float => 64,
     }
 }
 
@@ -1140,6 +1299,9 @@ fn flatten_scalar(insts: &[ScalarInst]) -> Vec<&ScalarInst> {
 fn scalar_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
     match inst {
         ScalarInst::Const { dest, .. }
+        | ScalarInst::FloatConst { dest, .. }
+        | ScalarInst::Float { dest, .. }
+        | ScalarInst::FloatCompare { dest, .. }
         | ScalarInst::Integer { dest, .. }
         | ScalarInst::Boolean { dest, .. }
         | ScalarInst::Compare { dest, .. }
@@ -1379,10 +1541,13 @@ fn aot_fallback_execute(
             contract.outputs.first(),
         )
     };
+    // The C driver parses scalar words itself (`strtod` for floats), so
+    // argv carries the decimal request spellings, not the bit-carried
+    // JIT words: re-stringified float bits would parse as huge decimals.
     let argv: Vec<String> = if arena_image.is_some() {
         Vec::new()
     } else {
-        raw_args.iter().map(|value| value.to_string()).collect()
+        crate::native::argv_from_request(request)?
     };
     let call_path = arena_image.as_ref().map(|image| {
         let mut blob = Vec::new();
@@ -1453,6 +1618,35 @@ fn integer_bounds(bits: u16, signed: bool) -> (i64, i64) {
     } else {
         let top = 1i64 << (bits - 1);
         (-top, top - 1)
+    }
+}
+
+/// Sliver-safe `(bad-if predicate, lo, hi)` for a guarded float-to-integer
+/// conversion (Profile 0.12), as host f64 values. The range check runs on
+/// the untruncated value: the upper bound is exact as-is, while the lower
+/// bound admits the fractional sliver `(lo - 1, lo)` whose truncation still
+/// lands in domain. The i64 sliver is empty, so plain less-than is exact
+/// there; narrower signed domains spell `lo - 1` exactly; unsigned uses
+/// `v <= -1`, which also admits `-0.0` (truncates to zero, in domain).
+fn float_guard_bounds(to: ScalarTy) -> (cranelift_codegen::ir::condcodes::FloatCC, f64, f64) {
+    use cranelift_codegen::ir::condcodes::FloatCC;
+    let bits = bits_of(to);
+    let signed = signed_of(to);
+    let hi = 2f64.powi(if signed {
+        i32::from(bits) - 1
+    } else {
+        i32::from(bits)
+    });
+    if signed && bits == 64 {
+        (FloatCC::LessThan, -2f64.powi(63), hi)
+    } else if signed {
+        (
+            FloatCC::LessThanOrEqual,
+            -2f64.powi(i32::from(bits) - 1) - 1.0,
+            hi,
+        )
+    } else {
+        (FloatCC::LessThanOrEqual, -1.0, hi)
     }
 }
 
@@ -1535,7 +1729,8 @@ fn declare_and_build<M>(
 where
     M: cranelift_module::Module,
 {
-    use cranelift_codegen::ir::condcodes::IntCC;
+    use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
+    use cranelift_codegen::ir::immediates::Ieee64;
     use cranelift_codegen::ir::{types, AbiParam, BlockArg, InstBuilder, MemFlags, Value};
     use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
     use cranelift_module::{FuncId, Linkage, Module};
@@ -1602,6 +1797,13 @@ where
                 blocks.insert(block.id.clone(), builder.create_block());
             }
             let fail = builder.create_block();
+            // Reserved reinterpret slot for the float bit-carries.
+            let f64slot =
+                builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                    cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                    8,
+                    0,
+                ));
             let entry = *blocks
                 .get(&function.blocks[0].id)
                 .ok_or_else(|| "Cranelift function has no blocks".to_owned())?;
@@ -1645,6 +1847,97 @@ where
                                 "and" => builder.ins().band(left, right),
                                 _ => builder.ins().bor(left, right),
                             };
+                            values.insert(dest.id.clone(), produced);
+                        }
+                        ScalarInst::FloatConst { dest, bits } => {
+                            let produced = builder.ins().iconst(types::I64, *bits as i64);
+                            values.insert(dest.id.clone(), produced);
+                        }
+                        ScalarInst::Float {
+                            dest,
+                            operator,
+                            lhs,
+                            rhs,
+                        } => {
+                            // Uniform i64 cells bitcast at use; operands and
+                            // result guard finite into the shared `fail`
+                            // block, like the division guards.
+                            let left = jit_bits_to_f64(&mut builder, f64slot, values[lhs]);
+                            let right = jit_bits_to_f64(&mut builder, f64slot, values[rhs]);
+                            let zero = builder.ins().f64const(Ieee64::with_bits(0));
+                            for value in [left, right] {
+                                let diff = builder.ins().fsub(value, value);
+                                let bad = builder.ins().fcmp(FloatCC::NotEqual, diff, zero);
+                                let cont = builder.create_block();
+                                builder.ins().brif(
+                                    bad,
+                                    fail,
+                                    &[] as &[BlockArg],
+                                    cont,
+                                    &[] as &[BlockArg],
+                                );
+                                builder.switch_to_block(cont);
+                                builder.seal_block(cont);
+                            }
+                            let computed = match operator.as_str() {
+                                "add" => builder.ins().fadd(left, right),
+                                "sub" => builder.ins().fsub(left, right),
+                                "mul" => builder.ins().fmul(left, right),
+                                "div" => builder.ins().fdiv(left, right),
+                                // Unreachable: scalar lowering rejects
+                                // unknown float operators first.
+                                _ => builder.ins().fadd(left, right),
+                            };
+                            let diff = builder.ins().fsub(computed, computed);
+                            let bad = builder.ins().fcmp(FloatCC::NotEqual, diff, zero);
+                            let cont = builder.create_block();
+                            builder.ins().brif(
+                                bad,
+                                fail,
+                                &[] as &[BlockArg],
+                                cont,
+                                &[] as &[BlockArg],
+                            );
+                            builder.switch_to_block(cont);
+                            builder.seal_block(cont);
+                            let produced = jit_f64_to_bits(&mut builder, f64slot, computed);
+                            values.insert(dest.id.clone(), produced);
+                        }
+                        ScalarInst::FloatCompare {
+                            dest,
+                            predicate,
+                            lhs,
+                            rhs,
+                        } => {
+                            let left = jit_bits_to_f64(&mut builder, f64slot, values[lhs]);
+                            let right = jit_bits_to_f64(&mut builder, f64slot, values[rhs]);
+                            let zero = builder.ins().f64const(Ieee64::with_bits(0));
+                            for value in [left, right] {
+                                let diff = builder.ins().fsub(value, value);
+                                let bad = builder.ins().fcmp(FloatCC::NotEqual, diff, zero);
+                                let cont = builder.create_block();
+                                builder.ins().brif(
+                                    bad,
+                                    fail,
+                                    &[] as &[BlockArg],
+                                    cont,
+                                    &[] as &[BlockArg],
+                                );
+                                builder.switch_to_block(cont);
+                                builder.seal_block(cont);
+                            }
+                            // Operands are guarded finite, so the ordered
+                            // codes never observe NaN.
+                            let cc = match predicate.as_str() {
+                                "eq" => FloatCC::Equal,
+                                "ne" => FloatCC::NotEqual,
+                                "lt" => FloatCC::LessThan,
+                                "le" => FloatCC::LessThanOrEqual,
+                                "gt" => FloatCC::GreaterThan,
+                                _ => FloatCC::GreaterThanOrEqual,
+                            };
+                            let flag = builder.ins().fcmp(cc, left, right);
+                            let produced = builder.ins().uextend(types::I64, flag);
                             values.insert(dest.id.clone(), produced);
                         }
                         ScalarInst::Integer {
@@ -2093,24 +2386,102 @@ where
                             let produced = builder.ins().band(shifted, mask);
                             values.insert(dest.id.clone(), produced);
                         }
-                        ScalarInst::Convert { dest, to, src, .. } => {
+                        ScalarInst::Convert {
+                            dest,
+                            from,
+                            to,
+                            src,
+                            ..
+                        } => {
+                            let src_v = values[src];
+                            // Float edges (Profile 0.12). Integer, byte, and
+                            // boolean sources convert to binary64 exactly
+                            // rounded; float sources guard finite, then
+                            // range-guard with sliver-safe bounds (see the
+                            // LLVM backend for the exactness argument), then
+                            // convert. The shared renormalization below is
+                            // the identity on guarded values.
+                            let raw = if matches!(to, ScalarTy::Float) {
+                                let converted = if signed_of(*from) {
+                                    builder.ins().fcvt_from_sint(types::F64, src_v)
+                                } else {
+                                    builder.ins().fcvt_from_uint(types::F64, src_v)
+                                };
+                                jit_f64_to_bits(&mut builder, f64slot, converted)
+                            } else if matches!(from, ScalarTy::Float) {
+                                if !matches!(to, ScalarTy::Int(_) | ScalarTy::Byte) {
+                                    // No float-to-bool cast exists in the
+                                    // language: fail closed on a real edge
+                                    // so both successors stay reachable.
+                                    let always = builder.ins().iconst(types::I8, 1);
+                                    let dead = builder.create_block();
+                                    builder.ins().brif(
+                                        always,
+                                        fail,
+                                        &[] as &[BlockArg],
+                                        dead,
+                                        &[] as &[BlockArg],
+                                    );
+                                    builder.switch_to_block(dead);
+                                    builder.seal_block(dead);
+                                }
+                                let v = jit_bits_to_f64(&mut builder, f64slot, src_v);
+                                let zero = builder.ins().f64const(Ieee64::with_bits(0));
+                                let diff = builder.ins().fsub(v, v);
+                                let bad = builder.ins().fcmp(FloatCC::NotEqual, diff, zero);
+                                let cont = builder.create_block();
+                                builder.ins().brif(
+                                    bad,
+                                    fail,
+                                    &[] as &[BlockArg],
+                                    cont,
+                                    &[] as &[BlockArg],
+                                );
+                                builder.switch_to_block(cont);
+                                builder.seal_block(cont);
+                                let (lo_cc, lo_f, hi_f) = float_guard_bounds(*to);
+                                let lo_c =
+                                    builder.ins().f64const(Ieee64::with_bits(lo_f.to_bits()));
+                                let hi_c =
+                                    builder.ins().f64const(Ieee64::with_bits(hi_f.to_bits()));
+                                let bad_lo = builder.ins().fcmp(lo_cc, v, lo_c);
+                                let bad_hi =
+                                    builder.ins().fcmp(FloatCC::GreaterThanOrEqual, v, hi_c);
+                                let bad = builder.ins().bor(bad_lo, bad_hi);
+                                let cont = builder.create_block();
+                                builder.ins().brif(
+                                    bad,
+                                    fail,
+                                    &[] as &[BlockArg],
+                                    cont,
+                                    &[] as &[BlockArg],
+                                );
+                                builder.switch_to_block(cont);
+                                builder.seal_block(cont);
+                                if signed_of(*to) {
+                                    builder.ins().fcvt_to_sint(types::I64, v)
+                                } else {
+                                    builder.ins().fcvt_to_uint(types::I64, v)
+                                }
+                            } else {
+                                src_v
+                            };
                             // Renormalize the source cell into the target
                             // width/signedness: truncation drops high bits,
                             // widening keeps the value exactly.
                             let bits = bits_of(*to);
                             let signed = signed_of(*to);
-                            let src_v = values[src];
                             let produced = if bits >= 64 && !signed {
-                                src_v
+                                raw
                             } else if signed {
                                 let shift = builder.ins().iconst(types::I64, i64::from(64 - bits));
-                                let widened = builder.ins().ishl(src_v, shift);
+                                let widened = builder.ins().ishl(raw, shift);
                                 builder.ins().sshr(widened, shift)
                             } else {
                                 let mask = builder
                                     .ins()
                                     .iconst(types::I64, ((1i128 << bits) - 1) as i64);
-                                builder.ins().band(src_v, mask)
+                                builder.ins().band(raw, mask)
                             };
                             values.insert(dest.id.clone(), produced);
                         }
@@ -2601,13 +2972,25 @@ fn jit_boundary_arguments_for_request(
         // the full u64 range (`18446744073709551615` for u64::MAX), which
         // does not parse as i64, so round-trip through i128 and keep the
         // low 64 bits (bit-exact for every value the ABI can carry,
-        // including negative words for signed arguments).
+        // including negative words for signed arguments). Float words
+        // parse as binary64 and cross bit-carried, exactly like every
+        // other float cell in the JIT.
         let raw_args = argv_from_request(request)?
             .iter()
-            .map(|arg| {
-                arg.parse::<i128>()
-                    .map(|value| value as i64)
-                    .map_err(|error| error.to_string())
+            .enumerate()
+            .map(|(index, arg)| {
+                if input_contracts
+                    .get(index)
+                    .is_some_and(crate::support::contract_is_float)
+                {
+                    arg.parse::<f64>()
+                        .map(|value| value.to_bits() as i64)
+                        .map_err(|error| error.to_string())
+                } else {
+                    arg.parse::<i128>()
+                        .map(|value| value as i64)
+                        .map_err(|error| error.to_string())
+                }
             })
             .collect::<Result<Vec<_>, _>>()?;
         return Ok((raw_args, None));
@@ -2689,9 +3072,12 @@ impl JitSession {
         function_name: &str,
         raw_args: &[i64],
     ) -> Result<(ExecutionStatus, i128), String> {
+        // Module symbols follow the native-symbol rule (`fn main` is
+        // defined as `mncs_main`); the request carries the MNCS name.
+        let symbol = crate::support::c_symbol(function_name);
         let func_id = self
             .declared
-            .get(function_name)
+            .get(&symbol)
             .copied()
             .ok_or_else(|| "requested Cranelift export is missing".to_owned())?;
         let ptr = self.module.get_finalized_function(func_id);

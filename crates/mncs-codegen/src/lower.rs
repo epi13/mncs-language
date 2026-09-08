@@ -464,6 +464,61 @@ fn lower_instruction(
             });
             body.push(Instr::LocalSet(dest));
         }
+        SsaInstructionKind::FloatConstant { bits, ty } => {
+            if !ty.is_supported() {
+                return Err("only binary64 float constants are supported".to_owned());
+            }
+            let dest = dest_local(layout, instruction)?;
+            body.push(Instr::F64Const(*bits));
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::Float { operator } => {
+            let instruction_op = match operator.as_str() {
+                "add" => Instr::F64Add,
+                "sub" => Instr::F64Sub,
+                "mul" => Instr::F64Mul,
+                "div" => Instr::F64Div,
+                _ => {
+                    return Err(format!("unsupported float operator {operator}"));
+                }
+            };
+            let dest = dest_local(layout, instruction)?;
+            let left = operand_local(layout, instruction, 0)?;
+            let right = operand_local(layout, instruction, 1)?;
+            // The non-finite trap rule, realized as the conservative
+            // fallback: guard both inputs and the result.
+            emit_finite_guard(body, left);
+            emit_finite_guard(body, right);
+            body.push(Instr::LocalGet(left));
+            body.push(Instr::LocalGet(right));
+            body.push(instruction_op);
+            body.push(Instr::LocalSet(dest));
+            emit_finite_guard(body, dest);
+        }
+        SsaInstructionKind::FloatCompare { predicate } => {
+            let instruction_op = match predicate.as_str() {
+                "eq" => Instr::F64Eq,
+                "ne" => Instr::F64Ne,
+                "lt" => Instr::F64Lt,
+                "le" => Instr::F64Le,
+                "gt" => Instr::F64Gt,
+                "ge" => Instr::F64Ge,
+                _ => {
+                    return Err(format!(
+                        "unsupported float comparison predicate {predicate}"
+                    ));
+                }
+            };
+            let dest = dest_local(layout, instruction)?;
+            let left = operand_local(layout, instruction, 0)?;
+            let right = operand_local(layout, instruction, 1)?;
+            emit_finite_guard(body, left);
+            emit_finite_guard(body, right);
+            body.push(Instr::LocalGet(left));
+            body.push(Instr::LocalGet(right));
+            body.push(instruction_op);
+            body.push(Instr::LocalSet(dest));
+        }
         SsaInstructionKind::ByteShift { operator } => {
             // Total semantics: the u64 count is taken modulo 8 (count rides
             // i64), shifts are logical, and the result is masked to a byte.
@@ -603,6 +658,11 @@ fn lower_instruction(
                 match element_valtype {
                     ValType::I32 => body.push(Instr::I32Load),
                     ValType::I64 => body.push(Instr::I64Load),
+                    // Float sequences stay refused in C1: element lowering
+                    // is per-width on every backend.
+                    ValType::F64 => {
+                        return Err("float sequences are not supported".to_owned());
+                    }
                 }
                 store_element_width(layout, instruction, 2, body)?;
             }
@@ -867,6 +927,9 @@ fn lower_instruction(
             body.push(match lane_type {
                 ValType::I32 => Instr::I32Const(seed as i32),
                 ValType::I64 => Instr::I64Const(seed),
+                ValType::F64 => {
+                    return Err("float vectors are not supported".to_owned());
+                }
             });
             body.push(Instr::LocalSet(dest));
             for lane in 0..*lanes {
@@ -1347,6 +1410,11 @@ fn emit_const(body: &mut Vec<Instr>, value: i128, ty: &IrType) -> Result<(), Str
             };
             body.push(Instr::I64Const(encoded));
         }
+        // Integer constants never carry a float type: floats take the
+        // FloatConstant path instead.
+        ValType::F64 => {
+            return Err("float constants need a float literal".to_owned());
+        }
     }
     Ok(())
 }
@@ -1471,6 +1539,11 @@ fn emit_checked_division(
     body.push(match wasm {
         ValType::I64 => Instr::I64Eqz,
         ValType::I32 => Instr::I32Eqz,
+        // Float division never reaches the integer zero-guard: floats take
+        // the guarded F64Div path instead.
+        ValType::F64 => {
+            return Err("float division needs the float path".to_owned());
+        }
     });
     body.push(Instr::If);
     body.push(Instr::Unreachable);
@@ -1480,14 +1553,23 @@ fn emit_checked_division(
         let (min_const, minus_one): (Instr, Instr) = match wasm {
             ValType::I32 => (Instr::I32Const(i32::MIN), Instr::I32Const(-1)),
             ValType::I64 => (Instr::I64Const(i64::MIN), Instr::I64Const(-1)),
+            ValType::F64 => {
+                return Err("float division needs the float path".to_owned());
+            }
         };
         let eq: Instr = match wasm {
             ValType::I32 => Instr::I32Eq,
             ValType::I64 => Instr::I64Eq,
+            ValType::F64 => {
+                return Err("float division needs the float path".to_owned());
+            }
         };
         let eq2: Instr = match wasm {
             ValType::I32 => Instr::I32Eq,
             ValType::I64 => Instr::I64Eq,
+            ValType::F64 => {
+                return Err("float division needs the float path".to_owned());
+            }
         };
         body.push(Instr::LocalGet(right));
         body.push(minus_one);
@@ -1521,6 +1603,51 @@ fn emit_checked_division(
     body.push(native);
     body.push(Instr::LocalSet(dest));
     Ok(())
+}
+
+/// Emit `if !finite(local) { trap }` for one f64 local (Profile 0.12).
+/// Finiteness is `local - local == 0`: exact for finite values (same
+/// operand, no rounding), NaN for infinities and NaN. The trap is the
+/// conservative fallback for the `float-finite` obligation.
+fn emit_finite_guard(body: &mut Vec<Instr>, local: u32) {
+    body.push(Instr::LocalGet(local));
+    body.push(Instr::LocalGet(local));
+    body.push(Instr::F64Sub);
+    body.push(Instr::F64Const(0.0f64.to_bits()));
+    body.push(Instr::F64Eq);
+    body.push(Instr::I32Eqz);
+    body.push(Instr::If);
+    body.push(Instr::Unreachable);
+    body.push(Instr::End);
+}
+
+/// Trap unless the i32 cell in `local` (a just-truncated float) lies in
+/// the narrow integer domain `[lo, hi)`. Signedness follows the target:
+/// the truncated value compares exactly, so this matches the reference
+/// trunc-then-range-check verdict on every input.
+fn narrow_float_trap(body: &mut Vec<Instr>, local: u32, bits: u16, signed: bool) {
+    let (lo, hi) = if signed {
+        (-(1_i32 << (bits - 1)), 1_i32 << (bits - 1))
+    } else {
+        (0, 1_i32 << bits)
+    };
+    let (lt, ge) = if signed {
+        (Instr::I32LtS, Instr::I32GeS)
+    } else {
+        (Instr::I32LtU, Instr::I32GeU)
+    };
+    body.push(Instr::LocalGet(local));
+    body.push(Instr::I32Const(lo));
+    body.push(lt);
+    body.push(Instr::If);
+    body.push(Instr::Unreachable);
+    body.push(Instr::End);
+    body.push(Instr::LocalGet(local));
+    body.push(Instr::I32Const(hi));
+    body.push(ge);
+    body.push(Instr::If);
+    body.push(Instr::Unreachable);
+    body.push(Instr::End);
 }
 
 fn emit_wide_i64_operation(
@@ -1818,6 +1945,9 @@ fn emit_checked(
             emit_signed_i64_overflow_trap(body, left, right, dest, operator)
         }
         ValType::I64 => emit_unsigned_i64_overflow_trap(body, left, right, dest, operator),
+        // Checked float arithmetic is refused in C1: overflow is not an
+        // error for binary64, and trapping needs the operand-guard path.
+        ValType::F64 => Err("checked float arithmetic is unsupported".to_owned()),
     }
 }
 
@@ -2238,6 +2368,7 @@ fn load_valtype(ty: ValType, body: &mut Vec<Instr>) {
     match ty {
         ValType::I32 => body.push(Instr::I32Load),
         ValType::I64 => body.push(Instr::I64Load),
+        ValType::F64 => body.push(Instr::F64Load),
     }
 }
 
@@ -2245,6 +2376,7 @@ fn store_valtype(ty: ValType, body: &mut Vec<Instr>) {
     match ty {
         ValType::I32 => body.push(Instr::I32Store),
         ValType::I64 => body.push(Instr::I64Store),
+        ValType::F64 => body.push(Instr::F64Store),
     }
 }
 
@@ -2296,10 +2428,16 @@ fn emit_vector_binary_lane(
         body.push(match lane_type {
             ValType::I32 => Instr::I32Xor,
             ValType::I64 => Instr::I64Xor,
+            ValType::F64 => {
+                return Err("float vectors are not supported".to_owned());
+            }
         });
         body.push(match lane_type {
             ValType::I32 => Instr::I32Const(0),
             ValType::I64 => Instr::I64Const(0),
+            ValType::F64 => {
+                return Err("float vectors are not supported".to_owned());
+            }
         });
         load(body, left);
         load(body, right);
@@ -2313,14 +2451,23 @@ fn emit_vector_binary_lane(
         body.push(match lane_type {
             ValType::I32 => Instr::I32Sub,
             ValType::I64 => Instr::I64Sub,
+            ValType::F64 => {
+                return Err("float vectors are not supported".to_owned());
+            }
         });
         body.push(match lane_type {
             ValType::I32 => Instr::I32And,
             ValType::I64 => Instr::I64And,
+            ValType::F64 => {
+                return Err("float vectors are not supported".to_owned());
+            }
         });
         body.push(match lane_type {
             ValType::I32 => Instr::I32Xor,
             ValType::I64 => Instr::I64Xor,
+            ValType::F64 => {
+                return Err("float vectors are not supported".to_owned());
+            }
         });
         return Ok(());
     }
@@ -2372,10 +2519,16 @@ fn emit_vector_reduce_lane(
         body.push(match lane_type {
             ValType::I32 => Instr::I32Xor,
             ValType::I64 => Instr::I64Xor,
+            ValType::F64 => {
+                return Err("float vectors are not supported".to_owned());
+            }
         });
         body.push(match lane_type {
             ValType::I32 => Instr::I32Const(0),
             ValType::I64 => Instr::I64Const(0),
+            ValType::F64 => {
+                return Err("float vectors are not supported".to_owned());
+            }
         });
         body.push(Instr::LocalGet(dest));
         lane(body);
@@ -2389,14 +2542,23 @@ fn emit_vector_reduce_lane(
         body.push(match lane_type {
             ValType::I32 => Instr::I32Sub,
             ValType::I64 => Instr::I64Sub,
+            ValType::F64 => {
+                return Err("float vectors are not supported".to_owned());
+            }
         });
         body.push(match lane_type {
             ValType::I32 => Instr::I32And,
             ValType::I64 => Instr::I64And,
+            ValType::F64 => {
+                return Err("float vectors are not supported".to_owned());
+            }
         });
         body.push(match lane_type {
             ValType::I32 => Instr::I32Xor,
             ValType::I64 => Instr::I64Xor,
+            ValType::F64 => {
+                return Err("float vectors are not supported".to_owned());
+            }
         });
     } else if operator == "sum" {
         body.push(Instr::LocalGet(dest));
@@ -2404,6 +2566,9 @@ fn emit_vector_reduce_lane(
         body.push(match lane_type {
             ValType::I32 => Instr::I32Add,
             ValType::I64 => Instr::I64Add,
+            ValType::F64 => {
+                return Err("float vectors are not supported".to_owned());
+            }
         });
     } else {
         return Err(format!("unsupported vector reduction {operator}"));
@@ -2434,6 +2599,9 @@ fn store_instr(
     match valtype {
         ValType::I64 => store_width(SlotWidth::W64, body),
         ValType::I32 => store_width(SlotWidth::W32, body),
+        // Floats are bit-carried: an f64 payload occupies a full 8-byte
+        // slot exactly like an i64 (I64Store is bitwise F64Store).
+        ValType::F64 => store_width(SlotWidth::W64, body),
     }
     Ok(())
 }
@@ -2453,6 +2621,9 @@ fn store_element_width(
     match valtype {
         ValType::I64 => store_width(SlotWidth::W64, body),
         ValType::I32 => store_width(SlotWidth::W32, body),
+        // Floats are bit-carried: an f64 element occupies a full 8-byte
+        // slot exactly like an i64.
+        ValType::F64 => store_width(SlotWidth::W64, body),
     }
     Ok(())
 }
@@ -2482,6 +2653,8 @@ fn load_element_width(
         match valtype {
             ValType::I64 => body.push(Instr::I64Load),
             ValType::I32 => body.push(Instr::I32Load),
+            // Bit-carried f64: an 8-byte load moves the payload bits.
+            ValType::F64 => body.push(Instr::F64Load),
         }
     }
     Ok(())
@@ -2498,6 +2671,81 @@ fn emit_convert(
 ) -> Result<(), String> {
     let dest = dest_local(layout, instruction)?;
     let src = operand_local(layout, instruction, 0)?;
+    // Float edges (Profile 0.12). Only binary64 is admitted on either
+    // side; anything else stays refused.
+    if matches!(&from, BodyType::Float(float) if !float.is_supported())
+        || matches!(&to, BodyType::Float(float) if !float.is_supported())
+    {
+        return Err("only binary64 float conversions are supported".to_owned());
+    }
+    if matches!(&to, BodyType::Float(_)) {
+        // Integer, byte, and boolean domains convert to binary64 exactly
+        // rounded by hardware. Narrow sources ride normalized in i32
+        // cells, so they convert as i32 by source signedness.
+        body.push(Instr::LocalGet(src));
+        match &from {
+            BodyType::Integer(ty) if ty.bits == 64 && ty.signed => {
+                body.push(Instr::F64ConvertI64S);
+            }
+            BodyType::Integer(ty) if ty.bits == 64 => {
+                body.push(Instr::F64ConvertI64U);
+            }
+            BodyType::Integer(ty) if ty.signed => {
+                body.push(Instr::F64ConvertI32S);
+            }
+            BodyType::Integer(_) | BodyType::Byte => {
+                body.push(Instr::F64ConvertI32U);
+            }
+            BodyType::Named(name) if name == "bool" => {
+                body.push(Instr::F64ConvertI32U);
+            }
+            BodyType::Float(_) => {}
+            _ => {
+                return Err("conversion source cannot target a float".to_owned());
+            }
+        }
+        body.push(Instr::LocalSet(dest));
+        return Ok(());
+    }
+    if matches!(&from, BodyType::Float(_)) {
+        // Float to integer truncates toward zero and traps on non-finite
+        // or out-of-range inputs (the float trap rule). Full-width
+        // targets trap in the truncations themselves; narrow targets
+        // truncate to i32 first (which traps outside the i32 domain the
+        // reference would also reject) and then trap outside the narrow
+        // domain with integer comparisons over the truncated value.
+        body.push(Instr::LocalGet(src));
+        match &to {
+            BodyType::Integer(ty) if ty.bits == 64 && ty.signed => {
+                body.push(Instr::I64TruncF64S);
+            }
+            BodyType::Integer(ty) if ty.bits == 64 => {
+                body.push(Instr::I64TruncF64U);
+            }
+            BodyType::Integer(ty) if ty.signed => {
+                body.push(Instr::I32TruncF64S);
+            }
+            BodyType::Integer(_) => {
+                body.push(Instr::I32TruncF64U);
+            }
+            BodyType::Byte => {
+                body.push(Instr::I32TruncF64U);
+            }
+            _ => {
+                return Err("float conversion target must be numeric".to_owned());
+            }
+        }
+        body.push(Instr::LocalSet(dest));
+        if let BodyType::Integer(ty) = &to {
+            if ty.bits < 32 {
+                narrow_float_trap(body, dest, ty.bits, ty.signed);
+            }
+        }
+        if matches!(&to, BodyType::Byte) {
+            narrow_float_trap(body, dest, 8, false);
+        }
+        return Ok(());
+    }
     let src_wide = matches!(&from, BodyType::Integer(ty) if ty.bits == 64);
     let dst_wide = matches!(&to, BodyType::Integer(ty) if ty.bits == 64);
     let dst_signed = matches!(&to, BodyType::Integer(ty) if ty.signed);
@@ -2553,6 +2801,7 @@ fn wasm_type(ty: &IrType) -> Result<(ValType, Option<IntegerType>), String> {
         IrType::Record { .. } => Ok((ValType::I32, None)),
         IrType::Named(name) if name == "bool" => Ok((ValType::I32, None)),
         IrType::Named(name) => match BodyType::from_semantic_name(name) {
+            BodyType::Float(float) if float.is_supported() => Ok((ValType::F64, None)),
             BodyType::Integer(integer) => Ok((val_type(integer)?, Some(integer))),
             // Bytes ride zero-extended in i32 cells.
             BodyType::Byte => Ok((ValType::I32, None)),
@@ -2577,6 +2826,8 @@ fn wasm_type(ty: &IrType) -> Result<(ValType, Option<IntegerType>), String> {
             BodyType::Named(_) | BodyType::Finite { .. } | BodyType::Record { .. } => {
                 Err(format!("unsupported SSA type {name}"))
             }
+            // Non-binary64 floats stay refused in C1.
+            BodyType::Float(_) => Err(format!("unsupported SSA type {name}")),
             BodyType::GenericParam { .. } => {
                 Err("generic type parameter must be specialized before backend lowering".to_owned())
             }

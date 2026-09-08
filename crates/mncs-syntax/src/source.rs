@@ -15,6 +15,7 @@ pub const SOURCE_PROFILE_VERSION_0_8: &str = "0.8";
 pub const SOURCE_PROFILE_VERSION_0_9: &str = "0.9";
 pub const SOURCE_PROFILE_VERSION_0_10: &str = "0.10";
 pub const SOURCE_PROFILE_VERSION_0_11: &str = "0.11";
+pub const SOURCE_PROFILE_VERSION_0_12: &str = "0.12";
 pub const SOURCE_PROFILE_VERSION_1_0: &str = "1.0";
 
 /// True when the active source profile declares at least `version`. Profile
@@ -496,6 +497,12 @@ pub enum AstExpr {
         text: SpannedText,
         value: i128,
     },
+    /// A binary64 float literal (Profile 0.12). Bits (not `f64`) keep the
+    /// AST `Eq`; `f64::from_bits` recovers the correctly-rounded value.
+    Float {
+        text: SpannedText,
+        bits: u64,
+    },
     Boolean {
         text: SpannedText,
         value: bool,
@@ -641,6 +648,7 @@ impl AstExpr {
         match self {
             Self::Name(name)
             | Self::Integer { text: name, .. }
+            | Self::Float { text: name, .. }
             | Self::Boolean { text: name, .. } => name.span,
             Self::QualifiedPath { span, .. } => *span,
             Self::FiniteVariant { span, .. }
@@ -2271,6 +2279,50 @@ impl<'a> Parser<'a> {
                 let value = text.text.parse().unwrap_or(0);
                 Some(AstExpr::Integer { text, value })
             }
+            Some(TokenKind::Version) => {
+                // A version-shaped token in expression position is a float
+                // literal candidate (`440.0` lexes dotted). Multi-dot
+                // versions and non-profile-gated uses stay refused.
+                let text = self.spanned(TokenKind::Version, "MNP197", "expected float literal")?;
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_12) {
+                    self.error(
+                        "MNP197",
+                        "float literals require source profile 0.12 or later",
+                        vec![TokenKind::Version],
+                    );
+                    return None;
+                }
+                let mut parts = text.text.split('.');
+                let shape = matches!(
+                    (parts.next(), parts.next(), parts.next()),
+                    (Some(whole), Some(frac), None)
+                        if !whole.is_empty()
+                            && !frac.is_empty()
+                            && whole.bytes().all(|byte| byte.is_ascii_digit())
+                            && frac.bytes().all(|byte| byte.is_ascii_digit())
+                );
+                if !shape {
+                    self.error(
+                        "MNP197",
+                        "float literal requires digits on both sides of one dot",
+                        vec![TokenKind::Version],
+                    );
+                    return None;
+                }
+                let value: f64 = text.text.parse().unwrap_or(f64::NAN);
+                if !value.is_finite() {
+                    self.error(
+                        "MNP198",
+                        "float literal is not finite",
+                        vec![TokenKind::Version],
+                    );
+                    return None;
+                }
+                Some(AstExpr::Float {
+                    text,
+                    bits: value.to_bits(),
+                })
+            }
             Some(TokenKind::TrueKeyword | TokenKind::FalseKeyword) => {
                 let kind = self.current_kind().expect("matched keyword");
                 let text = self.spanned(kind, "MNP067", "expected boolean literal")?;
@@ -3770,6 +3822,7 @@ pub fn source_profile_supported(version: &str) -> bool {
             | SOURCE_PROFILE_VERSION_0_9
             | SOURCE_PROFILE_VERSION_0_10
             | SOURCE_PROFILE_VERSION_0_11
+            | SOURCE_PROFILE_VERSION_0_12
             | SOURCE_PROFILE_VERSION_1_0
     )
 }
@@ -3830,6 +3883,7 @@ fn infer_source_profile(text: &str) -> &'static str {
     });
     match header {
         Some(line) if line.trim_start().starts_with("mncs 1.0") => SOURCE_PROFILE_VERSION_1_0,
+        Some(line) if line.trim_start().starts_with("mncs 0.12") => SOURCE_PROFILE_VERSION_0_12,
         Some(line) if line.trim_start().starts_with("mncs 0.11") => SOURCE_PROFILE_VERSION_0_11,
         Some(line) if line.trim_start().starts_with("mncs 0.10") => SOURCE_PROFILE_VERSION_0_10,
         Some(line) if line.trim_start().starts_with("mncs 0.9") => SOURCE_PROFILE_VERSION_0_9,

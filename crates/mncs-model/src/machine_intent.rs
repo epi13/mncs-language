@@ -9,6 +9,24 @@ pub struct IntegerType {
     pub signed: bool,
 }
 
+/// A binary floating-point width (Profile 0.12). Only 64-bit IEEE-754
+/// binary64 is admitted; `f32` stays deferred so every backend realizes
+/// exactly one float domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FloatType {
+    pub bits: u16,
+}
+
+impl FloatType {
+    pub fn f64() -> Self {
+        Self { bits: 64 }
+    }
+
+    pub fn is_supported(&self) -> bool {
+        self.bits == 64
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArithmeticIntent {

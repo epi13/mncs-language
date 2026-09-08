@@ -9,9 +9,9 @@ use mncs_model::{
     BodyOperationKind, BodyParameter, BodyTerminator, BodyType, BodyValue,
     BoundedIterationCompletion, CompilationStatus, CompilationStudyRequest, CompilationStudyResult,
     CompilerArtifactRef, CompilerNodeProfile, CompilerPassExecutionObservation, ContractClause,
-    ContractKind, Effect, FailureMode, FiniteType, FiniteVariant, Function, FunctionBody,
-    IntegerType, Intent, IterationDomain, MachineIntentSpec, MachinePreference, Program,
-    RecordField, RecordType, Requirement, ResolutionProvenance, SemanticBinding,
+    ContractKind, Effect, FailureMode, FiniteType, FiniteVariant, FloatType, Function,
+    FunctionBody, IntegerType, Intent, IterationDomain, MachineIntentSpec, MachinePreference,
+    Program, RecordField, RecordType, Requirement, ResolutionProvenance, SemanticBinding,
     SemanticBindingKind, SemanticBindingTable, SemanticGraph, SemanticId, SemanticIdentities,
     SemanticNamespace, SemanticReference, SemanticScope, TransformationEdge, TransformationStatus,
     ValidationReport, Value, EXECUTABLE_BODY_SCHEMA_VERSION,
@@ -2664,11 +2664,7 @@ fn elaborate_function(
                 namespace_aliases,
                 direct_imports,
                 generic_map.clone(),
-                // ---- Profile 0.11: nested bounded iteration ----
-                mncs_syntax::profile_at_least(
-                    &ast.language_version.text,
-                    mncs_syntax::SOURCE_PROFILE_VERSION_0_11,
-                ),
+                ast.language_version.text.clone(),
             );
             builder.elaborate_statements(&function.body.statements, &mut env, &mut diagnostics);
             if let Some(returned) = builder.elaborate_expr(
@@ -2991,6 +2987,7 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
         AstExpr::Name(_)
         | AstExpr::QualifiedPath { .. }
         | AstExpr::Integer { .. }
+        | AstExpr::Float { .. }
         | AstExpr::Boolean { .. }
         | AstExpr::HostRead { .. }
         | AstExpr::ClockRead { .. }
@@ -3251,10 +3248,10 @@ struct BodyBuilder<'a> {
     generic_map: BTreeMap<String, mncs_model::GenericParamKind>,
     resolutions: Vec<NameResolution>,
     iteration_depth: usize,
-    /// Profile 0.11: two-level nested bounded iteration and the
-    /// counted-loop index binding. Older profiles keep the historical
-    /// refusals (MNE147 for any nesting, unbound counted index).
-    profile_nested_iteration: bool,
+    /// Declared source profile (`ast.language_version`), for additive
+    /// feature gates. Older profiles keep their historical refusals and
+    /// fingerprints; gates query through `profile_at_least`.
+    source_profile: String,
 }
 
 impl<'a> BodyBuilder<'a> {
@@ -3270,7 +3267,7 @@ impl<'a> BodyBuilder<'a> {
         namespace_aliases: &'a BTreeMap<String, String>,
         direct_imports: &'a BTreeSet<String>,
         generic_map: BTreeMap<String, mncs_model::GenericParamKind>,
-        profile_nested_iteration: bool,
+        source_profile: String,
     ) -> Self {
         let owner = function_id(&namespace, &function);
         Self {
@@ -3297,8 +3294,20 @@ impl<'a> BodyBuilder<'a> {
             generic_map,
             resolutions: Vec::new(),
             iteration_depth: 0,
-            profile_nested_iteration,
+            source_profile,
         }
+    }
+
+    fn profile_at_least(&self, version: &str) -> bool {
+        mncs_syntax::profile_at_least(&self.source_profile, version)
+    }
+
+    fn profile_nested_iteration(&self) -> bool {
+        self.profile_at_least(mncs_syntax::SOURCE_PROFILE_VERSION_0_11)
+    }
+
+    fn profile_float(&self) -> bool {
+        self.profile_at_least(mncs_syntax::SOURCE_PROFILE_VERSION_0_12)
     }
 
     fn elaborate_statements(
@@ -3553,7 +3562,7 @@ impl<'a> BodyBuilder<'a> {
         // the dynamic step product within the step budget. Older profiles
         // keep the historical refusal, and depth three or more stays
         // refused on every profile.
-        if self.iteration_depth >= 1 && !self.profile_nested_iteration {
+        if self.iteration_depth >= 1 && !self.profile_nested_iteration() {
             diagnostics.push(elaboration_diagnostic(
                 "MNE147",
                 "Source Profile 0.4 does not permit nested bounded iterations",
@@ -3833,7 +3842,7 @@ impl<'a> BodyBuilder<'a> {
                 BoundNameKind::TraversalIndex,
                 diagnostics,
             );
-        } else if self.profile_nested_iteration {
+        } else if self.profile_nested_iteration() {
             // Profile 0.11 binds the counted-loop index in the body scope:
             // the 0-based position `bound - remaining`, typed u64 like the
             // counter. Older profiles leave it unbound (MNE102). The
@@ -4581,6 +4590,47 @@ impl<'a> BodyBuilder<'a> {
                     portability: None,
                 });
                 let _ = text;
+                Some(ResolvedBinding::plain(id, ty))
+            }
+            AstExpr::Float { bits, text } => {
+                if !self.profile_float() {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE247",
+                        "float values require source profile 0.12 or later",
+                        text.span,
+                    ));
+                    return None;
+                }
+                let ty = match expected {
+                    Some(BodyType::Float(float)) if float.is_supported() => BodyType::Float(*float),
+                    Some(_) => {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE118",
+                            "float literal cannot satisfy a non-float type",
+                            text.span,
+                        ));
+                        BodyType::Float(FloatType::f64())
+                    }
+                    None => BodyType::Float(FloatType::f64()),
+                };
+                let id = self.new_value("fc");
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: id.clone(),
+                    kind: BodyOperationKind::FloatConstant {
+                        bits: *bits,
+                        ty: FloatType::f64(),
+                    },
+                    operands: Vec::new(),
+                    results: vec![BodyValue {
+                        id: id.clone(),
+                        ty: ty.clone(),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                });
                 Some(ResolvedBinding::plain(id, ty))
             }
             AstExpr::Boolean { value, text: _ } => {
@@ -6305,19 +6355,34 @@ impl<'a> BodyBuilder<'a> {
                     self.record_types,
                     diagnostics,
                 );
+                let is_float =
+                    |ty: &BodyType| matches!(ty, BodyType::Float(float) if float.is_supported());
                 let convertible_source = |ty: &BodyType| {
                     matches!(ty, BodyType::Byte)
                         || matches!(ty, BodyType::Integer(integer) if matches!(integer.bits, 1..=64))
                         || matches!(ty, BodyType::Named(name) if name == "bool")
+                        || is_float(ty)
                 };
                 let convertible_target = |ty: &BodyType| {
                     matches!(ty, BodyType::Byte)
                         || matches!(ty, BodyType::Integer(integer) if matches!(integer.bits, 1..=64))
+                        || is_float(ty)
                 };
                 if !convertible_source(&subject.ty) || !convertible_target(&to) {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE189",
-                        "explicit conversions require scalar integer or byte types on both sides",
+                        "explicit conversions require scalar integer, byte, or binary64 float types",
+                        *span,
+                    ));
+                    return None;
+                }
+                // Conversions touching floats produce float values: int/bool
+                // to float rounds per IEEE-754, float to int truncates toward
+                // zero and traps on non-finite or out-of-range inputs.
+                if (is_float(&subject.ty) || is_float(&to)) && !self.profile_float() {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE247",
+                        "float values require source profile 0.12 or later",
                         *span,
                     ));
                     return None;
@@ -6574,6 +6639,94 @@ impl<'a> BodyBuilder<'a> {
                         });
                         return Some(ResolvedBinding::plain(id, result_ty));
                     }
+                }
+                // Binary64 operators (Profile 0.12): `+ - * /` under the
+                // non-finite trap rule, and the six comparisons. Both
+                // operands already share the float type (MNE119 above);
+                // mixed int/float arithmetic stays refused, and every other
+                // operator (bitwise, shifts, `%`, wrapping/saturating
+                // intents) is refused explicitly rather than falling into
+                // the integer diagnostics below.
+                if let BodyType::Float(float) = left_value.ty {
+                    if !self.profile_float() {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE247",
+                            "float values require source profile 0.12 or later",
+                            expr.span(),
+                        ));
+                        return None;
+                    }
+                    if !float.is_supported() {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE249",
+                            "only binary64 floats are supported",
+                            expr.span(),
+                        ));
+                        return None;
+                    }
+                    let is_compare = matches!(
+                        op,
+                        AstBinaryOp::Eq
+                            | AstBinaryOp::Ne
+                            | AstBinaryOp::Lt
+                            | AstBinaryOp::Le
+                            | AstBinaryOp::Gt
+                            | AstBinaryOp::Ge
+                    );
+                    let operator = match op {
+                        AstBinaryOp::Add => "add",
+                        AstBinaryOp::Sub => "sub",
+                        AstBinaryOp::Mul => "mul",
+                        AstBinaryOp::Div => "div",
+                        _ if is_compare => "",
+                        _ => {
+                            diagnostics.push(elaboration_diagnostic(
+                                "MNE248",
+                                "only `+ - * /` and comparisons are defined on floats",
+                                expr.span(),
+                            ));
+                            return None;
+                        }
+                    };
+                    let id = self.new_value("fl");
+                    let (kind, result_ty) = if is_compare {
+                        (
+                            BodyOperationKind::FloatCompare {
+                                predicate: match op {
+                                    AstBinaryOp::Eq => "eq",
+                                    AstBinaryOp::Ne => "ne",
+                                    AstBinaryOp::Lt => "lt",
+                                    AstBinaryOp::Le => "le",
+                                    AstBinaryOp::Gt => "gt",
+                                    _ => "ge",
+                                }
+                                .to_owned(),
+                            },
+                            BodyType::Named("bool".to_owned()),
+                        )
+                    } else {
+                        (
+                            BodyOperationKind::Float {
+                                operator: operator.to_owned(),
+                            },
+                            BodyType::Float(float),
+                        )
+                    };
+                    self.blocks[self.current].operations.push(BodyOperation {
+                        id: id.clone(),
+                        kind,
+                        operands: vec![left_value.id, right_value.id],
+                        results: vec![BodyValue {
+                            id: id.clone(),
+                            ty: result_ty.clone(),
+                        }],
+                        contracts: Vec::new(),
+                        assumptions: Vec::new(),
+                        machine_intent: None,
+                        lowering: None,
+                        portability: None,
+                    });
+                    return Some(ResolvedBinding::plain(id, result_ty));
                 }
                 let id = self.new_value("v");
                 let (kind, result_ty) = match op {
@@ -7460,6 +7613,7 @@ fn substitute_body_type(
         BodyType::Record { identity, name } => BodyType::Record { identity, name },
         BodyType::Finite { identity, name } => BodyType::Finite { identity, name },
         BodyType::Integer(i) => BodyType::Integer(i),
+        BodyType::Float(f) => BodyType::Float(f),
         BodyType::Byte => BodyType::Byte,
         BodyType::Named(n) => BodyType::Named(n),
     }
@@ -7714,7 +7868,11 @@ fn profile_scalar_supported(name: &str) -> Option<BodyType> {
                 bits: 8 | 16 | 32 | 64,
                 ..
             }) | BodyType::Byte
-        );
+        )
+        // `f64` resolves as a type name on every profile so declarations
+        // keep one spelling; producing float values (literals, operators,
+        // casts, comparisons) is gated on Profile 0.12 at each use site.
+        || matches!(&ty, BodyType::Float(float) if float.is_supported());
     supported.then_some(ty)
 }
 

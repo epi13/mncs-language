@@ -58,6 +58,16 @@ pub enum SsaInstructionKind {
         predicate: String,
         operand_type: crate::IntegerType,
     },
+    FloatConstant {
+        bits: u64,
+        ty: crate::FloatType,
+    },
+    Float {
+        operator: String,
+    },
+    FloatCompare {
+        predicate: String,
+    },
     BooleanOp {
         operator: String,
     },
@@ -2078,6 +2088,16 @@ fn ssa_kind(kind: &IrOperationKind) -> SsaInstructionKind {
             required_capabilities: required_capabilities.clone(),
         },
         IrOperationKind::Effect => SsaInstructionKind::Effect,
+        IrOperationKind::FloatConstant { bits, ty } => SsaInstructionKind::FloatConstant {
+            bits: *bits,
+            ty: *ty,
+        },
+        IrOperationKind::Float { operator } => SsaInstructionKind::Float {
+            operator: operator.clone(),
+        },
+        IrOperationKind::FloatCompare { predicate } => SsaInstructionKind::FloatCompare {
+            predicate: predicate.clone(),
+        },
         IrOperationKind::HostCall {
             capability,
             operation,
@@ -2119,6 +2139,16 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
         } => SsaInstructionKind::IntegerCompare {
             predicate: predicate.clone(),
             operand_type: *operand_type,
+        },
+        BodyOperationKind::FloatConstant { bits, ty } => SsaInstructionKind::FloatConstant {
+            bits: *bits,
+            ty: *ty,
+        },
+        BodyOperationKind::Float { operator } => SsaInstructionKind::Float {
+            operator: operator.clone(),
+        },
+        BodyOperationKind::FloatCompare { predicate } => SsaInstructionKind::FloatCompare {
+            predicate: predicate.clone(),
         },
         BodyOperationKind::BooleanOp { operator } => SsaInstructionKind::BooleanOp {
             operator: operator.clone(),
