@@ -118,6 +118,11 @@ measured optimization after correctness.
 - No profile change (all correctness repairs; new negative-literal syntax is
   a compatible grammar extension within existing expression semantics, no
   version bump in this tranche).
+- Frozen fingerprint rotation: `ravel_snapshot_is_canonically_identical_to_upstream`
+  `4bfaff83...` → `1cc17f37...`. Provenance verified by isolation rebuild
+  (legacy temp IDs restored with all other tranche changes held constant →
+  old fingerprint returns exactly), so the hygienic `$mncs$` temporaries are
+  the sole canonical delta. No semantic change to the snapshot.
 
 ## Test evidence
 
