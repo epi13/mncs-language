@@ -260,7 +260,8 @@ impl Program {
                                 ))
                             }
                             crate::BodyOperationKind::Float { .. }
-                            | crate::BodyOperationKind::FloatCompare { .. } => {
+                            | crate::BodyOperationKind::FloatCompare { .. }
+                            | crate::BodyOperationKind::FloatIntrinsic { .. } => {
                                 Some(crate::obligations::body_obligation_id(
                                     "float-finite",
                                     &operation_identity,

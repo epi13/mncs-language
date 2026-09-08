@@ -1,0 +1,1506 @@
+{
+  "schema_version": "0.2",
+  "name": "stage-c2-trig",
+  "cases": [
+    {
+      "id": "sin-0",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 0,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 0,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cos-0",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 0,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4607182418800017408,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sin-1",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4602678819172646912,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4602308182625945072,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cos-1",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4602678819172646912,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4606079780542709072,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sin-2",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4607182418800017408,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4605754516372524270,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cos-2",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4607182418800017408,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4603041830072026764,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sin-3",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 13830554455654793216,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 13829126553227300078,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cos-3",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 13830554455654793216,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4603041830072026764,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sin-4",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4591870180066957722,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4591858176471321388,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cos-4",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4591870180066957722,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4607137420321232833,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sin-5",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4612811918334230528,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4603565777395632817,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cos-5",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4612811918334230528,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 13828763316576947069,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sin-6",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 13836183955189006336,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 13826937814250408625,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cos-6",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 13836183955189006336,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 13828763316576947069,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sin-7",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 9223372036854775808,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 9223372036854775808,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cos-7",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 9223372036854775808,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4607182418800017408,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sin-8",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4609753056924675352,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4607182418800017408,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cos-8",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4609753056924675352,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4364452196894661639,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sin-9",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4614256656552045848,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4368955796522032135,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cos-9",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4614256656552045848,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 13830554455654793216,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sin-10",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4613937818241073152,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4594252404416238939,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cos-10",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4613937818241073152,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 13830464316077630930,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sin-11",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4621819117588971520,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 13826447362944618322,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cos-11",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4621819117588971520,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 13829104940851424031,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sin-12",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 13845191154443747328,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4603075326089842514,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cos-12",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 13845191154443747328,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 13829104940851424031,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sin-13",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4756540486875873280,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 13825825784584381667,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cos-13",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4756540486875873280,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4606039581959951130,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sin-14",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 13979912523730649088,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4602453747729605859,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "cos-14",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 13979912523730649088,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4606039581959951130,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sincos-0",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "sincos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4602678819172646912,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4608790240348373028,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sinofcos-0",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "sin_of_cos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4602678819172646912,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4605103524379349835,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "pythag-0",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "pythag"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4602678819172646912,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4607182418800017408,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sincos-1",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "sincos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4607182418800017408,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4608901772849646013,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sinofcos-1",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "sin_of_cos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4607182418800017408,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4602808480134492028,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "pythag-1",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "pythag"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4607182418800017408,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4607182418800017408,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sincos-2",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "sincos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 13836183955189006336,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 13832354165041048343,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sinofcos-2",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "sin_of_cos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 13836183955189006336,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 13828015798038282162,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "pythag-2",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "pythag"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 13836183955189006336,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4607182418800017408,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sincos-3",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "sincos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4621819117588971520,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 13832279751525391672,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sinofcos-3",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "sin_of_cos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4621819117588971520,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 13828248820525169410,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "pythag-3",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "pythag"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 4621819117588971520,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4607182418800017408,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "sin-posinf",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 9218868437227405312,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "runtime_failure"
+    },
+    {
+      "id": "sin-neginf",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 18442240474082181120,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "runtime_failure"
+    },
+    {
+      "id": "cos-posinf",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 9218868437227405312,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "runtime_failure"
+    },
+    {
+      "id": "cos-neginf",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 18442240474082181120,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "runtime_failure"
+    },
+    {
+      "id": "sin-nan",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fsin"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 9221120237041090560,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "runtime_failure"
+    },
+    {
+      "id": "cos-nan",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "fcos"
+        },
+        "arguments": [
+          {
+            "float": {
+              "bits": 9221120237041090560,
+              "type": {
+                "bits": 64
+              }
+            }
+          }
+        ],
+        "step_budget": 256
+      },
+      "expected_status": "runtime_failure"
+    },
+    {
+      "id": "entry-main",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.trig",
+          "function": "main"
+        },
+        "arguments": [],
+        "step_budget": 256
+      },
+      "expected_status": "returned",
+      "expected": [
+        {
+          "float": {
+            "bits": 4608790240348373028,
+            "type": {
+              "bits": 64
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "properties": []
+}

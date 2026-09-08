@@ -173,6 +173,24 @@ pub struct WasmModule {
     pub functions: Vec<WasmFunction>,
     pub memory: Option<WasmMemory>,
     pub globals: Vec<WasmGlobal>,
+    /// Host function imports (Profile 0.12 trigonometry). Indices
+    /// `0..imports.len()` are the imports; defined functions follow.
+    /// Empty for every pre-trig module, which keeps all existing index
+    /// arithmetic unchanged.
+    pub imports: Vec<WasmImport>,
+}
+
+/// One host function import: the `mncs.sin` / `mncs.cos` trigonometry
+/// shims (Profile 0.12). Both take one binary64 and return one binary64;
+/// the interpreter resolves them against same-process libm, and real
+/// engines resolve them through the standard import object, so emitted
+/// binaries stay spec-valid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WasmImport {
+    pub module: String,
+    pub name: String,
+    pub params: Vec<ValType>,
+    pub results: Vec<ValType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,6 +210,12 @@ pub fn encode_module(module: &WasmModule) -> Vec<u8> {
     bytes.extend_from_slice(&WASM_MAGIC);
     bytes.extend_from_slice(&WASM_VERSION);
     let mut types = Vec::new();
+    for import in &module.imports {
+        let mut ty = vec![0x60];
+        encode_vec(&mut ty, &import.params, |out, ty| out.push(ty.byte()));
+        encode_vec(&mut ty, &import.results, |out, ty| out.push(ty.byte()));
+        types.push(ty);
+    }
     for function in &module.functions {
         let mut ty = vec![0x60];
         encode_vec(&mut ty, &function.params, |out, ty| out.push(ty.byte()));
@@ -201,10 +225,24 @@ pub fn encode_module(module: &WasmModule) -> Vec<u8> {
     emit_section(&mut bytes, 1, |section| {
         encode_vec(section, &types, |out, ty| out.extend_from_slice(ty));
     });
+    // Imported function indices come first (`0..imports.len()`); defined
+    // functions follow. With no imports every index below is unchanged.
+    let import_count = module.imports.len() as u32;
+    if !module.imports.is_empty() {
+        emit_section(&mut bytes, 2, |section| {
+            encode_u32(section, module.imports.len() as u32);
+            for (index, import) in module.imports.iter().enumerate() {
+                encode_name(section, &import.module);
+                encode_name(section, &import.name);
+                section.push(0x00);
+                encode_u32(section, index as u32);
+            }
+        });
+    }
     emit_section(&mut bytes, 3, |section| {
         encode_u32(section, module.functions.len() as u32);
         for index in 0..module.functions.len() {
-            encode_u32(section, index as u32);
+            encode_u32(section, import_count + index as u32);
         }
     });
     if let Some(memory) = &module.memory {
@@ -244,7 +282,7 @@ pub fn encode_module(module: &WasmModule) -> Vec<u8> {
         for (index, function) in module.functions.iter().enumerate() {
             encode_name(section, &function.name);
             section.push(0x00);
-            encode_u32(section, index as u32);
+            encode_u32(section, import_count + index as u32);
         }
         if module.memory.is_some() {
             // Browser hosts need a standard named memory export to populate
@@ -290,6 +328,7 @@ pub fn decode_module(bytes: &[u8]) -> Result<WasmModule, WasmTrap> {
     let mut bodies = Vec::new();
     let mut memory = None;
     let mut globals = Vec::new();
+    let mut import_raws = Vec::new();
     while cursor < bytes.len() {
         let id = bytes[cursor];
         cursor += 1;
@@ -306,6 +345,7 @@ pub fn decode_module(bytes: &[u8]) -> Result<WasmModule, WasmTrap> {
         match id {
             0 => {}
             1 => types = decode_types(payload)?,
+            2 => import_raws = decode_imports(payload)?,
             3 => func_types = decode_func_types(payload)?,
             5 => memory = decode_memory(payload)?,
             6 => globals = decode_globals(payload)?,
@@ -326,6 +366,40 @@ pub fn decode_module(bytes: &[u8]) -> Result<WasmModule, WasmTrap> {
             "WASM function and code sections disagree",
         ));
     }
+    // Imported indices come first; only the `mncs.sin` / `mncs.cos`
+    // trigonometry shims are admitted (Profile 0.12).
+    let mut imports = Vec::new();
+    for (module, name, kind, type_index) in import_raws {
+        if kind != 0x00 {
+            return Err(trap(
+                ExecutionStatus::Unsupported,
+                "only function imports are supported",
+            ));
+        }
+        let (params, results) = types.get(type_index as usize).cloned().ok_or_else(|| {
+            trap(
+                ExecutionStatus::InvalidRequest,
+                "WASM import type is missing",
+            )
+        })?;
+        if module != "mncs"
+            || !matches!(name.as_str(), "sin" | "cos")
+            || params != [ValType::F64]
+            || results != [ValType::F64]
+        {
+            return Err(trap(
+                ExecutionStatus::Unsupported,
+                format!("unsupported WASM import {module}.{name}"),
+            ));
+        }
+        imports.push(WasmImport {
+            module,
+            name,
+            params,
+            results,
+        });
+    }
+    let import_count = imports.len() as u32;
     let mut functions = Vec::new();
     for (index, (type_index, (locals, body))) in func_types.into_iter().zip(bodies).enumerate() {
         let ty = types.get(type_index as usize).ok_or_else(|| {
@@ -336,7 +410,7 @@ pub fn decode_module(bytes: &[u8]) -> Result<WasmModule, WasmTrap> {
         })?;
         let name = exports
             .iter()
-            .find(|(_, exported)| *exported == index as u32)
+            .find(|(_, exported)| *exported == import_count + index as u32)
             .map(|(name, _)| name.clone())
             .ok_or_else(|| {
                 trap(
@@ -356,6 +430,7 @@ pub fn decode_module(bytes: &[u8]) -> Result<WasmModule, WasmTrap> {
         functions,
         memory,
         globals,
+        imports,
     })
 }
 
@@ -619,9 +694,33 @@ fn execute_raw(
             }
             Instr::Return => break,
             Instr::Call(callee_index) => {
+                // Imported indices come first: resolve host shims before
+                // defined functions. The trigonometry shims evaluate with
+                // same-process libm, exactly like the reference executor.
+                if (*callee_index as usize) < module.imports.len() {
+                    let import = &module.imports[*callee_index as usize];
+                    let raw = pop(&mut stack)?;
+                    let input = f64::from_bits(raw as u64);
+                    let value = match (import.module.as_str(), import.name.as_str()) {
+                        ("mncs", "sin") => input.sin(),
+                        ("mncs", "cos") => input.cos(),
+                        _ => {
+                            return Err(trap(
+                                ExecutionStatus::Unsupported,
+                                format!(
+                                    "unsupported WASM host import {}.{}",
+                                    import.module, import.name
+                                ),
+                            ));
+                        }
+                    };
+                    stack.push(value.to_bits() as i64);
+                    ip += 1;
+                    continue;
+                }
                 let callee = module
                     .functions
-                    .get(*callee_index as usize)
+                    .get((*callee_index as usize) - module.imports.len())
                     .ok_or_else(|| {
                         trap(
                             ExecutionStatus::InvalidRequest,
@@ -643,7 +742,7 @@ fn execute_raw(
                 let returned = execute_raw(
                     module,
                     runtime,
-                    *callee_index as usize,
+                    (*callee_index as usize) - module.imports.len(),
                     arguments,
                     opcode_budget,
                     steps,
@@ -1264,12 +1363,16 @@ fn write_marshal(
             Ok(*value as i64)
         }
         (ExecutionValue::Float { bits, .. }, MarshalTy::Float(ty)) => {
-            if !ty.is_supported() || !f64::from_bits(*bits).is_finite() {
+            if !ty.is_supported() {
                 return Err(trap(
                     ExecutionStatus::InvalidRequest,
-                    "float argument is not a finite binary64 value",
+                    "float argument is not a supported binary64 value",
                 ));
             }
+            // Non-finite bits pass through: the lowering-time operand
+            // guard traps them as `runtime_failure` (the float trap
+            // rule), exactly like every other backend. Rejecting them
+            // here would turn a semantic trap into a request error.
             Ok(*bits as i64)
         }
         // Bytes marshal through their unsigned 8-bit domain.
@@ -2095,6 +2198,51 @@ fn read_i64(bytes: &[u8], mut cursor: usize) -> Result<(i64, usize), WasmTrap> {
 type FuncType = (Vec<ValType>, Vec<ValType>);
 type FuncBody = (Vec<ValType>, Vec<Instr>);
 
+/// Raw import descriptors `(module, name, kind, type index)`, resolved
+/// against the type section after all sections decode (the type section
+/// precedes imports in every module this backend emits).
+fn decode_imports(payload: &[u8]) -> Result<Vec<(String, String, u8, u32)>, WasmTrap> {
+    fn read_name(payload: &[u8], cursor: usize) -> Result<(String, usize), WasmTrap> {
+        let (len, next) = read_u32(payload, cursor)?;
+        let mut cursor = next;
+        let end = cursor + len as usize;
+        let name = std::str::from_utf8(payload.get(cursor..end).ok_or_else(|| {
+            trap(
+                ExecutionStatus::InvalidRequest,
+                "truncated WASM import name",
+            )
+        })?)
+        .map_err(|_| {
+            trap(
+                ExecutionStatus::InvalidRequest,
+                "WASM import name is not UTF-8",
+            )
+        })?
+        .to_owned();
+        cursor = end;
+        Ok((name, cursor))
+    }
+    let (count, mut cursor) = read_u32(payload, 0)?;
+    let mut imports = Vec::new();
+    for _ in 0..count {
+        let (module, next) = read_name(payload, cursor)?;
+        cursor = next;
+        let (name, next) = read_name(payload, cursor)?;
+        cursor = next;
+        let kind = *payload.get(cursor).ok_or_else(|| {
+            trap(
+                ExecutionStatus::InvalidRequest,
+                "truncated WASM import kind",
+            )
+        })?;
+        cursor += 1;
+        let (type_index, next) = read_u32(payload, cursor)?;
+        cursor = next;
+        imports.push((module, name, kind, type_index));
+    }
+    Ok(imports)
+}
+
 fn decode_types(payload: &[u8]) -> Result<Vec<FuncType>, WasmTrap> {
     let (count, mut cursor) = read_u32(payload, 0)?;
     let mut types = Vec::new();
@@ -2499,6 +2647,7 @@ mod tests {
             }],
             memory: None,
             globals: Vec::new(),
+            imports: Vec::new(),
         };
         let decoded = decode_module(&encode_module(&module)).expect("decode module");
         let execution = execute_function_typed(
@@ -2543,6 +2692,7 @@ mod tests {
             }],
             memory: Some(WasmMemory { min_pages: 1 }),
             globals: Vec::new(),
+            imports: Vec::new(),
         };
 
         let bytes = encode_module(&module);
@@ -2598,6 +2748,7 @@ mod tests {
                 mutable: true,
                 init: 8,
             }],
+            imports: Vec::new(),
         };
         crate::lower::emit_alloc_helpers(&mut module);
         let decoded = decode_module(&encode_module(&module)).expect("decode host ABI module");
@@ -2669,6 +2820,7 @@ mod tests {
                 mutable: true,
                 init: 8,
             }],
+            imports: Vec::new(),
         };
         let mut runtime = Runtime::new(&module);
         let first = runtime.allocate(4).expect("first region");

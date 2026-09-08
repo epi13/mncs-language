@@ -987,6 +987,53 @@ fn execute_instruction(
                 values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
             }
         }
+        SsaInstructionKind::FloatIntrinsic { function } => {
+            let Some(input) = float_operand(instruction, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "float intrinsic operand was unavailable or not a float value",
+                );
+                return true;
+            };
+            if !input.is_finite() {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    instruction_identity(instruction),
+                    format!("float {function} trapped on a non-finite input"),
+                );
+                return true;
+            }
+            let value = match function.as_str() {
+                "sin" => input.sin(),
+                "cos" => input.cos(),
+                _ => {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        instruction_identity(instruction),
+                        format!("unsupported float intrinsic {function:?}"),
+                    );
+                    return true;
+                }
+            };
+            if !value.is_finite() {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    instruction_identity(instruction),
+                    format!("float {function} trapped on a non-finite result"),
+                );
+                return true;
+            }
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Float {
+                        bits: value.to_bits(),
+                        ty: crate::FloatType::f64(),
+                    },
+                );
+            }
+        }
         SsaInstructionKind::BooleanOp { operator } => {
             let Some((left, right)) = boolean_operands(instruction, values) else {
                 result.fail(
@@ -2420,6 +2467,19 @@ fn boolean_operands(
         return None;
     };
     Some((*left, *right))
+}
+
+fn float_operand(
+    instruction: &SsaInstruction,
+    values: &BTreeMap<SemanticId, ExecutionValue>,
+) -> Option<f64> {
+    let [input] = instruction.inputs.as_slice() else {
+        return None;
+    };
+    let ExecutionValue::Float { bits, .. } = values.get(input)? else {
+        return None;
+    };
+    Some(f64::from_bits(*bits))
 }
 
 fn float_operands(

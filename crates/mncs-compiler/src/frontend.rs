@@ -2974,6 +2974,7 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
             }
         }
         AstExpr::Sha256Digest { view, .. } => calls_in_expr(view, calls),
+        AstExpr::FloatIntrinsic { argument, .. } => calls_in_expr(argument, calls),
         AstExpr::Ed25519Verify {
             pubkey,
             message,
@@ -4416,6 +4417,76 @@ impl<'a> BodyBuilder<'a> {
             portability: None,
         });
         Some(ResolvedBinding::plain(id, result_ty))
+    }
+
+    /// Elaborate the `sin(x)` / `cos(x)` float intrinsics (Profile
+    /// 0.12). The operand and result are binary64; a non-float operand
+    /// is refused, and the non-finite trap obligation is recorded with
+    /// the operation like arithmetic.
+    fn elaborate_float_intrinsic(
+        &mut self,
+        name: &str,
+        argument: &AstExpr,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        if !matches!(name, "sin" | "cos") {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE250",
+                format!("unsupported float intrinsic {name:?}"),
+                span,
+            ));
+            return None;
+        }
+        if !self.profile_float() {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE247",
+                "float values require source profile 0.12 or later",
+                span,
+            ));
+            return None;
+        }
+        let float_ty = BodyType::Float(mncs_model::FloatType::f64());
+        if expected.is_some_and(|expected| expected != &float_ty) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE252",
+                format!(
+                    "float intrinsic {name} produces {} which does not satisfy the required type",
+                    float_ty.semantic_name()
+                ),
+                span,
+            ));
+            return None;
+        }
+        let operand = self.elaborate_expr(argument, Some(&float_ty), env, diagnostics)?;
+        if operand.ty != float_ty {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE251",
+                format!("float intrinsic {name} requires a binary64 operand"),
+                argument.span(),
+            ));
+            return None;
+        }
+        let id = self.new_value("fi");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::FloatIntrinsic {
+                function: name.to_owned(),
+            },
+            operands: vec![operand.id.clone()],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: float_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, float_ty))
     }
 
     /// Elaborate the `ed25519_verify(pubkey, message, signature)`
@@ -6117,6 +6188,18 @@ impl<'a> BodyBuilder<'a> {
             AstExpr::Sha256Digest { view, span } => {
                 self.elaborate_sha256_digest(view, *span, expected, env, diagnostics)
             }
+            AstExpr::FloatIntrinsic {
+                name,
+                argument,
+                span,
+            } => self.elaborate_float_intrinsic(
+                &name.text,
+                argument,
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
             AstExpr::Ed25519Verify {
                 pubkey,
                 message,

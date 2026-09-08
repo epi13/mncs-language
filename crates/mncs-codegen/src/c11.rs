@@ -903,6 +903,28 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 "      {dest_n} = {lhs_n} {op} {rhs_n};\n      if (!(({lhs_n} - {lhs_n}) == 0.0) || !(({rhs_n} - {rhs_n}) == 0.0) || !(({dest_n} - {dest_n}) == 0.0)) {{ *mncs_status = 1; *mncs_value = 0; return; }}"
             );
         }
+        ScalarInst::FloatIntrinsic {
+            dest,
+            function,
+            src,
+        } => {
+            // Same-process libm, guarded like arithmetic: `sin`/`cos` of
+            // a finite binary64 is finite, and the guards trap otherwise.
+            let call = match function.as_str() {
+                "sin" => "sin",
+                "cos" => "cos",
+                _ => {
+                    let _ = writeln!(out, "      *mncs_status = 2; *mncs_value = 0; return;");
+                    return;
+                }
+            };
+            let dest_n = names.value(&dest.id);
+            let src_n = names.value(src);
+            let _ = writeln!(
+                out,
+                "      {dest_n} = {call}({src_n});\n      if (!(({src_n} - {src_n}) == 0.0) || !(({dest_n} - {dest_n}) == 0.0)) {{ *mncs_status = 1; *mncs_value = 0; return; }}"
+            );
+        }
         ScalarInst::FloatCompare {
             dest,
             predicate,
@@ -1368,6 +1390,7 @@ fn inst_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
         | ScalarInst::FloatConst { dest, .. }
         | ScalarInst::Float { dest, .. }
         | ScalarInst::FloatCompare { dest, .. }
+        | ScalarInst::FloatIntrinsic { dest, .. }
         | ScalarInst::Integer { dest, .. }
         | ScalarInst::Boolean { dest, .. }
         | ScalarInst::Compare { dest, .. }
