@@ -2833,6 +2833,147 @@
       "stages": [],
       "evidence_confidence": "medium",
       "notes": "RFC header reads 'Implemented experimentally (2026-08-29)'."
+    },
+    {
+      "number": "0047",
+      "title": "Provably Terminating Structural Recursion over Finite Values",
+      "file": "rfcs/0047-machine-native-structural-recursion-finite-values.md",
+      "design_status": "DRAFT",
+      "implementation_status": "NONE",
+      "implementation_scope": "Design only: descendant-provenance rule (R1-R5), kernel re-derivation design, runtime call-depth fuel design, ten-fixture conformance corpus. No admission implemented; MNE130 stays fail-closed.",
+      "normativity": "experimental",
+      "acceptance_criteria": [
+        {
+          "id": "0047-C1",
+          "text": "Positive fixtures elaborate and execute identically on all five executable backends with kernel-discharged structural-decrease obligations",
+          "state": "unsatisfied",
+          "evidence": []
+        },
+        {
+          "id": "0047-C2",
+          "text": "Negative fixtures stay rejected in every tranche",
+          "state": "partial",
+          "evidence": [
+            "crates/mncs-cli/tests/pressure_structural_recursion.rs"
+          ]
+        },
+        {
+          "id": "0047-C3",
+          "text": "MNE130 still rejects every non-structural cycle",
+          "state": "partial",
+          "evidence": [
+            "crates/mncs-cli/tests/pressure_structural_recursion.rs"
+          ]
+        },
+        {
+          "id": "0047-C4",
+          "text": "Interpreter call-depth exhaustion is deterministic (no host stack overflow)",
+          "state": "unsatisfied",
+          "evidence": []
+        },
+        {
+          "id": "0047-C5",
+          "text": "External targets declare recursion capability honestly",
+          "state": "unsatisfied",
+          "evidence": []
+        }
+      ],
+      "evidence_artifacts": [
+        "rfcs/0047-machine-native-structural-recursion-finite-values.md"
+      ],
+      "tests": [
+        "crates/mncs-cli/tests/pressure_structural_recursion.rs"
+      ],
+      "dependents": [],
+      "dependencies": [
+        "0004",
+        "0007",
+        "0019",
+        "0022",
+        "0041"
+      ],
+      "gaps": [
+        "Checker needs resolved-binding provenance (post-elaboration); kernel needs match-chain re-derivation; runtime needs call-depth fuel in interpreter and all backends."
+      ],
+      "pressure_sources": [
+        "CP-0011 (mncs-compiler acyclic-call machines)"
+      ],
+      "last_validated_revision": "unvalidated",
+      "profiles": [],
+      "stdlib": [],
+      "stages": [],
+      "evidence_confidence": "low",
+      "notes": "Draft design from the compiler-pressure tranche. Fail-closed pins pass; no admission implemented."
+    },
+    {
+      "number": "0048",
+      "title": "MNCS-native JIT / execution orchestration architecture",
+      "file": "rfcs/0048-mncs-native-jit-execution-architecture.md",
+      "design_status": "ACCEPTED",
+      "implementation_status": "IMPLEMENTED_EXPERIMENTALLY",
+      "implementation_scope": "MNCS-owned JIT/execution orchestration (sessions, generations, bindings, invalidation, planning, profiling, proof metadata, lifecycle) in library/jit/ with Cranelift as the first native provider; Rust bootstrap acts only as the compiler.",
+      "normativity": "experimental",
+      "acceptance_criteria": [
+        {
+          "id": "0048-C1",
+          "text": "Orchestration corpora (session/binding/invalidation/planning/proof/lifecycle) execute and agree across providers",
+          "state": "satisfied",
+          "evidence": [
+            "crates/mncs-cli/tests/jit_orchestration.rs",
+            "library/jit/session.mncs"
+          ]
+        },
+        {
+          "id": "0048-C2",
+          "text": "JIT architecture recorded as MNCS-owned layering with provider selection and code lifetime",
+          "state": "satisfied",
+          "evidence": [
+            "docs/jit-architecture.md"
+          ]
+        },
+        {
+          "id": "0048-C3",
+          "text": "Proof-aware execution metadata linked to orchestration state",
+          "state": "partial",
+          "evidence": [
+            "library/jit/proof.mncs"
+          ]
+        },
+        {
+          "id": "0048-C4",
+          "text": "Definition retirement and redefinition/invalidation across generations",
+          "state": "partial",
+          "evidence": [
+            "library/jit/lifecycle.mncs"
+          ]
+        }
+      ],
+      "evidence_artifacts": [
+        "rfcs/0048-mncs-native-jit-execution-architecture.md",
+        "docs/jit-architecture.md"
+      ],
+      "tests": [
+        "crates/mncs-cli/tests/jit_orchestration.rs"
+      ],
+      "dependents": [],
+      "dependencies": [
+        "0016",
+        "0017",
+        "0038",
+        "0041"
+      ],
+      "gaps": [
+        "Provider set beyond Cranelift/reference, persistent cross-process sessions, and full proof-linkage admission are future work."
+      ],
+      "pressure_sources": [],
+      "last_validated_revision": "unvalidated",
+      "profiles": [],
+      "stdlib": [
+        "mncs.jit.session.v1"
+      ],
+      "stages": [],
+      "evidence_confidence": "medium",
+      "notes": "RFC header reads 'Implemented (experimental)'. Landed on feat/mncs-native-jit."
     }
   ]
 }

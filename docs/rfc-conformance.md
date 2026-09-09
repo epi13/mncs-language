@@ -3,7 +3,7 @@
 > Generated from `rfcs/conformance-ledger.json` by
 > `scripts/gen_rfc_ledger_docs.py`. Do not edit by hand.
 
-Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 70 satisfied, 27 partially satisfied, 36 unsatisfied criteria.
+Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 72 satisfied, 31 partially satisfied, 39 unsatisfied criteria.
 
 ## Reading this document
 
@@ -65,6 +65,8 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 70 
 | 0044 | Machine-Native Bounded Sequence, Byte, and View Semantics | ACCEPTED | IMPLEMENTED_EXPERIMENTALLY |
 | 0045 | Machine-Native Bounded Stateful Execution Traces | ACCEPTED | IMPLEMENTED_EXPERIMENTALLY |
 | 0046 | Machine-Native Cost, Reuse, and Evidence-Efficiency Tranche | ACCEPTED | IMPLEMENTED_EXPERIMENTALLY |
+| 0047 | Provably Terminating Structural Recursion over Finite Values | DRAFT | NONE |
+| 0048 | MNCS-native JIT / execution orchestration architecture | ACCEPTED | IMPLEMENTED_EXPERIMENTALLY |
 
 ## Entries
 
@@ -772,3 +774,36 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 70 
   - Proof-cache reuse across changed dependencies is refused by binding checks; positive reuse infrastructure is future work.
 - Pressure sources: RFC 0007 tranche (identity-bound proof reuse).
 - Note: RFC header reads 'Implemented experimentally (2026-08-29)'.
+
+### RFC 0047 — Provably Terminating Structural Recursion over Finite Values
+
+- Design: **DRAFT**; implementation: **NONE** (experimental; confidence low).
+- Scope: Design only: descendant-provenance rule (R1-R5), kernel re-derivation design, runtime call-depth fuel design, ten-fixture conformance corpus. No admission implemented; MNE130 stays fail-closed.
+- Depends on: RFC 0004, RFC 0007, RFC 0019, RFC 0022, RFC 0041.
+- Tests: `crates/mncs-cli/tests/pressure_structural_recursion.rs`.
+- Acceptance criteria:
+  - [ ] 0047-C1: Positive fixtures elaborate and execute identically on all five executable backends with kernel-discharged structural-decrease obligations
+  - [~] 0047-C2: Negative fixtures stay rejected in every tranche — evidence: `crates/mncs-cli/tests/pressure_structural_recursion.rs`
+  - [~] 0047-C3: MNE130 still rejects every non-structural cycle — evidence: `crates/mncs-cli/tests/pressure_structural_recursion.rs`
+  - [ ] 0047-C4: Interpreter call-depth exhaustion is deterministic (no host stack overflow)
+  - [ ] 0047-C5: External targets declare recursion capability honestly
+- Known gaps:
+  - Checker needs resolved-binding provenance (post-elaboration); kernel needs match-chain re-derivation; runtime needs call-depth fuel in interpreter and all backends.
+- Pressure sources: CP-0011 (mncs-compiler acyclic-call machines).
+- Note: Draft design from the compiler-pressure tranche. Fail-closed pins pass; no admission implemented.
+
+### RFC 0048 — MNCS-native JIT / execution orchestration architecture
+
+- Design: **ACCEPTED**; implementation: **IMPLEMENTED_EXPERIMENTALLY** (experimental; confidence medium).
+- Scope: MNCS-owned JIT/execution orchestration (sessions, generations, bindings, invalidation, planning, profiling, proof metadata, lifecycle) in library/jit/ with Cranelift as the first native provider; Rust bootstrap acts only as the compiler.
+- Stdlib: mncs.jit.session.v1.
+- Depends on: RFC 0016, RFC 0017, RFC 0038, RFC 0041.
+- Tests: `crates/mncs-cli/tests/jit_orchestration.rs`.
+- Acceptance criteria:
+  - [x] 0048-C1: Orchestration corpora (session/binding/invalidation/planning/proof/lifecycle) execute and agree across providers — evidence: `crates/mncs-cli/tests/jit_orchestration.rs`, `library/jit/session.mncs`
+  - [x] 0048-C2: JIT architecture recorded as MNCS-owned layering with provider selection and code lifetime — evidence: `docs/jit-architecture.md`
+  - [~] 0048-C3: Proof-aware execution metadata linked to orchestration state — evidence: `library/jit/proof.mncs`
+  - [~] 0048-C4: Definition retirement and redefinition/invalidation across generations — evidence: `library/jit/lifecycle.mncs`
+- Known gaps:
+  - Provider set beyond Cranelift/reference, persistent cross-process sessions, and full proof-linkage admission are future work.
+- Note: RFC header reads 'Implemented (experimental)'. Landed on feat/mncs-native-jit.

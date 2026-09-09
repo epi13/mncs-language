@@ -1,6 +1,10 @@
 //! RFC ledger conformance: the machine-readable ledger stays well-formed,
 //! evidence-backed, and consistent with the MNCS-native status gates, and
 //! the status corpus passes on every executable backend.
+//!
+//! Governance is a bijection, not a count: numbered RFC files, ledger
+//! entries, and the RFC index must agree exactly, so RFC 0049 or later
+//! cannot land without updating governance metadata.
 
 use std::process::Command;
 
@@ -20,6 +24,24 @@ fn ledger() -> Value {
     serde_json::from_str(&text).expect("parse conformance ledger")
 }
 
+/// Sorted numbers of the canonical RFC files (`rfcs/NNNN-slug.md`).
+fn numbered_rfc_files() -> Vec<String> {
+    let mut numbers = Vec::new();
+    for entry in std::fs::read_dir(workspace("rfcs")).expect("read rfcs dir") {
+        let entry = entry.expect("rfc dir entry");
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.len() > 7
+            && name.as_bytes()[0..4].iter().all(u8::is_ascii_digit)
+            && name.as_bytes()[4] == b'-'
+            && name.ends_with(".md")
+        {
+            numbers.push(name[0..4].to_owned());
+        }
+    }
+    numbers.sort();
+    numbers
+}
+
 fn is_gap_reference(text: &str) -> bool {
     let bytes = text.as_bytes();
     bytes.len() >= 7
@@ -28,6 +50,76 @@ fn is_gap_reference(text: &str) -> bool {
         && bytes[5].is_ascii_uppercase()
         && !bytes[6..].is_empty()
         && bytes[6..].iter().all(u8::is_ascii_digit)
+}
+
+#[test]
+fn ledger_is_in_bijection_with_rfc_files() {
+    let document = ledger();
+    let files = numbered_rfc_files();
+    assert!(!files.is_empty(), "no numbered RFC files discovered");
+    // Numbers must be dense from 0001: no gaps, no duplicates.
+    for (position, number) in files.iter().enumerate() {
+        let expected = format!("{:04}", position + 1);
+        assert_eq!(number, &expected, "RFC file numbering must stay dense");
+    }
+    let entries = document["entries"].as_array().expect("entries");
+    assert_eq!(
+        entries.len(),
+        files.len(),
+        "ledger entries must match discovered RFC files one-for-one (no hardcoded count)"
+    );
+    for (position, entry) in entries.iter().enumerate() {
+        let expected = format!("{:04}", position + 1);
+        assert_eq!(
+            entry["number"].as_str().unwrap_or("?"),
+            expected,
+            "ledger entries must stay in numeric order"
+        );
+        let file = entry["file"].as_str().unwrap_or("?");
+        assert!(
+            std::path::Path::new(&workspace(file)).exists(),
+            "RFC {expected}: ledger file missing: {file}"
+        );
+        let file_name = std::path::Path::new(file)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("?");
+        assert!(
+            file_name.starts_with(&expected),
+            "RFC {expected}: ledger file {file} does not match the entry number"
+        );
+    }
+}
+
+#[test]
+fn rfc_index_contains_every_rfc_exactly_once() {
+    let files = numbered_rfc_files();
+    let index = std::fs::read_to_string(workspace("rfcs/README.md")).expect("read RFC index");
+    for number in &files {
+        let hits = index
+            .lines()
+            .filter(|line| line.contains(number) && line.contains("RFC"))
+            .count();
+        assert_eq!(
+            hits, 1,
+            "RFC {number}: index must contain it exactly once, found {hits}"
+        );
+    }
+    // No index line may point at a file that does not exist.
+    for line in index
+        .lines()
+        .filter(|line| line.trim_start().starts_with("- [RFC"))
+    {
+        let Some(open) = line.find('(') else { continue };
+        let Some(close) = line.find(')') else {
+            continue;
+        };
+        let target = &line[open + 1..close];
+        assert!(
+            std::path::Path::new(&workspace(&format!("rfcs/{target}"))).exists(),
+            "index points at a missing file: {target}"
+        );
+    }
 }
 
 #[test]
@@ -47,7 +139,6 @@ fn ledger_covers_every_rfc_with_valid_states() {
         .map(|state| state.as_str().expect("state").to_owned())
         .collect();
     let entries = document["entries"].as_array().expect("entries");
-    assert_eq!(entries.len(), 46, "ledger must cover RFC 0001 through 0046");
     for (position, entry) in entries.iter().enumerate() {
         let expected = format!("{:04}", position + 1);
         assert_eq!(

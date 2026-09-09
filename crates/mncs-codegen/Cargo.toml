@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 mncs-model = { path = "../mncs-model" }
+mncs-syntax = { path = "../mncs-syntax" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -21,5 +22,4 @@ cranelift-native = "0.121"
 cranelift-object = "0.121"
 
 [dev-dependencies]
-mncs-syntax = { path = "../mncs-syntax" }
 mncs-compiler = { path = "../mncs-compiler" }
