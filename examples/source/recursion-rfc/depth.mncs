@@ -1,0 +1,11 @@
+mncs 0.10;
+// RFC 0047 positive: two recursive calls on direct structural descendants.
+// Must be accepted by the implementation tranche (MNE130 until then).
+module recursion.rfc.depth;
+enum Tree { Leaf, Node { left: Tree, right: Tree } }
+fn depth(tree: Tree) -> (result: u64) {
+    return match tree {
+        Leaf => 0,
+        Node { left: l, right: r } => depth(l) + depth(r) + 1
+    };
+}

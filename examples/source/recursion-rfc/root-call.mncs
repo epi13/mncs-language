@@ -1,0 +1,11 @@
+mncs 0.10;
+// RFC 0047 negative: recursion on the unchanged parameter is not a
+// structural descent. Rejected in every tranche.
+module recursion.rfc.root;
+enum Tree { Leaf, Node { left: Tree, right: Tree } }
+fn bad(tree: Tree) -> (result: u64) {
+    return match tree {
+        Leaf => 0,
+        Node { left: l, right: r } => bad(tree) + 1
+    };
+}

@@ -1,0 +1,10 @@
+mncs 0.10;
+// RFC 0047 negative: numeric recursion is not structural recursion, no
+// matter how obviously it terminates to a human. Rejected in every tranche.
+module recursion.rfc.numeric;
+fn countdown(n: u64) -> (result: u64) {
+    if n == 0 {
+        return 0;
+    }
+    return countdown(n - 1) + 1;
+}

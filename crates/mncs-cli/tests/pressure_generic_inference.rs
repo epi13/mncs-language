@@ -96,17 +96,17 @@ fn ambiguous_inference_refuses_with_names() {
     let cases = [
         (
             "phantom",
-            "mncs 0.10;\nmodule test.generics.neg_phantom;\nfn phantom<T>() -> (result: i64) {\n    return 0;\n}\nfn probe() -> (result: i64) {\n    return phantom();\n}\n",
+            "mncs 0.13;\nmodule test.generics.neg_phantom;\nfn phantom<T>() -> (result: i64) {\n    return 0;\n}\nfn probe() -> (result: i64) {\n    return phantom();\n}\n",
             "cannot infer T",
         ),
         (
             "partial",
-            "mncs 0.10;\nmodule test.generics.neg_partial;\nfn two<N: Nat, M: Nat>(a: [i64; N]) -> (result: i64) {\n    return a[0];\n}\nfn probe() -> (result: i64) {\n    let base: [i64; 8] = [0, 0, 0, 0, 0, 0, 0, 0];\n    return two(base);\n}\n",
+            "mncs 0.13;\nmodule test.generics.neg_partial;\nfn two<N: Nat, M: Nat>(a: [i64; N]) -> (result: i64) {\n    return a[0];\n}\nfn probe() -> (result: i64) {\n    let base: [i64; 8] = [0, 0, 0, 0, 0, 0, 0, 0];\n    return two(base);\n}\n",
             "cannot infer M",
         ),
         (
             "conflict",
-            "mncs 0.10;\nmodule test.generics.neg_conflict;\nfn either<N: Nat>(a: [i64; N], b: [i64; N]) -> (result: i64) {\n    return a[0] +% b[0];\n}\nfn probe() -> (result: i64) {\n    let x: [i64; 8] = [0, 0, 0, 0, 0, 0, 0, 0];\n    let y: [i64; 4] = [0, 0, 0, 0];\n    return either(x, y);\n}\n",
+            "mncs 0.13;\nmodule test.generics.neg_conflict;\nfn either<N: Nat>(a: [i64; N], b: [i64; N]) -> (result: i64) {\n    return a[0] +% b[0];\n}\nfn probe() -> (result: i64) {\n    let x: [i64; 8] = [0, 0, 0, 0, 0, 0, 0, 0];\n    let y: [i64; 4] = [0, 0, 0, 0];\n    return either(x, y);\n}\n",
             "conflicting arguments for N",
         ),
     ];

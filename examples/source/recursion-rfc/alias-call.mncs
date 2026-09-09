@@ -1,0 +1,13 @@
+mncs 0.10;
+// RFC 0047 negative: a `let` alias of the parameter carries no descendant
+// provenance even though it denotes the same value. Rejected in every
+// tranche (this is why R3 resolves bindings, not names).
+module recursion.rfc.alias;
+enum Tree { Leaf, Node { left: Tree, right: Tree } }
+fn bad(tree: Tree) -> (result: u64) {
+    let t: Tree = tree;
+    return match t {
+        Leaf => 0,
+        Node { left: l, right: r } => bad(t) + 1
+    };
+}

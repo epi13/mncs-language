@@ -1,0 +1,12 @@
+mncs 0.10;
+// RFC 0047 positive: one recursive call on a descendant plus unrestricted
+// extra arguments (an accumulator). Only the recursive-parameter position
+// must descend.
+module recursion.rfc.single;
+enum Tree { Leaf, Node { left: Tree, right: Tree } }
+fn leaves(tree: Tree, acc: u64) -> (result: u64) {
+    return match tree {
+        Leaf => acc + 1,
+        Node { left: l, right: r } => leaves(l, leaves(r, acc))
+    };
+}

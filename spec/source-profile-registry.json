@@ -1,0 +1,234 @@
+[
+  {
+    "version": "0.1",
+    "status": "sealed",
+    "spec_document": "spec/source-profile-0.1.md",
+    "predecessor": null,
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 0,
+    "max_iteration_bound": 0,
+    "max_iteration_nesting": 0,
+    "max_iteration_work_product": 0,
+    "max_vector_lanes": 0,
+    "features": [
+      "scalar_core",
+      "pure_functions"
+    ]
+  },
+  {
+    "version": "0.2",
+    "status": "sealed",
+    "spec_document": "spec/source-profile-0.2.md",
+    "predecessor": "0.1",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 0,
+    "max_iteration_bound": 0,
+    "max_iteration_nesting": 0,
+    "max_iteration_work_product": 0,
+    "max_vector_lanes": 0,
+    "features": [
+      "finite_types",
+      "match_expressions"
+    ]
+  },
+  {
+    "version": "0.3",
+    "status": "sealed",
+    "spec_document": "docs/source-profile-0.3.md",
+    "predecessor": "0.2",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 0,
+    "max_iteration_bound": 0,
+    "max_iteration_nesting": 0,
+    "max_iteration_work_product": 0,
+    "max_vector_lanes": 0,
+    "features": [
+      "experiment_bootstrap",
+      "acyclic_calls"
+    ]
+  },
+  {
+    "version": "0.4",
+    "status": "sealed",
+    "spec_document": "docs/source-profile-0.4.md",
+    "predecessor": "0.3",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 0,
+    "max_iteration_bound": 32,
+    "max_iteration_nesting": 1,
+    "max_iteration_work_product": 32,
+    "max_vector_lanes": 0,
+    "features": [
+      "bounded_iteration_1_32",
+      "scoped_iteration_identities_strict"
+    ]
+  },
+  {
+    "version": "0.5",
+    "status": "sealed",
+    "spec_document": "docs/source-profile-0.5.md",
+    "predecessor": "0.4",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 0,
+    "max_iteration_bound": 32,
+    "max_iteration_nesting": 1,
+    "max_iteration_work_product": 32,
+    "max_vector_lanes": 0,
+    "features": [
+      "records"
+    ]
+  },
+  {
+    "version": "0.6",
+    "status": "sealed",
+    "spec_document": "docs/source-profile-0.6.md",
+    "predecessor": "0.5",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 0,
+    "max_iteration_bound": 32,
+    "max_iteration_nesting": 1,
+    "max_iteration_work_product": 32,
+    "max_vector_lanes": 0,
+    "features": [
+      "finite_payloads",
+      "explicit_arithmetic_intent",
+      "bool_patterns"
+    ]
+  },
+  {
+    "version": "0.7",
+    "status": "sealed",
+    "spec_document": "docs/source-profile-0.7.md",
+    "predecessor": "0.6",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 64,
+    "max_iteration_bound": 32,
+    "max_iteration_nesting": 1,
+    "max_iteration_work_product": 64,
+    "max_vector_lanes": 0,
+    "features": [
+      "bounded_sequences_64",
+      "bytes",
+      "views",
+      "explicit_conversion"
+    ]
+  },
+  {
+    "version": "0.8",
+    "status": "sealed",
+    "spec_document": "docs/source-profile-0.8.md",
+    "predecessor": "0.7",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 64,
+    "max_iteration_bound": 32,
+    "max_iteration_nesting": 1,
+    "max_iteration_work_product": 64,
+    "max_vector_lanes": 64,
+    "features": [
+      "semantic_vectors",
+      "strict_select",
+      "host_effects"
+    ]
+  },
+  {
+    "version": "0.9",
+    "status": "sealed",
+    "spec_document": "docs/source-profile-0.9.md",
+    "predecessor": "0.8",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 64,
+    "max_iteration_bound": 32,
+    "max_iteration_nesting": 1,
+    "max_iteration_work_product": 64,
+    "max_vector_lanes": 64,
+    "features": [
+      "namespaces",
+      "import_aliases"
+    ]
+  },
+  {
+    "version": "0.10",
+    "status": "sealed",
+    "spec_document": "docs/source-profile-0.10.md",
+    "predecessor": "0.9",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 64,
+    "max_iteration_bound": 32,
+    "max_iteration_nesting": 1,
+    "max_iteration_work_product": 64,
+    "max_vector_lanes": 64,
+    "features": [
+      "explicit_generics",
+      "generic_specialization"
+    ]
+  },
+  {
+    "version": "0.11",
+    "status": "sealed",
+    "spec_document": "docs/source-profile-0.11.md",
+    "predecessor": "0.10",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 64,
+    "max_iteration_bound": 32,
+    "max_iteration_nesting": 2,
+    "max_iteration_work_product": 4096,
+    "max_vector_lanes": 64,
+    "features": [
+      "two_level_nested_iteration"
+    ]
+  },
+  {
+    "version": "0.12",
+    "status": "sealed",
+    "spec_document": "docs/source-profile-0.12.md",
+    "predecessor": "0.11",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 64,
+    "max_iteration_bound": 32,
+    "max_iteration_nesting": 2,
+    "max_iteration_work_product": 4096,
+    "max_vector_lanes": 64,
+    "features": [
+      "binary64_arithmetic",
+      "binary64_conversion",
+      "trig_intrinsics"
+    ]
+  },
+  {
+    "version": "0.13",
+    "status": "current",
+    "spec_document": "docs/source-profile-0.13.md",
+    "predecessor": "0.12",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 1024,
+    "max_iteration_bound": 1024,
+    "max_iteration_nesting": 2,
+    "max_iteration_work_product": 1048576,
+    "max_vector_lanes": 64,
+    "features": [
+      "bool_negation",
+      "bool_equality",
+      "scalar_int_match",
+      "sequential_iteration_reuse",
+      "contextual_next_field",
+      "repeat_sequence_literals",
+      "lexical_shadowing",
+      "raised_sequence_ceiling_1024",
+      "raised_iteration_ceiling_1024",
+      "structural_recursion"
+    ]
+  }
+]

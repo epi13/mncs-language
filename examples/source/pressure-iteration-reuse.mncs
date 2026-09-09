@@ -1,0 +1,57 @@
+mncs 0.13;
+
+// Live-scope iteration identities (CP-0009). Iteration identities are
+// unique over their live lexical scope, not function-wide text: two
+// sequential non-overlapping loops may reuse a source-level index name,
+// while a nested loop reusing a still-open identity stays rejected
+// (`MNE146`). The recorded identity is hygienic (`i`, then `i#2`, ...;
+// `#` never lexes in source) so the proof graph, obligation subjects,
+// and body validation stay per-loop when the source name repeats. The
+// first use keeps the bare name, so single-loop fingerprints are stable.
+module pressure.iterreuse;
+
+fn seq_reuse() -> (result: u64) {
+    let a: [u64; 2] = [10, 20];
+    let b: [u64; 2] = [1, 2];
+    iterate i over a carrying x: u64 = 0 {
+        next x = x + 1;
+    }
+    iterate i over b carrying y: u64 = x {
+        next y = y + 10;
+    }
+    return y;
+}
+
+fn counted_reuse() -> (result: u64) {
+    iterate k up_to 3 carrying acc: u64 = 0 {
+        next acc = acc + 1;
+    }
+    iterate k up_to 4 carrying acc2: u64 = acc {
+        next acc2 = acc2 + 10;
+    }
+    return acc2;
+}
+
+fn triple_reuse() -> (result: u64) {
+    iterate t up_to 2 carrying a: u64 = 0 {
+        next a = a + 1;
+    }
+    iterate t up_to 2 carrying b: u64 = a {
+        next b = b + 1;
+    }
+    iterate t up_to 2 carrying c: u64 = b {
+        next c = c + 1;
+    }
+    return c;
+}
+
+// Distinct names in sequence keep working exactly as before.
+fn distinct_names() -> (result: u64) {
+    iterate p up_to 2 carrying a: u64 = 0 {
+        next a = a + 1;
+    }
+    iterate q up_to 3 carrying b: u64 = a {
+        next b = b + 1;
+    }
+    return b;
+}

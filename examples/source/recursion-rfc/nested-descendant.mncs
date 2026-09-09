@@ -1,0 +1,14 @@
+mncs 0.10;
+// RFC 0047 positive: transitive provenance through two matches.
+// `l2` descends from `l`, which descends from `tree`.
+module recursion.rfc.nested;
+enum Tree { Leaf, Node { left: Tree, right: Tree } }
+fn left_depth(tree: Tree) -> (result: u64) {
+    return match tree {
+        Leaf => 0,
+        Node { left: l, right: r } => match l {
+            Leaf => 1,
+            Node { left: l2, right: r2 } => left_depth(l2) + 2
+        }
+    };
+}

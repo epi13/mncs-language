@@ -2,8 +2,10 @@ use std::collections::BTreeSet;
 
 use serde::Serialize;
 
+mod profile;
 mod source;
 
+pub use profile::*;
 pub use source::*;
 
 /// Tokenizer-neutral measurements for one source representation.

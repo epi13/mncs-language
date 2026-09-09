@@ -9,8 +9,16 @@ use crate::{
 };
 
 pub const EXECUTABLE_BODY_SCHEMA_VERSION: &str = "0.2";
-/// Inclusive upper bound for `iterate ... up_to N` counter loops and
-/// sequence-traversal steps (ENG-PRESSURE-0004).
+/// Absolute model ceiling for `iterate ... up_to N` counter loops and
+/// sequence-traversal steps: the largest bound any layer may represent,
+/// regardless of source profile.
+///
+/// This is a *representational* ceiling, not an admission policy. Which
+/// bound a program may actually declare depends on its source profile
+/// (`mncs-syntax` registry: 1..=32 through Profile 0.12, 1..=1024 in
+/// Profile 0.13, plus the static nest work-product envelope). Model
+/// validation enforces this absolute ceiling; the frontend enforces the
+/// admitted per-profile ceiling.
 ///
 /// Why 1024: every backend lowers bounded iteration to a native loop (the
 /// C/LLVM/Cranelift emitters use a program-counter state machine, WASM
@@ -21,16 +29,26 @@ pub const EXECUTABLE_BODY_SCHEMA_VERSION: &str = "0.2";
 /// the retained two-level nesting cap keeps fully-nested loops inside
 /// caller-sized step budgets. 1024 also matches the sequence bound, so any
 /// well-typed sequence is fully traversable.
-pub const SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND: u32 = 1024;
-/// Inclusive upper bound for sequence lengths and view capacities
-/// (Source Profile 0.7; ENG-PRESSURE-0018). Bounds are semantic facts
-/// carried by types, so they must stay small enough to remain
-/// machine-checkable everywhere: 1024 keeps one i64 axis to 8 KiB on the
-/// stack-backed native emitters, stays far inside the 16 MiB composite
-/// cell arena, and fits comfortably in WASM linear memory. Larger shapes
-/// compose from these (records of sequences, nested sequences); genuinely
-/// unbounded growth stays out of scope under deterministic allocation.
-pub const MAX_SEQUENCE_BOUND: u32 = 1024;
+pub const MODEL_MAX_ITERATION_BOUND: u32 = 1024;
+/// Historical name for [`MODEL_MAX_ITERATION_BOUND`]. It never described
+/// Profile 0.4 specifically (Profile 0.4 admits 1..=32); kept so existing
+/// consumers keep compiling while they migrate to the honest name and to
+/// per-profile policy from the `mncs-syntax` registry.
+pub const SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND: u32 = MODEL_MAX_ITERATION_BOUND;
+/// Absolute model ceiling for sequence lengths and view capacities.
+/// Admission policy lives in the `mncs-syntax` registry (64 through
+/// Profile 0.12, 1024 in Profile 0.13). Bounds are semantic facts carried
+/// by types, so they must stay small enough to remain machine-checkable
+/// everywhere: 1024 keeps one i64 axis to 8 KiB on the stack-backed native
+/// emitters, stays far inside the 16 MiB composite cell arena, and fits
+/// comfortably in WASM linear memory. Larger shapes compose from these
+/// (records of sequences, nested sequences); genuinely unbounded growth
+/// stays out of scope under deterministic allocation.
+pub const MODEL_MAX_SEQUENCE_BOUND: u32 = 1024;
+/// Historical name for [`MODEL_MAX_SEQUENCE_BOUND`]. Kept so existing
+/// consumers keep compiling; new code should use the honest name and read
+/// admitted ceilings from the `mncs-syntax` registry.
+pub const MAX_SEQUENCE_BOUND: u32 = MODEL_MAX_SEQUENCE_BOUND;
 /// Semantic vectors and masks are deliberately bounded in the first Profile
 /// 0.8 tranche. Lane count is logical identity and never a register width.
 pub const MAX_VECTOR_LANES: u32 = 64;
@@ -53,8 +71,9 @@ pub enum SequenceBound {
 
 impl SequenceBound {
     /// The static ceiling this bound contributes to traversal step counts.
-    /// For generic params the ceiling is the profile maximum; instantiation
-    /// will substitute a concrete bound that must respect it.
+    /// For generic params the ceiling is the absolute model maximum;
+    /// instantiation will substitute a concrete bound that must respect
+    /// the active profile's admitted ceiling.
     pub fn ceiling(&self) -> u32 {
         match self {
             Self::Exact(length) | Self::UpTo(length) => *length,
@@ -604,6 +623,16 @@ pub enum BodyOperationKind {
     BooleanOp {
         operator: String,
     },
+    /// Boolean equality comparison (Profile 0.10, CP-0004): `eq` | `ne`
+    /// over two normalized bool values, producing a bool. Ordering
+    /// predicates are not defined on bools; mixed bool/integer comparisons
+    /// are rejected at elaboration. Total.
+    BooleanCompare {
+        predicate: String,
+    },
+    /// Boolean negation (Profile 0.10, CP-0004): logical `not` over one
+    /// normalized bool value, producing a bool. Total.
+    BooleanNot,
     /// Byte-oriented bitwise operation (Profile 0.7): `and` | `or` | `xor`
     /// over two byte operands, producing a byte. Total.
     ByteBitwise {
@@ -1679,6 +1708,73 @@ fn validate_operation(
                     "MNB070",
                     format!("{path}.results"),
                     "boolean operation result must have bool type",
+                ));
+            }
+        }
+        BodyOperationKind::BooleanCompare { predicate } => {
+            if !matches!(predicate.as_str(), "eq" | "ne") {
+                errors.push(body_diagnostic(
+                    "MNB138",
+                    format!("{path}.kind"),
+                    format!("unsupported boolean comparison predicate {predicate:?}"),
+                ));
+            }
+            if operation.operands.len() != 2 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB139",
+                    path.to_owned(),
+                    "boolean comparison requires two operands and one result",
+                ));
+            }
+            let bool_type = BodyType::Named("bool".to_owned());
+            for (index, operand) in operation.operands.iter().enumerate() {
+                if available.get(operand) != Some(&bool_type) {
+                    errors.push(body_diagnostic(
+                        "MNB140",
+                        format!("{path}.inputs[{index}]"),
+                        "boolean comparison operands must have bool type",
+                    ));
+                }
+            }
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| result.ty != bool_type)
+            {
+                errors.push(body_diagnostic(
+                    "MNB141",
+                    format!("{path}.results"),
+                    "boolean comparison result must have bool type",
+                ));
+            }
+        }
+        BodyOperationKind::BooleanNot => {
+            if operation.operands.len() != 1 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB139",
+                    path.to_owned(),
+                    "boolean negation requires one operand and one result",
+                ));
+            }
+            let bool_type = BodyType::Named("bool".to_owned());
+            for (index, operand) in operation.operands.iter().enumerate() {
+                if available.get(operand) != Some(&bool_type) {
+                    errors.push(body_diagnostic(
+                        "MNB140",
+                        format!("{path}.inputs[{index}]"),
+                        "boolean negation operand must have bool type",
+                    ));
+                }
+            }
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| result.ty != bool_type)
+            {
+                errors.push(body_diagnostic(
+                    "MNB141",
+                    format!("{path}.results"),
+                    "boolean negation result must have bool type",
                 ));
             }
         }

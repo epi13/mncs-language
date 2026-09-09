@@ -1,0 +1,11 @@
+mncs 0.10;
+// RFC 0047 positive: the descendant sits in recursive-parameter position
+// while other arguments are arbitrary (here a flag passed through).
+module recursion.rfc.argpos;
+enum Tree { Leaf, Node { left: Tree, right: Tree } }
+fn count_tagged(tree: Tree, tag: bool) -> (result: u64) {
+    return match tree {
+        Leaf => 0,
+        Node { left: l, right: r } => count_tagged(l, tag) + count_tagged(r, tag)
+    };
+}

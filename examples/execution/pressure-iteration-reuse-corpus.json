@@ -1,0 +1,10 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-iteration-reuse",
+ "cases": [
+  {"id": "seq", "request": {"schema_version": "0.1", "target": {"module": "pressure.iterreuse", "function": "seq_reuse"}, "arguments": [], "step_budget": 8000}, "expected": [{"integer": {"value": 22, "type": {"bits": 64, "signed": false}}}], "expected_status": "returned"},
+  {"id": "counted", "request": {"schema_version": "0.1", "target": {"module": "pressure.iterreuse", "function": "counted_reuse"}, "arguments": [], "step_budget": 8000}, "expected": [{"integer": {"value": 43, "type": {"bits": 64, "signed": false}}}], "expected_status": "returned"},
+  {"id": "triple", "request": {"schema_version": "0.1", "target": {"module": "pressure.iterreuse", "function": "triple_reuse"}, "arguments": [], "step_budget": 8000}, "expected": [{"integer": {"value": 6, "type": {"bits": 64, "signed": false}}}], "expected_status": "returned"},
+  {"id": "distinct", "request": {"schema_version": "0.1", "target": {"module": "pressure.iterreuse", "function": "distinct_names"}, "arguments": [], "step_budget": 8000}, "expected": [{"integer": {"value": 5, "type": {"bits": 64, "signed": false}}}], "expected_status": "returned"}
+ ]
+}

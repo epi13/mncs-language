@@ -1,0 +1,12 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-next-field",
+ "cases": [
+  {"id": "construct", "request": {"schema_version": "0.1", "target": {"module": "pressure.nextfield", "function": "construct"}, "arguments": [], "step_budget": 8000}, "expected": [{"integer": {"value": 41, "type": {"bits": 64, "signed": false}}}], "expected_status": "returned"},
+  {"id": "project", "request": {"schema_version": "0.1", "target": {"module": "pressure.nextfield", "function": "project"}, "arguments": [], "step_budget": 8000}, "expected": [{"integer": {"value": 6, "type": {"bits": 64, "signed": false}}}], "expected_status": "returned"},
+  {"id": "payload", "request": {"schema_version": "0.1", "target": {"module": "pressure.nextfield", "function": "payload"}, "arguments": [], "step_budget": 8000}, "expected": [{"integer": {"value": 7, "type": {"bits": 64, "signed": false}}}], "expected_status": "returned"},
+  {"id": "payload-done", "request": {"schema_version": "0.1", "target": {"module": "pressure.nextfield", "function": "payload_done"}, "arguments": [], "step_budget": 8000}, "expected": [{"integer": {"value": 1, "type": {"bits": 64, "signed": false}}}], "expected_status": "returned"},
+  {"id": "step", "request": {"schema_version": "0.1", "target": {"module": "pressure.nextfield", "function": "step_still_iterates"}, "arguments": [], "step_budget": 8000}, "expected": [{"integer": {"value": 4, "type": {"bits": 64, "signed": false}}}], "expected_status": "returned"},
+  {"id": "both", "request": {"schema_version": "0.1", "target": {"module": "pressure.nextfield", "function": "field_and_step"}, "arguments": [], "step_budget": 8000}, "expected": [{"integer": {"value": 16, "type": {"bits": 64, "signed": false}}}], "expected_status": "returned"}
+ ]
+}

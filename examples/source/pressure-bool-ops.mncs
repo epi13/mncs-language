@@ -1,0 +1,74 @@
+mncs 0.13;
+
+// Boolean equality and negation pins (CP-0004). `==`/`!=` over two bools
+// elaborate to the total `BooleanCompare` operation and prefix `!` to the
+// total `BooleanNot` operation — never a frontend rewrite — so every
+// backend observes the same operation. Ordering comparisons on bools and
+// mixed bool/integer comparisons stay rejected (MNE121/MNE119); `!` on a
+// non-bool stays rejected (MNE181).
+module pressure.boolops;
+
+fn eq_tt() -> (result: bool) {
+    return true == true;
+}
+
+fn eq_tf() -> (result: bool) {
+    return true == false;
+}
+
+fn ne_tf() -> (result: bool) {
+    return true != false;
+}
+
+fn ne_tt() -> (result: bool) {
+    return true != true;
+}
+
+fn not_t() -> (result: bool) {
+    return !true;
+}
+
+fn not_f() -> (result: bool) {
+    return !false;
+}
+
+fn not_not(a: bool) -> (result: bool) {
+    return !!a;
+}
+
+fn eq_args(a: bool, b: bool) -> (result: bool) {
+    return a == b;
+}
+
+fn ne_args(a: bool, b: bool) -> (result: bool) {
+    return a != b;
+}
+
+// `!` binds tighter than `==`: `!a == b` is `(!a) == b`.
+fn not_binds_tight(a: bool, b: bool) -> (result: bool) {
+    return !a == b;
+}
+
+fn not_of_compare(a: bool, b: bool) -> (result: bool) {
+    return !(a == b);
+}
+
+// Boolean operators compose with the existing strict `&&`/`||`.
+fn composed(a: bool, b: bool) -> (result: bool) {
+    return (a == b) && (!a != b) || (!b == a);
+}
+
+// Negation in condition position: the compiler's `done = advance == false`
+// shape (CP-0004 workload).
+fn not_in_condition(done: bool, advance: bool) -> (result: u64) {
+    let finished: bool = done == advance;
+    if !finished {
+        return 0;
+    }
+    return 1;
+}
+
+// A comparison as a match scrutinee over the existing bool patterns.
+fn compare_then_match(a: bool, b: bool) -> (result: u64) {
+    return match a == b { true => 7, false => 9 };
+}

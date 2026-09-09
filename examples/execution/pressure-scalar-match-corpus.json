@@ -1,0 +1,686 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-scalar-match",
+ "cases": [
+  {
+   "id": "d0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "dispatch"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 100,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "d1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "dispatch"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 101,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "d7",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "dispatch"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 107,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "d9",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "dispatch"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 9,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 199,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "s-neg",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "signed"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": -5,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "s-zero",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "signed"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "s-pos",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "signed"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 3,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "n-max",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "narrow"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 255,
+       "type": {
+        "bits": 8,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "n-zero",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "narrow"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 8,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "w-any",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "wild_only"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 999,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 42,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "max-hit",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "max_boundary"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 18446744073709551615,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "max-miss",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "max_boundary"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "min-hit",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "min_boundary"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": -9223372036854775808,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "min-miss",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "min_boundary"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "nest-hit",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "nested"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "nest-miss",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "nested"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 9,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "prec-mul",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "precedence_class"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 10,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "prec-add",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "precedence_class"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 9,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "prec-shl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "precedence_class"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 8,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "prec-other",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.scalmatch",
+     "function": "precedence_class"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 24,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

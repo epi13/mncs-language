@@ -4,38 +4,19 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub const SOURCE_ENVELOPE_SCHEMA_VERSION: &str = "0.1";
-pub const SOURCE_PROFILE_VERSION: &str = "0.1";
-pub const SOURCE_PROFILE_VERSION_0_2: &str = "0.2";
-pub const SOURCE_PROFILE_VERSION_0_3: &str = "0.3";
-pub const SOURCE_PROFILE_VERSION_0_4: &str = "0.4";
-pub const SOURCE_PROFILE_VERSION_0_5: &str = "0.5";
-pub const SOURCE_PROFILE_VERSION_0_6: &str = "0.6";
-pub const SOURCE_PROFILE_VERSION_0_7: &str = "0.7";
-pub const SOURCE_PROFILE_VERSION_0_8: &str = "0.8";
-pub const SOURCE_PROFILE_VERSION_0_9: &str = "0.9";
-pub const SOURCE_PROFILE_VERSION_0_10: &str = "0.10";
-pub const SOURCE_PROFILE_VERSION_0_11: &str = "0.11";
-pub const SOURCE_PROFILE_VERSION_0_12: &str = "0.12";
-pub const SOURCE_PROFILE_VERSION_1_0: &str = "1.0";
 
-/// True when the active source profile declares at least `version`. Profile
-/// features are strictly additive, so a numeric comparison replaces the
-/// per-feature version lists that previously had to name every profile.
-pub fn profile_at_least(profile: &str, version: &str) -> bool {
-    let parse = |value: &str| -> Option<(u64, u64)> {
-        let mut parts = value.split('.');
-        let major = parts.next()?.parse::<u64>().ok()?;
-        let minor = parts.next()?.parse::<u64>().ok()?;
-        if parts.next().is_some() {
-            return None;
-        }
-        Some((major, minor))
-    };
-    match (parse(profile), parse(version)) {
-        (Some(active), Some(required)) => active >= required,
-        _ => false,
-    }
-}
+// Source-profile version identities, the `profile_at_least` ordering, and
+// the supported-profile predicate live in the authoritative registry
+// (`profile.rs`, RFC 0036). They are re-exported at the crate root, so
+// existing `mncs_syntax::SOURCE_PROFILE_VERSION_0_4` paths keep working.
+pub use crate::profile::{profile_at_least, source_profile_supported, SOURCE_PROFILE_VERSION_0_13};
+use crate::profile::{
+    SOURCE_PROFILE_VERSION, SOURCE_PROFILE_VERSION_0_10, SOURCE_PROFILE_VERSION_0_11,
+    SOURCE_PROFILE_VERSION_0_12, SOURCE_PROFILE_VERSION_0_2, SOURCE_PROFILE_VERSION_0_3,
+    SOURCE_PROFILE_VERSION_0_4, SOURCE_PROFILE_VERSION_0_5, SOURCE_PROFILE_VERSION_0_6,
+    SOURCE_PROFILE_VERSION_0_7, SOURCE_PROFILE_VERSION_0_8, SOURCE_PROFILE_VERSION_0_9,
+    SOURCE_PROFILE_VERSION_1_0,
+};
 pub const LEXICAL_SCHEMA_VERSION: &str = "0.1";
 pub const CST_SCHEMA_VERSION: &str = "0.1";
 pub const AST_SCHEMA_VERSION: &str = "0.1";
@@ -287,6 +268,9 @@ pub enum TokenKind {
     Caret,
     EqEq,
     NotEq,
+    /// Logical negation prefix (CP-0004). The lexer still recognizes `!=`
+    /// first, so this fires only for a bare `!` (previously MNL002).
+    Not,
     AndAnd,
     OrOr,
     Lt,
@@ -534,6 +518,13 @@ pub enum AstExpr {
         right: Box<AstExpr>,
         span: SourceSpan,
     },
+    /// Logical negation (Profile 0.13, CP-0004): `!value` over a bool,
+    /// producing a bool. The lexer only produces the `!` token in Profile
+    /// 0.13+, so older profiles keep their historical MNL002 rejection.
+    Not {
+        value: Box<AstExpr>,
+        span: SourceSpan,
+    },
     RecordLiteral {
         type_name: SpannedText,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -736,6 +727,7 @@ impl AstExpr {
             | Self::Call { span, .. }
             | Self::Match { span, .. }
             | Self::Binary { span, .. }
+            | Self::Not { span, .. }
             | Self::RecordLiteral { span, .. }
             | Self::FieldProject { span, .. }
             | Self::SequenceLiteral { span, .. }
@@ -760,8 +752,36 @@ impl AstExpr {
     }
 }
 
+/// The head pattern of a match arm (CP-0010). Variant patterns keep the
+/// historical meaning of the arm's other fields; scalar patterns use only
+/// `variant` (as the head span) and `value`. A bare `_` stays `Variant` at
+/// parse time: finite and bool subjects may declare a variant literally
+/// named `_`, so only integer-subject elaboration reads a bare `_` as the
+/// default arm.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AstMatchPattern {
+    /// Ordinary variant/bool pattern: `type_name`/`variant`/`bindings`/
+    /// `ignore_payload` keep their existing meaning. This is the default so
+    /// serialized arms from before scalar patterns round-trip unchanged.
+    #[default]
+    Variant,
+    /// Integer literal pattern: an optional leading `-` plus the literal
+    /// text. Interpretation is scrutinee-relative and happens at
+    /// elaboration (MNE145 on overflow or out-of-range).
+    Scalar { negative: bool, text: SpannedText },
+}
+
+fn ast_match_pattern_is_variant(pattern: &AstMatchPattern) -> bool {
+    matches!(pattern, AstMatchPattern::Variant)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AstMatchArm {
+    /// The head pattern kind. Skipped on serialization for the common
+    /// variant case so existing abstract-syntax fingerprints are stable.
+    #[serde(default, skip_serializing_if = "ast_match_pattern_is_variant")]
+    pub pattern: AstMatchPattern,
     /// Optional qualifying type name (`Type.VARIANT` patterns).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub type_name: Option<SpannedText>,
@@ -1177,6 +1197,28 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                 '&' => TokenKind::Ampersand,
                 '|' => TokenKind::Pipe,
                 '^' => TokenKind::Caret,
+                // Bare `!` is logical negation (Profile 0.13, CP-0004).
+                // `!=` is claimed earlier by the two-character operator
+                // scan above, so this arm only fires for the prefix
+                // operator. Under older profiles the historical rejection
+                // is preserved exactly: `!` never lexed there (MNL002),
+                // so an older profile keeps its historical diagnostics.
+                '!' => {
+                    if profile_at_least(&envelope.language_version, SOURCE_PROFILE_VERSION_0_13) {
+                        TokenKind::Not
+                    } else {
+                        diagnostics.push(SourceDiagnostic {
+                            code: "MNL002".to_owned(),
+                            stage: DiagnosticStage::Lexical,
+                            severity: DiagnosticSeverity::Error,
+                            message: format!("unsupported source character {current:?}"),
+                            span: SourceSpan::at(source, start, offset),
+                            expected: Vec::new(),
+                            found: Some(TokenKind::Unknown),
+                        });
+                        TokenKind::Unknown
+                    }
+                }
                 '<' => TokenKind::Lt,
                 '>' => TokenKind::Gt,
                 '=' => TokenKind::Equal,
@@ -1224,6 +1266,32 @@ pub fn parse(envelope: &SourceEnvelope) -> ParseOutput {
             expected: Vec::new(),
             found: None,
         });
+    }
+    // Fail closed on declared-but-unsupported profiles (RFC 0036). `mncs
+    // 1.0` has no published specification and no registry record: numeric
+    // `profile_at_least` ordering would otherwise let it silently inherit
+    // every 0.x feature. Unknown versions fail the same way.
+    if let Some(tree) = ast.as_ref() {
+        if !source_profile_supported(&tree.language_version.text) {
+            let message = if tree.language_version.text == SOURCE_PROFILE_VERSION_1_0 {
+                "source profile 1.0 has no published specification; declare a supported profile (0.1 through 0.13) until Profile 1.0 is deliberately specified"
+                    .to_owned()
+            } else {
+                format!(
+                    "source profile {} is not supported; declare a supported profile (0.1 through 0.13)",
+                    tree.language_version.text
+                )
+            };
+            diagnostics.push(SourceDiagnostic {
+                code: "MNP008".to_owned(),
+                stage: DiagnosticStage::Parsing,
+                severity: DiagnosticSeverity::Error,
+                message,
+                span: tree.language_version.span,
+                expected: Vec::new(),
+                found: Some(TokenKind::Version),
+            });
+        }
     }
     if ast
         .as_ref()
@@ -1523,11 +1591,9 @@ impl<'a> Parser<'a> {
                     // Payload variant: `Name { field: Type, ... }` with the
                     // same field syntax as record declarations.
                     self.cursor += 1;
-                    while let Some(field_name) = self.spanned(
-                        TokenKind::Identifier,
-                        "MNP132",
-                        "expected payload field name",
-                    ) {
+                    while let Some(field_name) =
+                        self.field_name("MNP132", "expected payload field name")
+                    {
                         self.expect(
                             TokenKind::Colon,
                             "MNP133",
@@ -1615,9 +1681,9 @@ impl<'a> Parser<'a> {
         );
         let mut fields: Vec<AstRecordField> = Vec::new();
         let mut children = Vec::new();
-        while self.current_kind() == Some(TokenKind::Identifier) {
+        while self.is_field_name() {
             let field_start = self.current_token_index();
-            let field_name = self.spanned(TokenKind::Identifier, "MNP124", "expected field name");
+            let field_name = self.field_name("MNP124", "expected field name");
             self.expect(TokenKind::Colon, "MNP125", "expected ':' after field name");
             let field_type = self.type_annotation("MNP126", "expected field type");
             let field_end = self.previous_token_index(field_start);
@@ -2203,7 +2269,33 @@ impl<'a> Parser<'a> {
     }
 
     fn primary(&mut self) -> Option<AstExpr> {
-        let atom = self.primary_atom()?;
+        // Logical negation (Profile 0.13, CP-0004): a `!` prefix binds
+        // tighter than any binary operator, so `!a == b` is `(!a) == b`
+        // and `a == !b` works in right-operand position too (both sides
+        // parse via `primary`). The operand recurses through `primary`,
+        // so `!!a`, `!a.b`, `!f(x)`, and `!(a == b)` all parse. The lexer
+        // only produces `Not` in Profile 0.13+; the defensive gate below
+        // keeps a smuggled token (envelope/header profile skew, which
+        // already reports MNE002) from silently gaining semantics.
+        let atom = if self.current_kind() == Some(TokenKind::Not) {
+            if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_13) {
+                self.error(
+                    "MNP064",
+                    "logical negation requires source profile 0.13 or later",
+                    vec![TokenKind::Not],
+                );
+                return None;
+            }
+            let bang = self.spanned(TokenKind::Not, "MNP064", "expected expression")?;
+            let operand = self.primary()?;
+            let span = SourceSpan::covering(&self.envelope.text, bang.span, operand.span());
+            AstExpr::Not {
+                value: Box::new(operand),
+                span,
+            }
+        } else {
+            self.primary_atom()?
+        };
         // Explicit total conversion suffix `expr as Type` (Profile 0.7).
         // The cast binds tighter than any binary operator.
         if self.current_kind() != Some(TokenKind::AsKeyword) {
@@ -2228,13 +2320,15 @@ impl<'a> Parser<'a> {
     }
 
     fn primary_atom(&mut self) -> Option<AstExpr> {
-        // Unary-negative numeric literals (MNP064): `-5`, `-2.0` as single
-        // expression atoms. Only directly before integer/float literals, so
-        // binary subtraction (`a - b`, `a-b`, `a - -5`) stays unambiguous:
-        // the binary loop consumes the operator, then this prefix handles a
-        // negated literal on the right. General negation (`-x`, `-(a+b)`,
-        // `--5`) stays refused; spell it `(0 - x)`.
-        if self.current_kind() == Some(TokenKind::Minus)
+        // Unary-negative numeric literals (Profile 0.13): `-5`, `-2.0` as
+        // single expression atoms. Only directly before integer/float
+        // literals, so binary subtraction (`a - b`, `a-b`, `a - -5`) stays
+        // unambiguous: the binary loop consumes the operator, then this
+        // prefix handles a negated literal on the right. General negation
+        // (`-x`, `-(a+b)`, `--5`) stays refused; spell it `(0 - x)`.
+        // Older profiles skip this block and keep the historical refusal.
+        if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_13)
+            && self.current_kind() == Some(TokenKind::Minus)
             && matches!(
                 self.peek_kind(1),
                 Some(TokenKind::IntegerLiteral | TokenKind::Version)
@@ -2337,11 +2431,8 @@ impl<'a> Parser<'a> {
                 }
                 let primary_expr = if self.current_kind() == Some(TokenKind::Dot) {
                     self.cursor += 1;
-                    let variant = self.spanned(
-                        TokenKind::Identifier,
-                        "MNP065",
-                        "expected finite variant or field after '.'",
-                    )?;
+                    let variant =
+                        self.field_name("MNP065", "expected finite variant or field after '.'")?;
                     let span = SourceSpan::covering(&self.envelope.text, name.span, variant.span);
                     // Qualified payload construction: `Type.Variant { ... }`
                     // (Profile 0.6). The lookahead distinguishes it from a
@@ -2354,11 +2445,9 @@ impl<'a> Parser<'a> {
                         while self.current_kind() != Some(TokenKind::RightBrace)
                             && self.cursor < self.significant.len()
                         {
-                            let Some(field_name) = self.spanned(
-                                TokenKind::Identifier,
-                                "MNP140",
-                                "expected payload field name",
-                            ) else {
+                            let Some(field_name) =
+                                self.field_name("MNP140", "expected payload field name")
+                            else {
                                 break;
                             };
                             self.expect(
@@ -2554,11 +2643,7 @@ impl<'a> Parser<'a> {
         let mut segments = vec![first.clone()];
         while self.current_kind() == Some(TokenKind::Dot) {
             self.cursor += 1;
-            segments.push(self.spanned(
-                TokenKind::Identifier,
-                "MNP065",
-                "expected namespace member after '.'",
-            )?);
+            segments.push(self.field_name("MNP065", "expected namespace member after '.'")?);
         }
         if segments.len() < 2 {
             return Some(AstExpr::Name(first));
@@ -2583,11 +2668,8 @@ impl<'a> Parser<'a> {
             while self.current_kind() != Some(TokenKind::RightBrace)
                 && self.cursor < self.significant.len()
             {
-                let Some(field_name) = self.spanned(
-                    TokenKind::Identifier,
-                    "MNP140",
-                    "expected payload field name",
-                ) else {
+                let Some(field_name) = self.field_name("MNP140", "expected payload field name")
+                else {
                     break;
                 };
                 self.expect(
@@ -2619,22 +2701,23 @@ impl<'a> Parser<'a> {
                 span: SourceSpan::covering(&self.envelope.text, path_span, end),
             });
         }
-        if segments.len() >= 3 && self.at_payload_construct() {
-            // Qualified payload construction: `alias.Type.Variant { ... }`
-            // (Profile 0.6, cross-module). Mirrors the two-segment shape
-            // with the qualifier path joined; elaboration retries a
-            // qualified record spelling when no finite type matches, exactly
-            // as for two segments (ENG-PRESSURE-0007).
+        // Qualified payload construction: `alias.Type.Variant { ... }`
+        // (Profile 0.13, ENG-PRESSURE-0007). Mirrors the two-segment
+        // Profile 0.6 shape with the qualifier path joined; elaboration
+        // retries a qualified record spelling when no finite type matches,
+        // exactly as for two segments. Older profiles keep the historical
+        // refusal (a qualified path followed by an unexpected `{`).
+        if segments.len() >= 3
+            && profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_13)
+            && self.at_payload_construct()
+        {
             self.cursor += 1;
             let mut fields = Vec::new();
             while self.current_kind() != Some(TokenKind::RightBrace)
                 && self.cursor < self.significant.len()
             {
-                let Some(field_name) = self.spanned(
-                    TokenKind::Identifier,
-                    "MNP140",
-                    "expected payload field name",
-                ) else {
+                let Some(field_name) = self.field_name("MNP140", "expected payload field name")
+                else {
                     break;
                 };
                 self.expect(
@@ -3094,11 +3177,8 @@ impl<'a> Parser<'a> {
             match self.current_kind() {
                 Some(TokenKind::Dot) => {
                     self.cursor += 1;
-                    let Some(field) = self.spanned(
-                        TokenKind::Identifier,
-                        "MNP129",
-                        "expected field name after '.'",
-                    ) else {
+                    let Some(field) = self.field_name("MNP129", "expected field name after '.'")
+                    else {
                         break;
                     };
                     let span = SourceSpan::covering(&self.envelope.text, base.span(), field.span);
@@ -3196,9 +3276,12 @@ impl<'a> Parser<'a> {
             };
             elements.push(element);
             // A semicolon after the first element opens the repeat form
-            // `[value; N]` (ENG-PRESSURE-0020); `;` is unambiguous here
-            // because `,` separates element lists.
-            if self.current_kind() == Some(TokenKind::Semicolon) {
+            // `[value; N]` (Profile 0.13, ENG-PRESSURE-0020); `;` is
+            // unambiguous here because `,` separates element lists. Older
+            // profiles keep the historical MNP157 refusal below.
+            if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_13)
+                && self.current_kind() == Some(TokenKind::Semicolon)
+            {
                 if elements.len() != 1 {
                     self.error(
                         "MNP203",
@@ -3267,10 +3350,32 @@ impl<'a> Parser<'a> {
     /// conditions, bounded-iteration bodies). A record literal always opens
     /// with a functional update (`..base`) or a field declaration (`name :`),
     /// so bounded lookahead disambiguates without guessing.
+    /// Whether the cursor starts a match arm. Integer-literal and `-`
+    /// patterns only start arms in Profile 0.13 (scalar match, CP-0010);
+    /// older profiles keep the historical variant/bool-only shape so an
+    /// integer in arm position still reaches MNP084.
+    fn at_match_arm_start(&self, scalar_patterns: bool) -> bool {
+        match self.current_kind() {
+            Some(TokenKind::Identifier | TokenKind::TrueKeyword | TokenKind::FalseKeyword) => true,
+            Some(TokenKind::IntegerLiteral | TokenKind::Minus) => scalar_patterns,
+            _ => false,
+        }
+    }
+
+    /// Whether `next` may serve as a field/member name in the active
+    /// profile. Contextual `next` fields are a Profile 0.13 extension
+    /// (CP-0013); older profiles keep the historical rejection.
+    fn admits_contextual_next(&self) -> bool {
+        profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_13)
+    }
+
     fn at_record_literal(&self) -> bool {
         match self.peek_kind(1) {
             Some(TokenKind::DotDot) => true,
             Some(TokenKind::Identifier) => {
+                matches!(self.peek_kind(2), Some(TokenKind::Colon))
+            }
+            Some(TokenKind::NextKeyword) if self.admits_contextual_next() => {
                 matches!(self.peek_kind(2), Some(TokenKind::Colon))
             }
             _ => false,
@@ -3285,7 +3390,12 @@ impl<'a> Parser<'a> {
             return false;
         }
         match self.peek_kind(1) {
-            Some(TokenKind::Identifier) => matches!(self.peek_kind(2), Some(TokenKind::Colon)),
+            Some(TokenKind::Identifier) => {
+                matches!(self.peek_kind(2), Some(TokenKind::Colon))
+            }
+            Some(TokenKind::NextKeyword) if self.admits_contextual_next() => {
+                matches!(self.peek_kind(2), Some(TokenKind::Colon))
+            }
             Some(TokenKind::RightBrace) => true,
             _ => false,
         }
@@ -3325,12 +3435,8 @@ impl<'a> Parser<'a> {
             self.cursor += 1;
         }
         let mut fields: Vec<(SpannedText, AstExpr)> = Vec::new();
-        while self.current_kind() == Some(TokenKind::Identifier) {
-            let field_name = self.spanned(
-                TokenKind::Identifier,
-                "MNP132",
-                "expected record field name",
-            )?;
+        while self.is_field_name() {
+            let field_name = self.field_name("MNP132", "expected record field name")?;
             self.expect(
                 TokenKind::Colon,
                 "MNP133",
@@ -3370,10 +3476,89 @@ impl<'a> Parser<'a> {
             "expected '{' after match value",
         );
         let mut arms = Vec::new();
+        // Scalar integer patterns are a Profile 0.13 extension (CP-0010).
+        // Older profiles keep the historical shape: only variant/bool arms
+        // enter the loop, and an integer literal in arm position falls
+        // through to the MNP084 `expected '}' after match arms` error.
+        let scalar_patterns = profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_13);
         while matches!(
             self.current_kind(),
             Some(TokenKind::Identifier | TokenKind::TrueKeyword | TokenKind::FalseKeyword)
-        ) {
+        ) || (scalar_patterns
+            && matches!(
+                self.current_kind(),
+                Some(TokenKind::IntegerLiteral | TokenKind::Minus)
+            ))
+        {
+            // Scalar patterns (Profile 0.13, CP-0010): a bare integer
+            // literal, or `-` directly before one for negative patterns on
+            // signed types. The literal text is preserved for
+            // scrutinee-relative interpretation at elaboration.
+            if scalar_patterns
+                && matches!(
+                    self.current_kind(),
+                    Some(TokenKind::IntegerLiteral | TokenKind::Minus)
+                )
+            {
+                let (negative, text) = match self.current_kind() {
+                    Some(TokenKind::Minus) => {
+                        let minus =
+                            self.spanned(TokenKind::Minus, "MNP082", "expected match pattern")?;
+                        let literal = self.spanned(
+                            TokenKind::IntegerLiteral,
+                            "MNP082",
+                            "expected integer literal after '-' in match pattern",
+                        )?;
+                        let span =
+                            SourceSpan::covering(&self.envelope.text, minus.span, literal.span);
+                        (
+                            true,
+                            SpannedText {
+                                text: literal.text,
+                                span,
+                            },
+                        )
+                    }
+                    _ => (
+                        false,
+                        self.spanned(
+                            TokenKind::IntegerLiteral,
+                            "MNP082",
+                            "expected match pattern",
+                        )?,
+                    ),
+                };
+                let head = text.clone();
+                self.expect(
+                    TokenKind::FatArrow,
+                    "MNP083",
+                    "expected '=>' after match pattern",
+                );
+                let arm_value = self.expression()?;
+                let span = SourceSpan::covering(&self.envelope.text, head.span, arm_value.span());
+                arms.push(AstMatchArm {
+                    pattern: AstMatchPattern::Scalar { negative, text },
+                    type_name: None,
+                    variant: head,
+                    bindings: Vec::new(),
+                    ignore_payload: false,
+                    value: arm_value,
+                    span,
+                });
+                if self.current_kind() == Some(TokenKind::Comma) {
+                    self.cursor += 1;
+                    continue;
+                }
+                if self.at_match_arm_start(scalar_patterns) {
+                    self.error(
+                        "MNP192",
+                        "expected ',' between match arms",
+                        vec![TokenKind::Comma],
+                    );
+                    continue;
+                }
+                break;
+            }
             // Boolean patterns `true` / `false` (HARNESS-PRESSURE-013). The
             // lexer never produces these spellings as identifiers, so the
             // text alone distinguishes a boolean pattern from a variant.
@@ -3384,6 +3569,14 @@ impl<'a> Parser<'a> {
                 }
                 _ => self.spanned(TokenKind::Identifier, "MNP082", "expected match variant")?,
             };
+            // NOTE (CP-0010): a bare `_` stays a `Variant` pattern here.
+            // Whether it means "variant literally named `_`" or "default
+            // arm" is scrutinee-relative and decided at elaboration: finite
+            // and bool subjects keep the historical variant meaning (a type
+            // may declare a variant named `_`), while integer subjects read
+            // a bare `_` (no qualifier, no payload) as the default arm.
+            // Deciding in the parser would silently reinterpret existing
+            // finite matches.
             let is_bool_pattern = first.text == "true" || first.text == "false";
             // Qualified pattern `Type.VARIANT` (Profile 0.6) or the bare
             // variant name accepted by every profile. Boolean patterns
@@ -3442,12 +3635,10 @@ impl<'a> Parser<'a> {
                     self.cursor += 1;
                     ignore_payload = true;
                 }
-                while self.current_kind() == Some(TokenKind::Identifier) {
-                    let Some(field_name) = self.spanned(
-                        TokenKind::Identifier,
-                        "MNP137",
-                        "expected payload field binding",
-                    ) else {
+                while self.is_field_name() {
+                    let Some(field_name) =
+                        self.field_name("MNP137", "expected payload field binding")
+                    else {
                         break;
                     };
                     let binding = if self.current_kind() == Some(TokenKind::Colon) {
@@ -3480,6 +3671,7 @@ impl<'a> Parser<'a> {
             let arm_value = self.expression()?;
             let span = SourceSpan::covering(&self.envelope.text, variant.span, arm_value.span());
             arms.push(AstMatchArm {
+                pattern: AstMatchPattern::Variant,
                 type_name,
                 variant,
                 bindings,
@@ -3494,10 +3686,8 @@ impl<'a> Parser<'a> {
             // A missing comma between arms previously cascaded into an
             // MNP084 wall (HARNESS-PRESSURE-012). When another arm clearly
             // follows, pin the single precise error and keep parsing arms.
-            if matches!(
-                self.current_kind(),
-                Some(TokenKind::Identifier | TokenKind::TrueKeyword | TokenKind::FalseKeyword)
-            ) {
+            // Integer/minus only start an arm in Profile 0.13.
+            if self.at_match_arm_start(scalar_patterns) {
                 self.error(
                     "MNP192",
                     "expected ',' between match arms",
@@ -3936,6 +4126,42 @@ impl<'a> Parser<'a> {
         )
     }
 
+    /// A field/member name: an ordinary identifier, or the `next` keyword
+    /// used contextually (Profile 0.13, CP-0013). `next` opens the iteration-step clause
+    /// (`next state = expr;`), which is parsed only as the terminator of an
+    /// `iterate` body and through `value_name` for the carried-state name,
+    /// so it stays reserved exactly there. In field positions — record
+    /// declarations and literals, finite payload declarations and
+    /// constructions, `.` projections, match payload bindings — no iterate
+    /// step can appear, and the trailing `:`/`,`/`}` delimiter keeps the
+    /// parse unambiguous. Mirrors the `capability` handling in
+    /// `value_name` and the `mncs`-segment handling in `name_segment`.
+    fn field_name(&mut self, code: &str, message: &str) -> Option<SpannedText> {
+        match self.current_kind() {
+            Some(TokenKind::Identifier) => self.spanned(TokenKind::Identifier, code, message),
+            Some(TokenKind::NextKeyword) if self.admits_contextual_next() => {
+                let index = self.significant[self.cursor];
+                self.cursor += 1;
+                let token = &self.tokens[index];
+                Some(SpannedText {
+                    text: token.text.clone(),
+                    span: token.span,
+                })
+            }
+            _ => {
+                self.error(code, message, vec![TokenKind::Identifier]);
+                None
+            }
+        }
+    }
+
+    /// Whether the cursor sits on a field/member name (`field_name`).
+    fn is_field_name(&self) -> bool {
+        matches!(self.current_kind(), Some(TokenKind::Identifier))
+            || (self.admits_contextual_next()
+                && matches!(self.current_kind(), Some(TokenKind::NextKeyword)))
+    }
+
     /// Parse a type annotation: a plain named/scalar identifier, a Profile
     /// 0.7 bounded sequence, or a Profile 0.8 semantic vector/mask family.
     /// The returned text is canonical; elaboration owns its semantic identity.
@@ -4246,24 +4472,8 @@ fn is_identifier_continue(value: char) -> bool {
     value == '_' || value.is_alphanumeric()
 }
 
-pub fn source_profile_supported(version: &str) -> bool {
-    matches!(
-        version,
-        SOURCE_PROFILE_VERSION
-            | SOURCE_PROFILE_VERSION_0_2
-            | SOURCE_PROFILE_VERSION_0_3
-            | SOURCE_PROFILE_VERSION_0_4
-            | SOURCE_PROFILE_VERSION_0_5
-            | SOURCE_PROFILE_VERSION_0_6
-            | SOURCE_PROFILE_VERSION_0_7
-            | SOURCE_PROFILE_VERSION_0_8
-            | SOURCE_PROFILE_VERSION_0_9
-            | SOURCE_PROFILE_VERSION_0_10
-            | SOURCE_PROFILE_VERSION_0_11
-            | SOURCE_PROFILE_VERSION_0_12
-            | SOURCE_PROFILE_VERSION_1_0
-    )
-}
+// `source_profile_supported` is registry-driven (`profile.rs`) and
+// re-exported above; internal callers resolve to that predicate.
 
 fn is_profile08_intrinsic(name: &str) -> bool {
     matches!(
@@ -4329,6 +4539,7 @@ fn infer_source_profile(text: &str) -> &'static str {
     });
     match header {
         Some(line) if line.trim_start().starts_with("mncs 1.0") => SOURCE_PROFILE_VERSION_1_0,
+        Some(line) if line.trim_start().starts_with("mncs 0.13") => SOURCE_PROFILE_VERSION_0_13,
         Some(line) if line.trim_start().starts_with("mncs 0.12") => SOURCE_PROFILE_VERSION_0_12,
         Some(line) if line.trim_start().starts_with("mncs 0.11") => SOURCE_PROFILE_VERSION_0_11,
         Some(line) if line.trim_start().starts_with("mncs 0.10") => SOURCE_PROFILE_VERSION_0_10,

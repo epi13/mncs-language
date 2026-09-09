@@ -1,0 +1,50 @@
+mncs 0.13;
+
+// Contextual `next` pins (CP-0013). `next` opens the iteration-step clause
+// and names carried state only through the step grammar, so it stays
+// reserved exactly there; in field positions it is an ordinary member name.
+// This file pins record declaration, record construction, projection,
+// finite payload declaration and construction, and match payload binding —
+// alongside a loop whose step clause still parses as iteration syntax.
+module pressure.nextfield;
+
+record Link { next: u64, after: u64 }
+
+enum Chain { More { next: u64 }, Done }
+
+fn construct() -> (result: u64) {
+    let link: Link = Link { next: 40, after: 1 };
+    return link.next + link.after;
+}
+
+fn project() -> (result: u64) {
+    let link: Link = Link { next: 6, after: 1 };
+    return link.next;
+}
+
+fn payload() -> (result: u64) {
+    let chain: Chain = Chain.More { next: 7 };
+    return match chain { More { next: n } => n, Done => 0 };
+}
+
+fn payload_done() -> (result: u64) {
+    let chain: Chain = Chain.Done;
+    return match chain { More { next: n } => n, Done => 1 };
+}
+
+// The step clause is untouched: `next acc = ...` still terminates the body.
+fn step_still_iterates() -> (result: u64) {
+    iterate i up_to 4 carrying acc: u64 = 0 {
+        next acc = acc + 1;
+    }
+    return acc;
+}
+
+// A field named `next` and a step clause coexist in one body.
+fn field_and_step() -> (result: u64) {
+    let link: Link = Link { next: 10, after: 2 };
+    iterate i up_to 3 carrying acc: u64 = link.next {
+        next acc = acc + link.after;
+    }
+    return acc;
+}

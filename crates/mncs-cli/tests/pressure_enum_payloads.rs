@@ -140,3 +140,48 @@ fn payload_rejections_stay_closed() {
         );
     }
 }
+
+/// CP-0008 reconciliation: canonical payload identity must not collapse
+/// distinct nominals. Two structurally identical enums (`A`, `B`) stay
+/// non-interchangeable both in return position and inside a payload
+/// field. A silent acceptance here would mean canonicalization erased
+/// nominal identity.
+#[test]
+fn nominal_identity_does_not_collapse() {
+    let cases = [
+        (
+            "return-position",
+            "mncs 0.10;\nmodule test.payload.neg_nominal_return;\nenum A { Ok { x: u64 }, Bad }\nenum B { Ok { x: u64 }, Bad }\nfn probe(a: A) -> (result: B) {\n    return a;\n}\n",
+            "MNE103",
+        ),
+        (
+            "payload-position",
+            "mncs 0.10;\nmodule test.payload.neg_nominal_payload;\nenum A { Ok { x: u64 }, Bad }\nenum B { Ok { x: u64 }, Bad }\nenum S { W { v: A }, Z }\nfn probe(b: B) -> (result: S) {\n    return S.W { v: b };\n}\n",
+            "MNE117",
+        ),
+    ];
+    for (name, text, code) in cases {
+        let dir = std::env::temp_dir().join(format!("mncs-pressure-payload-{name}"));
+        std::fs::create_dir_all(&dir).expect("create workspace");
+        let path = dir.join(format!("{name}.mncs"));
+        std::fs::write(&path, text).expect("write case");
+        let output = binary()
+            .args(["source-study", &path.to_string_lossy()])
+            .env("MNCS_LIBRARY_PATH", library(""))
+            .output()
+            .expect("run source-study");
+        let result: Value = serde_json::from_slice(&output.stdout).expect("study JSON");
+        let codes: Vec<String> = result["diagnostics"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter(|d| d["severity"] == "error")
+            .filter_map(|d| d["code"].as_str().map(str::to_owned))
+            .collect();
+        assert!(
+            codes.iter().any(|candidate| candidate == code),
+            "{name}: expected {code} in {codes:?}"
+        );
+    }
+}

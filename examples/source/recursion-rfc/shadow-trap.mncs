@@ -1,0 +1,19 @@
+mncs 0.10;
+// RFC 0047 negative: the inner `l` shadows the descendant spelling but
+// binds from a call result (`other(tree)`), not from a match on the
+// parameter. A name-based checker ("l is match-bound") would wrongly
+// accept this; R3 requires resolved-binding provenance, which rejects it.
+module recursion.rfc.shadow;
+enum Tree { Leaf, Node { left: Tree, right: Tree } }
+fn other(tree: Tree) -> (result: Tree) {
+    return tree;
+}
+fn bad(tree: Tree) -> (result: u64) {
+    return match tree {
+        Leaf => 0,
+        Node { left: l, right: r } => match other(tree) {
+            Leaf => 0,
+            Node { left: l, right: r } => bad(l) + 1
+        }
+    };
+}

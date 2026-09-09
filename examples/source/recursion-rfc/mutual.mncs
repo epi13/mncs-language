@@ -1,0 +1,17 @@
+mncs 0.10;
+// RFC 0047 negative: mutual recursion is deferred (R4: self calls only).
+// Rejected in every tranche until a mutual design exists.
+module recursion.rfc.mutual;
+enum Tree { Leaf, Node { left: Tree, right: Tree } }
+fn walk_a(tree: Tree) -> (result: u64) {
+    return match tree {
+        Leaf => 0,
+        Node { left: l, right: r } => walk_b(l) + 1
+    };
+}
+fn walk_b(tree: Tree) -> (result: u64) {
+    return match tree {
+        Leaf => 0,
+        Node { left: l, right: r } => walk_a(l) + 1
+    };
+}

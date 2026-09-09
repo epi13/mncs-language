@@ -1,0 +1,17 @@
+mncs 0.10;
+// RFC 0047 negative: the argument is a call result built from descendants,
+// not a matched descendant itself. Rebuilding resets provenance (R3).
+module recursion.rfc.rebuilt;
+enum Tree { Leaf, Node { left: Tree, right: Tree } }
+fn mirror(tree: Tree) -> (result: Tree) {
+    return match tree {
+        Leaf => Tree.Leaf,
+        Node { left: l, right: r } => Tree.Node { left: r, right: l }
+    };
+}
+fn bad(tree: Tree) -> (result: u64) {
+    return match tree {
+        Leaf => 0,
+        Node { left: l, right: r } => bad(mirror(l)) + 1
+    };
+}

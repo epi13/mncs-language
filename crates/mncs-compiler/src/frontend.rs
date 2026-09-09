@@ -14,12 +14,11 @@ use mncs_model::{
     Program, RecordField, RecordType, Requirement, ResolutionProvenance, SemanticBinding,
     SemanticBindingKind, SemanticBindingTable, SemanticGraph, SemanticId, SemanticIdentities,
     SemanticNamespace, SemanticReference, SemanticScope, TransformationEdge, TransformationStatus,
-    ValidationReport, Value, EXECUTABLE_BODY_SCHEMA_VERSION,
-    SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND, SUPPORTED_SCHEMA_VERSION,
+    ValidationReport, Value, EXECUTABLE_BODY_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSION,
 };
 use mncs_syntax::{
-    parse, AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstMatchArm, AstStmt,
-    ConcreteSyntaxTree, DiagnosticSeverity, DiagnosticStage, LexedDocument, ParseOutput,
+    parse, AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstMatchArm, AstMatchPattern,
+    AstStmt, ConcreteSyntaxTree, DiagnosticSeverity, DiagnosticStage, LexedDocument, ParseOutput,
     SourceArtifactKind, SourceDiagnostic, SourceEnvelope, SourceSpan, SpannedText,
     AST_SCHEMA_VERSION, CST_SCHEMA_VERSION, LEXICAL_SCHEMA_VERSION, SOURCE_ENVELOPE_SCHEMA_VERSION,
     SOURCE_PROFILE_VERSION_0_4, SOURCE_PROFILE_VERSION_0_9,
@@ -1353,6 +1352,10 @@ fn body_type_from_name(
             line: 1,
             column: 1,
         },
+        // Import-path re-resolution of an already-validated artifact:
+        // absolute model ceiling. Admission was enforced at origin
+        // elaboration under the origin profile.
+        mncs_model::MODEL_MAX_SEQUENCE_BOUND,
     ) {
         return sequence;
     }
@@ -1534,6 +1537,7 @@ fn elaborate_linked_module(
                     &payload_finite_types,
                     &payload_record_types,
                     &mut probe_diagnostics,
+                    admitted_sequence_ceiling(ast),
                 );
                 let supported = probe_diagnostics
                     .iter()
@@ -1695,6 +1699,7 @@ fn elaborate_linked_module(
                     &field.value_type.text,
                     &finite_types_by_name,
                     &provisional_record_types,
+                    admitted_sequence_ceiling(ast),
                 )
                 .is_none()
             {
@@ -1711,6 +1716,7 @@ fn elaborate_linked_module(
                 &finite_types_by_name,
                 &provisional_record_types,
                 &mut diagnostics,
+                admitted_sequence_ceiling(ast),
             );
             fields.push(RecordField {
                 name: field.name.text.clone(),
@@ -2523,6 +2529,7 @@ fn elaborate_function(
                 record_types,
                 &generic_map,
                 &mut diagnostics,
+                admitted_sequence_ceiling(ast),
             ),
         })
         .collect::<Vec<_>>();
@@ -2533,6 +2540,7 @@ fn elaborate_function(
         record_types,
         &generic_map,
         &mut diagnostics,
+        admitted_sequence_ceiling(ast),
     );
     // Keep pre-0.9 source spellings stable. Qualified nominal types need an
     // identity-bearing spelling in the semantic Program so body/IR/SSA
@@ -2832,6 +2840,7 @@ impl FunctionSignature {
                     record_types,
                     &generic_map,
                     diagnostics,
+                    admitted_sequence_ceiling(ast),
                 )
             })
             .collect();
@@ -2845,6 +2854,7 @@ impl FunctionSignature {
                     record_types,
                     &generic_map,
                     diagnostics,
+                    admitted_sequence_ceiling(ast),
                 )
             },
         );
@@ -2997,6 +3007,7 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
             calls_in_expr(end, calls);
         }
         AstExpr::Cast { value, .. } => calls_in_expr(value, calls),
+        AstExpr::Not { value, .. } => calls_in_expr(value, calls),
         AstExpr::Select {
             condition,
             when_true,
@@ -3309,6 +3320,24 @@ impl BindingEnv {
             .any(|scope| scope.contains_key(name))
     }
 
+    /// Whether a plain `let` for `name` would shadow a plain value (a `let`
+    /// or a parameter) in the current scope. Mirrors the `shadows_value`
+    /// condition in [`Self::bind`]: same-scope shadowing is a Profile 0.13
+    /// extension (ENG-PRESSURE-0021); older profiles keep the historical
+    /// MNE110 refusal, enforced by the caller before [`Self::bind`] runs.
+    fn shadows_plain_value_in_current_scope(&self, name: &str) -> bool {
+        self.scopes
+            .last()
+            .expect("scope stack is non-empty")
+            .get(name)
+            .is_some_and(|(_, _, existing_kind)| {
+                matches!(
+                    existing_kind,
+                    BoundNameKind::Binding | BoundNameKind::Parameter
+                )
+            })
+    }
+
     fn push(&mut self) {
         let parent_path = self
             .scope_paths
@@ -3355,10 +3384,90 @@ struct BodyBuilder<'a> {
     generic_map: BTreeMap<String, mncs_model::GenericParamKind>,
     resolutions: Vec<NameResolution>,
     iteration_depth: usize,
+    /// Lexically enclosing `iterate` loops as `(source name, static bound)`
+    /// (Profile 0.13, CP-0009). Iteration identities are unique over their
+    /// live lexical scope: a nested loop may not reuse a still-open
+    /// identity, while sequential non-overlapping loops may. The bound
+    /// feeds the compositional static work-product rule. Pushed at loop
+    /// entry, popped once the body (the only place a nested loop can
+    /// open) is elaborated, including on error exits below.
+    open_iterations: Vec<(String, u32)>,
+    /// Per-name elaboration counts for hygienic recorded identities
+    /// (CP-0009). The first loop with a source name keeps it verbatim;
+    /// later sequential reuses record `name#2`, `name#3`, ... so the
+    /// proof graph, obligation subjects, and MNB061 uniqueness stay
+    /// per-loop even when the source name repeats.
+    iteration_name_uses: BTreeMap<String, u64>,
     /// Declared source profile (`ast.language_version`), for additive
     /// feature gates. Older profiles keep their historical refusals and
     /// fingerprints; gates query through `profile_at_least`.
     source_profile: String,
+}
+
+/// Admissible literal range of an integer type as `(min, max)` (CP-0010).
+/// Defensive over the full `u16` width space: degenerate zero-width types
+/// admit nothing, and widths at or past 128 saturate at the i128 extremes
+/// rather than shifting out of range.
+fn integer_range(operand_type: IntegerType) -> (i128, i128) {
+    if operand_type.signed {
+        if operand_type.bits >= 128 {
+            (i128::MIN, i128::MAX)
+        } else if operand_type.bits == 0 {
+            (0, -1)
+        } else {
+            let half = 1i128 << (operand_type.bits - 1);
+            (-half, half - 1)
+        }
+    } else if operand_type.bits >= 128 {
+        (0, i128::MAX)
+    } else if operand_type.bits == 0 {
+        (0, -1)
+    } else {
+        (0, (1i128 << operand_type.bits) - 1)
+    }
+}
+
+/// Parse a scalar match pattern literal: decimal digits with an optional
+/// leading `-` tracked separately by the parser (CP-0010). Magnitudes past
+/// i128 fail here with MNE145; subject-range checking happens at the call
+/// site, so one diagnostic code covers the whole literal contract with no
+/// silent truncation.
+fn scalar_pattern_value(
+    negative: bool,
+    text: &SpannedText,
+    diagnostics: &mut Vec<SourceDiagnostic>,
+) -> Option<i128> {
+    let magnitude: i128 = match text.text.parse() {
+        Ok(value) => value,
+        Err(_) => {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE145",
+                format!(
+                    "scalar match literal {} is outside the subject integer type",
+                    text.text
+                ),
+                text.span,
+            ));
+            return None;
+        }
+    };
+    if !negative {
+        return Some(magnitude);
+    }
+    match magnitude.checked_neg() {
+        Some(value) => Some(value),
+        None => {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE145",
+                format!(
+                    "scalar match literal -{} is outside the subject integer type",
+                    text.text
+                ),
+                text.span,
+            ));
+            None
+        }
+    }
 }
 
 impl<'a> BodyBuilder<'a> {
@@ -3400,6 +3509,8 @@ impl<'a> BodyBuilder<'a> {
             direct_imports,
             generic_map,
             resolutions: Vec::new(),
+            open_iterations: Vec::new(),
+            iteration_name_uses: BTreeMap::new(),
             iteration_depth: 0,
             source_profile,
         }
@@ -3415,6 +3526,21 @@ impl<'a> BodyBuilder<'a> {
 
     fn profile_float(&self) -> bool {
         self.profile_at_least(mncs_syntax::SOURCE_PROFILE_VERSION_0_12)
+    }
+
+    /// Profile 0.13 consolidation/progression capabilities (RFC 0036):
+    /// boolean negation/equality, scalar integer match, sequential
+    /// iteration-name reuse, contextual `next` fields, repeat literals,
+    /// lexical shadowing, raised sequence/iteration ceilings, and
+    /// structural recursion. Older profiles keep their historical
+    /// acceptance/rejection behavior.
+    fn profile_0_13(&self) -> bool {
+        self.profile_at_least(mncs_syntax::SOURCE_PROFILE_VERSION_0_13)
+    }
+
+    /// Admitted sequence/view length ceiling for the active profile.
+    fn admitted_sequence_ceiling(&self) -> u32 {
+        mncs_syntax::max_sequence_bound_for(&self.source_profile).unwrap_or(0)
     }
 
     fn elaborate_statements(
@@ -3531,6 +3657,7 @@ impl<'a> BodyBuilder<'a> {
                     self.record_types,
                     &self.generic_map,
                     diagnostics,
+                    self.admitted_sequence_ceiling(),
                 );
                 let Some(produced) = self.elaborate_expr(value, Some(&declared), env, diagnostics)
                 else {
@@ -3542,6 +3669,19 @@ impl<'a> BodyBuilder<'a> {
                         "binding initializer type does not match its declared type",
                         *span,
                     ));
+                }
+                // Same-scope shadowing is a Profile 0.13 extension
+                // (ENG-PRESSURE-0021). Older profiles keep the historical
+                // MNE110 refusal for `let` over a plain value or parameter
+                // in the same scope; rebinding over index/state names stays
+                // MNE110 on every profile via `bind` below.
+                if !self.profile_0_13() && env.shadows_plain_value_in_current_scope(&name.text) {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE110",
+                        "binding is ambiguous in this lexical scope",
+                        name.span,
+                    ));
+                    return;
                 }
                 env.bind(
                     name.text.clone(),
@@ -3708,13 +3848,37 @@ impl<'a> BodyBuilder<'a> {
                     return;
                 };
                 traversal_element = Some(element.clone());
+                // u64 traversal domains are a Profile 0.13 extension: the
+                // traversal index is an abstract u64 counter, and older
+                // profiles confused a u64 *element* type with that counter
+                // (historical MNB101 at model validation). The refusal now
+                // fires here so model validation stays profile-agnostic;
+                // MNE194 is the elaboration-stage counterpart naming the
+                // profile rule.
+                if !self.profile_0_13()
+                    && **element
+                        == BodyType::Integer(IntegerType {
+                            bits: 64,
+                            signed: false,
+                        })
+                {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE194",
+                        "u64 sequence traversal domains require source profile 0.13 or later",
+                        *source_span,
+                    ));
+                    return;
+                }
                 let ceiling = bound.ceiling();
-                if ceiling > mncs_model::MAX_SEQUENCE_BOUND {
+                // Admitted sequence ceiling comes from profile policy (RFC
+                // 0036): 64 through Profile 0.12, 1024 in 0.13.
+                let admitted_sequence =
+                    mncs_syntax::max_sequence_bound_for(&self.source_profile).unwrap_or(0);
+                if ceiling > admitted_sequence {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE182",
                         format!(
-                            "sequence traversal bound must not exceed the profile ceiling {}",
-                            mncs_model::MAX_SEQUENCE_BOUND
+                            "sequence traversal bound must not exceed the profile ceiling {admitted_sequence}",
                         ),
                         *source_span,
                     ));
@@ -3754,12 +3918,16 @@ impl<'a> BodyBuilder<'a> {
                     ));
                     return;
                 };
-                if !(1..=SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND).contains(&bound_u32) {
+                // Admitted per-level ceiling comes from profile policy (RFC
+                // 0036): 1..=32 through Profile 0.12, 1..=1024 in 0.13.
+                let ceiling =
+                    mncs_syntax::max_iteration_bound_for(&self.source_profile).unwrap_or(0);
+                if bound_u32 == 0 || bound_u32 > ceiling {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE142",
                         format!(
-                            "iteration bound must be between 1 and {} in Source Profile 0.4",
-                            SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND
+                            "iteration bound must be between 1 and {ceiling} in Source Profile {}",
+                            self.source_profile
                         ),
                         bound.span,
                     ));
@@ -3768,10 +3936,30 @@ impl<'a> BodyBuilder<'a> {
                 bound_u32
             }
         };
-        if self
-            .bounded_iterations
-            .iter()
-            .any(|iteration| iteration.id == name.text)
+        // Iteration identities (Profile 0.13, CP-0009): uniqueness is scoped
+        // to the live lexical scope, so two sequential non-overlapping loops
+        // may reuse a source-level index name while a nested loop reusing a
+        // still-open enclosing identity stays rejected (MNE146). Older
+        // profiles keep the historical function-wide rule: any reuse —
+        // sequential or nested — is MNE146 with the historical message, and
+        // recording stays verbatim. The recorded identity below is hygienic
+        // (`name`, `name#2`, ...) so the proof graph, obligation subjects,
+        // and MNB061 uniqueness stay per-loop even when the source name
+        // repeats; only the source spelling is scoped here.
+        if self.profile_0_13() {
+            if self.open_iterations.iter().any(|open| open.0 == name.text) {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE146",
+                    "iteration identity is already bound by an enclosing iteration",
+                    name.span,
+                ));
+                return;
+            }
+        } else if self.open_iterations.iter().any(|open| open.0 == name.text)
+            || self
+                .bounded_iterations
+                .iter()
+                .any(|iteration| iteration.id == name.text)
         {
             diagnostics.push(elaboration_diagnostic(
                 "MNE146",
@@ -3780,6 +3968,51 @@ impl<'a> BodyBuilder<'a> {
             ));
             return;
         }
+        // Compositional bounded-work rule: the static product of the
+        // enclosing bounds and this loop's bound must fit the profile's
+        // admitted work envelope (registry). Through 0.12 the envelope
+        // admits every historically accepted shape (counted 32s and
+        // traversal-64 compositions); 0.13 admits an explicit 1024x1024
+        // envelope. Calls inside the body can multiply work transitively;
+        // that residual cost is an obligation on the callee's own bounds
+        // (see the resource-limit architecture note), not part of this
+        // static product.
+        let enclosing_product: u64 = self
+            .open_iterations
+            .iter()
+            .map(|(_, enclosing)| u64::from(*enclosing))
+            .product();
+        let work_product = enclosing_product.saturating_mul(u64::from(bound_u32));
+        let envelope =
+            mncs_syntax::max_iteration_work_product_for(&self.source_profile).unwrap_or(0);
+        if work_product > envelope {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE193",
+                format!(
+                    "nested iteration work product {work_product} exceeds the Source Profile {} static envelope {envelope}",
+                    self.source_profile
+                ),
+                *span,
+            ));
+            return;
+        }
+        self.open_iterations.push((name.text.clone(), bound_u32));
+        // Claim the hygienic recorded identity in elaboration (source)
+        // order, so the mapping is deterministic. `#` never lexes inside a
+        // name (MNL002), so a suffixed identity can never collide with a
+        // user-written one.
+        let prior_uses = self
+            .iteration_name_uses
+            .get(&name.text)
+            .copied()
+            .unwrap_or(0);
+        self.iteration_name_uses
+            .insert(name.text.clone(), prior_uses + 1);
+        let recorded_id = if prior_uses == 0 {
+            name.text.clone()
+        } else {
+            format!("{}#{}", name.text, prior_uses + 1)
+        };
         let carried_type = profile_type_with_generics(
             &state_type.text,
             state_type.span,
@@ -3787,6 +4020,7 @@ impl<'a> BodyBuilder<'a> {
             self.record_types,
             &self.generic_map,
             diagnostics,
+            self.admitted_sequence_ceiling(),
         );
         let Some(initial_value) =
             self.elaborate_expr(initial, Some(&carried_type), env, diagnostics)
@@ -4001,6 +4235,12 @@ impl<'a> BodyBuilder<'a> {
             diagnostics,
         );
         self.elaborate_statements(body, env, diagnostics);
+        // The loop body is the only place a nested iteration can open (the
+        // step clause is expression-only), so the identity closes here: a
+        // later sequential loop may reuse the source name while any loop
+        // still elaborating its body keeps MNE146. This single pop covers
+        // every exit below uniformly.
+        self.open_iterations.pop();
         if !self.block_is_open() {
             diagnostics.push(elaboration_diagnostic(
                 "MNE148",
@@ -4106,7 +4346,7 @@ impl<'a> BodyBuilder<'a> {
             }
         }
         self.bounded_iterations.push(BodyBoundedIteration {
-            id: name.text.clone(),
+            id: recorded_id,
             bound: bound_u32,
             state_name: state.text.clone(),
             state_type: carried_type.clone(),
@@ -4181,6 +4421,16 @@ impl<'a> BodyBuilder<'a> {
         let mut true_arm: Option<&AstExpr> = None;
         let mut false_arm: Option<&AstExpr> = None;
         for arm in arms {
+            // Scalar patterns need an integer subject (CP-0010); on a bool
+            // they are not variants of a two-case domain.
+            if !matches!(arm.pattern, AstMatchPattern::Variant) {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE138",
+                    "scalar match patterns require an integer match subject",
+                    arm.variant.span,
+                ));
+                continue;
+            }
             if arm.type_name.is_some()
                 || (arm.variant.text != "true" && arm.variant.text != "false")
             {
@@ -4273,6 +4523,222 @@ impl<'a> BodyBuilder<'a> {
             portability: None,
         });
         Some(ResolvedBinding::plain(id, result_type))
+    }
+
+    /// Elaborate `match` over an integer subject (CP-0010).
+    ///
+    /// The contract is total dispatch over an open scalar domain:
+    /// - literal arms cover exactly their literal value; duplicates are
+    ///   rejected (MNE139, like duplicate variant arms);
+    /// - exactly one `_` default arm is required (MNE140 when missing,
+    ///   MNE139 when duplicated);
+    /// - arms after the default are unreachable (MNE139);
+    /// - literals are range-checked against the subject type at
+    ///   elaboration with no silent truncation (MNE145);
+    /// - a bare `_` (no qualifier, no payload) is the default arm. On
+    ///   finite/bool subjects the same spelling keeps its historical
+    ///   variant meaning, so only the integer path interprets it;
+    /// - anything else (variant names, `true`/`false`, qualified patterns,
+    ///   payload bindings) is rejected (MNE138).
+    ///
+    /// Lowering reuses the finite-match branch-chain shape: one
+    /// `IntegerCompare eq` test per literal arm in source order with the
+    /// default as the terminal unconditional branch. Exhaustiveness is
+    /// decided here, never in a backend: every backend already realizes
+    /// branches, integer comparison, and constants.
+    #[allow(clippy::too_many_arguments)]
+    fn elaborate_scalar_match(
+        &mut self,
+        subject: &ResolvedBinding,
+        operand_type: IntegerType,
+        arms: &[AstMatchArm],
+        span: &SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let Some(result_type) = expected.cloned() else {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE137",
+                "match result requires an expected type in Source Profile 0.3",
+                *span,
+            ));
+            return None;
+        };
+        let (range_min, range_max) = integer_range(operand_type);
+        let diagnostic_count = diagnostics.len();
+        // Resolved arms in source order: `Some(literal)` for a literal arm,
+        // `None` for the default.
+        let mut resolved_arms: Vec<(Option<i128>, &AstExpr, SourceSpan)> = Vec::new();
+        let mut seen = BTreeSet::new();
+        let mut default_seen = false;
+        for arm in arms {
+            match &arm.pattern {
+                AstMatchPattern::Scalar { negative, text } => {
+                    let Some(literal) = scalar_pattern_value(*negative, text, diagnostics) else {
+                        continue;
+                    };
+                    if literal < range_min || literal > range_max {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE145",
+                            format!(
+                                "scalar match literal {literal} is outside the subject integer type ({}..={})",
+                                range_min, range_max
+                            ),
+                            text.span,
+                        ));
+                        continue;
+                    }
+                    if default_seen {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE139",
+                            "duplicate match arm is unreachable",
+                            arm.variant.span,
+                        ));
+                        continue;
+                    }
+                    if !seen.insert(literal) {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE139",
+                            "duplicate match arm is unreachable",
+                            arm.variant.span,
+                        ));
+                        continue;
+                    }
+                    resolved_arms.push((Some(literal), &arm.value, arm.variant.span));
+                }
+                AstMatchPattern::Variant => {
+                    let is_default = arm.type_name.is_none()
+                        && arm.variant.text == "_"
+                        && arm.bindings.is_empty()
+                        && !arm.ignore_payload;
+                    if !is_default {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE138",
+                            "scalar match arms must be integer literals or `_`",
+                            arm.variant.span,
+                        ));
+                        continue;
+                    }
+                    if default_seen {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE139",
+                            "duplicate match arm is unreachable",
+                            arm.variant.span,
+                        ));
+                        continue;
+                    }
+                    default_seen = true;
+                    resolved_arms.push((None, &arm.value, arm.variant.span));
+                }
+            }
+        }
+        if !default_seen {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE140",
+                "non-exhaustive scalar match; a wildcard arm `_` is required",
+                *span,
+            ));
+        }
+        if diagnostics.len() != diagnostic_count || resolved_arms.is_empty() {
+            return None;
+        }
+
+        let dispatch_start = self.current;
+        let join_id = self.new_block();
+        let arm_ids = resolved_arms
+            .iter()
+            .map(|_| self.new_block())
+            .collect::<Vec<_>>();
+        let test_ids = (1..resolved_arms.len())
+            .map(|_| self.new_block())
+            .collect::<Vec<_>>();
+        let mut dispatch = dispatch_start;
+        for (index, ((literal, _, _), arm_id)) in resolved_arms.iter().zip(&arm_ids).enumerate() {
+            self.current = dispatch;
+            if index + 1 == resolved_arms.len() {
+                self.blocks[self.current].terminator = BodyTerminator::Branch {
+                    target: arm_id.clone(),
+                    arguments: Vec::new(),
+                };
+            } else {
+                let literal = literal.expect("non-terminal scalar arm covers a literal");
+                let constant = self.new_value("matchlit");
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: constant.clone(),
+                    kind: BodyOperationKind::Constant {
+                        value: literal,
+                        ty: BodyType::Integer(operand_type),
+                    },
+                    operands: Vec::new(),
+                    results: vec![BodyValue {
+                        id: constant.clone(),
+                        ty: BodyType::Integer(operand_type),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                });
+                let condition = self.new_value("match");
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: condition.clone(),
+                    kind: BodyOperationKind::IntegerCompare {
+                        predicate: "eq".to_owned(),
+                        operand_type,
+                    },
+                    operands: vec![subject.id.clone(), constant],
+                    results: vec![BodyValue {
+                        id: condition.clone(),
+                        ty: BodyType::Named("bool".to_owned()),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                });
+                let next_test = test_ids[index].clone();
+                self.blocks[self.current].terminator = BodyTerminator::ConditionalBranch {
+                    condition,
+                    then_target: arm_id.clone(),
+                    then_arguments: Vec::new(),
+                    else_target: next_test.clone(),
+                    else_arguments: Vec::new(),
+                };
+                dispatch = self.index_of(&next_test);
+            }
+        }
+        let result_id = self.new_value("match_result");
+        let join_index = self.index_of(&join_id);
+        self.blocks[join_index].parameters.push(BodyValue {
+            id: result_id.clone(),
+            ty: result_type.clone(),
+        });
+        for ((_, arm_expr, _), arm_id) in resolved_arms.iter().zip(&arm_ids) {
+            self.current = self.index_of(arm_id);
+            env.push();
+            if let Some(value) = self.elaborate_expr(arm_expr, Some(&result_type), env, diagnostics)
+            {
+                if value.ty != result_type {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE141",
+                        "match arms must produce the same expected type",
+                        arm_expr.span(),
+                    ));
+                }
+                if self.block_is_open() {
+                    self.blocks[self.current].terminator = BodyTerminator::Branch {
+                        target: join_id.clone(),
+                        arguments: vec![value.id],
+                    };
+                }
+            }
+            env.pop();
+        }
+        self.current = join_index;
+        Some(ResolvedBinding::plain(result_id, result_type))
     }
 
     /// Elaborate the `host_read()` intrinsic (HARNESS-PRESSURE-004).
@@ -5240,6 +5706,7 @@ impl<'a> BodyBuilder<'a> {
                         self.finite_types,
                         self.record_types,
                         diagnostics,
+                        self.admitted_sequence_ceiling(),
                     );
                     let resolved =
                         self.elaborate_expr(field_value, Some(&expected_field), env, diagnostics)?;
@@ -5321,11 +5788,25 @@ impl<'a> BodyBuilder<'a> {
                         Vec::new()
                     } else {
                         if generic_args.is_empty() {
-                            // Deterministic inference (ENG-PRESSURE-0019):
-                            // solve directly-constrained parameters from
-                            // the value arguments; anything ambiguous keeps
-                            // the explicit-argument diagnostic with the
-                            // unresolved names spelled out.
+                            // Deterministic inference (Profile 0.13,
+                            // ENG-PRESSURE-0019): solve directly-constrained
+                            // parameters from the value arguments; anything
+                            // ambiguous keeps the explicit-argument
+                            // diagnostic with the unresolved names spelled
+                            // out. Older profiles keep the historical
+                            // refusal: inference is not available there.
+                            if !self.profile_0_13() {
+                                diagnostics.push(elaboration_diagnostic(
+                                    "MNE220",
+                                    format!(
+                                        "generic function '{}' requires {} generic argument(s); inference is not available in this tranche",
+                                        function.text,
+                                        callee_params.len()
+                                    ),
+                                    function.span,
+                                ));
+                                return None;
+                            }
                             match self.infer_generic_args(&signature, arguments, env, diagnostics) {
                                 Ok(inferred) => inferred,
                                 Err(GenericInferenceFailure::ArgError) => return None,
@@ -5394,6 +5875,7 @@ impl<'a> BodyBuilder<'a> {
                                             self.record_types,
                                             &self.generic_map,
                                             diagnostics,
+                                            self.admitted_sequence_ceiling(),
                                         );
                                         // Reject Nat value being passed as Type
                                         if arg.text.text.parse::<u32>().is_ok() {
@@ -5415,12 +5897,12 @@ impl<'a> BodyBuilder<'a> {
                                         let text = arg.text.text.trim();
                                         // Try integer literal
                                         if let Ok(val) = text.parse::<u32>() {
-                                            if val > mncs_model::MAX_SEQUENCE_BOUND {
+                                            let admitted = self.admitted_sequence_ceiling();
+                                            if val > admitted {
                                                 diagnostics.push(elaboration_diagnostic(
                                                 "MNE225",
                                                 format!(
-                                                    "sequence bound value {val} exceeds profile ceiling {}",
-                                                    mncs_model::MAX_SEQUENCE_BOUND
+                                                    "sequence bound value {val} exceeds profile ceiling {admitted}",
                                                 ),
                                                 arg.text.span,
                                             ));
@@ -5698,6 +6180,24 @@ impl<'a> BodyBuilder<'a> {
                         diagnostics,
                     );
                 }
+                // Scalar integer match (Profile 0.13, CP-0010): `match`
+                // over an integer subject accepts integer literal arms plus
+                // one required `_` default. Older profiles keep the
+                // historical refusal below (MNE136): an integer subject is
+                // not a declared finite type there.
+                if self.profile_0_13() {
+                    if let BodyType::Integer(operand_type) = &subject.ty {
+                        return self.elaborate_scalar_match(
+                            &subject,
+                            *operand_type,
+                            arms,
+                            span,
+                            expected,
+                            env,
+                            diagnostics,
+                        );
+                    }
+                }
                 let BodyType::Finite {
                     identity: type_identity,
                     name: type_name,
@@ -5705,7 +6205,11 @@ impl<'a> BodyBuilder<'a> {
                 else {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE136",
-                        "match subject must have a declared finite type",
+                        if self.profile_0_13() {
+                            "match subject must have a declared finite, bool, or integer type"
+                        } else {
+                            "match subject must have a declared finite type"
+                        },
                         value.span(),
                     ));
                     return None;
@@ -5728,6 +6232,16 @@ impl<'a> BodyBuilder<'a> {
                 let mut seen = BTreeSet::new();
                 let mut resolved_arms = Vec::new();
                 for arm in arms {
+                    // Scalar patterns need an integer subject (CP-0010);
+                    // they never name a variant of a finite type.
+                    if !matches!(arm.pattern, AstMatchPattern::Variant) {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE138",
+                            "scalar match patterns require an integer match subject",
+                            arm.variant.span,
+                        ));
+                        continue;
+                    }
                     // A qualified pattern `Type.VARIANT` must name the
                     // subject's own type.
                     if let Some(qualifier) = &arm.type_name {
@@ -5860,6 +6374,7 @@ impl<'a> BodyBuilder<'a> {
                             self.finite_types,
                             self.record_types,
                             diagnostics,
+                            self.admitted_sequence_ceiling(),
                         );
                         bindings.push((
                             field_name.text.clone(),
@@ -6146,6 +6661,7 @@ impl<'a> BodyBuilder<'a> {
                             self.finite_types,
                             self.record_types,
                             diagnostics,
+                            self.admitted_sequence_ceiling(),
                         );
                         let resolved =
                             self.elaborate_expr(value, Some(&expected_field), env, diagnostics)?;
@@ -6335,6 +6851,7 @@ impl<'a> BodyBuilder<'a> {
                     self.finite_types,
                     self.record_types,
                     diagnostics,
+                    self.admitted_sequence_ceiling(),
                 );
                 if expected.is_some_and(|expected| expected != &result_ty) {
                     diagnostics.push(elaboration_diagnostic(
@@ -6951,6 +7468,7 @@ impl<'a> BodyBuilder<'a> {
                     self.finite_types,
                     self.record_types,
                     diagnostics,
+                    self.admitted_sequence_ceiling(),
                 );
                 let is_float =
                     |ty: &BodyType| matches!(ty, BodyType::Float(float) if float.is_supported());
@@ -7011,6 +7529,51 @@ impl<'a> BodyBuilder<'a> {
                     portability: None,
                 });
                 Some(ResolvedBinding::plain(id, to))
+            }
+            AstExpr::Not { value, .. } => {
+                // Logical negation (Profile 0.13, CP-0004): `!bool -> bool`
+                // through the dedicated total `BooleanNot` operation — never
+                // a frontend rewrite — so semantic identities, obligations,
+                // and every backend observe the same operation. The parser
+                // only produces `Not` in Profile 0.13+; this gate is
+                // defense in depth for a smuggled AST.
+                if !self.profile_0_13() {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE149",
+                        "logical negation requires source profile 0.13 or later",
+                        expr.span(),
+                    ));
+                    return None;
+                }
+                let bool_type = BodyType::Named("bool".to_owned());
+                // No expectation threading: like `&&`/`||`, the operand is
+                // elaborated in its own type and checked here, so a
+                // mistyped operand reports the single precise MNE181.
+                let operand = self.elaborate_expr(value, None, env, diagnostics)?;
+                if operand.ty != bool_type {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE181",
+                        "boolean operator operands must have type bool",
+                        expr.span(),
+                    ));
+                    return None;
+                }
+                let id = self.new_value("b");
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: id.clone(),
+                    kind: BodyOperationKind::BooleanNot,
+                    operands: vec![operand.id],
+                    results: vec![BodyValue {
+                        id: id.clone(),
+                        ty: bool_type.clone(),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                });
+                Some(ResolvedBinding::plain(id, bool_type))
             }
             AstExpr::Binary {
                 op, left, right, ..
@@ -7133,6 +7696,40 @@ impl<'a> BodyBuilder<'a> {
                         portability: None,
                     });
                     return Some(ResolvedBinding::plain(id, bool_type));
+                }
+                // Boolean equality (Profile 0.13, CP-0004): `bool == bool
+                // -> bool` and `bool != bool -> bool` through the dedicated
+                // total `BooleanCompare` operation. Older profiles skip this
+                // block and keep the historical MNE121 refusal below.
+                // Mixed-type operands never reach here: the MNE119
+                // same-type check above rejects them first. Ordering
+                // comparisons on bools fall through to the integer gate
+                // below (MNE121).
+                if self.profile_0_13() && matches!(op, AstBinaryOp::Eq | AstBinaryOp::Ne) {
+                    let bool_type = BodyType::Named("bool".to_owned());
+                    if left_value.ty == bool_type && right_value.ty == bool_type {
+                        let id = self.new_value("b");
+                        self.blocks[self.current].operations.push(BodyOperation {
+                            id: id.clone(),
+                            kind: BodyOperationKind::BooleanCompare {
+                                predicate: match op {
+                                    AstBinaryOp::Eq => "eq".to_owned(),
+                                    _ => "ne".to_owned(),
+                                },
+                            },
+                            operands: vec![left_value.id, right_value.id],
+                            results: vec![BodyValue {
+                                id: id.clone(),
+                                ty: bool_type.clone(),
+                            }],
+                            contracts: Vec::new(),
+                            assumptions: Vec::new(),
+                            machine_intent: None,
+                            lowering: None,
+                            portability: None,
+                        });
+                        return Some(ResolvedBinding::plain(id, bool_type));
+                    }
                 }
                 // Byte-oriented operators (Profile 0.7): bitwise and/or/xor
                 // and unsigned comparisons over bytes.
@@ -7899,6 +8496,7 @@ impl<'a> BodyBuilder<'a> {
                     self.finite_types,
                     self.record_types,
                     diagnostics,
+                    self.admitted_sequence_ceiling(),
                 )
             })
             .unwrap_or_else(|| BodyType::Named("invalid".to_owned()));
@@ -8188,12 +8786,20 @@ fn exact_view_borrow_dimensions(actual: &BodyType, expected: &BodyType) -> Optio
     None
 }
 
+/// Admitted sequence/view length ceiling for source spelling resolution
+/// under `ast`'s profile (RFC 0036): 64 through Profile 0.12, 1024 in
+/// Profile 0.13. Unknown profiles fail closed to zero.
+fn admitted_sequence_ceiling(ast: &AbstractSyntaxTree) -> u32 {
+    mncs_syntax::max_sequence_bound_for(&ast.language_version.text).unwrap_or(0)
+}
+
 fn profile_type(
     name: &str,
     span: SourceSpan,
     finite_types: &BTreeMap<String, FiniteType>,
     record_types: &BTreeMap<String, RecordType>,
     diagnostics: &mut Vec<SourceDiagnostic>,
+    sequence_ceiling: u32,
 ) -> BodyType {
     if let Some(finite_type) = finite_types.get(name) {
         return BodyType::Finite {
@@ -8239,7 +8845,9 @@ fn profile_type(
     {
         return parametric;
     }
-    if let Some(sequence) = profile_sequence_type(name, finite_types, record_types) {
+    if let Some(sequence) =
+        profile_sequence_type(name, finite_types, record_types, sequence_ceiling)
+    {
         return sequence;
     }
     profile_scalar_supported(name).unwrap_or_else(|| {
@@ -8259,6 +8867,7 @@ fn profile_type_with_generics(
     record_types: &BTreeMap<String, RecordType>,
     generics: &BTreeMap<String, mncs_model::GenericParamKind>,
     diagnostics: &mut Vec<SourceDiagnostic>,
+    sequence_ceiling: u32,
 ) -> BodyType {
     // Direct type-parameter reference
     if let Some(kind) = generics.get(name) {
@@ -8285,12 +8894,20 @@ fn profile_type_with_generics(
             generics,
             diagnostics,
             span,
+            sequence_ceiling,
         ) {
             return seq;
         }
     }
     // Defer to non-generic resolver (finite/record/scalar/sequence without generics)
-    profile_type(name, span, finite_types, record_types, diagnostics)
+    profile_type(
+        name,
+        span,
+        finite_types,
+        record_types,
+        diagnostics,
+        sequence_ceiling,
+    )
 }
 
 /// Why generic-argument inference declined a call (ENG-PRESSURE-0019).
@@ -8506,23 +9123,28 @@ fn canonical_sequence_element_type(source: &str, ty: &BodyType) -> String {
 /// Resolve a canonical bounded-sequence spelling `[E; N]` / `[E; up_to M]`
 /// whose element may be a scalar, byte, nested sequence, or a declared
 /// nominal type of this module.
+/// Admitted sequence/view length ceiling for source spelling resolution.
+/// Callers pass the active profile's registry ceiling; import-path
+/// re-resolution of already-validated artifacts passes the absolute model
+/// ceiling (admission was enforced at origin elaboration).
 fn profile_sequence_type(
     name: &str,
     finite_types: &BTreeMap<String, FiniteType>,
     record_types: &BTreeMap<String, RecordType>,
+    sequence_ceiling: u32,
 ) -> Option<BodyType> {
     let inner = name.strip_prefix('[')?.strip_suffix(']')?;
     let separator = inner.rfind(';')?;
     let (element_text, bound_text) = (inner[..separator].trim(), inner[separator + 1..].trim());
     let bound = if let Some(capacity) = bound_text.strip_prefix("up_to") {
         let capacity = capacity.trim().parse::<u32>().ok()?;
-        if capacity > mncs_model::MAX_SEQUENCE_BOUND {
+        if capacity > sequence_ceiling {
             return None;
         }
         mncs_model::SequenceBound::UpTo(capacity)
     } else {
         let length = bound_text.parse::<u32>().ok()?;
-        if length > mncs_model::MAX_SEQUENCE_BOUND {
+        if length > sequence_ceiling {
             return None;
         }
         mncs_model::SequenceBound::Exact(length)
@@ -8560,7 +9182,7 @@ fn profile_sequence_type(
     }
     let element = Box::new(match profile_scalar_supported(element_text) {
         Some(scalar) => scalar,
-        None => profile_sequence_type(element_text, finite_types, record_types)?,
+        None => profile_sequence_type(element_text, finite_types, record_types, sequence_ceiling)?,
     });
     if matches!(&*element, BodyType::Mask { .. } | BodyType::Vector { .. }) {
         return None;
@@ -8578,6 +9200,7 @@ fn profile_sequence_type_with_generics(
     generics: &BTreeMap<String, mncs_model::GenericParamKind>,
     diagnostics: &mut Vec<SourceDiagnostic>,
     span: SourceSpan,
+    sequence_ceiling: u32,
 ) -> Option<BodyType> {
     let inner = name.strip_prefix('[')?.strip_suffix(']')?;
     let separator = inner.rfind(';')?;
@@ -8585,7 +9208,7 @@ fn profile_sequence_type_with_generics(
     let bound = if let Some(capacity) = bound_text.strip_prefix("up_to") {
         let cap = capacity.trim();
         if let Ok(v) = cap.parse::<u32>() {
-            if v > mncs_model::MAX_SEQUENCE_BOUND {
+            if v > sequence_ceiling {
                 return None;
             }
             mncs_model::SequenceBound::UpTo(v)
@@ -8605,7 +9228,7 @@ fn profile_sequence_type_with_generics(
             return None;
         }
     } else if let Ok(v) = bound_text.parse::<u32>() {
-        if v > mncs_model::MAX_SEQUENCE_BOUND {
+        if v > sequence_ceiling {
             return None;
         }
         mncs_model::SequenceBound::Exact(v)
@@ -8665,6 +9288,7 @@ fn profile_sequence_type_with_generics(
         generics,
         diagnostics,
         span,
+        sequence_ceiling,
     ) {
         nested
     } else {

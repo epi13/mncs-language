@@ -51,7 +51,7 @@ fn hygienic_temps_never_alias_short_user_bindings() {
 fn u64_iterate_domains_resolve_like_i64_and_f64() {
     // MNB101: [u64; N] traverses exactly like [i64; N] and [f64; N].
     let ok = study("mnb101", 
-        "mncs 0.12;\nmodule probe.udomain_v1;\nfn usum(a: [u64; 4]) -> (result: u64) {\n    iterate i over a carrying s: u64 = 0 {\n        next s = s + a[i];\n    }\n    return s;\n}\nfn entry_usum(x0: u64, x1: u64, x2: u64, x3: u64) -> (result: u64) {\n    return usum([x0, x1, x2, x3]);\n}\n",
+        "mncs 0.13;\nmodule probe.udomain_v1;\nfn usum(a: [u64; 4]) -> (result: u64) {\n    iterate i over a carrying s: u64 = 0 {\n        next s = s + a[i];\n    }\n    return s;\n}\nfn entry_usum(x0: u64, x1: u64, x2: u64, x3: u64) -> (result: u64) {\n    return usum([x0, x1, x2, x3]);\n}\n",
     );
     let codes = errors(&ok);
     assert!(
@@ -64,7 +64,7 @@ fn u64_iterate_domains_resolve_like_i64_and_f64() {
 fn negative_literals_are_valid_expression_arguments() {
     // MNP064: f(-5, -2), floats, nested calls, record fields, subtraction.
     let ok = study("mnp064", 
-        "mncs 0.12;\nmodule probe.negarg_v1;\nrecord Pt { x: i64, y: i64 }\nfn add2(a: i64, b: i64) -> (result: i64) {\n    return a + b;\n}\nfn sub2(a: i64, b: i64) -> (result: i64) {\n    return a - b;\n}\nfn entry_neg() -> (result: i64) {\n    return add2(-5, -2);\n}\nfn entry_sub(x: i64, y: i64) -> (result: i64) {\n    return sub2(x, y);\n}\nfn entry_nested(x: i64) -> (result: i64) {\n    return add2(sub2(x, 1), -5);\n}\nfn entry_rec() -> (result: Pt) {\n    return Pt { x: -3, y: -4 };\n}\nfn entry_float(a: f64) -> (result: f64) {\n    return a + -2.5;\n}\n",
+        "mncs 0.13;\nmodule probe.negarg_v1;\nrecord Pt { x: i64, y: i64 }\nfn add2(a: i64, b: i64) -> (result: i64) {\n    return a + b;\n}\nfn sub2(a: i64, b: i64) -> (result: i64) {\n    return a - b;\n}\nfn entry_neg() -> (result: i64) {\n    return add2(-5, -2);\n}\nfn entry_sub(x: i64, y: i64) -> (result: i64) {\n    return sub2(x, y);\n}\nfn entry_nested(x: i64) -> (result: i64) {\n    return add2(sub2(x, 1), -5);\n}\nfn entry_rec() -> (result: Pt) {\n    return Pt { x: -3, y: -4 };\n}\nfn entry_float(a: f64) -> (result: f64) {\n    return a + -2.5;\n}\n",
     );
     let codes = errors(&ok);
     assert!(

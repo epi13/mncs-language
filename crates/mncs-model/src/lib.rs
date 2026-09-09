@@ -56,7 +56,8 @@ pub use body::{
     BoundedIterationCompletion, BoundsEvidence, FunctionBody, GenericArg, GenericParam,
     GenericParamKind, IterationDomain, LoweringEnvelope, MachineIntentSpec, PortabilityEnvelope,
     PortabilityTarget, RealizationClass, SequenceBound, EXECUTABLE_BODY_SCHEMA_VERSION,
-    MAX_SEQUENCE_BOUND, MAX_VECTOR_LANES, SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
+    MAX_SEQUENCE_BOUND, MAX_VECTOR_LANES, MODEL_MAX_ITERATION_BOUND, MODEL_MAX_SEQUENCE_BOUND,
+    SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
 };
 pub use canonical::sha256_hex;
 pub use canonical::{CanonicalError, CanonicalForm, CANONICAL_SCHEMA_VERSION};

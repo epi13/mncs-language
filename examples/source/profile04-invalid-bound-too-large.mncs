@@ -1,10 +1,11 @@
 mncs 0.4;
 module examples.profile04.invalid_bound_large;
 
-// The iteration ceiling moved 32 -> 1024 (ENG-PRESSURE-0004); the refusal
-// now sits past the new bound.
+// Profile 0.4 admits iteration bounds 1..=32 (Source Profile 0.4; registry
+// policy). Larger bounds belong to Profile 0.13 (1..=1024). This fixture
+// pins the restored 0.4 boundary: 33 is refused with MNE142.
 fn invalid(input: u64) -> (result: u64) {
-    iterate retries up_to 1025 carrying state: u64 = input {
+    iterate retries up_to 33 carrying state: u64 = input {
         next state = state;
     }
     return state;

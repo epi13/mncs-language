@@ -1,0 +1,73 @@
+mncs 0.13;
+
+// Total scalar dispatch pins (CP-0010). `match` over an integer subject
+// accepts integer literal arms plus exactly one required `_` default arm.
+// Elaboration decides totality (duplicates rejected, range-checked, default
+// required); lowering reuses the finite-match branch-chain shape with one
+// `IntegerCompare eq` test per literal, so every backend realizes identical
+// semantics with no backend-side exhaustiveness logic. A bare `_` stays a
+// variant pattern on finite/bool subjects (a type may declare a variant
+// named `_`); only integer subjects read it as the default arm.
+module pressure.scalmatch;
+
+fn dispatch(x: u64) -> (result: u64) {
+    return match x {
+        0 => 100,
+        1 => 101,
+        7 => 107,
+        _ => 199
+    };
+}
+
+fn signed(x: i64) -> (result: i64) {
+    return match x {
+        -5 => 1,
+        0 => 2,
+        _ => 3
+    };
+}
+
+fn narrow(x: u8) -> (result: u64) {
+    return match x {
+        255 => 1,
+        _ => 0
+    };
+}
+
+fn wild_only(x: u64) -> (result: u64) {
+    return match x { _ => 42 };
+}
+
+fn max_boundary(x: u64) -> (result: u64) {
+    return match x {
+        18446744073709551615 => 1,
+        _ => 0
+    };
+}
+
+fn min_boundary(x: i64) -> (result: i64) {
+    return match x {
+        -9223372036854775808 => 1,
+        _ => 0
+    };
+}
+
+fn nested(x: u64) -> (result: u64) {
+    return match x {
+        0 => match x { _ => 7 },
+        _ => 9
+    };
+}
+
+// The compiler's opcode-table shape (CP-0010 workload): small-integer
+// dispatch with a total default, replacing a linear `if`-chain.
+fn precedence_class(op: u64) -> (result: u64) {
+    return match op {
+        0 => 10,
+        1 => 10,
+        2 => 9,
+        3 => 9,
+        4 => 8,
+        _ => 0
+    };
+}
