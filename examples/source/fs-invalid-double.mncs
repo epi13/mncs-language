@@ -1,0 +1,12 @@
+mncs 0.12;
+
+// Negative fixture: doubled `fs_list` effects (MNE258).
+module examples.fs_bad_double;
+
+fn entry_count() -> (result: u64)
+    capability fs_root
+    effect fs_list authorized_by fs_root
+    effect fs_list authorized_by fs_root
+{
+    return fs_list_count();
+}

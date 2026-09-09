@@ -1,0 +1,11 @@
+mncs 0.12;
+
+// Negative fixture: `fs_entry_name_at` index must be u64 (MNE262).
+module examples.fs_bad_index;
+
+fn entry_name(flag: bool) -> (result: [byte; up_to 64])
+    capability fs_root
+    effect fs_list authorized_by fs_root
+{
+    return fs_entry_name_at(flag);
+}

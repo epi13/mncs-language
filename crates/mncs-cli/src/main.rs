@@ -947,6 +947,12 @@ struct ExperimentOptions {
     /// appended to, never read back or truncated. Empty by default: no
     /// ambient filesystem access exists without a grant.
     write_grants: Vec<(String, String)>,
+    /// Explicit filesystem-root grants (`capability=root-path`), one per
+    /// capability allowed to enumerate and chunk-read the granted tree
+    /// via the `fs_*` intrinsics. The root is canonicalized at
+    /// realization; traversal outside it is impossible by construction.
+    /// Empty by default: no ambient filesystem access exists.
+    fs_grants: Vec<(String, String)>,
 }
 
 /// A `--grant-time` capability as a byte-less host grant. Time has no
@@ -983,6 +989,19 @@ fn write_host_grant(capability: &str, path: &str) -> HostGrant {
     }
 }
 
+/// A `--grant-fs` capability as a root-bound host grant. The locator is
+/// the granted root; no bytes travel in (content is observed through
+/// bounded calls). Canonicalization and containment happen at
+/// realization, never at parse: a bogus root fails the call closed,
+/// never the whole invocation.
+fn fs_host_grant(capability: &str, path: &str) -> HostGrant {
+    HostGrant {
+        capability: capability.to_owned(),
+        locator: path.to_owned(),
+        bytes: Vec::new(),
+    }
+}
+
 /// Fold byte-less time/crypto authority and path-bound write authority
 /// into loaded read grants. All four are explicit operator authority
 /// traveling together into layered validation and case execution.
@@ -991,6 +1010,7 @@ fn extend_with_named_grants(
     time_grants: &[String],
     crypto_grants: &[String],
     write_grants: &[(String, String)],
+    fs_grants: &[(String, String)],
 ) {
     host_grants.extend(
         time_grants
@@ -1006,6 +1026,11 @@ fn extend_with_named_grants(
         write_grants
             .iter()
             .map(|(capability, path)| write_host_grant(capability, path)),
+    );
+    host_grants.extend(
+        fs_grants
+            .iter()
+            .map(|(capability, path)| fs_host_grant(capability, path)),
     );
 }
 
@@ -1158,6 +1183,7 @@ where
             let mut time_grants: Vec<String> = Vec::new();
             let mut crypto_grants: Vec<String> = Vec::new();
             let mut write_grants: Vec<(String, String)> = Vec::new();
+            let mut fs_grants: Vec<(String, String)> = Vec::new();
             let mut parse_error = false;
             while let Some(option) = args.next() {
                 let mut take_value = |what: &str| -> Option<String> {
@@ -1231,6 +1257,23 @@ where
                             }
                         }
                     }
+                    "--grant-fs" => {
+                        if let Some(grant) = take_value("--grant-fs") {
+                            match grant.split_once('=') {
+                                Some((capability, path))
+                                    if !capability.is_empty() && !path.is_empty() =>
+                                {
+                                    fs_grants.push((capability.to_owned(), path.to_owned()))
+                                }
+                                _ => {
+                                    eprintln!(
+                                        "error: --grant-fs requires capability=root-path, got {grant:?}"
+                                    );
+                                    parse_error = true;
+                                }
+                            }
+                        }
+                    }
                     other => {
                         eprintln!("error: unknown experiment execute option {other:?}");
                         parse_error = true;
@@ -1266,6 +1309,7 @@ where
                 &time_grants,
                 &crypto_grants,
                 &write_grants,
+                &fs_grants,
             );
             let backend_session = BackendExecutionSession::new(&artifact);
             let observations = corpus
@@ -1479,6 +1523,7 @@ where
     let mut time_grants = Vec::new();
     let mut crypto_grants = Vec::new();
     let mut write_grants = Vec::new();
+    let mut fs_grants = Vec::new();
     while let Some(option) = args.next() {
         match option.as_str() {
             "--backend" => {
@@ -1563,6 +1608,20 @@ where
                 }
                 write_grants.push((capability.to_owned(), path.to_owned()));
             }
+            "--grant-fs" => {
+                let grant = args
+                    .next()
+                    .ok_or_else(|| "--grant-fs requires capability=root-path".to_owned())?;
+                let (capability, path) = grant.split_once('=').ok_or_else(|| {
+                    format!("--grant-fs requires capability=root-path, got {grant:?}")
+                })?;
+                if capability.is_empty() || path.is_empty() {
+                    return Err(format!(
+                        "--grant-fs requires capability=root-path, got {grant:?}"
+                    ));
+                }
+                fs_grants.push((capability.to_owned(), path.to_owned()));
+            }
             other => return Err(format!("unknown experiment option {other:?}")),
         }
     }
@@ -1589,6 +1648,7 @@ where
         time_grants,
         crypto_grants,
         write_grants,
+        fs_grants,
     })
 }
 
@@ -1996,6 +2056,7 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         &options.time_grants,
         &options.crypto_grants,
         &options.write_grants,
+        &options.fs_grants,
     );
     let validation = prepared.validation_profile.is_none().then(|| {
         validate_backend_lowering(

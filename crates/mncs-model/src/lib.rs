@@ -18,6 +18,7 @@ mod delta;
 mod evidence;
 mod execution;
 mod experiment;
+pub mod fs_resource;
 pub mod generics;
 mod graph;
 mod identity;

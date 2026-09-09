@@ -1,0 +1,8 @@
+mncs 0.12;
+
+// Negative fixture: `fs_list_count` without a declared `fs_list` effect (MNE257).
+module examples.fs_bad_missing;
+
+fn entry_count() -> (result: u64) {
+    return fs_list_count();
+}

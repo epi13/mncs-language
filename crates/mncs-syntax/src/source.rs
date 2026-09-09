@@ -665,6 +665,55 @@ pub enum AstExpr {
         signature: Box<AstExpr>,
         span: SourceSpan,
     },
+    /// Granted-filesystem entry count `fs_list_count()` (Profile 0.12).
+    /// Authority comes from the enclosing function's declarations
+    /// (`effect fs_list` plus its capability), granted via
+    /// `--grant-fs capability=root-path`. The executor walks the granted
+    /// root into a canonical byte-sorted entry sequence; this returns
+    /// the entry count. No path is spelled in source: indices name
+    /// entries, never pathnames.
+    FsListCount {
+        span: SourceSpan,
+    },
+    /// Granted-filesystem entry name `fs_entry_name_at(index)`
+    /// (Profile 0.12). Returns the index-th relative path in canonical
+    /// order as `[byte; up_to 64]`. Same `fs_list` authority as
+    /// `fs_list_count`.
+    FsEntryNameAt {
+        index: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Granted-filesystem entry kind `fs_entry_kind_at(index)`
+    /// (Profile 0.12): 0 = regular file, 1 = directory, 2 = other
+    /// (symlink, socket, device — never followed). Same `fs_list`
+    /// authority as `fs_list_count`.
+    FsEntryKindAt {
+        index: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Granted-root mutation hint `fs_generation()` (Profile 0.12).
+    /// Returns a generation counter covering names, kinds, sizes, and
+    /// mtimes of the granted tree. Poll between bounded quiet windows;
+    /// a changed value means re-list. Same `fs_list` authority as
+    /// `fs_list_count`. Absolute values are wall data: compare for
+    /// change, never pin.
+    FsGeneration {
+        span: SourceSpan,
+    },
+    /// Granted-filesystem chunked read
+    /// `fs_read_bytes_at(entry, offset, length)` (Profile 0.12).
+    /// Returns up to `length` bytes (at most 64) from the file entry at
+    /// `entry` starting at `offset`, as `[byte; up_to 64]`. Short reads
+    /// and empty views at end-of-input are the EOF signal. Authority is
+    /// `effect fs_read` plus its capability. Reads through directories
+    /// or symlinks are refused; indices are generation-scoped (re-list
+    /// when `fs_generation` moves).
+    FsReadBytesAt {
+        entry: Box<AstExpr>,
+        offset: Box<AstExpr>,
+        length: Box<AstExpr>,
+        span: SourceSpan,
+    },
     /// Profile 0.8 semantic vector/mask intrinsic. The parser preserves the
     /// intrinsic identity and arguments; elaboration supplies lane/type facts.
     VectorIntrinsic {
@@ -701,6 +750,11 @@ impl AstExpr {
             | Self::Sha256Digest { span, .. }
             | Self::HostWrite { span, .. }
             | Self::Ed25519Verify { span, .. }
+            | Self::FsListCount { span, .. }
+            | Self::FsEntryNameAt { span, .. }
+            | Self::FsEntryKindAt { span, .. }
+            | Self::FsGeneration { span, .. }
+            | Self::FsReadBytesAt { span, .. }
             | Self::VectorIntrinsic { span, .. } => *span,
         }
     }
@@ -2926,6 +2980,107 @@ impl<'a> Parser<'a> {
                 );
                 None
             }
+            ("fs_list_count", 0) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_12) {
+                    self.error(
+                        "MNP204",
+                        "filesystem intrinsics require source profile 0.12 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                Some(AstExpr::FsListCount { span })
+            }
+            ("fs_list_count", _) => {
+                self.error(
+                    "MNP205",
+                    "fs_list_count takes no arguments; authority comes from the enclosing function's declarations",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("fs_generation", 0) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_12) {
+                    self.error(
+                        "MNP204",
+                        "filesystem intrinsics require source profile 0.12 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                Some(AstExpr::FsGeneration { span })
+            }
+            ("fs_generation", _) => {
+                self.error(
+                    "MNP205",
+                    "fs_generation takes no arguments; authority comes from the enclosing function's declarations",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("fs_entry_name_at", 1) | ("fs_entry_kind_at", 1) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_12) {
+                    self.error(
+                        "MNP204",
+                        "filesystem intrinsics require source profile 0.12 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(index),) = (iter.next(),) else {
+                    return None;
+                };
+                if name.text.as_str() == "fs_entry_name_at" {
+                    Some(AstExpr::FsEntryNameAt {
+                        index: Box::new(index),
+                        span,
+                    })
+                } else {
+                    Some(AstExpr::FsEntryKindAt {
+                        index: Box::new(index),
+                        span,
+                    })
+                }
+            }
+            ("fs_entry_name_at", _) | ("fs_entry_kind_at", _) => {
+                self.error(
+                    "MNP205",
+                    "fs_entry_name_at and fs_entry_kind_at take exactly one u64 entry-index argument",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("fs_read_bytes_at", 3) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_12) {
+                    self.error(
+                        "MNP204",
+                        "filesystem intrinsics require source profile 0.12 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(entry), Some(offset), Some(length)) =
+                    (iter.next(), iter.next(), iter.next())
+                else {
+                    return None;
+                };
+                Some(AstExpr::FsReadBytesAt {
+                    entry: Box::new(entry),
+                    offset: Box::new(offset),
+                    length: Box::new(length),
+                    span,
+                })
+            }
+            ("fs_read_bytes_at", _) => {
+                self.error(
+                    "MNP205",
+                    "fs_read_bytes_at takes exactly three u64 arguments (entry, offset, length)",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
             _ => Some(AstExpr::VectorIntrinsic {
                 name,
                 arguments,
@@ -4117,6 +4272,11 @@ fn is_profile08_intrinsic(name: &str) -> bool {
             | "replace"
             | "host_read"
             | "host_write"
+            | "fs_list_count"
+            | "fs_entry_name_at"
+            | "fs_entry_kind_at"
+            | "fs_generation"
+            | "fs_read_bytes_at"
             | "clock_read"
             | "sha256_digest"
             | "ed25519_verify"

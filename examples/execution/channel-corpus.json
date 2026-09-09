@@ -1,0 +1,75 @@
+{
+ "schema_version": "0.1",
+ "name": "channel",
+ "cases": [
+  {
+   "id": "bounded-flow-with-backpressure",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.channel.v1",
+     "function": "candidate_channel_flow"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 361121,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "empty-and-early-close",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.channel.v1",
+     "function": "candidate_channel_empty"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 102,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "send-after-close",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.channel.v1",
+     "function": "candidate_send_closed"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 11002,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

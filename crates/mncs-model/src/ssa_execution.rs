@@ -2122,6 +2122,74 @@ fn execute_instruction(
                 );
                 return true;
             }
+            if matches!(
+                operation.as_str(),
+                "fs_list_count"
+                    | "fs_entry_name_at"
+                    | "fs_entry_kind_at"
+                    | "fs_generation"
+                    | "fs_read_bytes_at"
+            ) {
+                // Granted-filesystem intrinsics (index PRESS-003), mirroring
+                // the body reference executor arm-for-arm: same grant
+                // matching, same u64-operand rule, same realization, so the
+                // layered `check-backend-execution` comparison agrees.
+                let arity = crate::host_call_arity(operation).unwrap_or(0);
+                let mut fs_args = Vec::with_capacity(arity);
+                for position in 0..arity {
+                    let Some(arg) =
+                        crate::fs_resource::host_u64_by(&instruction.inputs, values, position)
+                    else {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            format!(
+                                "{operation} requires u64 index/offset/length operands, not a non-u64 value"
+                            ),
+                        );
+                        return true;
+                    };
+                    fs_args.push(arg);
+                }
+                match crate::fs_resource::fs_realize(operation, grant, &fs_args) {
+                    Ok((value, effect)) => {
+                        // Success stores the value and records the effect,
+                        // then returns `false` (continue with the next
+                        // instruction): falling through would re-enter the
+                        // host-call chain below and let the `blob_read`
+                        // default overwrite this value.
+                        if let Some(output) = instruction.outputs.first() {
+                            values.insert(output.identity.clone(), value);
+                        }
+                        result.effects.push(ExecutionEffectEvent {
+                            operation: instruction_identity(instruction).unwrap_or_else(|| {
+                                crate::identity::SemanticId(format!("host-call:{capability}"))
+                            }),
+                            kind: effect.kind,
+                            target: effect.target,
+                            capability: capability.clone(),
+                            provenance: Some(effect.provenance),
+                        });
+                        return false;
+                    }
+                    Err(crate::fs_resource::FsFail::InvalidRequest(reason)) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                    Err(crate::fs_resource::FsFail::RuntimeFailure(reason)) => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                }
+            }
             if operation == "clock_read" {
                 let Some(millis) = crate::execution::host_epoch_millis() else {
                     result.fail(

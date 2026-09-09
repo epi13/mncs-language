@@ -3,7 +3,7 @@
 > Generated from `rfcs/conformance-ledger.json` by
 > `scripts/gen_rfc_ledger_docs.py`. Do not edit by hand.
 
-Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 70 satisfied, 25 partially satisfied, 38 unsatisfied criteria.
+Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 70 satisfied, 27 partially satisfied, 36 unsatisfied criteria.
 
 ## Reading this document
 
@@ -28,7 +28,7 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 70 
 | 0007 | Proof-Carrying Dependent Core | DRAFT | BOUNDED_IMPLEMENTATION |
 | 0008 | Machine-Native I/O, Resource, Effect, and Event Semantics | DRAFT | PARTIAL |
 | 0009 | Machine-Native Memory, Reference, Provenance, and Storage Semantics | DRAFT | SUBSTRATE |
-| 0010 | Machine-Native Concurrency, Causality, Atomicity, and Memory Consistency Semantics | DRAFT | NONE |
+| 0010 | Machine-Native Concurrency, Causality, Atomicity, and Memory Consistency Semantics | DRAFT | SUBSTRATE |
 | 0011 | Machine-Native Failure, Recovery, Nondeterminism, and External Observation Semantics | DRAFT | PARTIAL |
 | 0012 | Machine-Native Executable Semantic Core | DRAFT | BOUNDED_IMPLEMENTATION |
 | 0013 | Machine-Native Abstraction, Polymorphism, Interface, and Evidence Semantics | DRAFT | BOUNDED_IMPLEMENTATION |
@@ -44,7 +44,7 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 70 
 | 0023 | Machine-Native Time, Clock, Deadline, Temporal Validity, and Real-Time Semantics | DRAFT | NONE |
 | 0024 | Machine-Native Information Flow, Confidentiality, Integrity, Declassification, and Side-Channel Semantics | DRAFT | NONE |
 | 0025 | Machine-Native Principal, Identity, Authentication, Credential, Attestation, and Cryptographic Trust Semantics | DRAFT | SUBSTRATE |
-| 0026 | Machine-Native Persistent State, Durability, Transaction, Snapshot, Journal, and Crash-Consistency Semantics | DRAFT | NONE |
+| 0026 | Machine-Native Persistent State, Durability, Transaction, Snapshot, Journal, and Crash-Consistency Semantics | DRAFT | SUBSTRATE |
 | 0027 | Machine-Native Serialization, Canonical Encoding, Schema, Wire Contract, and Data-Evolution Semantics | DRAFT | BOUNDED_IMPLEMENTATION |
 | 0028 | Machine-Native Distribution, Messaging, Partial Failure, Consistency, Replication, Consensus, and Failure-Detector Semantics | DRAFT | NONE |
 | 0029 | Machine-Native Placement, Topology, Locality, Mobility, Migration, and Heterogeneous-Execution Semantics | DRAFT | SUBSTRATE |
@@ -205,8 +205,9 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 70 
 ### RFC 0008 — Machine-Native I/O, Resource, Effect, and Event Semantics
 
 - Design: **DRAFT**; implementation: **PARTIAL** (experimental; confidence medium).
-- Scope: Effects, capabilities, authority, and closure obligations; general I/O and resource semantics remain narrow.
+- Scope: Effects, capabilities, authority, and closure obligations; granted filesystem roots with canonical enumeration, bounded chunked reads, and generation mutation hints on the research path (explicit refusal elsewhere). General I/O beyond files, event push delivery, and time semantics remain absent.
 - Profiles: 0.2+.
+- Stdlib: mncs.std.chunk.v1.
 - Stages: semantic program.
 - Depends on: RFC 0001, RFC 0002.
 - Required by: RFC 0009, RFC 0010.
@@ -214,7 +215,7 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 70 
 - Acceptance criteria:
   - [x] 0008-C1: Effect/capability declarations with closure checking — evidence: `spec/effects-and-capabilities.md`, `crates/mncs-model/src/authority.rs`
   - [~] 0008-C2: Authority preservation across calls — evidence: `crates/mncs-model/src/obligations.rs`
-  - [ ] 0008-C3: General I/O, resource, and event semantics
+  - [~] 0008-C3: General I/O, resource, and event semantics — evidence: `crates/mncs-model/src/fs_resource.rs`, `examples/source/fs-scan.mncs`, `crates/mncs-cli/tests/fs_effects.rs`, `docs/fs-resource-effects.md`, `library/std/chunk.mncs`
 - Known gaps:
   - I/O and resource vocabularies beyond capabilities are not yet modeled.
 - Note: Bounded append-only storage (host_write/blob_append, Profile 0.12) added alongside host_read/clock/crypto: explicit capability + --grant-write path, 64-byte-per-call bound, recorded host_write effects with appended-bytes digest, fail-closed without grants, explicit refusal on non-realizing backends. General I/O, networking, processes, and full storage semantics remain open.
@@ -233,11 +234,12 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 70 
 
 ### RFC 0010 — Machine-Native Concurrency, Causality, Atomicity, and Memory Consistency Semantics
 
-- Design: **DRAFT**; implementation: **NONE** (absent; confidence low).
-- Scope: No concurrency semantics implemented in mncs-language.
+- Design: **DRAFT**; implementation: **SUBSTRATE** (absent; confidence medium).
+- Scope: Deterministic task-scope/channel contracts in stdlib (spawn/join ownership, id-ordered merge, failure-vs-cancellation, close-once channels, backpressure as data) plus the mncs-embed TaskScope runtime realization (bounded threads, deterministic merge, cooperative cancellation, failure aggregation). No source-thread execution, no blocking transport, no scheduler/fairness properties; memory-consistency model still absent.
+- Stdlib: mncs.std.scope.v1, mncs.std.channel.v1.
 - Depends on: RFC 0008, RFC 0009.
 - Acceptance criteria:
-  - [ ] 0010-C1: Concurrency and memory-consistency model
+  - [~] 0010-C1: Concurrency and memory-consistency model — evidence: `library/std/scope.mncs`, `library/std/channel.mncs`, `crates/mncs-embed/src/scope.rs`, `crates/mncs-cli/tests/task_scope.rs`, `crates/mncs-cli/tests/channel_contract.rs`, `crates/mncs-embed/tests/task_scope.rs`
 - Known gaps:
   - Entire RFC vision unimplemented; blocked on memory semantics (0009).
 - Note: Survey-level classification; deepen if concurrency work lands.
@@ -245,8 +247,9 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 70 
 ### RFC 0011 — Machine-Native Failure, Recovery, Nondeterminism, and External Observation Semantics
 
 - Design: **DRAFT**; implementation: **PARTIAL** (experimental; confidence medium).
-- Scope: Failure-mode vocabulary, isolated failure semantics, runtime-failure classification across backends.
+- Scope: Failure-mode vocabulary, isolated failure semantics, runtime-failure classification across backends; failure-vs-cancellation distinction in scope contracts and embed failure aggregation. Recovery, nondeterminism, and external-observation semantics remain absent.
 - Profiles: 0.2+.
+- Stdlib: mncs.std.scope.v1.
 - Stages: semantic program, backend execution.
 - Depends on: RFC 0001.
 - Tests: `crates/mncs-cli/tests/backend_family.rs`.
@@ -482,8 +485,9 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 70 
 
 ### RFC 0026 — Machine-Native Persistent State, Durability, Transaction, Snapshot, Journal, and Crash-Consistency Semantics
 
-- Design: **DRAFT**; implementation: **NONE** (absent; confidence low).
-- Scope: No durability or crash-consistency semantics; stateful execution traces are observations, not persistence.
+- Design: **DRAFT**; implementation: **SUBSTRATE** (absent; confidence medium).
+- Scope: Durable-state transition contracts in stdlib (generations, atomic compare-and-transition, durability-level receipts with explicit power-loss UNKNOWN, snapshot handles, retention policy as data). No durable mechanism, no OS realization, no crash evidence; stateful execution traces remain observations, not persistence.
+- Stdlib: mncs.std.store.v1.
 - Depends on: RFC 0009.
 - Acceptance criteria:
   - [ ] 0026-C1: Durability and crash-consistency model

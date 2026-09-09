@@ -1,0 +1,46 @@
+mncs 0.12;
+
+// Positive fixture: a real MNCS program enumerates a granted directory
+// tree and chunk-reads its files through the filesystem-capability
+// boundary (index PRESS-003). Authority is declared, never ambient: each
+// function names its capability and its `fs_list`/`fs_read` effect, and
+// the executor realizes the calls from an explicit `--grant-fs
+// capability=root-path` for that capability. No pathname is spelled in
+// source: indices name entries in canonical byte-sorted order, never
+// host directory order. Without a grant the calls fail closed.
+module examples.fs_scan;
+
+fn entry_count() -> (result: u64)
+    capability fs_root
+    effect fs_list authorized_by fs_root
+{
+    return fs_list_count();
+}
+
+fn entry_name(index: u64) -> (result: [byte; up_to 64])
+    capability fs_root
+    effect fs_list authorized_by fs_root
+{
+    return fs_entry_name_at(index);
+}
+
+fn entry_kind(index: u64) -> (result: u64)
+    capability fs_root
+    effect fs_list authorized_by fs_root
+{
+    return fs_entry_kind_at(index);
+}
+
+fn read_chunk(entry: u64, offset: u64, length: u64) -> (result: [byte; up_to 64])
+    capability fs_root
+    effect fs_read authorized_by fs_root
+{
+    return fs_read_bytes_at(entry, offset, length);
+}
+
+fn generation() -> (result: u64)
+    capability fs_root
+    effect fs_list authorized_by fs_root
+{
+    return fs_generation();
+}

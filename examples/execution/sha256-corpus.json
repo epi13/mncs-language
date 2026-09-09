@@ -1,0 +1,3975 @@
+{
+ "schema_version": "0.1",
+ "name": "sha256",
+ "cases": [
+  {
+   "id": "sha256-abc",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.sha256.v1",
+     "function": "candidate_sha256_abc"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "integer": {
+          "value": 1116352408,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1899447441,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3049323471,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3921009573,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 961987163,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1508970993,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2453635748,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2870763221,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3624381080,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 310598401,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 607225278,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1426881987,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1925078388,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2162078206,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2614888103,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3248222580,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3835390401,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 4022224774,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 264347078,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 604807628,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 770255983,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1249150122,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1555081692,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1996064986,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2554220882,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2821834349,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2952996808,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3210313671,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3336571891,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3584528711,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 113926993,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 338241895,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 666307205,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 773529912,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1294757372,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1396182291,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1695183700,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1986661051,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2177026350,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2456956037,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2730485921,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2820302411,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3259730800,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3345764771,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3516065817,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3600352804,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 4094571909,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 275423344,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 430227734,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 506948616,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 659060556,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 883997877,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 958139571,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1322822218,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1537002063,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1747873779,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1955562222,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2024104815,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2227730452,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2361852424,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2428436474,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2756734187,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3204031479,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3329325298,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        }
+       ]
+      }
+     }
+    ],
+    "step_budget": 1000000
+   },
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 186
+        }
+       },
+       {
+        "byte": {
+         "value": 120
+        }
+       },
+       {
+        "byte": {
+         "value": 22
+        }
+       },
+       {
+        "byte": {
+         "value": 191
+        }
+       },
+       {
+        "byte": {
+         "value": 143
+        }
+       },
+       {
+        "byte": {
+         "value": 1
+        }
+       },
+       {
+        "byte": {
+         "value": 207
+        }
+       },
+       {
+        "byte": {
+         "value": 234
+        }
+       },
+       {
+        "byte": {
+         "value": 65
+        }
+       },
+       {
+        "byte": {
+         "value": 65
+        }
+       },
+       {
+        "byte": {
+         "value": 64
+        }
+       },
+       {
+        "byte": {
+         "value": 222
+        }
+       },
+       {
+        "byte": {
+         "value": 93
+        }
+       },
+       {
+        "byte": {
+         "value": 174
+        }
+       },
+       {
+        "byte": {
+         "value": 34
+        }
+       },
+       {
+        "byte": {
+         "value": 35
+        }
+       },
+       {
+        "byte": {
+         "value": 176
+        }
+       },
+       {
+        "byte": {
+         "value": 3
+        }
+       },
+       {
+        "byte": {
+         "value": 97
+        }
+       },
+       {
+        "byte": {
+         "value": 163
+        }
+       },
+       {
+        "byte": {
+         "value": 150
+        }
+       },
+       {
+        "byte": {
+         "value": 23
+        }
+       },
+       {
+        "byte": {
+         "value": 122
+        }
+       },
+       {
+        "byte": {
+         "value": 156
+        }
+       },
+       {
+        "byte": {
+         "value": 180
+        }
+       },
+       {
+        "byte": {
+         "value": 16
+        }
+       },
+       {
+        "byte": {
+         "value": 255
+        }
+       },
+       {
+        "byte": {
+         "value": 97
+        }
+       },
+       {
+        "byte": {
+         "value": 242
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 21
+        }
+       },
+       {
+        "byte": {
+         "value": 173
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "sha256-blocks-64-64-28",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.sha256.v1",
+     "function": "candidate_sha256_blocks"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 55
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 57
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 102
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 55
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 57
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 102
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 64,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 55
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 57
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 102
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 55
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 57
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 102
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 55
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 57
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 64,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 102
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 55
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 57
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 102
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 28,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "integer": {
+          "value": 1116352408,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1899447441,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3049323471,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3921009573,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 961987163,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1508970993,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2453635748,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2870763221,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3624381080,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 310598401,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 607225278,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1426881987,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1925078388,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2162078206,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2614888103,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3248222580,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3835390401,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 4022224774,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 264347078,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 604807628,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 770255983,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1249150122,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1555081692,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1996064986,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2554220882,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2821834349,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2952996808,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3210313671,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3336571891,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3584528711,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 113926993,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 338241895,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 666307205,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 773529912,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1294757372,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1396182291,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1695183700,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1986661051,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2177026350,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2456956037,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2730485921,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2820302411,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3259730800,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3345764771,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3516065817,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3600352804,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 4094571909,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 275423344,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 430227734,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 506948616,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 659060556,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 883997877,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 958139571,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1322822218,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1537002063,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1747873779,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1955562222,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2024104815,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2227730452,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2361852424,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2428436474,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2756734187,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3204031479,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3329325298,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        }
+       ]
+      }
+     }
+    ],
+    "step_budget": 1000000
+   },
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 59
+        }
+       },
+       {
+        "byte": {
+         "value": 78
+        }
+       },
+       {
+        "byte": {
+         "value": 194
+        }
+       },
+       {
+        "byte": {
+         "value": 47
+        }
+       },
+       {
+        "byte": {
+         "value": 70
+        }
+       },
+       {
+        "byte": {
+         "value": 72
+        }
+       },
+       {
+        "byte": {
+         "value": 183
+        }
+       },
+       {
+        "byte": {
+         "value": 168
+        }
+       },
+       {
+        "byte": {
+         "value": 125
+        }
+       },
+       {
+        "byte": {
+         "value": 66
+        }
+       },
+       {
+        "byte": {
+         "value": 223
+        }
+       },
+       {
+        "byte": {
+         "value": 206
+        }
+       },
+       {
+        "byte": {
+         "value": 195
+        }
+       },
+       {
+        "byte": {
+         "value": 72
+        }
+       },
+       {
+        "byte": {
+         "value": 99
+        }
+       },
+       {
+        "byte": {
+         "value": 163
+        }
+       },
+       {
+        "byte": {
+         "value": 255
+        }
+       },
+       {
+        "byte": {
+         "value": 79
+        }
+       },
+       {
+        "byte": {
+         "value": 31
+        }
+       },
+       {
+        "byte": {
+         "value": 17
+        }
+       },
+       {
+        "byte": {
+         "value": 181
+        }
+       },
+       {
+        "byte": {
+         "value": 165
+        }
+       },
+       {
+        "byte": {
+         "value": 252
+        }
+       },
+       {
+        "byte": {
+         "value": 69
+        }
+       },
+       {
+        "byte": {
+         "value": 94
+        }
+       },
+       {
+        "byte": {
+         "value": 214
+        }
+       },
+       {
+        "byte": {
+         "value": 248
+        }
+       },
+       {
+        "byte": {
+         "value": 43
+        }
+       },
+       {
+        "byte": {
+         "value": 25
+        }
+       },
+       {
+        "byte": {
+         "value": 18
+        }
+       },
+       {
+        "byte": {
+         "value": 121
+        }
+       },
+       {
+        "byte": {
+         "value": 98
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "sha256-blocks-30-63-63",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.sha256.v1",
+     "function": "candidate_sha256_blocks"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 55
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 57
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 102
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 30,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 55
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 57
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 102
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 55
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 57
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 102
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 63,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 55
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 57
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 102
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 55
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 57
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 102
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 110
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        },
+        {
+         "byte": {
+          "value": 48
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 55
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 57
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 102
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 63,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "integer": {
+          "value": 1116352408,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1899447441,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3049323471,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3921009573,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 961987163,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1508970993,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2453635748,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2870763221,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3624381080,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 310598401,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 607225278,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1426881987,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1925078388,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2162078206,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2614888103,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3248222580,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3835390401,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 4022224774,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 264347078,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 604807628,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 770255983,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1249150122,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1555081692,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1996064986,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2554220882,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2821834349,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2952996808,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3210313671,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3336571891,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3584528711,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 113926993,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 338241895,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 666307205,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 773529912,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1294757372,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1396182291,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1695183700,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1986661051,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2177026350,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2456956037,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2730485921,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2820302411,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3259730800,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3345764771,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3516065817,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3600352804,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 4094571909,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 275423344,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 430227734,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 506948616,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 659060556,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 883997877,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 958139571,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1322822218,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1537002063,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1747873779,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 1955562222,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2024104815,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2227730452,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2361852424,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2428436474,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2756734187,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3204031479,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3329325298,
+          "type": {
+           "bits": 32,
+           "signed": false
+          }
+         }
+        }
+       ]
+      }
+     }
+    ],
+    "step_budget": 1000000
+   },
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 59
+        }
+       },
+       {
+        "byte": {
+         "value": 78
+        }
+       },
+       {
+        "byte": {
+         "value": 194
+        }
+       },
+       {
+        "byte": {
+         "value": 47
+        }
+       },
+       {
+        "byte": {
+         "value": 70
+        }
+       },
+       {
+        "byte": {
+         "value": 72
+        }
+       },
+       {
+        "byte": {
+         "value": 183
+        }
+       },
+       {
+        "byte": {
+         "value": 168
+        }
+       },
+       {
+        "byte": {
+         "value": 125
+        }
+       },
+       {
+        "byte": {
+         "value": 66
+        }
+       },
+       {
+        "byte": {
+         "value": 223
+        }
+       },
+       {
+        "byte": {
+         "value": 206
+        }
+       },
+       {
+        "byte": {
+         "value": 195
+        }
+       },
+       {
+        "byte": {
+         "value": 72
+        }
+       },
+       {
+        "byte": {
+         "value": 99
+        }
+       },
+       {
+        "byte": {
+         "value": 163
+        }
+       },
+       {
+        "byte": {
+         "value": 255
+        }
+       },
+       {
+        "byte": {
+         "value": 79
+        }
+       },
+       {
+        "byte": {
+         "value": 31
+        }
+       },
+       {
+        "byte": {
+         "value": 17
+        }
+       },
+       {
+        "byte": {
+         "value": 181
+        }
+       },
+       {
+        "byte": {
+         "value": 165
+        }
+       },
+       {
+        "byte": {
+         "value": 252
+        }
+       },
+       {
+        "byte": {
+         "value": 69
+        }
+       },
+       {
+        "byte": {
+         "value": 94
+        }
+       },
+       {
+        "byte": {
+         "value": 214
+        }
+       },
+       {
+        "byte": {
+         "value": 248
+        }
+       },
+       {
+        "byte": {
+         "value": 43
+        }
+       },
+       {
+        "byte": {
+         "value": 25
+        }
+       },
+       {
+        "byte": {
+         "value": 18
+        }
+       },
+       {
+        "byte": {
+         "value": 121
+        }
+       },
+       {
+        "byte": {
+         "value": 98
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

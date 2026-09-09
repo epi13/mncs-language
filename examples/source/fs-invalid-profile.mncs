@@ -1,0 +1,11 @@
+mncs 0.11;
+
+// Negative fixture: filesystem intrinsics require profile 0.12 (MNP204).
+module examples.fs_bad_profile;
+
+fn entry_count() -> (result: u64)
+    capability fs_root
+    effect fs_list authorized_by fs_root
+{
+    return fs_list_count();
+}

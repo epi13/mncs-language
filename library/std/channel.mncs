@@ -1,0 +1,193 @@
+mncs 0.10;
+
+// mncs.std.channel — deterministic bounded-channel contracts.
+//
+// A Channel is a bounded FIFO with explicit producer accounting and a
+// close-once contract, expressed as total bounded functions over explicit
+// values. It is the SOURCE-SEMANTICS half of MNCS producer/consumer
+// communication (RFC 0010): capacity, backpressure, close semantics,
+// deterministic shutdown, and producer/consumer causality are all decided
+// here without threads, blocking, or a scheduler.
+//
+// Blocking is NOT in this module: `send` reports backpressure as data
+// (`blocked`, never a block) and `recv` reports emptiness as data
+// (`kind == 1`, never a wait). A host or runtime realization loops on
+// those verdicts; cancellation safety for a blocked party is then the
+// realization checking its cancel flag between retries, exactly like the
+// `mncs-index` drain protocol this contract is meant to replace. What the
+// language owns — and what this module pins on every backend — is the
+// contract a realization must honor.
+//
+// The one clear close contract:
+// - `new(capacity, producers)` registers how many producers must report
+//   done before the channel may close.
+// - `producer_done` records one finished producer.
+// - `close` is accepted exactly once, and only when every registered
+//   producer is done (`done == producers`).
+// - `recv` reports `kind == 2` (closed) if and only if the channel is
+//   closed AND fully drained. Close is therefore observed exactly once
+//   per drain, with no sentinel value convention: DATA/EMPTY/CLOSED are
+//   carried in `kind`, never in `value`.
+module mncs.std.channel.v1;
+
+use mncs.core.logic.v1 as logic;
+
+record Channel {
+    buf: [u64; 8],
+    count: u64,
+    capacity: u64,
+    producers: u64,
+    done: u64,
+    closed: bool
+}
+
+record SendOut { channel: Channel, accepted: bool, blocked: bool }
+
+record RecvOut { channel: Channel, kind: u64, value: u64 }
+
+record CloseOut { channel: Channel, accepted: bool }
+
+record DoneOut { channel: Channel, accepted: bool }
+
+// Open a channel holding up to `capacity` items (clamped 1..=8) from
+// exactly `producers` producers (clamped 0..=8).
+fn new(capacity: u64, producers: u64) -> (result: Channel) {
+    let cap: u64 = select(capacity <= 8, capacity, 8);
+    let clamped: u64 = select(cap >= 1, cap, 1);
+    let who: u64 = select(producers <= 8, producers, 8);
+    return Channel {
+        buf: [0; 8],
+        count: 0,
+        capacity: clamped,
+        producers: who,
+        done: 0,
+        closed: false
+    };
+}
+
+// Enqueue one item. Full (but open) reports `blocked` — backpressure as
+// data. Closed rejects. Neither traps.
+fn send(ch: Channel, value: u64) -> (result: SendOut) {
+    let full: bool = ch.count >= ch.capacity;
+    let accepted: bool = logic.bool_not(ch.closed) && logic.bool_not(full);
+    let blocked: bool = logic.bool_not(ch.closed) && full;
+    let slot: u64 = select(accepted, ch.count, 0);
+    let grown: Channel = Channel { ..ch, buf: replace(ch.buf, slot, value), count: ch.count +% 1 };
+    return SendOut { channel: select(accepted, grown, ch), accepted: accepted, blocked: blocked };
+}
+
+record ShiftFold { buf: [u64; 8] }
+
+// Dequeue one item in FIFO order. `kind` is 0 (data), 1 (open but empty:
+// retry), or 2 (closed and drained: close observed). Values are never
+// sentinel-bearing: `value` is meaningful only when `kind == 0`.
+fn recv(ch: Channel) -> (result: RecvOut) {
+    let has_data: bool = ch.count > 0;
+    let drained_close: bool = ch.closed && logic.bool_not(has_data);
+    let kind: u64 = select(has_data, 0, select(drained_close, 2, 1));
+    let head: u64 = ch.buf[0];
+    let seed: ShiftFold = ShiftFold { buf: ch.buf };
+    iterate i over ch.buf carrying st: ShiftFold = seed {
+        let src: u64 = select(i +% 1 < 8, i +% 1, 0);
+        let carry: bool = i +% 1 < ch.count;
+        let moved: u64 = select(carry, st.buf[src], st.buf[i]);
+        next st = ShiftFold { buf: replace(st.buf, i, moved) };
+    }
+    let shifted: Channel = Channel { ..ch, buf: st.buf, count: ch.count -% 1 };
+    return RecvOut { channel: select(has_data, shifted, ch), kind: kind, value: select(has_data, head, 0) };
+}
+
+// Record one finished producer. Rejected once all registered producers
+// are done (over-reporting is observable, not fatal).
+fn producer_done(ch: Channel) -> (result: DoneOut) {
+    let ok: bool = logic.bool_not(ch.closed) && ch.done < ch.producers;
+    let advanced: Channel = Channel { ..ch, done: ch.done +% 1 };
+    return DoneOut { channel: select(ok, advanced, ch), accepted: ok };
+}
+
+// Close the channel: accepted exactly once, and only after every
+// registered producer reported done. A rejected close leaves the channel
+// unchanged, so an early close can never smuggle the channel shut.
+fn close(ch: Channel) -> (result: CloseOut) {
+    let ok: bool = logic.bool_not(ch.closed) && ch.done == ch.producers;
+    if ok {
+        return CloseOut { channel: Channel { ..ch, closed: true }, accepted: true };
+    } else {
+    }
+    return CloseOut { channel: ch, accepted: false };
+}
+
+// --- Executable entry points (scalar shapes for backend corpora) ---
+
+// Channel test: two producers, one consumer, capacity 2 forcing
+// backpressure. Eight items flow FIFO (sum 36, order exact); the third
+// send while full reports blocked; close is accepted once after both
+// producers are done; the drained close is observed as kind 2; a second
+// close is rejected. Packs to 361121.
+fn candidate_channel_flow() -> (result: i64) {
+    let c0: Channel = new(2, 2);
+    // Producer A fills the channel.
+    let s1: SendOut = send(c0, 1);
+    let s2: SendOut = send(s1.channel, 2);
+    // Producer A hits backpressure on the third send.
+    let s3: SendOut = send(s2.channel, 3);
+    let blocked: bool = s3.blocked && logic.bool_not(s3.accepted);
+    // Consumer drains one, producer A's item fits.
+    let r1: RecvOut = recv(s2.channel);
+    let s4: SendOut = send(r1.channel, 3);
+    // Consumer drains the next two in order.
+    let r2: RecvOut = recv(s4.channel);
+    let r3: RecvOut = recv(r2.channel);
+    // Producer B fills while the consumer keeps draining.
+    let s5: SendOut = send(r3.channel, 4);
+    let s6: SendOut = send(s5.channel, 5);
+    let r4: RecvOut = recv(s6.channel);
+    let s7: SendOut = send(r4.channel, 6);
+    let r5: RecvOut = recv(s7.channel);
+    let r6: RecvOut = recv(r5.channel);
+    let s8: SendOut = send(r6.channel, 7);
+    let s9: SendOut = send(s8.channel, 8);
+    let r7: RecvOut = recv(s9.channel);
+    let r8: RecvOut = recv(r7.channel);
+    // Both producers report done; the owner closes exactly once.
+    let d1: DoneOut = producer_done(r8.channel);
+    let d2: DoneOut = producer_done(d1.channel);
+    let shut: CloseOut = close(d2.channel);
+    let empty: RecvOut = recv(shut.channel);
+    let again: CloseOut = close(empty.channel);
+    let ordered: bool = r1.value == 1 && r2.value == 2 && r3.value == 3 && r4.value == 4 && r5.value == 5 && r6.value == 6 && r7.value == 7 && r8.value == 8;
+    let sum: u64 = r1.value +% r2.value +% r3.value +% r4.value +% r5.value +% r6.value +% r7.value +% r8.value;
+    let kinds: bool = r1.kind == 0 && r8.kind == 0 && empty.kind == 2;
+    let ok: bool = s1.accepted && s2.accepted && blocked && s4.accepted && s5.accepted && s6.accepted && s7.accepted && s8.accepted && s9.accepted && d1.accepted && d2.accepted && shut.accepted && kinds && logic.bool_not(again.accepted);
+    return select(ok && ordered, (sum as i64) * 10000 + 1000 + 100 + 20 + 1, 0 - 1);
+}
+
+// Empty/close-boundary test: recv on an open empty channel reports EMPTY
+// (1); close before producers are done is rejected; after the single
+// producer is done close is accepted and the drained close reads CLOSED
+// (2). Packs to 102.
+fn candidate_channel_empty() -> (result: i64) {
+    let c0: Channel = new(2, 1);
+    let r0: RecvOut = recv(c0);
+    let early: CloseOut = close(r0.channel);
+    let d1: DoneOut = producer_done(early.channel);
+    let shut: CloseOut = close(d1.channel);
+    let drained: RecvOut = recv(shut.channel);
+    let ok: bool = r0.kind == 1 && logic.bool_not(early.accepted) && d1.accepted && shut.accepted && drained.kind == 2;
+    return select(ok, 102, 0 - 1);
+}
+
+// Send-after-close test: a closed channel rejects sends and done reports,
+// the buffered item still drains first, then the drained close reads
+// CLOSED (11002).
+fn candidate_send_closed() -> (result: i64) {
+    let c0: Channel = new(1, 0);
+    let s1: SendOut = send(c0, 5);
+    let shut: CloseOut = close(s1.channel);
+    let s2: SendOut = send(shut.channel, 6);
+    let r1: RecvOut = recv(s2.channel);
+    let r2: RecvOut = recv(r1.channel);
+    let dd: DoneOut = producer_done(r2.channel);
+    let ok: bool = s1.accepted && shut.accepted && logic.bool_not(s2.accepted) && r1.kind == 0 && r1.value == 5 && r2.kind == 2 && logic.bool_not(dd.accepted);
+    return select(ok, 11002, 0 - 1);
+}

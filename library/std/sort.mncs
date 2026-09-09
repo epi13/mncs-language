@@ -1,0 +1,113 @@
+mncs 0.10;
+
+// mncs.std.sort — deterministic bounded sort and deduplication.
+//
+// Corpus-scale ordering (PRESS-014) is host-driven iteration over these
+// total bounded primitives, never host comparison logic: `sort_up`
+// insertion-sorts a `[u64; N]` window in place by value, `dedup_sorted`
+// compacts a sorted window, and `is_sorted` witnesses orderedness. Rows
+// are host-assigned u64 codes (the `token_set` pattern: spellings map to
+// codes at the capability boundary), so ordering policy stays numeric,
+// allocation-free, and identical on every backend. Ties cannot occur on
+// scalar codes; multi-field rows order by their packed code.
+//
+// Complexity bounds (N <= 8 by these entry points; the generic cores
+// range over any N <= MAX_SEQUENCE_BOUND):
+//   is_sorted / dedup pass  <= N comparisons
+//   insertion sort           <= N*N comparisons, N*N moves
+// No operation allocates; every function is total over its declared
+// domain, including empty (`count == 0`) and saturated windows.
+module mncs.std.sort.v1;
+
+use mncs.core.logic.v1 as logic;
+
+// Orderedness witness over the logical window. The ahead projection is
+// clamped into storage so the verdict is total for any `count`, even
+// beyond the storage bound.
+fn is_sorted<N: Nat>(xs: [u64; N], count: u64) -> (result: bool) {
+    iterate i over xs carrying ok: bool = true {
+        let up: u64 = select(i +% 1 < xs.len, i +% 1, 0);
+        let ahead: bool = i +% 1 < count && i +% 1 < xs.len;
+        next ok = ok && select(ahead, xs[i] <= xs[up], true);
+    }
+    return ok;
+}
+
+// One insertion step: move `xs[at]` left while its predecessor is
+// greater. The inner scan walks the whole storage so the fold stays
+// straight-line; positions outside the live window compare false and
+// leave the storage untouched.
+fn insert_step<N: Nat>(xs: [u64; N], count: u64, at: u64) -> (result: [u64; N]) {
+    iterate j over xs carrying row: [u64; N] = xs {
+        let k: u64 = at -% j;
+        let live: bool = k > 0 && k < count;
+        // Every projection below is clamped into storage, and `moved`
+        // writes back identical values unless a real swap is needed, so
+        // the step is total for any `count` with no array-valued select.
+        let above: u64 = select(k < count, k, 0);
+        let below: u64 = select(k > 0 && k <= count, k -% 1, 0);
+        let swap: bool = live && row[above] < row[below];
+        let placed: u64 = select(swap, row[above], row[below]);
+        let kept: u64 = select(swap, row[below], row[above]);
+        next row = replace(replace(row, above, kept), below, placed);
+    }
+    return row;
+}
+
+// Insertion sort over the logical window: after pass `at`, the prefix
+// `0..=at` is ordered. Passes at or beyond `count` run the `at == 0`
+// pass, which is the identity, so no array-valued select is needed and
+// the tail beyond `count` is never observed.
+fn sort_up<N: Nat>(xs: [u64; N], count: u64) -> (result: [u64; N]) {
+    iterate at over xs carrying row: [u64; N] = xs {
+        let bounded: u64 = select(at < count, at, 0);
+        next row = insert_step<N>(row, count, bounded);
+    }
+    return row;
+}
+
+// Compaction witness: distinct count over a SORTED window (adjacent
+// comparison only). Unsorted input yields the adjacent-distinct count,
+// so callers sort first; the contract is explicit in the name. The
+// predecessor projection is clamped so the fold is total for any
+// `count` under either boolean-evaluation semantics.
+fn dedup_sorted_count<N: Nat>(xs: [u64; N], count: u64) -> (result: u64) {
+    iterate i over xs carrying distinct: u64 = 0 {
+        let live: bool = i < count;
+        let prev: u64 = select(i > 0, i -% 1, 0);
+        let change: bool = live && (i == 0 || xs[i] != xs[prev]);
+        next distinct = distinct +% select(change, 1, 0);
+    }
+    return distinct;
+}
+
+// --- Executable entry points (scalar shapes for backend corpora) ---
+
+// Sort witness: [5,3,5,1,4,2,2,0] sorts ordered with adjacent-distinct
+// count 6 (0,1,2,3,4,5). Packs sorted * 10 + distinct = 16.
+fn candidate_sort_dedup(xs: [u64; 8], count: u64) -> (result: i64) {
+    let ordered: [u64; 8] = sort_up<8>(xs, count);
+    let sorted: bool = is_sorted<8>(ordered, count);
+    let distinct: u64 = dedup_sorted_count<8>(ordered, count);
+    return select(sorted, 10, 0) + distinct as i64;
+}
+
+// Reverse-sorted input converges to the same ordered window: [8,7,...,1]
+// sorts with first element 1 and last 8. Packs first * 10 + last = 18.
+fn candidate_sort_reverse(xs: [u64; 8], count: u64) -> (result: i64) {
+    let ordered: [u64; 8] = sort_up<8>(xs, count);
+    let last: u64 = select(count >= 1 && count <= ordered.len, count -% 1, 0);
+    let ok: bool = count >= 1 && count <= ordered.len && is_sorted<8>(ordered, count);
+    return select(ok, ordered[0] as i64 * 10 + ordered[last] as i64, 0 - 1);
+}
+
+// Empty and singleton windows are already ordered with exact counts:
+// packs sorted(empty) * 1000 + distinct(empty) * 100 + distinct(one).
+fn candidate_sort_edges(empty_count: u64, one: [u64; 8], one_count: u64) -> (result: i64) {
+    let empty: [u64; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+    let sorted_empty: bool = is_sorted<8>(empty, empty_count);
+    let distinct_empty: u64 = dedup_sorted_count<8>(empty, empty_count);
+    let ordered_one: [u64; 8] = sort_up<8>(one, one_count);
+    let distinct_one: u64 = dedup_sorted_count<8>(ordered_one, one_count);
+    return select(sorted_empty, 1000, 0) + distinct_empty as i64 * 100 + distinct_one as i64;
+}

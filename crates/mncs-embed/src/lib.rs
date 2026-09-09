@@ -27,6 +27,9 @@ use mncs_model::{
 };
 use serde::{Deserialize, Serialize};
 
+pub mod scope;
+pub use scope::{ScopeRun, ScopedOutput, TaskScope, WorkItem};
+
 /// Machine-readable embed failure. `code` is stable for host matching.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmbedError {
@@ -35,7 +38,7 @@ pub struct EmbedError {
 }
 
 impl EmbedError {
-    fn new(code: &str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &str, message: impl Into<String>) -> Self {
         Self {
             code: code.to_owned(),
             message: message.into(),
@@ -116,7 +119,16 @@ impl Artifact {
                 EmbedError::new("unsupported_backend", format!("{diagnostic:?}"))
             })?;
         let compilation = compiler.compile(request, &program);
-        if compilation.status != mncs_model::CompilationStatus::Completed {
+        // The CLI `experiment run` path executes artifacts that completed
+        // with unresolved obligations under their conservative fallbacks,
+        // so embedding matches that contract: either completed status is
+        // executable, and the frozen artifact carries its evidence bundle
+        // (including the retained obligations) under its identity.
+        if !matches!(
+            compilation.status,
+            mncs_model::CompilationStatus::Completed
+                | mncs_model::CompilationStatus::CompletedWithUnresolvedObligations
+        ) {
             return Err(EmbedError::new(
                 "compile_failed",
                 "compilation did not complete; no artifact was produced",
@@ -184,6 +196,18 @@ impl Grant {
     }
 
     pub fn write_path(capability: &str, path: &str) -> Self {
+        Self {
+            capability: capability.to_owned(),
+            locator: path.to_owned(),
+            bytes: Vec::new(),
+        }
+    }
+
+    /// Filesystem-root grant: `path` names the granted root the `fs_*`
+    /// intrinsics may enumerate and chunk-read. Canonicalization and
+    /// containment happen at realization; a bogus root fails the call
+    /// closed, never the scope.
+    pub fn fs_root(capability: &str, path: &str) -> Self {
         Self {
             capability: capability.to_owned(),
             locator: path.to_owned(),
@@ -533,6 +557,67 @@ pub unsafe extern "C" fn mncs_session_call(
     }
 }
 
+/// Execute many entrypoints sequentially on one session with one boundary
+/// crossing; `requests_json` is a JSON array of
+/// `{module, function, args, grants?, step_budget?}` objects. Returns the
+/// JSON array of [`CallOutput`] documents in request order, or NULL on
+/// failure. This is the stable-boundary batch API for hosts that issue
+/// hundreds of kernel calls per build (index PRESS-010): per-call
+/// subprocess cost is gone, and even the per-call ABI crossing amortizes
+/// to one call here.
+///
+/// # Safety
+///
+/// `handle` must be NULL or a live session handle; `requests_json` must
+/// be NULL or valid NUL-terminated UTF-8.
+#[no_mangle]
+pub unsafe extern "C" fn mncs_session_call_batch(
+    handle: *const Session,
+    requests_json: *const c_char,
+) -> *mut CallResponse {
+    if handle.is_null() {
+        stash_error("null session handle".to_owned());
+        return ptr::null_mut();
+    }
+    let session = unsafe { &*handle };
+    let text = read_c_str(requests_json).unwrap_or_else(|| "[]".to_owned());
+    #[derive(serde::Deserialize)]
+    struct BatchRequest {
+        module: String,
+        function: String,
+        #[serde(default)]
+        args: Vec<mncs_model::ExecutionValue>,
+        #[serde(default)]
+        grants: Vec<Grant>,
+        #[serde(default)]
+        step_budget: u64,
+    }
+    let requests: Vec<BatchRequest> = match serde_json::from_str(&text) {
+        Ok(requests) => requests,
+        Err(error) => {
+            stash_error(format!("batch request JSON rejected: {error}"));
+            return ptr::null_mut();
+        }
+    };
+    let outputs: Vec<CallOutput> = requests
+        .into_iter()
+        .map(|request| {
+            let options = CallOptions {
+                step_budget: request.step_budget,
+                grants: request.grants,
+            };
+            session.call(&request.module, &request.function, request.args, &options)
+        })
+        .collect();
+    match CallResponse::of(&outputs) {
+        Ok(response) => response,
+        Err(message) => {
+            stash_error(message);
+            ptr::null_mut()
+        }
+    }
+}
+
 /// Borrow NUL-terminated UTF-8 JSON out of a response. Valid until
 /// `mncs_response_free`. NULL in gives NULL out.
 ///
@@ -547,8 +632,8 @@ pub unsafe extern "C" fn mncs_response_text(response: *const CallResponse) -> *c
     unsafe { (*response).text.as_ptr() }
 }
 
-/// Free a response from `mncs_session_call`/`mncs_session_info`. NULL is
-/// a no-op.
+/// Free a response from `mncs_session_call`/`mncs_session_call_batch`/
+/// `mncs_session_info`. NULL is a no-op.
 ///
 /// # Safety
 ///

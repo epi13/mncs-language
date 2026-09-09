@@ -1,0 +1,121 @@
+{
+ "schema_version": "0.1",
+ "name": "scope",
+ "cases": [
+  {
+   "id": "task-join-is-id-ordered",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.scope.v1",
+     "function": "candidate_task_join"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1122,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "scope-close-rejects-escape",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.scope.v1",
+     "function": "candidate_scope_escape"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 100,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "failure-distinct-from-cancel",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.scope.v1",
+     "function": "candidate_failure"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 20731,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "cancel-blocks-success",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.scope.v1",
+     "function": "candidate_cancel_cleanup"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 30,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "settle-rejections",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.scope.v1",
+     "function": "candidate_settle_rejected"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 100010,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

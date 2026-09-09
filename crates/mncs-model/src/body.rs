@@ -793,18 +793,22 @@ pub enum BodyOperationKind {
 }
 
 /// The declared-effect kind discharged by one host-call operation id
-/// (HARNESS-PRESSURE-004/005/006, P-006 storage slice). `blob_read`
-/// discharges `host_read` and `blob_append` discharges `host_write`;
-/// every other known operation discharges an effect of its own name.
-/// Anything unknown maps to `host_read` so pre-validation lowering keeps
-/// today's shape; unknown operations still fail closed at validation
-/// (MNB123) and at every executor.
+/// (HARNESS-PRESSURE-004/005/006, P-006 storage slice, index PRESS-003
+/// filesystem slice). `blob_read` discharges `host_read` and
+/// `blob_append` discharges `host_write`; the `fs_*` operations
+/// discharge `fs_list` (enumeration/identity) or `fs_read` (chunked
+/// content). Every other known operation discharges an effect of its own
+/// name. Anything unknown maps to `host_read` so pre-validation lowering
+/// keeps today's shape; unknown operations still fail closed at
+/// validation (MNB123) and at every executor.
 pub fn host_call_effect_kind(operation: &str) -> &'static str {
     match operation {
         "clock_read" => "clock_read",
         "sha256_digest" => "sha256_digest",
         "ed25519_verify" => "ed25519_verify",
         "blob_append" => "host_write",
+        "fs_list_count" | "fs_entry_name_at" | "fs_entry_kind_at" | "fs_generation" => "fs_list",
+        "fs_read_bytes_at" => "fs_read",
         _ => "host_read",
     }
 }
@@ -814,9 +818,9 @@ pub fn host_call_effect_kind(operation: &str) -> &'static str {
 /// check rather than stacking a second error on it.
 pub fn host_call_arity(operation: &str) -> Option<usize> {
     match operation {
-        "blob_read" | "clock_read" => Some(0),
-        "sha256_digest" | "blob_append" => Some(1),
-        "ed25519_verify" => Some(3),
+        "blob_read" | "clock_read" | "fs_list_count" | "fs_generation" => Some(0),
+        "sha256_digest" | "blob_append" | "fs_entry_name_at" | "fs_entry_kind_at" => Some(1),
+        "ed25519_verify" | "fs_read_bytes_at" => Some(3),
         _ => None,
     }
 }

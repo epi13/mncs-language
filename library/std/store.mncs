@@ -1,0 +1,156 @@
+mncs 0.10;
+
+// mncs.std.store — durable-state transition contracts (index PRESS-013/
+// 016/017/018, RFC 0026 substrate).
+//
+// `mncs-index` needs named durable state with explicit authority,
+// atomicity, durability, reader lifetime, and crash semantics. This
+// module lands the SEMANTIC foundation as total bounded functions over
+// explicit values; the runtime mechanism (POSIX files, flock, fsync)
+// and its crash evidence are a later realization behind these
+// contracts, documented in docs/fs-resource-effects.md. Nothing here
+// touches a disk: generations, receipts, snapshot handles, and
+// retention policy are data with checkable transition rules.
+//
+// The foundation, stated as rules:
+// - identity: a Store has one current generation (u64, dense from 0)
+//   and one committed value; every transition names its base.
+// - compare-and-transition: `cas` commits exactly when the base equals
+//   the current generation; otherwise the store is unchanged and the
+//   caller receives the observed generation as a typed stale result.
+// - atomic publication: one transition moves generation and value
+//   together; there is no torn intermediate, by construction (a single
+//   value, never two writes).
+// - durability levels are explicit data (`VOLATILE < PROCESS < POWER`):
+//   PROCESS promises complete-old-or-new across process death; POWER
+//   (arbitrary power loss) is declared UNKNOWN until a realization
+//   proves it — the unknown is carried in the receipt, never hidden.
+// - snapshot handles pin what a reader observes: acquire copies the
+//   generation and value; later publications never rewrite a handle.
+// - stale handles stay total: reading through a released handle reports
+//   released, never a value.
+// - retention policy is data (`keep_last` plus pinned generations):
+//   `reclaim_scan` reports which generations in 0..=newest may be
+//   reclaimed, and a protected generation is never reported.
+module mncs.std.store.v1;
+
+use mncs.core.logic.v1 as logic;
+
+// Durability promise codes: 0 = volatile (no crash promise), 1 =
+// process (complete old-or-new across process death), 2 = power
+// (UNKNOWN without realization evidence; carried, never claimed).
+record Store { generation: u64, value: u64, durability: u64 }
+
+record CasOut { store: Store, committed: bool, observed: u64 }
+
+record Snapshot { generation: u64, value: u64, live: bool }
+
+// Compare-and-transition from `base`: commit moves generation and
+// value atomically; a stale base leaves the store unchanged and
+// reports the observed generation for retry.
+fn cas(store: Store, base: u64, value: u64, durability: u64) -> (result: CasOut) {
+    let fresh: bool = base == store.generation;
+    if fresh {
+        return CasOut {
+            store: Store { generation: store.generation +% 1, value: value, durability: durability },
+            committed: true,
+            observed: store.generation +% 1
+        };
+    } else {
+    }
+    return CasOut { store: store, committed: false, observed: store.generation };
+}
+
+// Pin the current generation and value for a reader.
+fn acquire(store: Store) -> (result: Snapshot) {
+    return Snapshot { generation: store.generation, value: store.value, live: true };
+}
+
+// Release a handle. Reading through it afterwards reports released.
+fn release(snap: Snapshot) -> (result: Snapshot) {
+    return Snapshot { generation: snap.generation, value: snap.value, live: false };
+}
+
+record ReadOut { value: u64, at: u64, live: bool }
+
+// Read through a handle: live handles observe their pinned generation
+// even after the store advances; released handles report `live == false`
+// with no value.
+fn read_through(snap: Snapshot) -> (result: ReadOut) {
+    if snap.live {
+        return ReadOut { value: snap.value, at: snap.generation, live: true };
+    } else {
+    }
+    return ReadOut { value: 0, at: snap.generation, live: false };
+}
+
+record ReclaimOut { count: u64, first: u64 }
+
+// Retention scan over generations 0..=newest: reclaimable are those
+// outside the `keep_last` window and not pinned live. `live_a`/`live_b`
+// name up to two pinned generations (`live_count` says how many).
+// Reports the count plus the first reclaimable generation (or 99 when
+// none). A protected generation is never counted, by construction of
+// the predicate (each clause is required, never defaulted).
+fn reclaim_scan(newest: u64, keep_last: u64, live_a: u64, live_b: u64, live_count: u64) -> (result: ReclaimOut) {
+    let window: u64 = select(keep_last <= 8, keep_last, 8);
+    let gens: [u64; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
+    iterate g over gens carrying st: ReclaimOut = ReclaimOut { count: 0, first: 99 } {
+        let in_range: bool = g <= newest;
+        let retained: bool = g +% window > newest;
+        let pinned: bool = (live_count >= 1 && g == live_a) || (live_count >= 2 && g == live_b);
+        let free: bool = in_range && logic.bool_not(retained) && logic.bool_not(pinned);
+        next st = ReclaimOut {
+            count: st.count +% select(free, 1, 0),
+            first: select(free && st.count == 0, g, st.first)
+        };
+    }
+    return st;
+}
+
+// --- Executable entry points (scalar shapes for backend corpora) ---
+
+// CAS race: two writers from base 0 publishing 11 and 22. Exactly one
+// commits (11 at generation 1); the stale write reports observed 1.
+// Packs commit1 * 10000 + gen * 1000 + commit2 * 100 + observed * 10 +
+// final value digit... precisely 1*10000 + 1*1000 + 0*100 + 1*10 + 1.
+fn candidate_cas_race() -> (result: i64) {
+    let s0: Store = Store { generation: 0, value: 0, durability: 0 };
+    let w1: CasOut = cas(s0, 0, 11, 1);
+    let w2: CasOut = cas(w1.store, 0, 22, 1);
+    let final_value: u64 = w2.store.value;
+    let last_digit: u64 = final_value -% (final_value / 10) *% 10;
+    return select(w1.committed, 10000, 0) + w1.store.generation as i64 * 1000 + select(w2.committed, 100, 0) + w2.observed as i64 * 10 + last_digit as i64;
+}
+
+// Snapshot isolation: acquire at generation 1, publish twice more, and
+// the handle still reads generation 1 with value 11. Packs
+// at * 1000 + value * 10 + live.
+fn candidate_snapshot_isolation() -> (result: i64) {
+    let s0: Store = Store { generation: 0, value: 0, durability: 0 };
+    let w1: CasOut = cas(s0, 0, 11, 1);
+    let snap: Snapshot = acquire(w1.store);
+    let w2: CasOut = cas(w1.store, w1.observed, 22, 1);
+    let w3: CasOut = cas(w2.store, w2.observed, 33, 1);
+    let seen: ReadOut = read_through(snap);
+    let gone: ReadOut = read_through(release(snap));
+    let ok: bool = seen.live && logic.bool_not(gone.live);
+    return select(ok, seen.at as i64 * 1000 + seen.value as i64 * 10 + w3.store.generation as i64, 0 - 1);
+}
+
+// Retention: newest 5, keep 2, live {4} reclaims {0,1,2,3} (count 4,
+// first 0); live {2} instead reclaims {0,1,3} (count 3, first 0).
+// Packs count_a * 10000 + first_a * 1000 + count_b * 100 + first_b.
+fn candidate_reclaim() -> (result: i64) {
+    let a: ReclaimOut = reclaim_scan(5, 2, 4, 0, 1);
+    let b: ReclaimOut = reclaim_scan(5, 2, 2, 0, 1);
+    return a.count as i64 * 10000 + a.first as i64 * 1000 + b.count as i64 * 100 + b.first as i64;
+}
+
+// Durability receipt: a PROCESS publish records generation, level, and
+// acknowledgement without claiming power-loss survival.
+fn candidate_durability_receipt() -> (result: i64) {
+    let s0: Store = Store { generation: 0, value: 0, durability: 0 };
+    let w1: CasOut = cas(s0, 0, 11, 1);
+    return select(w1.committed, w1.store.generation as i64 * 100 + w1.store.durability as i64 * 10 + 1, 0 - 1);
+}

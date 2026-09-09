@@ -672,12 +672,14 @@ fn collect_body_constants(
     let mut constants = BTreeMap::new();
     for block in &body.blocks {
         for operation in &block.operations {
-            if let BodyOperationKind::Constant { value, ty } = &operation.kind {
-                if let crate::BodyType::Integer(int_ty) = ty {
-                    for result in &operation.results {
-                        constants.insert(result.id.clone(), (*value, *int_ty));
-                    }
-                }
+            let BodyOperationKind::Constant { value, ty } = &operation.kind else {
+                continue;
+            };
+            let crate::BodyType::Integer(int_ty) = ty else {
+                continue;
+            };
+            for result in &operation.results {
+                constants.insert(result.id.clone(), (*value, *int_ty));
             }
         }
     }
@@ -763,6 +765,7 @@ fn push_division_obligations(
 
 /// Push one body obligation with the pass/unknown method, freshness, and
 /// fallback selected by its statically established state.
+#[allow(clippy::too_many_arguments)]
 fn push_single_obligation(
     obligations: &mut Vec<ObligationRecord>,
     function_identity: &SemanticId,

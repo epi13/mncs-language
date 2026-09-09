@@ -2844,6 +2844,70 @@ fn execute_operation(
                 );
                 return Some(result.clone());
             }
+            if matches!(
+                operation_id.as_str(),
+                "fs_list_count"
+                    | "fs_entry_name_at"
+                    | "fs_entry_kind_at"
+                    | "fs_generation"
+                    | "fs_read_bytes_at"
+            ) {
+                // Granted-filesystem intrinsics (index PRESS-003): the
+                // operands are u64 indices/offsets/lengths (data, never
+                // authority); the grant's locator names the root. Reads
+                // are side-effect free, so layered replay is harmless.
+                let arity = crate::host_call_arity(operation_id).unwrap_or(0);
+                let mut fs_args = Vec::with_capacity(arity);
+                for position in 0..arity {
+                    let Some(arg) =
+                        crate::fs_resource::host_u64_by(&operation.operands, values, position)
+                    else {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            format!(
+                                "{operation_id} requires u64 index/offset/length operands, not a non-u64 value"
+                            ),
+                        );
+                        return Some(result.clone());
+                    };
+                    fs_args.push(arg);
+                }
+                match crate::fs_resource::fs_realize(operation_id, grant, &fs_args) {
+                    Ok((value, effect)) => {
+                        // Success stores the value and records the effect,
+                        // then returns `None` (continue with the next
+                        // operation): falling through would re-enter the
+                        // host-call chain below and let the `blob_read`
+                        // default overwrite this value.
+                        values.insert(operation.results[0].id.clone(), value);
+                        result.effects.push(ExecutionEffectEvent {
+                            operation: identity.clone(),
+                            kind: effect.kind,
+                            target: effect.target,
+                            capability: capability.clone(),
+                            provenance: Some(effect.provenance),
+                        });
+                        return None;
+                    }
+                    Err(crate::fs_resource::FsFail::InvalidRequest(reason)) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                    Err(crate::fs_resource::FsFail::RuntimeFailure(reason)) => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                }
+            }
             if operation_id == "clock_read" {
                 let Some(millis) = host_epoch_millis() else {
                     result.fail(

@@ -1,0 +1,286 @@
+mncs 0.10;
+
+// mncs.std.relation — bounded deterministic edge sets with transitive closure.
+//
+// Structural ownership (PRESS-015) as total bounded functions: an EdgeSet
+// is storage plus a logical count, `normalize` imposes canonical
+// (src, dst) order with deduplication, and `closure` computes bounded
+// transitive reachability with explicit depth/node budgets. Nodes are
+// host-assigned u64 codes (the `token_set` pattern); insertion order
+// never leaks into results because every output passes through the
+// canonical order. Cycles terminate (first-visit-wins), duplicates are
+// rejected at insertion, missing targets are leaves (never errors), and
+// budget exhaustion is an explicit `truncated` verdict, never silent
+// loss.
+//
+// Complexity bounds (E <= 16 edges, V <= 16 nodes by these entry points):
+//   contains / insert      <= E comparisons
+//   normalize (sort+dedup) <= E*E comparisons, E*E moves
+//   closure                <= depth * (E * V) checks
+// No operation allocates; every function is total over its declared
+// domain. Record swaps rebuild records from scalar-selected fields, so
+// no composite-valued select appears anywhere.
+module mncs.std.relation.v1;
+
+use mncs.core.logic.v1 as logic;
+
+record Edge { src: u64, dst: u64 }
+
+record EdgeSet { edges: [Edge; 16], count: u64 }
+
+record InsertOut { set: EdgeSet, accepted: bool }
+
+record ClosureOut { reached: [u64; 16], count: u64, truncated: bool }
+
+// Membership over the logical window.
+fn contains(set: EdgeSet, src: u64, dst: u64) -> (result: bool) {
+    iterate i over set.edges carrying found: bool = false {
+        let live: bool = i < set.count;
+        next found = found || (live && set.edges[i].src == src && set.edges[i].dst == dst);
+    }
+    return found;
+}
+
+// Insertion with deduplication: a present edge and a full store both
+// report rejected with the set unchanged.
+fn insert(set: EdgeSet, src: u64, dst: u64) -> (result: InsertOut) {
+    let full: bool = set.count >= 16;
+    let known: bool = contains(set, src, dst);
+    let accepted: bool = logic.bool_not(full) && logic.bool_not(known);
+    let slot: u64 = select(accepted, set.count, 0);
+    let grown: EdgeSet = EdgeSet {
+        edges: replace(set.edges, slot, Edge { src: src, dst: dst }),
+        count: set.count +% 1
+    };
+    if accepted {
+        return InsertOut { set: grown, accepted: true };
+    } else {
+    }
+    return InsertOut { set: set, accepted: false };
+}
+
+// Canonical edge order: by source, then by destination.
+fn edge_less(a: Edge, b: Edge) -> (result: bool) {
+    return a.src < b.src || (a.src == b.src && a.dst < b.dst);
+}
+
+// One insertion pass over edge storage. Swaps rebuild both records from
+// scalar-selected fields, and idle positions rewrite identical values,
+// so the step is total for any `count` with no record-valued select.
+fn edge_insert_step(set: EdgeSet, at: u64) -> (result: EdgeSet) {
+    iterate j over set.edges carrying row: EdgeSet = set {
+        let k: u64 = at -% j;
+        let live: bool = k > 0 && k < set.count && k < 16;
+        let hi: u64 = select(live, k, 0);
+        let lo: u64 = select(live, k -% 1, 0);
+        let here: Edge = row.edges[hi];
+        let prev: Edge = row.edges[lo];
+        let swap: bool = live && edge_less(here, prev);
+        let upper: Edge = Edge {
+            src: select(swap, prev.src, here.src),
+            dst: select(swap, prev.dst, here.dst)
+        };
+        let lower: Edge = Edge {
+            src: select(swap, here.src, prev.src),
+            dst: select(swap, here.dst, prev.dst)
+        };
+        // The larger record settles at `hi`, the smaller at `lo`; idle
+        // positions rewrite identical values.
+        next row = EdgeSet {
+            edges: replace(replace(row.edges, hi, upper), lo, lower),
+            count: row.count
+        };
+    }
+    return row;
+}
+
+record CompactOut { edges: [Edge; 16], count: u64 }
+
+// Sort plus adjacent-dedup into canonical order. The sort passes at or
+// beyond `count` run the `at == 0` pass (the identity); compaction keeps
+// the first of each adjacent-equal run.
+fn normalize(set: EdgeSet) -> (result: EdgeSet) {
+    iterate at over set.edges carrying row: EdgeSet = set {
+        let bounded: u64 = select(at < set.count, at, 0);
+        next row = edge_insert_step(row, bounded);
+    }
+    let seed: CompactOut = CompactOut { edges: row.edges, count: 0 };
+    iterate i over row.edges carrying st: CompactOut = seed {
+        let live: bool = i < row.count;
+        let prev: Edge = st.edges[select(i > 0, i -% 1, 0)];
+        let here: Edge = row.edges[i];
+        let keep: bool = live && (i == 0 || here.src != prev.src || here.dst != prev.dst);
+        // A rejected input rewrites its own slot (`st.edges[slot]` back
+        // into `slot`), so skipped positions leave the storage
+        // untouched; accepted inputs land at the compaction frontier.
+        let slot: u64 = select(keep, st.count, 0);
+        let kept: Edge = select(keep, here, st.edges[slot]);
+        next st = CompactOut {
+            edges: replace(st.edges, slot, kept),
+            count: st.count +% select(keep, 1, 0)
+        };
+    }
+    return EdgeSet { edges: st.edges, count: st.count };
+}
+
+// Node membership over a reached window.
+fn visited_has(reached: [u64; 16], count: u64, node: u64) -> (result: bool) {
+    iterate i over reached carrying found: bool = false {
+        next found = found || (i < count && reached[i] == node);
+    }
+    return found;
+}
+
+record ExpandOut { reached: [u64; 16], count: u64, refused: bool }
+
+record DepthFold { st: ExpandOut, round: u64 }
+
+// One breadth-first round: every edge out of a visited node nominates
+// its target; unvisited targets join while the node budget holds, and a
+// nomination beyond the budget sets `refused` (explicit truncation,
+// never silent loss). A frozen round (`active` false) is the identity,
+// which lets the depth loop run a fixed 16 rounds without any
+// record-valued select.
+fn expand_round(set: EdgeSet, base: [u64; 16], base_count: u64, st: ExpandOut, max_nodes: u64, active: bool) -> (result: ExpandOut) {
+    iterate i over set.edges carrying acc: ExpandOut = st {
+        let live: bool = i < set.count;
+        let edge: Edge = set.edges[i];
+        let nominated: bool = live && visited_has(base, base_count, edge.src) && logic.bool_not(visited_has(acc.reached, acc.count, edge.dst));
+        let room: bool = acc.count < max_nodes;
+        let join: bool = nominated && room && active;
+        let slot: u64 = select(join, acc.count, 0);
+        next acc = ExpandOut {
+            reached: replace(acc.reached, slot, select(join, edge.dst, acc.reached[slot])),
+            count: acc.count +% select(join, 1, 0),
+            refused: acc.refused || (nominated && logic.bool_not(room) && active)
+        };
+    }
+    return acc;
+}
+
+// Bounded transitive closure from `roots`: at most `max_depth` rounds,
+// at most `max_nodes` reached nodes. Roots are listed at distance zero;
+// missing targets are leaves (never errors). Rounds are level-
+// synchronous (each round expands exactly one hop from the round-start
+// frontier), so `max_depth` bounds hops, not sweeps. Results arrive in
+// discovery order; callers sort for canonical presentation.
+fn closure(set: EdgeSet, roots: [u64; 16], root_count: u64, max_depth: u64, max_nodes: u64) -> (result: ClosureOut) {
+    let capped_nodes: u64 = select(max_nodes <= 16, max_nodes, 16);
+    let seed: ExpandOut = ExpandOut {
+        reached: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        count: 0,
+        refused: false
+    };
+    iterate r over roots carrying st: ExpandOut = seed {
+        let live: bool = r < root_count && r < 16;
+        let node: u64 = roots[select(live, r, 0)];
+        let fresh: bool = live && logic.bool_not(visited_has(st.reached, st.count, node));
+        let room: bool = st.count < capped_nodes;
+        let join: bool = fresh && room;
+        let slot: u64 = select(join, st.count, 0);
+        next st = ExpandOut {
+            reached: replace(st.reached, slot, select(join, node, st.reached[slot])),
+            count: st.count +% select(join, 1, 0),
+            refused: st.refused || (fresh && logic.bool_not(room))
+        };
+    }
+    // The `up_to` counter is intentionally unbound (countdown semantics
+    // stay inside the lowering), so the round is threaded explicitly.
+    // Each round expands one hop from the round-start frontier (`base`);
+    // the accumulator keeps refusal evidence across rounds.
+    iterate round up_to 16 carrying fold: DepthFold = DepthFold { st: st, round: 0 } {
+        next fold = DepthFold {
+            st: expand_round(set, fold.st.reached, fold.st.count, fold.st, capped_nodes, fold.round < max_depth),
+            round: fold.round +% 1
+        };
+    }
+    return ClosureOut { reached: fold.st.reached, count: fold.st.count, truncated: fold.st.refused };
+}
+
+// --- Executable entry points (scalar shapes for backend corpora) ---
+
+fn pack_closure(reached: [u64; 16], count: u64, truncated: bool) -> (result: i64) {
+    let first: u64 = select(count >= 1, reached[0], 0);
+    let last: u64 = select(count >= 1 && count <= 16, reached[count -% 1], 0);
+    return count as i64 * 100000 + first as i64 * 1000 + last as i64 * 10 + select(truncated, 1, 0);
+}
+
+// Chain 10->20->30->40 from root 10 reaches {10,20,30,40}: 410400.
+fn candidate_chain() -> (result: i64) {
+    let s0: EdgeSet = EdgeSet {
+        edges: [Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }],
+        count: 0
+    };
+    let i1: InsertOut = insert(s0, 10, 20);
+    let i2: InsertOut = insert(i1.set, 20, 30);
+    let i3: InsertOut = insert(i2.set, 30, 40);
+    let roots: [u64; 16] = [10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let done: ClosureOut = closure(i3.set, roots, 1, 8, 16);
+    return pack_closure(done.reached, done.count, done.truncated);
+}
+
+// Diamond 1->{2,3}->{4} from root 1 reaches {1,2,3,4}: 401040.
+fn candidate_diamond() -> (result: i64) {
+    let s0: EdgeSet = EdgeSet {
+        edges: [Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }],
+        count: 0
+    };
+    let i1: InsertOut = insert(s0, 1, 2);
+    let i2: InsertOut = insert(i1.set, 1, 3);
+    let i3: InsertOut = insert(i2.set, 2, 4);
+    let i4: InsertOut = insert(i3.set, 3, 4);
+    let roots: [u64; 16] = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let done: ClosureOut = closure(i4.set, roots, 1, 8, 16);
+    return pack_closure(done.reached, done.count, done.truncated);
+}
+
+// Cycle 1->2->3->2 terminates at {1,2,3} and the duplicate insert is
+// rejected: 0 * 1000000 + 301030 = 301030.
+fn candidate_cycle_dup() -> (result: i64) {
+    let s0: EdgeSet = EdgeSet {
+        edges: [Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }],
+        count: 0
+    };
+    let i1: InsertOut = insert(s0, 1, 2);
+    let i2: InsertOut = insert(i1.set, 2, 3);
+    let i3: InsertOut = insert(i2.set, 3, 2);
+    let dup: InsertOut = insert(i3.set, 2, 3);
+    let roots: [u64; 16] = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let done: ClosureOut = closure(dup.set, roots, 1, 8, 16);
+    return select(dup.accepted, 1000000, 0) + pack_closure(done.reached, done.count, done.truncated);
+}
+
+// Six-chain under a 3-node budget reaches 3 with truncation: 31.
+fn candidate_budget() -> (result: i64) {
+    let s0: EdgeSet = EdgeSet {
+        edges: [Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }],
+        count: 0
+    };
+    let i1: InsertOut = insert(s0, 1, 2);
+    let i2: InsertOut = insert(i1.set, 2, 3);
+    let i3: InsertOut = insert(i2.set, 3, 4);
+    let i4: InsertOut = insert(i3.set, 4, 5);
+    let i5: InsertOut = insert(i4.set, 5, 6);
+    let i6: InsertOut = insert(i5.set, 6, 7);
+    let roots: [u64; 16] = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let done: ClosureOut = closure(i6.set, roots, 1, 8, 3);
+    return done.count as i64 * 10 + select(done.truncated, 1, 0);
+}
+
+// Reversed insertion normalizes identically, and the missing target 99
+// is a leaf: first edge (1,2), leaf closure {9,99}: 102029.
+fn candidate_missing_order() -> (result: i64) {
+    let s0: EdgeSet = EdgeSet {
+        edges: [Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }, Edge { src: 0, dst: 0 }],
+        count: 0
+    };
+    let i1: InsertOut = insert(s0, 9, 99);
+    let i2: InsertOut = insert(i1.set, 3, 4);
+    let i3: InsertOut = insert(i2.set, 2, 3);
+    let i4: InsertOut = insert(i3.set, 1, 2);
+    let canon: EdgeSet = normalize(i4.set);
+    let first: Edge = canon.edges[0];
+    let roots: [u64; 16] = [9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let leaf: ClosureOut = closure(canon, roots, 1, 8, 16);
+    return first.src as i64 * 100000 + first.dst as i64 * 1000 + leaf.count as i64 * 10 + select(leaf.count >= 1, leaf.reached[0] as i64, 0 - 1);
+}

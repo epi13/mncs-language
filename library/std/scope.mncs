@@ -1,0 +1,282 @@
+mncs 0.10;
+
+// mncs.std.scope — deterministic structured task-scope contracts.
+//
+// A Scope is a bounded, explicitly owned set of single-step work descriptors
+// with deterministic result collection. It is the SOURCE-SEMANTICS half of
+// the MNCS concurrency story (RFC 0010): causality, lifetime, ownership,
+// failure-vs-cancellation distinction, and schedule-independent merge are all
+// expressed here as total bounded functions over explicit values.
+//
+// It is deliberately NOT a thread runtime: there are no threads, no
+// preemption, no blocking, and no scheduler. Parallel EXECUTION is a runtime
+// realization (`mncs-embed` TaskScope) that runs artifact entrypoints on host
+// threads and merges results by task id through exactly these contracts, so
+// completion order can never leak into semantic identity. Fairness, deadlock
+// freedom, lock freedom, and scheduler independence are NOT claimed.
+//
+// Design rules (mirroring `mncs.std.task.v1` discipline):
+// - Task ids are slot indices assigned in spawn order (0, 1, ...), so
+//   id order IS insertion order and join-by-id is deterministic.
+// - Every transition reports acceptance explicitly; invalid transitions
+//   (spawn into a closed/cancelled/full scope, settle an unknown or
+//   non-pending task, settle after cancel/close) leave the scope unchanged
+//   and report rejected — never trap, never promote.
+// - Cancellation is cooperative at task boundaries: `request_cancel`
+//   converts every PENDING task to CANCELLED, records per-task cleanup
+//   evidence (`cleanups`), and afterwards no task can publish success
+//   (`complete` on a cancelled scope is rejected).
+// - Failure is data: `fail` records an inspectable `code` on the task and
+//   the code survives cancellation of siblings, so the originating failure
+//   stays distinguishable from sibling cancellation.
+// - A closed scope owns nothing further: spawn/settle after `close` are
+//   rejected, so children cannot escape their scope.
+// - Results are stored IN the scope (unlike task.v1, where the host threads
+//   values): `join_sum`/`join_pack2` fold DONE values in id order.
+module mncs.std.scope.v1;
+
+use mncs.core.logic.v1 as logic;
+
+// Lifecycle of one work descriptor. Declaration order fixes the numeric
+// codes used by `state_of`: PENDING=0, DONE=1, FAILED=2, CANCELLED=3.
+enum TaskState { PENDING, DONE, FAILED, CANCELLED }
+
+record TaskSlot { id: u64, state: TaskState, value: i64, code: u64 }
+
+record Scope {
+    slots: [TaskSlot; 8],
+    count: u64,
+    capacity: u64,
+    closed: bool,
+    cancel_requested: bool,
+    cleanups: u64
+}
+
+record Spawned { scope: Scope, id: i64, accepted: bool }
+
+record Settled { scope: Scope, accepted: bool }
+
+fn blank_slot() -> (result: TaskSlot) {
+    return TaskSlot { id: 0, state: TaskState.PENDING, value: 0, code: 0 };
+}
+
+// Open a scope owning up to `capacity` tasks (clamped to 1..=8).
+fn open(capacity: u64) -> (result: Scope) {
+    let cap: u64 = select(capacity <= 8, capacity, 8);
+    let clamped: u64 = select(cap >= 1, cap, 1);
+    let empty: TaskSlot = blank_slot();
+    return Scope {
+        slots: [empty, empty, empty, empty, empty, empty, empty, empty],
+        count: 0,
+        capacity: clamped,
+        closed: false,
+        cancel_requested: false,
+        cleanups: 0
+    };
+}
+
+// Spawn one PENDING task. The id is the slot index, so ids are dense and
+// ordered by spawn. Rejected when closed, cancelled, or full.
+fn spawn(s: Scope) -> (result: Spawned) {
+    let full: bool = s.count >= s.capacity || s.count >= 8;
+    let accepted: bool = logic.bool_not(s.closed) && logic.bool_not(s.cancel_requested) && logic.bool_not(full);
+    if accepted {
+        let fresh: TaskSlot = TaskSlot { id: s.count, state: TaskState.PENDING, value: 0, code: 0 };
+        let grown: Scope = Scope { ..s, slots: replace(s.slots, s.count, fresh), count: s.count +% 1 };
+        return Spawned { scope: grown, id: s.count as i64, accepted: true };
+    } else {
+    }
+    return Spawned { scope: s, id: 0 - 1, accepted: false };
+}
+
+fn slot_is_pending(slot: TaskSlot) -> (result: bool) {
+    return match slot.state {
+        PENDING => true,
+        DONE => false,
+        FAILED => false,
+        CANCELLED => false,
+    };
+}
+
+// Settle precondition shared by `complete` and `record_failure`: the id
+// names a live pending slot and the scope is open and uncancelled. The
+// range check stays in the i64 domain so no possibly-negative value is
+// ever converted; the `as u64` projections below execute only inside the
+// taken branch.
+fn can_settle(s: Scope, id: i64) -> (result: bool) {
+    if id >= 0 && id < s.count as i64 {
+        return logic.bool_not(s.closed) && logic.bool_not(s.cancel_requested) && slot_is_pending(s.slots[id as u64]);
+    } else {
+    }
+    return false;
+}
+
+// Publish a successful result. Rejected after cancel/close by construction,
+// so a cancelled task can never publish success afterward.
+fn complete(s: Scope, id: i64, value: i64) -> (result: Settled) {
+    if can_settle(s, id) {
+        let index: u64 = id as u64;
+        let prior: TaskSlot = s.slots[index];
+        let done: TaskSlot = TaskSlot { ..prior, state: TaskState.DONE, value: value };
+        return Settled { scope: Scope { ..s, slots: replace(s.slots, index, done) }, accepted: true };
+    } else {
+    }
+    return Settled { scope: s, accepted: false };
+}
+
+// Record a typed failure. The code stays inspectable after siblings cancel.
+fn record_failure(s: Scope, id: i64, code: u64) -> (result: Settled) {
+    if can_settle(s, id) {
+        let index: u64 = id as u64;
+        let prior: TaskSlot = s.slots[index];
+        let failed: TaskSlot = TaskSlot { ..prior, state: TaskState.FAILED, code: code };
+        return Settled { scope: Scope { ..s, slots: replace(s.slots, index, failed) }, accepted: true };
+    } else {
+    }
+    return Settled { scope: s, accepted: false };
+}
+
+record CancelFold { slots: [TaskSlot; 8], converted: u64 }
+
+// Cooperative cancellation: every PENDING slot becomes CANCELLED, each one
+// counts as executed cleanup evidence, and the flag blocks later success.
+fn request_cancel(s: Scope) -> (result: Scope) {
+    let seed: CancelFold = CancelFold { slots: s.slots, converted: 0 };
+    iterate i over s.slots carrying st: CancelFold = seed {
+        let live: bool = i < s.count;
+        let convert: bool = live && slot_is_pending(st.slots[i]);
+        let prior: TaskSlot = st.slots[i];
+        let stopped: TaskSlot = TaskSlot { ..prior, state: TaskState.CANCELLED };
+        let chosen: TaskSlot = select(convert, stopped, prior);
+        next st = CancelFold { slots: replace(st.slots, i, chosen), converted: st.converted +% select(convert, 1, 0) };
+    }
+    return Scope { ..s, slots: st.slots, cancel_requested: true, cleanups: s.cleanups +% st.converted };
+}
+
+// Close the scope. Afterwards spawn/settle are rejected: children cannot
+// escape. Closing an already-closed scope is rejected (not fatal).
+fn close(s: Scope) -> (result: Settled) {
+    if logic.bool_not(s.closed) {
+        return Settled { scope: Scope { ..s, closed: true }, accepted: true };
+    } else {
+    }
+    return Settled { scope: s, accepted: false };
+}
+
+// Numeric state code for corpus witnesses (matches declaration order).
+fn state_of(s: Scope, id: i64) -> (result: u64) {
+    if id >= 0 && id < s.count as i64 {
+        return match s.slots[id as u64].state {
+            PENDING => 0,
+            DONE => 1,
+            FAILED => 2,
+            CANCELLED => 3,
+        };
+    } else {
+    }
+    return 99;
+}
+
+fn code_of(s: Scope, id: i64) -> (result: u64) {
+    if id >= 0 && id < s.count as i64 {
+        return s.slots[id as u64].code;
+    } else {
+    }
+    return 99;
+}
+
+fn slot_is_done(slot: TaskSlot) -> (result: bool) {
+    return match slot.state {
+        PENDING => false,
+        DONE => true,
+        FAILED => false,
+        CANCELLED => false,
+    };
+}
+
+// Deterministic collection: sum of DONE values in id order. The fold walks
+// slots in index order, so completion order cannot affect the result.
+fn join_sum(s: Scope) -> (result: i64) {
+    iterate i over s.slots carrying acc: i64 = 0 {
+        let live: bool = i < s.count;
+        next acc = acc + select(live && slot_is_done(s.slots[i]), s.slots[i].value, 0);
+    }
+    return acc;
+}
+
+// Deterministic two-task pack: value[0] * 100 + value[1] when both are
+// DONE, else -1. Order-by-id is observable: completing 1 before 0 still
+// packs 0 first.
+fn join_pack2(s: Scope) -> (result: i64) {
+    if s.count >= 2 && slot_is_done(s.slots[0]) && slot_is_done(s.slots[1]) {
+        return s.slots[0].value * 100 + s.slots[1].value;
+    } else {
+    }
+    return 0 - 1;
+}
+
+// --- Executable entry points (scalar shapes for backend corpora) ---
+
+// Task test: spawn two tasks, complete out of order (1 before 0), join by
+// id. 11 * 100 + 22 = 1122 regardless of completion order.
+fn candidate_task_join() -> (result: i64) {
+    let s0: Scope = open(8);
+    let a: Spawned = spawn(s0);
+    let b: Spawned = spawn(a.scope);
+    let c1: Settled = complete(b.scope, b.id, 22);
+    let c0: Settled = complete(c1.scope, a.id, 11);
+    return join_pack2(c0.scope);
+}
+
+// Scope-ownership test: spawn, close, then spawn and settle are rejected.
+fn candidate_scope_escape() -> (result: i64) {
+    let s0: Scope = open(8);
+    let a: Spawned = spawn(s0);
+    let shut: Settled = close(a.scope);
+    let late: Spawned = spawn(shut.scope);
+    let stale: Settled = complete(late.scope, a.id, 5);
+    let first: i64 = select(a.accepted, 100, 0);
+    let second: i64 = select(late.accepted, 10, 0);
+    let third: i64 = select(stale.accepted, 1, 0);
+    return first + second + third;
+}
+
+// Failure test: task 0 fails with code 7, sibling 1 is cancelled. The
+// failure code stays inspectable (20731 = state 2, code 7, state 3,
+// close accepted).
+fn candidate_failure() -> (result: i64) {
+    let s0: Scope = open(8);
+    let a: Spawned = spawn(s0);
+    let b: Spawned = spawn(a.scope);
+    let f0: Settled = record_failure(b.scope, a.id, 7);
+    let cancelled: Scope = request_cancel(f0.scope);
+    let shut: Settled = close(cancelled);
+    let packed: u64 = state_of(cancelled, a.id) * 10000 + code_of(cancelled, a.id) * 100 + state_of(cancelled, b.id) * 10;
+    return packed as i64 + select(shut.accepted, 1, 0);
+}
+
+// Cancellation test: three pending tasks cancel at once (3 cleanups), and
+// a later success publication is rejected (30 = 3 cleanups, 0 accepted).
+fn candidate_cancel_cleanup() -> (result: i64) {
+    let s0: Scope = open(8);
+    let a: Spawned = spawn(s0);
+    let b: Spawned = spawn(a.scope);
+    let c: Spawned = spawn(b.scope);
+    let cancelled: Scope = request_cancel(c.scope);
+    let late: Settled = complete(cancelled, a.id, 9);
+    return cancelled.cleanups as i64 * 10 + select(late.accepted, 1, 0);
+}
+
+// Rejection test: over-capacity spawn, unknown-id settle, and double
+// settle are all rejected without trapping; only the two legal steps
+// report accepted (100010).
+fn candidate_settle_rejected() -> (result: i64) {
+    let s0: Scope = open(1);
+    let a: Spawned = spawn(s0);
+    let b: Spawned = spawn(a.scope);
+    let c: Settled = complete(b.scope, b.id, 5);
+    let d: Settled = complete(b.scope, 99, 5);
+    let e: Settled = record_failure(b.scope, a.id, 3);
+    let f: Settled = complete(e.scope, a.id, 5);
+    return select(a.accepted, 100000, 0) + select(b.accepted, 10000, 0) + select(c.accepted, 1000, 0) + select(d.accepted, 100, 0) + select(e.accepted, 10, 0) + select(f.accepted, 1, 0);
+}

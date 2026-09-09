@@ -1,0 +1,207 @@
+{
+ "schema_version": "0.1",
+ "name": "chunk",
+ "cases": [
+  {
+   "id": "find-newline",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.chunk.v1",
+     "function": "candidate_find_newline"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 300000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 201,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "next-line",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.chunk.v1",
+     "function": "candidate_next_line"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 300000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2031,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "continue-line",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.chunk.v1",
+     "function": "candidate_continue_line"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 102
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 120
+         }
+        },
+        {
+         "byte": {
+          "value": 120
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 60,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 300000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 621,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

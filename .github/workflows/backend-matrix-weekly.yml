@@ -60,6 +60,15 @@ jobs:
             "--grant-time ticker"
           check examples/source/crypto-verify.mncs examples/execution/crypto-verify-corpus.json \
             "--grant-crypto verifier"
+          check library/std/scope.mncs examples/execution/scope-corpus.json
+          check library/std/channel.mncs examples/execution/channel-corpus.json
+          check library/std/chunk.mncs examples/execution/chunk-corpus.json
+          check library/std/sort.mncs examples/execution/sort-corpus.json
+          check library/std/relation.mncs examples/execution/relation-corpus.json
+          check library/std/sha256.mncs examples/execution/sha256-corpus.json
+          check library/std/store.mncs examples/execution/store-corpus.json
+          check examples/source/fs-scan.mncs examples/execution/fs-scan-corpus.json \
+            "--grant-fs fs_root=examples/fs-fixture"
       - name: Machine-readable backend envelope
         shell: bash
         run: |
@@ -71,4 +80,6 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --release -p mncs-cli --test backend_family --test text_scan \
-            --test host_effects --test clock_effects --test crypto_verify --test host_write
+            --test host_effects --test clock_effects --test crypto_verify --test host_write \
+            --test task_scope --test channel_contract --test fs_effects --test collections \
+            --test sha256_pure --test store_contracts

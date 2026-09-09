@@ -1,0 +1,98 @@
+{
+ "schema_version": "0.1",
+ "name": "store",
+ "cases": [
+  {
+   "id": "cas-race",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.store.v1",
+     "function": "candidate_cas_race"
+    },
+    "arguments": [],
+    "step_budget": 200000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 11011,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "snapshot-isolation",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.store.v1",
+     "function": "candidate_snapshot_isolation"
+    },
+    "arguments": [],
+    "step_budget": 200000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1113,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "reclaim",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.store.v1",
+     "function": "candidate_reclaim"
+    },
+    "arguments": [],
+    "step_budget": 200000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 40300,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "durability-receipt",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.store.v1",
+     "function": "candidate_durability_receipt"
+    },
+    "arguments": [],
+    "step_budget": 200000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 111,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

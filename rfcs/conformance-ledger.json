@@ -698,7 +698,7 @@
       "file": "rfcs/0008-machine-native-io-resource-effect-event-semantics.md",
       "design_status": "DRAFT",
       "implementation_status": "PARTIAL",
-      "implementation_scope": "Effects, capabilities, authority, and closure obligations; general I/O and resource semantics remain narrow.",
+      "implementation_scope": "Effects, capabilities, authority, and closure obligations; granted filesystem roots with canonical enumeration, bounded chunked reads, and generation mutation hints on the research path (explicit refusal elsewhere). General I/O beyond files, event push delivery, and time semantics remain absent.",
       "normativity": "experimental",
       "acceptance_criteria": [
         {
@@ -721,8 +721,14 @@
         {
           "id": "0008-C3",
           "text": "General I/O, resource, and event semantics",
-          "state": "unsatisfied",
-          "evidence": []
+          "state": "partial",
+          "evidence": [
+            "crates/mncs-model/src/fs_resource.rs",
+            "examples/source/fs-scan.mncs",
+            "crates/mncs-cli/tests/fs_effects.rs",
+            "docs/fs-resource-effects.md",
+            "library/std/chunk.mncs"
+          ]
         }
       ],
       "evidence_artifacts": [
@@ -753,7 +759,9 @@
       "profiles": [
         "0.2+"
       ],
-      "stdlib": [],
+      "stdlib": [
+        "mncs.std.chunk.v1"
+      ],
       "stages": [
         "semantic program"
       ],
@@ -810,15 +818,22 @@
       "title": "Machine-Native Concurrency, Causality, Atomicity, and Memory Consistency Semantics",
       "file": "rfcs/0010-machine-native-concurrency-causality-atomicity-memory-consistency-semantics.md",
       "design_status": "DRAFT",
-      "implementation_status": "NONE",
-      "implementation_scope": "No concurrency semantics implemented in mncs-language.",
+      "implementation_status": "SUBSTRATE",
+      "implementation_scope": "Deterministic task-scope/channel contracts in stdlib (spawn/join ownership, id-ordered merge, failure-vs-cancellation, close-once channels, backpressure as data) plus the mncs-embed TaskScope runtime realization (bounded threads, deterministic merge, cooperative cancellation, failure aggregation). No source-thread execution, no blocking transport, no scheduler/fairness properties; memory-consistency model still absent.",
       "normativity": "absent",
       "acceptance_criteria": [
         {
           "id": "0010-C1",
           "text": "Concurrency and memory-consistency model",
-          "state": "unsatisfied",
-          "evidence": []
+          "state": "partial",
+          "evidence": [
+            "library/std/scope.mncs",
+            "library/std/channel.mncs",
+            "crates/mncs-embed/src/scope.rs",
+            "crates/mncs-cli/tests/task_scope.rs",
+            "crates/mncs-cli/tests/channel_contract.rs",
+            "crates/mncs-embed/tests/task_scope.rs"
+          ]
         }
       ],
       "evidence_artifacts": [],
@@ -834,9 +849,12 @@
       "pressure_sources": [],
       "last_validated_revision": "bfa455a5453ee36edfa3987de12b136bed95356c",
       "profiles": [],
-      "stdlib": [],
+      "stdlib": [
+        "mncs.std.scope.v1",
+        "mncs.std.channel.v1"
+      ],
       "stages": [],
-      "evidence_confidence": "low",
+      "evidence_confidence": "medium",
       "notes": "Survey-level classification; deepen if concurrency work lands."
     },
     {
@@ -845,7 +863,7 @@
       "file": "rfcs/0011-machine-native-failure-recovery-nondeterminism-external-observation-semantics.md",
       "design_status": "DRAFT",
       "implementation_status": "PARTIAL",
-      "implementation_scope": "Failure-mode vocabulary, isolated failure semantics, runtime-failure classification across backends.",
+      "implementation_scope": "Failure-mode vocabulary, isolated failure semantics, runtime-failure classification across backends; failure-vs-cancellation distinction in scope contracts and embed failure aggregation. Recovery, nondeterminism, and external-observation semantics remain absent.",
       "normativity": "experimental",
       "acceptance_criteria": [
         {
@@ -888,7 +906,9 @@
       "profiles": [
         "0.2+"
       ],
-      "stdlib": [],
+      "stdlib": [
+        "mncs.std.scope.v1"
+      ],
       "stages": [
         "semantic program",
         "backend execution"
@@ -1751,8 +1771,8 @@
       "title": "Machine-Native Persistent State, Durability, Transaction, Snapshot, Journal, and Crash-Consistency Semantics",
       "file": "rfcs/0026-machine-native-persistent-state-durability-transaction-snapshot-journal-crash-consistency-semantics.md",
       "design_status": "DRAFT",
-      "implementation_status": "NONE",
-      "implementation_scope": "No durability or crash-consistency semantics; stateful execution traces are observations, not persistence.",
+      "implementation_status": "SUBSTRATE",
+      "implementation_scope": "Durable-state transition contracts in stdlib (generations, atomic compare-and-transition, durability-level receipts with explicit power-loss UNKNOWN, snapshot handles, retention policy as data). No durable mechanism, no OS realization, no crash evidence; stateful execution traces remain observations, not persistence.",
       "normativity": "absent",
       "acceptance_criteria": [
         {
@@ -1774,9 +1794,11 @@
       "pressure_sources": [],
       "last_validated_revision": "bfa455a5453ee36edfa3987de12b136bed95356c",
       "profiles": [],
-      "stdlib": [],
+      "stdlib": [
+        "mncs.std.store.v1"
+      ],
       "stages": [],
-      "evidence_confidence": "low",
+      "evidence_confidence": "medium",
       "notes": "Survey-level classification."
     },
     {

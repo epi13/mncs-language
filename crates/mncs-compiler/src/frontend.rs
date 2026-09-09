@@ -3043,6 +3043,19 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
             calls_in_expr(message, calls);
             calls_in_expr(signature, calls);
         }
+        AstExpr::FsEntryNameAt { index, .. } | AstExpr::FsEntryKindAt { index, .. } => {
+            calls_in_expr(index, calls)
+        }
+        AstExpr::FsReadBytesAt {
+            entry,
+            offset,
+            length,
+            ..
+        } => {
+            calls_in_expr(entry, calls);
+            calls_in_expr(offset, calls);
+            calls_in_expr(length, calls);
+        }
         AstExpr::Name(_)
         | AstExpr::QualifiedPath { .. }
         | AstExpr::Integer { .. }
@@ -3050,6 +3063,8 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
         | AstExpr::Boolean { .. }
         | AstExpr::HostRead { .. }
         | AstExpr::ClockRead { .. }
+        | AstExpr::FsListCount { .. }
+        | AstExpr::FsGeneration { .. }
         | AstExpr::FiniteVariant { .. } => {}
     }
 }
@@ -4410,6 +4425,204 @@ impl<'a> BodyBuilder<'a> {
                 operation: "blob_read".to_owned(),
             },
             operands: Vec::new(),
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
+    /// Elaborate the nullary granted-filesystem intrinsics
+    /// (`fs_list_count`, `fs_generation`; index PRESS-003). Both produce
+    /// `u64` under exactly one declared `fs_list` effect plus its
+    /// authorizing capability (`--grant-fs`); indices and paths never
+    /// appear in source, so there are no operands to check.
+    fn elaborate_fs_nullary(
+        &mut self,
+        operation: &str,
+        effect_kind: &str,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let result_ty = BodyType::Integer(IntegerType {
+            bits: 64,
+            signed: false,
+        });
+        if expected.is_some_and(|expected| expected != &result_ty) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE261",
+                format!(
+                    "{operation} produces {} which does not satisfy the required type",
+                    result_ty.semantic_name()
+                ),
+                span,
+            ));
+            return None;
+        }
+        let capability =
+            self.check_host_authority(effect_kind, "MNE257", "MNE258", span, diagnostics)?;
+        let id = self.new_value("fslist");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability,
+                operation: operation.to_owned(),
+            },
+            operands: Vec::new(),
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
+    /// Elaborate one u64 index operand of a filesystem intrinsic. Indices
+    /// are data, never authority: a stale or wild index fails the call
+    /// closed at realization (InvalidRequest), never with a value.
+    fn elaborate_fs_index(
+        &mut self,
+        operation: &str,
+        index: &AstExpr,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let counter_type = BodyType::Integer(IntegerType {
+            bits: 64,
+            signed: false,
+        });
+        let binding = self.elaborate_expr(index, Some(&counter_type), env, diagnostics)?;
+        if binding.ty != counter_type {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE262",
+                format!("{operation} index/offset/length operands must have u64 type"),
+                index.span(),
+            ));
+            return None;
+        }
+        Some(binding)
+    }
+
+    /// Elaborate the indexed granted-filesystem intrinsics
+    /// (`fs_entry_name_at`, `fs_entry_kind_at`; index PRESS-003) under
+    /// exactly one declared `fs_list` effect. Names deliver
+    /// `[byte; up_to 64]`; kinds deliver `u64` (0 = file, 1 = dir,
+    /// 2 = other).
+    fn elaborate_fs_entry_at(
+        &mut self,
+        operation: &str,
+        index: &AstExpr,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let result_ty = if operation == "fs_entry_name_at" {
+            BodyType::Sequence {
+                element: Box::new(BodyType::Byte),
+                bound: mncs_model::SequenceBound::UpTo(64),
+            }
+        } else {
+            BodyType::Integer(IntegerType {
+                bits: 64,
+                signed: false,
+            })
+        };
+        if expected.is_some_and(|expected| expected != &result_ty) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE261",
+                format!(
+                    "{operation} produces {} which does not satisfy the required type",
+                    result_ty.semantic_name()
+                ),
+                span,
+            ));
+            return None;
+        }
+        let capability =
+            self.check_host_authority("fs_list", "MNE257", "MNE258", span, diagnostics)?;
+        let operand = self.elaborate_fs_index(operation, index, env, diagnostics)?;
+        let id = self.new_value("fsentry");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability,
+                operation: operation.to_owned(),
+            },
+            operands: vec![operand.id.clone()],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
+    /// Elaborate the chunked granted-filesystem read
+    /// (`fs_read_bytes_at(entry, offset, length)`; index PRESS-003)
+    /// under exactly one declared `fs_read` effect. Delivers up to 64
+    /// bytes as `[byte; up_to 64]`; short reads and empty views at
+    /// end-of-input are the EOF signal.
+    fn elaborate_fs_read_bytes_at(
+        &mut self,
+        parts: (&AstExpr, &AstExpr, &AstExpr),
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let (entry, offset, length) = parts;
+        let result_ty = BodyType::Sequence {
+            element: Box::new(BodyType::Byte),
+            bound: mncs_model::SequenceBound::UpTo(64),
+        };
+        if expected.is_some_and(|expected| expected != &result_ty) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE261",
+                format!(
+                    "fs_read_bytes_at produces {} which does not satisfy the required type",
+                    result_ty.semantic_name()
+                ),
+                span,
+            ));
+            return None;
+        }
+        let capability =
+            self.check_host_authority("fs_read", "MNE259", "MNE260", span, diagnostics)?;
+        let entry_binding = self.elaborate_fs_index("fs_read_bytes_at", entry, env, diagnostics)?;
+        let offset_binding =
+            self.elaborate_fs_index("fs_read_bytes_at", offset, env, diagnostics)?;
+        let length_binding =
+            self.elaborate_fs_index("fs_read_bytes_at", length, env, diagnostics)?;
+        let id = self.new_value("fsread");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability,
+                operation: "fs_read_bytes_at".to_owned(),
+            },
+            operands: vec![
+                entry_binding.id.clone(),
+                offset_binding.id.clone(),
+                length_binding.id.clone(),
+            ],
             results: vec![BodyValue {
                 id: id.clone(),
                 ty: result_ty.clone(),
@@ -6370,6 +6583,40 @@ impl<'a> BodyBuilder<'a> {
                 diagnostics,
             ),
             AstExpr::HostRead { span } => self.elaborate_host_read(*span, expected, diagnostics),
+            AstExpr::FsListCount { span } => {
+                self.elaborate_fs_nullary("fs_list_count", "fs_list", *span, expected, diagnostics)
+            }
+            AstExpr::FsGeneration { span } => {
+                self.elaborate_fs_nullary("fs_generation", "fs_list", *span, expected, diagnostics)
+            }
+            AstExpr::FsEntryNameAt { index, span } => self.elaborate_fs_entry_at(
+                "fs_entry_name_at",
+                index,
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
+            AstExpr::FsEntryKindAt { index, span } => self.elaborate_fs_entry_at(
+                "fs_entry_kind_at",
+                index,
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
+            AstExpr::FsReadBytesAt {
+                entry,
+                offset,
+                length,
+                span,
+            } => self.elaborate_fs_read_bytes_at(
+                (entry, offset, length),
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
             AstExpr::ClockRead { span } => self.elaborate_clock_read(*span, expected, diagnostics),
             AstExpr::Sha256Digest { view, span } => {
                 self.elaborate_sha256_digest(view, *span, expected, env, diagnostics)

@@ -1,0 +1,11 @@
+mncs 0.12;
+
+// Negative fixture: `fs_list_count` takes no arguments (MNP205).
+module examples.fs_bad_arity;
+
+fn entry_count(extra: u64) -> (result: u64)
+    capability fs_root
+    effect fs_list authorized_by fs_root
+{
+    return fs_list_count(extra);
+}
