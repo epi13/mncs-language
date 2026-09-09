@@ -769,6 +769,68 @@ fn store_dest(out: &mut String, names: &NameMap, dest: &ScalarValue, tmp: &str) 
     );
 }
 
+/// Canonical arena-dereference guard: the absolute byte address `addr` must
+/// satisfy `addr + width <= NATIVE_ARENA_LEN`, spelled as one unsigned
+/// `icmp ugt` against `LEN - width`. A negative i64 bit-pattern is a huge
+/// u64, a forged base past the end fails, and a base+width wraparound can
+/// only come from a base already above the limit, so a single comparison
+/// covers every hazard class. Violations branch to `%mncs_fail`; otherwise
+/// the following GEP's `inbounds` contract holds on every path.
+fn emit_arena_guard(out: &mut String, split: &mut u32, addr: &str, width: u64, tag: &str) {
+    *split += 1;
+    let guard = *split;
+    let limit = NATIVE_ARENA_LEN.saturating_sub(width);
+    let _ = writeln!(
+        out,
+        "  %ag{guard} = icmp ugt i64 %{addr}, {limit} ; arena-guard:{tag}"
+    );
+    let _ = writeln!(
+        out,
+        "  br i1 %ag{guard}, label %mncs_fail, label %ag{guard}_ok"
+    );
+    let _ = writeln!(out, "ag{guard}_ok:");
+}
+
+/// Canonical bump-allocator exhaustion check: `bump` names the loaded
+/// `@mncs_bump` cursor and `aligned` the 8-aligned candidate base. A request
+/// larger than the arena, an already-past-the-end cursor (possible only
+/// from a corrupted global, since every stored cursor is range-checked),
+/// or an aligned base with no room left all branch to `%mncs_fail` instead
+/// of wrapping around or handing out an out-of-bounds base. The `spent`
+/// check must come from the loaded cursor rather than the aligned base: a
+/// near-`u64::MAX` cursor would wrap the align arithmetic back to a small
+/// value that the room check alone would accept.
+fn emit_alloc_guard(out: &mut String, split: &mut u32, bump: &str, aligned: &str, bytes: u64) {
+    *split += 1;
+    let guard = *split;
+    let limit = NATIVE_ARENA_LEN.saturating_sub(bytes);
+    let _ = writeln!(
+        out,
+        "  %ag{guard}_huge = icmp ugt i64 {bytes}, {NATIVE_ARENA_LEN} ; arena-guard:alloc"
+    );
+    let _ = writeln!(
+        out,
+        "  %ag{guard}_spent = icmp ugt i64 %{bump}, {NATIVE_ARENA_LEN} ; arena-guard:alloc"
+    );
+    let _ = writeln!(
+        out,
+        "  %ag{guard}_over = icmp ugt i64 %{aligned}, {limit} ; arena-guard:alloc"
+    );
+    let _ = writeln!(
+        out,
+        "  %ag{guard}_any = or i1 %ag{guard}_huge, %ag{guard}_spent"
+    );
+    let _ = writeln!(
+        out,
+        "  %ag{guard}_fail = or i1 %ag{guard}_any, %ag{guard}_over"
+    );
+    let _ = writeln!(
+        out,
+        "  br i1 %ag{guard}_fail, label %mncs_fail, label %ag{guard}_ok"
+    );
+    let _ = writeln!(out, "ag{guard}_ok:");
+}
+
 fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u32) {
     match inst {
         ScalarInst::Const { dest, value } => {
@@ -1089,6 +1151,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let _ = writeln!(out, "  %{bump} = load i64, ptr @mncs_bump");
             let _ = writeln!(out, "  %{bumped} = add i64 %{bump}, 7");
             let _ = writeln!(out, "  %{aligned} = and i64 %{bumped}, -8");
+            emit_alloc_guard(out, split, &bump, &aligned, *bytes);
             let _ = writeln!(out, "  %{newbump} = add i64 %{aligned}, {bytes}");
             let _ = writeln!(out, "  store i64 %{newbump}, ptr @mncs_bump");
             let _ = writeln!(out, "  store i64 %{aligned}, ptr %{d}_slot");
@@ -1101,6 +1164,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let gep = format!("cs_gep{split}");
             let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
             let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, 0");
+            emit_arena_guard(out, split, &addr, 4, "cell-discriminant");
             let _ = writeln!(
                 out,
                 "  %{gep} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
@@ -1127,6 +1191,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 crate::composite::SlotWidth::W32 => {
                     let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
                     let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
+                    emit_arena_guard(out, split, &addr, 4, "cell-store");
                     let _ = writeln!(
                         out,
                         "  %{gep} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
@@ -1137,6 +1202,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 crate::composite::SlotWidth::W64 => {
                     let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
                     let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
+                    emit_arena_guard(out, split, &addr, 8, "cell-store");
                     let _ = writeln!(
                         out,
                         "  %{gep} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
@@ -1163,6 +1229,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 crate::composite::SlotWidth::W32 => {
                     let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
                     let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
+                    emit_arena_guard(out, split, &addr, 4, "cell-load");
                     let _ = writeln!(
                         out,
                         "  %{gep} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
@@ -1173,6 +1240,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 crate::composite::SlotWidth::W64 => {
                     let _ = writeln!(out, "  %{cellv} = load i64, ptr %{c}_slot");
                     let _ = writeln!(out, "  %{addr} = add i64 %{cellv}, {byte_offset}");
+                    emit_arena_guard(out, split, &addr, 8, "cell-load");
                     let _ = writeln!(
                         out,
                         "  %{gep} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %{addr}"
@@ -1366,6 +1434,13 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let _ = writeln!(out, "  %rbump{tag} = load i64, ptr @mncs_bump");
             let _ = writeln!(out, "  %rbb{tag} = add i64 %rbump{tag}, 7");
             let _ = writeln!(out, "  %ral{tag} = and i64 %rbb{tag}, -8");
+            emit_alloc_guard(
+                out,
+                split,
+                &format!("rbump{tag}"),
+                &format!("ral{tag}"),
+                bytes,
+            );
             let _ = writeln!(out, "  %rnb{tag} = add i64 %ral{tag}, {bytes}");
             let _ = writeln!(out, "  store i64 %rnb{tag}, ptr @mncs_bump");
             let _ = writeln!(out, "  store i64 %ral{tag}, ptr %{d}_slot");
@@ -1374,6 +1449,20 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 let offset = u64::from(lane) * 8;
                 let _ = writeln!(out, "  %rsaddr{tag}_{lane} = add i64 %{source}, {offset}");
                 let _ = writeln!(out, "  %rdaddr{tag}_{lane} = add i64 %ral{tag}, {offset}");
+                emit_arena_guard(
+                    out,
+                    split,
+                    &format!("rsaddr{tag}_{lane}"),
+                    8,
+                    "seq-replace-src",
+                );
+                emit_arena_guard(
+                    out,
+                    split,
+                    &format!("rdaddr{tag}_{lane}"),
+                    8,
+                    "seq-replace-dst",
+                );
                 let _ = writeln!(out, "  %rsgep{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %rsaddr{tag}_{lane}");
                 let _ = writeln!(out, "  %rdgep{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %rdaddr{tag}_{lane}");
                 let _ = writeln!(
@@ -1392,6 +1481,13 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let _ = writeln!(
                 out,
                 "  %riaddr{store_tag} = add i64 %ral{tag}, %rioff{store_tag}"
+            );
+            emit_arena_guard(
+                out,
+                split,
+                &format!("riaddr{store_tag}"),
+                8,
+                "seq-replace-idx",
             );
             let _ = writeln!(out, "  %rige{store_tag} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %riaddr{store_tag}");
             let _ = writeln!(out, "  store {raw_ty} %{element}, ptr %rige{store_tag}");
@@ -1452,6 +1548,11 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let off = format!("soff{split}");
             let _ = writeln!(out, "  %idxw{split} = shl i64 %{idx}, 3");
             let _ = writeln!(out, "  %{off} = add i64 %{base}, %idxw{split}");
+            let guard_width = match width {
+                crate::composite::SlotWidth::W32 => 4,
+                crate::composite::SlotWidth::W64 => 8,
+            };
+            emit_arena_guard(out, split, &off, guard_width, "seq-project");
             let gep = format!("sgep{split}");
             let _ = writeln!(
                 out,
@@ -1574,6 +1675,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             *split += 1;
             let tagptr = format!("tag{split}");
             let tag = format!("tagv{split}");
+            emit_arena_guard(out, split, &srcv, 4, "finite-tag");
             let _ = writeln!(
                 out,
                 "  %{tagptr} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %{srcv}"
