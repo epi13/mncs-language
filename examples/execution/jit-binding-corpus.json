@@ -1,0 +1,144 @@
+{
+ "schema_version": "0.1",
+ "name": "jit-binding",
+ "cases": [
+  {
+   "id": "publish-flow",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.binding.v1",
+     "function": "candidate_publish_flow"
+    },
+    "arguments": [],
+    "step_budget": 262144
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 101101301,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "supersede",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.binding.v1",
+     "function": "candidate_supersede"
+    },
+    "arguments": [],
+    "step_budget": 262144
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2223210,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "abandon",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.binding.v1",
+     "function": "candidate_abandon"
+    },
+    "arguments": [],
+    "step_budget": 262144
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1111010,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "retire",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.binding.v1",
+     "function": "candidate_retire"
+    },
+    "arguments": [],
+    "step_budget": 262144
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1144001,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "stale-proof",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.binding.v1",
+     "function": "candidate_stale_proof"
+    },
+    "arguments": [],
+    "step_budget": 262144
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 501001,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "note-guards",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.binding.v1",
+     "function": "candidate_note_guards"
+    },
+    "arguments": [],
+    "step_budget": 262144
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 356411,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

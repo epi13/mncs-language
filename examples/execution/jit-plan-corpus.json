@@ -1,0 +1,98 @@
+{
+ "schema_version": "0.1",
+ "name": "jit-plan",
+ "cases": [
+  {
+   "id": "selection-rows",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.plan.v1",
+     "function": "candidate_selection_rows"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 101099,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "selection-flags",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.plan.v1",
+     "function": "candidate_selection_flags"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 11000,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "tier-policy",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.plan.v1",
+     "function": "candidate_tier_policy"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 112010,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "plan-accept",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.plan.v1",
+     "function": "candidate_plan_accept"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1000,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

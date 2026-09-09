@@ -1,0 +1,423 @@
+mncs 0.10;
+
+// mncs.jit.depends — dependency edges and invalidation for the
+// MNCS-native JIT orchestration layer.
+//
+// An edge `DepEdge { user, used, kind_code }` records that logical
+// definition `user` observes definition `used` through `kind_code`
+// (the `mncs.jit.types.v1` DepKind table: 0 Call, 1 Signature,
+// 2 Layout). Nodes are host-assigned u64 logical identities; the
+// session allocator starts them at 1, so 0 is always a sentinel.
+//
+// INVALIDATION POLICY (explicit, no incidental backend behavior):
+//   change BodyOnly(0)    -> every dependent Unaffected(0).
+//   change Signature(1)   -> Call edge: RequiresRecompile(2);
+//                            Signature edge: RequiresRecompile(2);
+//                            Layout edge: ValidRoutesNew(1): layout is
+//                            preserved, so the dependent keeps its
+//                            binding and picks up the new generation
+//                            once published, with no rebuild.
+//   change Contract(2)    -> every dependent RequiresRecompile(2):
+//                            proof/capability assumptions changed.
+// Transitive dependents (depth >= 2) escalate: any change that forces
+// review becomes RequiresRecompile, because an intermediary rebuild
+// may alter observable behavior; BodyOnly stays Unaffected.
+// Stale reasons reuse the binding table: 2 = dep-signature,
+// 3 = dep-contract (change_code +% 1).
+//
+// All windows are bounded: edges <= 16, affected <= 8, closure rounds
+// <= 8. Overflow and truncation are explicit verdicts, never silent
+// loss. Every function is total; every operation is a bounded fold.
+//
+// Complexity bounds: insert/contains <= E comparisons; direct-user
+// scan <= E; closure <= rounds * (E * V); stale application
+// <= bindings * affected. No operation allocates.
+module mncs.jit.depends.v1;
+
+use mncs.core.logic.v1 as logic;
+use mncs.jit.types.v1 as types;
+
+// --- Edge storage ---
+
+record EdgeInsertOut {
+    edges: [types.DepEdge; 16],
+    count: u64,
+    accepted: bool,
+}
+
+fn edge_known(edges: [types.DepEdge; 16], count: u64, user: u64, used: u64) -> (result: bool) {
+    iterate i over edges carrying found: bool = false {
+        let live: bool = i < count;
+        next found = found || (live && edges[i].user == user && edges[i].used == used);
+    }
+    return found;
+}
+
+// Insert with deduplication (first edge kind wins; see the module
+// header). A present edge, an unknown kind, and a full store all
+// report rejected with the storage unchanged.
+fn insert_edge(edges: [types.DepEdge; 16], count: u64, user: u64, used: u64, kind_code: u64) -> (result: EdgeInsertOut) {
+    let full: bool = count >= 16;
+    let known: bool = edge_known(edges, count, user, used);
+    let kind_ok: bool = types.dep_kind_is_known(kind_code);
+    let accepted: bool = logic.bool_not(full) && logic.bool_not(known) && kind_ok;
+    let slot: u64 = select(accepted, count, 0);
+    let grown: [types.DepEdge; 16] = replace(edges, slot, types.DepEdge { user: user, used: used, kind_code: kind_code });
+    if accepted {
+        return EdgeInsertOut { edges: grown, count: count +% 1, accepted: true };
+    } else {
+    }
+    return EdgeInsertOut { edges: edges, count: count, accepted: false };
+}
+
+// --- Per-edge verdict ---
+
+// Explicit policy matrix from the module header. Unknown change or
+// kind codes fail closed to RequiresRecompile: an unrecognized change
+// must never read as Unaffected.
+fn classify_dependent(change_code: u64, kind_code: u64) -> (result: u64) {
+    if logic.bool_not(types.change_is_known(change_code)) {
+        return 2;
+    }
+    if logic.bool_not(types.dep_kind_is_known(kind_code)) {
+        return 2;
+    }
+    if change_code == 0 {
+        return 0;
+    }
+    if change_code == 2 {
+        return 2;
+    }
+    if kind_code == 2 {
+        return 1;
+    }
+    return 2;
+}
+
+// Escalation for transitive dependents: review-forcing changes become
+// RequiresRecompile; BodyOnly stays Unaffected.
+fn escalate_transitive(change_code: u64) -> (result: u64) {
+    if types.change_forces_dependent_review(change_code) {
+        return 2;
+    }
+    return 0;
+}
+
+fn stale_reason_for(change_code: u64) -> (result: u64) {
+    return change_code +% 1;
+}
+
+// --- Direct users with edge kinds ---
+
+record DirectOut {
+    users: [u64; 8],
+    kinds: [u64; 8],
+    count: u64,
+    truncated: bool,
+}
+
+fn direct_has(users: [u64; 8], count: u64, node: u64) -> (result: bool) {
+    iterate i over users carrying found: bool = false {
+        next found = found || (i < count && users[i] == node);
+    }
+    return found;
+}
+
+// Direct users of `changed` with the first recorded edge kind each.
+// At most 8 users; further nominations set `truncated`.
+fn direct_users(edges: [types.DepEdge; 16], count: u64, changed: u64) -> (result: DirectOut) {
+    let seed: DirectOut = DirectOut {
+        users: [0, 0, 0, 0, 0, 0, 0, 0],
+        kinds: [0, 0, 0, 0, 0, 0, 0, 0],
+        count: 0,
+        truncated: false,
+    };
+    iterate i over edges carrying st: DirectOut = seed {
+        let live: bool = i < count;
+        let edge: types.DepEdge = edges[i];
+        let nominated: bool = live && edge.used == changed && logic.bool_not(direct_has(st.users, st.count, edge.user));
+        let room: bool = st.count < 8;
+        let join: bool = nominated && room;
+        let slot: u64 = select(join, st.count, 0);
+        next st = DirectOut {
+            users: replace(st.users, slot, select(join, edge.user, st.users[slot])),
+            kinds: replace(st.kinds, slot, select(join, edge.kind_code, st.kinds[slot])),
+            count: st.count +% select(join, 1, 0) as u64,
+            truncated: st.truncated || (nominated && logic.bool_not(room)),
+        };
+    }
+    return st;
+}
+
+// --- Transitive dependents (reversed-edge closure) ---
+
+record DependentsOut {
+    affected: [u64; 8],
+    count: u64,
+    truncated: bool,
+}
+
+fn affected_has(reached: [u64; 8], count: u64, node: u64) -> (result: bool) {
+    iterate i over reached carrying found: bool = false {
+        next found = found || (i < count && reached[i] == node);
+    }
+    return found;
+}
+
+// One breadth-first round over reversed edges: every edge whose
+// `used` endpoint is already reached nominates its `user`. A frozen
+// round (`active` false) is the identity, so the depth loop runs a
+// fixed 8 rounds with no record-valued select.
+fn depend_round(edges: [types.DepEdge; 16], count: u64, base: [u64; 8], base_count: u64, st: DependentsOut, active: bool) -> (result: DependentsOut) {
+    iterate i over edges carrying acc: DependentsOut = st {
+        let live: bool = i < count;
+        let edge: types.DepEdge = edges[i];
+        let nominated: bool = live && affected_has(base, base_count, edge.used) && logic.bool_not(affected_has(acc.affected, acc.count, edge.user));
+        let room: bool = acc.count < 8;
+        let join: bool = nominated && room && active;
+        let slot: u64 = select(join, acc.count, 0);
+        next acc = DependentsOut {
+            affected: replace(acc.affected, slot, select(join, edge.user, acc.affected[slot])),
+            count: acc.count +% select(join, 1, 0) as u64,
+            truncated: acc.truncated || (nominated && logic.bool_not(room) && active),
+        };
+    }
+    return acc;
+}
+
+record DependFold {
+    st: DependentsOut,
+    round: u64,
+}
+
+// Seeding: the first round expands from the round-start frontier, so
+// the changed node enters the frontier explicitly at depth zero. Each
+// later round adds exactly the next hop, so `max_depth` bounds hops.
+fn dependents_seeded(edges: [types.DepEdge; 16], count: u64, changed: u64, max_depth: u64) -> (result: DependentsOut) {
+    let seed: DependentsOut = DependentsOut {
+        affected: [changed, 0, 0, 0, 0, 0, 0, 0],
+        count: 1,
+        truncated: false,
+    };
+    let fold_seed: DependFold = DependFold { st: seed, round: 0 };
+    iterate round up_to 8 carrying fold: DependFold = fold_seed {
+        let frontier: [u64; 8] = fold.st.affected;
+        let frontier_count: u64 = fold.st.count;
+        let acc: DependentsOut = fold.st;
+        next fold = DependFold {
+            st: depend_round(edges, count, frontier, frontier_count, acc, fold.round < max_depth),
+            round: fold.round +% 1,
+        };
+    }
+    // Drop the changed node from position 0; the window otherwise
+    // holds reached users in discovery order. Projections bind one
+    // level at a time: only single-level `name.field[i]` chains parse.
+    let reached: [u64; 8] = fold.st.affected;
+    let out: DependentsOut = DependentsOut {
+        affected: [reached[1], reached[2], reached[3], reached[4], reached[5], reached[6], reached[7], 0],
+        count: fold.st.count -% 1,
+        truncated: fold.st.truncated,
+    };
+    return out;
+}
+
+// --- Apply verdicts to a binding window ---
+
+record StaleOut {
+    bindings: [types.Binding; 8],
+    staled: u64,
+    routed: u64,
+    truncated: bool,
+}
+
+fn direct_kind(users: [u64; 8], kinds: [u64; 8], count: u64, node: u64) -> (result: u64) {
+    iterate i over users carrying kind: u64 = 0 {
+        let hit: bool = i < count && users[i] == node;
+        next kind = select(hit, kinds[i], kind);
+    }
+    return kind;
+}
+
+// Mark dependents of `changed` stale in a binding window. The changed
+// definition's own binding is left to its caller (redefinition owns
+// that transition). Direct users take the policy-matrix verdict for
+// their edge kind; transitive-only users escalate. Only Valid
+// bindings transition; already-Stale bindings keep their reason.
+// Returns the updated window plus stale/routed counts.
+fn stale_bindings(edges: [types.DepEdge; 16], edge_count: u64, bindings: [types.Binding; 8], binding_count: u64, changed: u64, change_code: u64) -> (result: StaleOut) {
+    let direct: DirectOut = direct_users(edges, edge_count, changed);
+    let reach: DependentsOut = dependents_seeded(edges, edge_count, changed, 8);
+    let reason: u64 = stale_reason_for(change_code);
+    let seed: StaleOut = StaleOut { bindings: bindings, staled: 0, routed: 0, truncated: direct.truncated || reach.truncated };
+    iterate i over bindings carrying st: StaleOut = seed {
+        let live: bool = i < binding_count;
+        let b: types.Binding = st.bindings[i];
+        let is_changed: bool = b.logical == changed;
+        let is_valid: bool = b.state_code == 0;
+        let hit: bool = live && logic.bool_not(is_changed) && is_valid && affected_has(reach.affected, reach.count, b.logical);
+        let is_direct: bool = direct_has(direct.users, direct.count, b.logical);
+        let verdict: u64 = select(is_direct, classify_dependent(change_code, direct_kind(direct.users, direct.kinds, direct.count, b.logical)), escalate_transitive(change_code));
+        let stale_now: bool = hit && verdict == 2;
+        let routed_now: bool = hit && verdict == 1;
+        let slot: u64 = select(stale_now, i, 0);
+        let next_b: types.Binding = types.Binding {
+            logical: b.logical,
+            generation: b.generation,
+            artifact: b.artifact,
+            previous_generation: b.previous_generation,
+            previous_artifact: b.previous_artifact,
+            state_code: select(stale_now, 1, b.state_code),
+            stale_reason: select(stale_now, reason, b.stale_reason),
+        };
+        next st = StaleOut {
+            bindings: replace(st.bindings, slot, select_binding(stale_now, next_b, st.bindings[slot])),
+            staled: st.staled +% select(stale_now, 1, 0) as u64,
+            routed: st.routed +% select(routed_now, 1, 0) as u64,
+            truncated: st.truncated,
+        };
+    }
+    return st;
+}
+
+// Edge-typed conditional for callers that fold edge windows.
+fn select_binding_edge(flag: bool, a: types.DepEdge, b: types.DepEdge) -> (result: types.DepEdge) {
+    return types.DepEdge {
+        user: select(flag, a.user, b.user),
+        used: select(flag, a.used, b.used),
+        kind_code: select(flag, a.kind_code, b.kind_code),
+    };
+}
+
+// Record-typed conditional without a composite-valued select: both
+// arms are bindings, the flag picks fields. (The language forbids
+// composite-valued `select`; field-wise rebuilds are the pattern.)
+fn select_binding(flag: bool, a: types.Binding, b: types.Binding) -> (result: types.Binding) {
+    return types.Binding {
+        logical: select(flag, a.logical, b.logical),
+        generation: select(flag, a.generation, b.generation),
+        artifact: select(flag, a.artifact, b.artifact),
+        previous_generation: select(flag, a.previous_generation, b.previous_generation),
+        previous_artifact: select(flag, a.previous_artifact, b.previous_artifact),
+        state_code: select(flag, a.state_code, b.state_code),
+        stale_reason: select(flag, a.stale_reason, b.stale_reason),
+    };
+}
+
+// --- Executable entry points (scalar shapes for backend corpora) ---
+
+fn empty_edges() -> (result: [types.DepEdge; 16]) {
+    return [
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+        types.DepEdge { user: 0, used: 0, kind_code: 0 },
+    ];
+}
+
+fn empty_bindings() -> (result: [types.Binding; 8]) {
+    return [
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+    ];
+}
+
+// Policy matrix over (change, kind): BodyOnlyx3 -> 000, Signature ->
+// Call 2 / Signature 2 / Layout 1, Contract -> 222, unknown -> 2.
+// Packed verdicts plus the unknown-change guard.
+fn candidate_policy_matrix() -> (result: i64) {
+    let body_row: u64 = classify_dependent(0, 0) as u64 *% 100 +% classify_dependent(0, 1) as u64 *% 10 +% classify_dependent(0, 2) as u64;
+    let sig_row: u64 = classify_dependent(1, 0) as u64 *% 100 +% classify_dependent(1, 1) as u64 *% 10 +% classify_dependent(1, 2) as u64;
+    let con_row: u64 = classify_dependent(2, 0) as u64 *% 100 +% classify_dependent(2, 1) as u64 *% 10 +% classify_dependent(2, 2) as u64;
+    return body_row as i64 *% 1000000 +% sig_row as i64 *% 1000 +% con_row as i64 +% classify_dependent(9, 0) as i64 *% 1000000000;
+}
+
+// foo(1) -Call-> bar(2), baz(3) -Layout-> bar(2). A bar Signature
+// change stales foo (reason 2) and routes baz (routed 1).
+fn candidate_direct_call_layout() -> (result: i64) {
+    let e0: [types.DepEdge; 16] = empty_edges();
+    let i1: EdgeInsertOut = insert_edge(e0, 0, 1, 2, 0);
+    let i2: EdgeInsertOut = insert_edge(i1.edges, i1.count, 3, 2, 2);
+    let binds: [types.Binding; 8] = [
+        types.Binding { logical: 1, generation: 1, artifact: 10, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 2, generation: 1, artifact: 11, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 3, generation: 1, artifact: 12, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+    ];
+    let done: StaleOut = stale_bindings(i2.edges, i2.count, binds, 3, 2, 1);
+    let foo: types.Binding = done.bindings[0];
+    let baz: types.Binding = done.bindings[2];
+    return done.staled as i64 *% 100000 +% done.routed as i64 *% 10000 +% foo.state_code as i64 *% 1000 +% foo.stale_reason as i64 *% 100 +% baz.state_code as i64 *% 10 +% baz.stale_reason as i64;
+}
+
+// Chain c(3) -Call-> b(2) -Call-> a(1). An `a` Signature change
+// stales both b and c (c escalates as transitive).
+fn candidate_transitive_chain() -> (result: i64) {
+    let e0: [types.DepEdge; 16] = empty_edges();
+    let i1: EdgeInsertOut = insert_edge(e0, 0, 2, 1, 0);
+    let i2: EdgeInsertOut = insert_edge(i1.edges, i1.count, 3, 2, 0);
+    let binds: [types.Binding; 8] = [
+        types.Binding { logical: 1, generation: 1, artifact: 10, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 2, generation: 1, artifact: 11, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 3, generation: 1, artifact: 12, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+    ];
+    let done: StaleOut = stale_bindings(i2.edges, i2.count, binds, 3, 1, 1);
+    let b: types.Binding = done.bindings[1];
+    let c: types.Binding = done.bindings[2];
+    return done.staled as i64 *% 10000 +% b.state_code as i64 *% 1000 +% b.stale_reason as i64 *% 100 +% c.state_code as i64 *% 10 +% c.stale_reason as i64;
+}
+
+// BodyOnly change leaves every dependent Unaffected: nothing stales.
+fn candidate_body_only() -> (result: i64) {
+    let e0: [types.DepEdge; 16] = empty_edges();
+    let i1: EdgeInsertOut = insert_edge(e0, 0, 1, 2, 0);
+    let binds: [types.Binding; 8] = [
+        types.Binding { logical: 1, generation: 1, artifact: 10, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 2, generation: 1, artifact: 11, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
+    ];
+    let done: StaleOut = stale_bindings(i1.edges, i1.count, binds, 2, 2, 0);
+    return done.staled as i64 *% 100 +% done.routed as i64 *% 10 +% done.bindings[0].state_code as i64;
+}
+
+// Duplicate insert rejected; unknown kind rejected; the dependent
+// set of an isolated node is empty.
+fn candidate_insert_guards() -> (result: i64) {
+    let e0: [types.DepEdge; 16] = empty_edges();
+    let i1: EdgeInsertOut = insert_edge(e0, 0, 1, 2, 0);
+    let dup: EdgeInsertOut = insert_edge(i1.edges, i1.count, 1, 2, 1);
+    let bad: EdgeInsertOut = insert_edge(i1.edges, i1.count, 5, 6, 9);
+    let reach: DependentsOut = dependents_seeded(i1.edges, i1.count, 7, 8);
+    return select(i1.accepted, 1000, 0) as i64 +% select(dup.accepted, 100000, 0) as i64 +% select(bad.accepted, 10000, 0) as i64 +% reach.count as i64;
+}

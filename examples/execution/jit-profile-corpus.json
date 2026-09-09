@@ -1,0 +1,75 @@
+{
+ "schema_version": "0.1",
+ "name": "jit-profile",
+ "cases": [
+  {
+   "id": "saturation",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.profile.v1",
+     "function": "candidate_saturation"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1111,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "observe-chain",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.profile.v1",
+     "function": "candidate_observe_chain"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 210550061,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "empty-profile",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.profile.v1",
+     "function": "candidate_empty_profile"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

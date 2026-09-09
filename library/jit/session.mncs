@@ -1,0 +1,624 @@
+mncs 0.10;
+
+// mncs.jit.session — persistent JIT session state for the MNCS-native
+// JIT orchestration layer.
+//
+// A Session is a persistent VALUE threaded explicitly between calls
+// by the host (the `task` pattern): the language keeps no ambient
+// store, so creation, destruction, and every transition are
+// deterministic functions of the threaded value. Logical definition
+// identities (`logical`) are allocator-owned codes starting at 1;
+// 0 is always a sentinel (allocate-new / missing).
+//
+// GENERATIONAL MODEL: a logical definition owns a history of source
+// generations (Definition rows, never mutated), each compiled zero
+// or more times into Executable rows keyed by MNCS-assigned artifact
+// codes. The Binding row selects at most one executable per logical
+// definition. Old executables stay alive under explicit lifecycle
+// states; redefinition never overwrites emitted code.
+//
+// DEFINE POLICY (`define` reasons):
+//   0 ok-new, 1 ok-redefined,
+//   2 rejected-closed, 3 rejected-defs-full, 4 rejected-duplicate,
+//   5 rejected-edges-full, 6 rejected-unknown-logical,
+//   7 rejected-unknown-change-or-kind.
+// Every rejection returns the session unchanged with generation 0.
+// A duplicate-content resubmission is not a new generation: it would
+// spend a compile on identical bytes, so it is refused explicitly.
+// Redefinition snapshots the current selection into previous_*
+// (rollback support), points the binding at the new generation with
+// no artifact (Stale, reason 1 = self-redefine), and marks review-
+// forcing dependents stale through `mncs.jit.depends.v1`.
+//
+// ERA POLICY: `advance_proof` / `advance_semantic` bump the session
+// era. Artifacts bound to older eras fail proof checks at publish
+// and report proof-stale at resolve; nothing is silently
+// revalidated. `close` freezes the session (closed=true), retires
+// every live artifact, and retires every binding; mutating entry
+// points reject closed sessions. Close is idempotent.
+//
+// Complexity bounds: define scans defs (<= 8), bindings (<= 8),
+// edges (<= 16) plus one bounded stale pass; getters are single
+// passes; close is two passes. No operation allocates; every
+// function is total.
+module mncs.jit.session.v1;
+
+use mncs.core.logic.v1 as logic;
+use mncs.jit.depends.v1 as depends;
+use mncs.jit.lifecycle.v1 as lifecycle;
+use mncs.jit.types.v1 as types;
+
+record DefineOut {
+    session: types.Session,
+    logical: u64,
+    generation: u64,
+    accepted: bool,
+    reason: u64,
+}
+
+record Counts {
+    defs: u64,
+    bindings: u64,
+    artifacts: u64,
+    edges: u64,
+    semantic_generation: u64,
+    proof_generation: u64,
+    publish_seq: u64,
+    closed: bool,
+}
+
+record BindingQuery {
+    found: bool,
+    generation: u64,
+    artifact: u64,
+    state_code: u64,
+    stale_reason: u64,
+}
+
+record ArtifactQuery {
+    found: bool,
+    logical: u64,
+    generation: u64,
+    lifecycle_code: u64,
+    provider_code: u64,
+    publish_seq: u64,
+}
+
+record ProofQuery {
+    found: bool,
+    semantic_generation: u64,
+    proof_generation: u64,
+    assumption_bits: u64,
+}
+
+record EdgeFold {
+    edges: [types.DepEdge; 16],
+    count: u64,
+}
+
+// --- Zero values ---
+
+fn zero_definition() -> (result: types.Definition) {
+    return types.Definition {
+        logical: 0,
+        generation: 0,
+        content_hash: 0,
+        change_code: 0,
+        semantic_generation: 0,
+        proof_generation: 0,
+        assumption_bits: 0,
+        dep_count: 0,
+    };
+}
+
+fn zero_binding() -> (result: types.Binding) {
+    return types.Binding {
+        logical: 0,
+        generation: 0,
+        artifact: 0,
+        previous_generation: 0,
+        previous_artifact: 0,
+        state_code: 0,
+        stale_reason: 0,
+    };
+}
+
+fn zero_executable() -> (result: types.Executable) {
+    return types.Executable {
+        code: 0,
+        logical: 0,
+        generation: 0,
+        provider_code: 0,
+        lifecycle_code: 0,
+        semantic_generation: 0,
+        proof_generation: 0,
+        assumption_bits: 0,
+        compile_ms: 0,
+        publish_seq: 0,
+    };
+}
+
+fn zero_edge() -> (result: types.DepEdge) {
+    return types.DepEdge { user: 0, used: 0, kind_code: 0 };
+}
+
+// --- Creation ---
+
+fn create() -> (result: types.Session) {
+    let d0: types.Definition = zero_definition();
+    let b0: types.Binding = zero_binding();
+    let a0: types.Executable = zero_executable();
+    let e0: types.DepEdge = zero_edge();
+    return types.Session {
+        semantic_generation: 1,
+        proof_generation: 1,
+        next_logical: 1,
+        next_generation: 1,
+        next_artifact: 1,
+        publish_seq: 0,
+        closed: false,
+        defs: [d0, d0, d0, d0, d0, d0, d0, d0],
+        def_count: 0,
+        bindings: [b0, b0, b0, b0, b0, b0, b0, b0],
+        binding_count: 0,
+        artifacts: [a0, a0, a0, a0, a0, a0, a0, a0, a0, a0, a0, a0, a0, a0, a0, a0],
+        artifact_count: 0,
+        edges: [e0, e0, e0, e0, e0, e0, e0, e0, e0, e0, e0, e0, e0, e0, e0, e0],
+        edge_count: 0,
+    };
+}
+
+// --- Scans ---
+
+fn binding_index(session: types.Session, logical: u64) -> (result: u64) {
+    let binds: [types.Binding; 8] = session.bindings;
+    iterate i over binds carrying slot: u64 = session.binding_count {
+        let hit: bool = i < session.binding_count && binds[i].logical == logical;
+        next slot = select(hit, i, slot);
+    }
+    return slot;
+}
+
+fn latest_generation(session: types.Session, logical: u64) -> (result: u64) {
+    let rows: [types.Definition; 8] = session.defs;
+    iterate i over rows carrying gen: u64 = 0 {
+        let hit: bool = i < session.def_count && rows[i].logical == logical;
+        next gen = select(hit, rows[i].generation, gen);
+    }
+    return gen;
+}
+
+fn latest_hash(session: types.Session, logical: u64) -> (result: u64) {
+    let rows: [types.Definition; 8] = session.defs;
+    iterate i over rows carrying hash: u64 = 0 {
+        let hit: bool = i < session.def_count && rows[i].logical == logical;
+        next hash = select(hit, rows[i].content_hash, hash);
+    }
+    return hash;
+}
+
+// Rows append in global generation order, so the last row for a
+// logical definition is its latest.
+fn has_room_edges(session: types.Session, need: u64) -> (result: bool) {
+    return need <= 16 as u64 -% session.edge_count;
+}
+
+// --- Definition ---
+
+fn insert_dep_edges(session: types.Session, user: u64, deps: [u64; 4], dep_count: u64, kind_code: u64) -> (result: types.Session) {
+    let seed: EdgeFold = EdgeFold { edges: session.edges, count: session.edge_count };
+    iterate k over deps carrying fold: EdgeFold = seed {
+        let live: bool = k < dep_count && k < 4;
+        let edge: types.DepEdge = types.DepEdge { user: user, used: deps[select(live, k, 0 as u64)], kind_code: kind_code };
+        let placed: depends.EdgeInsertOut = depends.insert_edge(fold.edges, fold.count, edge.user, edge.used, edge.kind_code);
+        let take: bool = live && placed.accepted;
+        next fold = EdgeFold {
+            edges: select_edge_fold(take, placed.edges, fold.edges),
+            count: fold.count +% select(take, 1, 0) as u64,
+        };
+    }
+    return types.Session {
+        semantic_generation: session.semantic_generation,
+        proof_generation: session.proof_generation,
+        next_logical: session.next_logical,
+        next_generation: session.next_generation,
+        next_artifact: session.next_artifact,
+        publish_seq: session.publish_seq,
+        closed: session.closed,
+        defs: session.defs,
+        def_count: session.def_count,
+        bindings: session.bindings,
+        binding_count: session.binding_count,
+        artifacts: session.artifacts,
+        artifact_count: session.artifact_count,
+        edges: fold.edges,
+        edge_count: fold.count,
+    };
+}
+
+// Edge-window conditional without a composite-valued select.
+fn select_edge_fold(flag: bool, a: [types.DepEdge; 16], b: [types.DepEdge; 16]) -> (result: [types.DepEdge; 16]) {
+    iterate i over a carrying out: [types.DepEdge; 16] = b {
+        let pick: types.DepEdge = a[i];
+        let keep: types.DepEdge = out[i];
+        next out = replace(out, i, depends.select_binding_edge(flag, pick, keep));
+    }
+    return out;
+}
+
+fn define(session: types.Session, logical: u64, content_hash: u64, change_code: u64, assumption_bits: u64, deps: [u64; 4], dep_count: u64, dep_kind_code: u64) -> (result: DefineOut) {
+    if session.closed {
+        return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 2 };
+    } else {
+    }
+    if logic.bool_not(types.change_is_known(change_code)) {
+        return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 7 };
+    } else {
+    }
+    if dep_count > 0 && logic.bool_not(types.dep_kind_is_known(dep_kind_code)) {
+        return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 7 };
+    } else {
+    }
+    if dep_count > 4 {
+        return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 5 };
+    } else {
+    }
+    if logical == 0 {
+        return define_new(session, content_hash, change_code, assumption_bits, deps, dep_count, dep_kind_code);
+    } else {
+    }
+    return define_redefine(session, logical, content_hash, change_code, assumption_bits, deps, dep_count, dep_kind_code);
+}
+
+fn define_new(session: types.Session, content_hash: u64, change_code: u64, assumption_bits: u64, deps: [u64; 4], dep_count: u64, dep_kind_code: u64) -> (result: DefineOut) {
+    if session.def_count >= 8 {
+        return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 3 };
+    } else {
+    }
+    if session.binding_count >= 8 {
+        return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 3 };
+    } else {
+    }
+    if logic.bool_not(has_room_edges(session, dep_count)) {
+        return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 5 };
+    } else {
+    }
+    let fresh: u64 = session.next_logical;
+    let gen: u64 = session.next_generation;
+    let row: types.Definition = types.Definition {
+        logical: fresh,
+        generation: gen,
+        content_hash: content_hash,
+        change_code: change_code,
+        semantic_generation: session.semantic_generation,
+        proof_generation: session.proof_generation,
+        assumption_bits: assumption_bits,
+        dep_count: dep_count,
+    };
+    let bind: types.Binding = types.Binding {
+        logical: fresh,
+        generation: gen,
+        artifact: 0,
+        previous_generation: 0,
+        previous_artifact: 0,
+        state_code: 1,
+        stale_reason: 0,
+    };
+    let grown: types.Session = types.Session {
+        semantic_generation: session.semantic_generation,
+        proof_generation: session.proof_generation,
+        next_logical: session.next_logical +% 1,
+        next_generation: session.next_generation +% 1,
+        next_artifact: session.next_artifact,
+        publish_seq: session.publish_seq,
+        closed: session.closed,
+        defs: replace(session.defs, session.def_count, row),
+        def_count: session.def_count +% 1,
+        bindings: replace(session.bindings, session.binding_count, bind),
+        binding_count: session.binding_count +% 1,
+        artifacts: session.artifacts,
+        artifact_count: session.artifact_count,
+        edges: session.edges,
+        edge_count: session.edge_count,
+    };
+    let placed: types.Session = insert_dep_edges(grown, fresh, deps, dep_count, dep_kind_code);
+    return DefineOut { session: placed, logical: fresh, generation: gen, accepted: true, reason: 0 };
+}
+
+fn define_redefine(session: types.Session, logical: u64, content_hash: u64, change_code: u64, assumption_bits: u64, deps: [u64; 4], dep_count: u64, dep_kind_code: u64) -> (result: DefineOut) {
+    let slot: u64 = binding_index(session, logical);
+    if slot >= session.binding_count {
+        return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 6 };
+    } else {
+    }
+    if latest_hash(session, logical) == content_hash {
+        return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 4 };
+    } else {
+    }
+    if session.def_count >= 8 {
+        return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 3 };
+    } else {
+    }
+    if logic.bool_not(has_room_edges(session, dep_count)) {
+        return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 5 };
+    } else {
+    }
+    let gen: u64 = session.next_generation;
+    let row: types.Definition = types.Definition {
+        logical: logical,
+        generation: gen,
+        content_hash: content_hash,
+        change_code: change_code,
+        semantic_generation: session.semantic_generation,
+        proof_generation: session.proof_generation,
+        assumption_bits: assumption_bits,
+        dep_count: dep_count,
+    };
+    let binds: [types.Binding; 8] = session.bindings;
+    let cur: types.Binding = binds[slot];
+    let moved: types.Binding = types.Binding {
+        logical: logical,
+        generation: gen,
+        artifact: 0,
+        previous_generation: cur.generation,
+        previous_artifact: cur.artifact,
+        state_code: 1,
+        stale_reason: 1,
+    };
+    let grown: types.Session = types.Session {
+        semantic_generation: session.semantic_generation,
+        proof_generation: session.proof_generation,
+        next_logical: session.next_logical,
+        next_generation: session.next_generation +% 1,
+        next_artifact: session.next_artifact,
+        publish_seq: session.publish_seq,
+        closed: session.closed,
+        defs: replace(session.defs, session.def_count, row),
+        def_count: session.def_count +% 1,
+        bindings: replace(binds, slot, moved),
+        binding_count: session.binding_count,
+        artifacts: session.artifacts,
+        artifact_count: session.artifact_count,
+        edges: session.edges,
+        edge_count: session.edge_count,
+    };
+    let placed: types.Session = insert_dep_edges(grown, logical, deps, dep_count, dep_kind_code);
+    let staled: depends.StaleOut = depends.stale_bindings(placed.edges, placed.edge_count, placed.bindings, placed.binding_count, logical, change_code);
+    let done: types.Session = types.Session {
+        semantic_generation: placed.semantic_generation,
+        proof_generation: placed.proof_generation,
+        next_logical: placed.next_logical,
+        next_generation: placed.next_generation,
+        next_artifact: placed.next_artifact,
+        publish_seq: placed.publish_seq,
+        closed: placed.closed,
+        defs: placed.defs,
+        def_count: placed.def_count,
+        bindings: staled.bindings,
+        binding_count: placed.binding_count,
+        artifacts: placed.artifacts,
+        artifact_count: placed.artifact_count,
+        edges: placed.edges,
+        edge_count: placed.edge_count,
+    };
+    return DefineOut { session: done, logical: logical, generation: gen, accepted: true, reason: 1 };
+}
+
+// --- Era advance ---
+
+fn advance_proof(session: types.Session) -> (result: types.Session) {
+    return types.Session {
+        semantic_generation: session.semantic_generation,
+        proof_generation: session.proof_generation +% 1,
+        next_logical: session.next_logical,
+        next_generation: session.next_generation,
+        next_artifact: session.next_artifact,
+        publish_seq: session.publish_seq,
+        closed: session.closed,
+        defs: session.defs,
+        def_count: session.def_count,
+        bindings: session.bindings,
+        binding_count: session.binding_count,
+        artifacts: session.artifacts,
+        artifact_count: session.artifact_count,
+        edges: session.edges,
+        edge_count: session.edge_count,
+    };
+}
+
+fn advance_semantic(session: types.Session) -> (result: types.Session) {
+    return types.Session {
+        semantic_generation: session.semantic_generation +% 1,
+        proof_generation: session.proof_generation,
+        next_logical: session.next_logical,
+        next_generation: session.next_generation,
+        next_artifact: session.next_artifact,
+        publish_seq: session.publish_seq,
+        closed: session.closed,
+        defs: session.defs,
+        def_count: session.def_count,
+        bindings: session.bindings,
+        binding_count: session.binding_count,
+        artifacts: session.artifacts,
+        artifact_count: session.artifact_count,
+        edges: session.edges,
+        edge_count: session.edge_count,
+    };
+}
+
+// --- Close ---
+
+record CloseFold {
+    bindings: [types.Binding; 8],
+}
+
+fn close(session: types.Session) -> (result: types.Session) {
+    let retired: lifecycle.RetireOut = lifecycle.retire_window(session.artifacts, session.artifact_count);
+    let seed: CloseFold = CloseFold { bindings: session.bindings };
+    iterate i over session.bindings carrying fold: CloseFold = seed {
+        let live: bool = i < session.binding_count;
+        let b: types.Binding = fold.bindings[i];
+        let shut: types.Binding = types.Binding {
+            logical: b.logical,
+            generation: b.generation,
+            artifact: b.artifact,
+            previous_generation: b.previous_generation,
+            previous_artifact: b.previous_artifact,
+            state_code: select(live, 2, b.state_code),
+            stale_reason: b.stale_reason,
+        };
+        next fold = CloseFold { bindings: replace(fold.bindings, i, shut) };
+    }
+    return types.Session {
+        semantic_generation: session.semantic_generation,
+        proof_generation: session.proof_generation,
+        next_logical: session.next_logical,
+        next_generation: session.next_generation,
+        next_artifact: session.next_artifact,
+        publish_seq: session.publish_seq,
+        closed: true,
+        defs: session.defs,
+        def_count: session.def_count,
+        bindings: fold.bindings,
+        binding_count: session.binding_count,
+        artifacts: retired.artifacts,
+        artifact_count: session.artifact_count,
+        edges: session.edges,
+        edge_count: session.edge_count,
+    };
+}
+
+// --- Introspection ---
+
+fn session_counts(session: types.Session) -> (result: Counts) {
+    return Counts {
+        defs: session.def_count,
+        bindings: session.binding_count,
+        artifacts: session.artifact_count,
+        edges: session.edge_count,
+        semantic_generation: session.semantic_generation,
+        proof_generation: session.proof_generation,
+        publish_seq: session.publish_seq,
+        closed: session.closed,
+    };
+}
+
+fn binding_of(session: types.Session, logical: u64) -> (result: BindingQuery) {
+    let slot: u64 = binding_index(session, logical);
+    let found: bool = slot < session.binding_count;
+    let b: types.Binding = session.bindings[select(found, slot, 0)];
+    return BindingQuery {
+        found: found,
+        generation: select(found, b.generation, 0),
+        artifact: select(found, b.artifact, 0),
+        state_code: select(found, b.state_code, 0),
+        stale_reason: select(found, b.stale_reason, 0),
+    };
+}
+
+fn artifact_of(session: types.Session, code: u64) -> (result: ArtifactQuery) {
+    let arts: [types.Executable; 16] = session.artifacts;
+    iterate i over arts carrying slot: u64 = session.artifact_count {
+        let hit: bool = i < session.artifact_count && arts[i].code == code;
+        next slot = select(hit, i, slot);
+    }
+    let found: bool = slot < session.artifact_count;
+    let a: types.Executable = arts[select(found, slot, 0)];
+    return ArtifactQuery {
+        found: found,
+        logical: select(found, a.logical, 0),
+        generation: select(found, a.generation, 0),
+        lifecycle_code: select(found, a.lifecycle_code, 0),
+        provider_code: select(found, a.provider_code, 0),
+        publish_seq: select(found, a.publish_seq, 0),
+    };
+}
+
+fn definition_proof(session: types.Session, logical: u64, generation: u64) -> (result: ProofQuery) {
+    let rows: [types.Definition; 8] = session.defs;
+    iterate i over rows carrying slot: u64 = session.def_count {
+        let hit: bool = i < session.def_count && rows[i].logical == logical && rows[i].generation == generation;
+        next slot = select(hit, i, slot);
+    }
+    let found: bool = slot < session.def_count;
+    let row: types.Definition = rows[select(found, slot, 0)];
+    return ProofQuery {
+        found: found,
+        semantic_generation: select(found, row.semantic_generation, 0),
+        proof_generation: select(found, row.proof_generation, 0),
+        assumption_bits: select(found, row.assumption_bits, 0),
+    };
+}
+
+// --- Executable entry points (scalar shapes for backend corpora) ---
+
+fn no_deps() -> (result: [u64; 4]) {
+    return [0, 0, 0, 0];
+}
+
+// Create then define one BodyOnly definition: logical 1,
+// generation 1, accepted, reason 0; counts 1/1/0/0.
+fn candidate_create_define() -> (result: i64) {
+    let s0: types.Session = create();
+    let d1: DefineOut = define(s0, 0, 100, 0, 0, no_deps(), 0, 0);
+    let c: Counts = session_counts(d1.session);
+    return d1.logical as i64 *% 100000000
+        +% d1.generation as i64 *% 1000000
+        +% select(d1.accepted, 100000, 0) as i64
+        +% d1.reason as i64 *% 10000
+        +% c.defs as i64 *% 1000
+        +% c.bindings as i64 *% 100
+        +% c.artifacts as i64 *% 10
+        +% c.edges as i64;
+}
+
+// Redefine with new content: generation 2, reason 1; the binding
+// goes Stale(1) with reason 1; resubmitting the same hash is a
+// duplicate (reason 4); unknown logical is rejected (reason 6).
+fn candidate_redefine_flow() -> (result: i64) {
+    let s0: types.Session = create();
+    let d1: DefineOut = define(s0, 0, 100, 0, 0, no_deps(), 0, 0);
+    let d2: DefineOut = define(d1.session, 1, 200, 1, 0, no_deps(), 0, 0);
+    let q: BindingQuery = binding_of(d2.session, 1);
+    let dup: DefineOut = define(d2.session, 1, 200, 1, 0, no_deps(), 0, 0);
+    let ghost: DefineOut = define(d2.session, 99, 300, 0, 0, no_deps(), 0, 0);
+    return d2.generation as i64 *% 100000000
+        +% d2.reason as i64 *% 10000000
+        +% q.state_code as i64 *% 1000000
+        +% q.stale_reason as i64 *% 100000
+        +% dup.reason as i64 *% 10000
+        +% select(dup.accepted, 1000, 0) as i64
+        +% ghost.reason as i64 *% 100
+        +% latest_generation(d2.session, 1) as i64;
+}
+
+// Guard matrix: define on a closed session (2), unknown change (7),
+// dependency window overflow (5), unknown dep kind (7).
+fn candidate_guards() -> (result: i64) {
+    let s0: types.Session = create();
+    let shut: types.Session = close(s0);
+    let on_closed: DefineOut = define(shut, 0, 100, 0, 0, no_deps(), 0, 0);
+    let bad_change: DefineOut = define(s0, 0, 100, 9, 0, no_deps(), 0, 0);
+    let wide: DefineOut = define(s0, 0, 100, 0, 0, [2, 3, 4, 5], 5, 0);
+    let bad_kind: DefineOut = define(s0, 0, 100, 0, 0, [2, 0, 0, 0], 1, 9);
+    return on_closed.reason as i64 *% 1000 +% bad_change.reason as i64 *% 100 +% wide.reason as i64 *% 10 +% bad_kind.reason as i64;
+}
+
+// Era advance bumps each axis independently; close freezes the
+// session, retires bindings, and stays idempotent.
+fn candidate_era_close() -> (result: i64) {
+    let s0: types.Session = create();
+    let s1: types.Session = advance_proof(s0);
+    let s2: types.Session = advance_semantic(s1);
+    let d1: DefineOut = define(s2, 0, 100, 0, 0, no_deps(), 0, 0);
+    let shut: types.Session = close(d1.session);
+    let shut2: types.Session = close(shut);
+    let c: Counts = session_counts(shut2);
+    let q: BindingQuery = binding_of(shut2, 1);
+    return s1.proof_generation as i64 *% 100000000
+        +% s2.semantic_generation as i64 *% 10000000
+        +% select(c.closed, 1000000, 0) as i64
+        +% q.state_code as i64 *% 100000
+        +% c.publish_seq as i64 *% 10000
+        +% c.defs as i64;
+}

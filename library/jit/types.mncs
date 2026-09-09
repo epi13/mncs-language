@@ -1,0 +1,451 @@
+mncs 0.10;
+
+// mncs.jit.types — shared vocabulary for the MNCS-native JIT/execution
+// orchestration layer.
+//
+// This module owns the concept tables every other `mncs.jit.*` module
+// builds on: providers, artifact lifecycles, execution tiers, change and
+// dependency kinds, invalidation verdicts, binding validity, proof
+// references, and the persistent session tables (definitions, logical
+// bindings, compiled artifacts, dependency edges).
+//
+// BOUNDARY CONVENTION (host-assigned codes, the `token_set` pattern):
+// records at rest carry u64 codes, never enum values, so cross-module
+// construction and corpus boundaries stay scalar. The enums below are
+// the checked vocabulary: converters live in this same module (where
+// match exhaustiveness is verified), and every other module reads codes
+// through `*_code` helpers or writes them through guarded `*_of`
+// converters plus explicit `*_is_known` checks. Unknown codes always
+// fail closed at the call site; they never reinterpret as a valid kind.
+//
+// Code tables (stable; a future `mncs-jit` extraction keeps these codes):
+//   Provider   0 Reference (direct execution) | 1 Cranelift | 2 LLVM | 3 Native
+//   Lifecycle  0 Empty | 1 Compiled | 2 Published | 3 Active | 4 Retired
+//   Tier       0 Cold | 1 Warm | 2 Hot
+//   ChangeKind 0 BodyOnly | 1 Signature | 2 Contract
+//   DepKind    0 Call | 1 Signature | 2 Layout
+//   DepVerdict 0 Unaffected | 1 ValidRoutesNew | 2 RequiresRecompile
+//   Validity   0 Valid | 1 Stale | 2 Retired
+//   Workload   0 OneShot | 1 Interactive | 2 HotStable | 3 Accelerator
+//
+// Table capacities (bounded, explicit-full verdicts, never silent loss):
+//   definitions <= 8 source generations (history is retained)
+//   bindings    <= 8 logical definitions
+//   artifacts   <= 16 executable generations
+//   edges       <= 16 dependency edges
+//   define-time dependency window <= 4 edges per call
+//
+// Complexity bounds: every predicate is O(1); converters are O(1);
+// table scans in other modules are bounded by the capacities above.
+// No operation allocates; every function is total over its domain.
+module mncs.jit.types.v1;
+
+use mncs.core.logic.v1 as logic;
+
+// Execution providers. Reference and Cranelift are implemented;
+// LLVM and Native exist as first-class future provider classes so
+// policy code can name them without faking execution (selection of an
+// unimplemented provider is an explicit deferred verdict, never a
+// silent substitution).
+enum Provider { Reference, Cranelift, Llvm, Native }
+
+// Provider-neutral artifact lifecycle. Retired is terminal: a retired
+// artifact can never become active again, even if it is still alive in
+// provider memory (see `mncs.jit.lifecycle.v1`).
+enum Lifecycle { Empty, Compiled, Published, Active, Retired }
+
+// Execution tier advisory state. Thresholds are policy parameters at
+// the call site, never hard-coded here.
+enum Tier { Cold, Warm, Hot }
+
+// What changed about a definition. Only BodyOnly leaves dependents
+// untouched; Signature and Contract changes force dependent review.
+enum ChangeKind { BodyOnly, Signature, Contract }
+
+// What a dependency edge observes. Call edges break only when the
+// used definition's callable behavior changes; Signature edges break
+// on signature change; Layout edges break on contract change.
+enum DepKind { Call, Signature, Layout }
+
+// Per-dependent invalidation verdict. Unaffected keeps routing;
+// ValidRoutesNew keeps the current binding (no recompile) while new
+// calls pick up the new generation once published; RequiresRecompile
+// marks the dependent binding stale until it is rebuilt.
+enum DepVerdict { Unaffected, ValidRoutesNew, RequiresRecompile }
+
+// Logical binding state. Stale bindings never resolve to an artifact;
+// Retired bindings belong to a closed session.
+enum Validity { Valid, Stale, Retired }
+
+// Workload classes for provider selection. Accelerator has no
+// provider yet: selecting for it is an explicit unsupported verdict.
+enum Workload { OneShot, Interactive, HotStable, Accelerator }
+
+// Proof/execution metadata carried by every definition and every
+// compiled artifact. Generations are session counters, not wall time;
+// assumption_bits is an opaque kernel-owned bitmap the JIT compares
+// for equality but never interprets.
+record ProofRef { semantic_generation: u64, proof_generation: u64, assumption_bits: u64 }
+
+// One source generation of a logical definition. History rows are
+// never mutated: redefinition appends a new row.
+record Definition {
+    logical: u64,
+    generation: u64,
+    content_hash: u64,
+    change_code: u64,
+    semantic_generation: u64,
+    proof_generation: u64,
+    assumption_bits: u64,
+    dep_count: u64,
+}
+
+// Logical binding: which executable generation of a logical
+// definition is currently selected, plus the previous selection for
+// explicit rollback when a new generation fails to publish.
+record Binding {
+    logical: u64,
+    generation: u64,
+    artifact: u64,
+    previous_generation: u64,
+    previous_artifact: u64,
+    state_code: u64,
+    stale_reason: u64,
+}
+
+// One compiled executable generation. `code` is the MNCS-assigned
+// artifact identity; provider memory is keyed by it host-side.
+// `publish_seq` orders publications deterministically.
+record Executable {
+    code: u64,
+    logical: u64,
+    generation: u64,
+    provider_code: u64,
+    lifecycle_code: u64,
+    semantic_generation: u64,
+    proof_generation: u64,
+    assumption_bits: u64,
+    compile_ms: u64,
+    publish_seq: u64,
+}
+
+// Dependency edge: `user` depends on `used` through `kind_code`.
+record DepEdge { user: u64, used: u64, kind_code: u64 }
+
+// Persistent JIT session value. The host threads this value between
+// calls (the `task` pattern); the language never hides state in an
+// ambient store. `closed` freezes the session: every mutating entry
+// point rejects a closed session with the value unchanged.
+record Session {
+    semantic_generation: u64,
+    proof_generation: u64,
+    next_logical: u64,
+    next_generation: u64,
+    next_artifact: u64,
+    publish_seq: u64,
+    closed: bool,
+    defs: [Definition; 8],
+    def_count: u64,
+    bindings: [Binding; 8],
+    binding_count: u64,
+    artifacts: [Executable; 16],
+    artifact_count: u64,
+    edges: [DepEdge; 16],
+    edge_count: u64,
+}
+
+// --- Provider converters and predicates ---
+
+fn provider_of(code: u64) -> (result: Provider) {
+    if code == 1 {
+        return Provider.Cranelift;
+    }
+    if code == 2 {
+        return Provider.Llvm;
+    }
+    if code == 3 {
+        return Provider.Native;
+    }
+    return Provider.Reference;
+}
+
+fn provider_code(p: Provider) -> (result: u64) {
+    return match p {
+        Reference => 0,
+        Cranelift => 1,
+        Llvm => 2,
+        Native => 3,
+    };
+}
+
+fn provider_is_known(code: u64) -> (result: bool) {
+    return code <= 3;
+}
+
+// Only Reference and Cranelift execute today. LLVM and Native are
+// named future classes; routing to them must go through the plan
+// layer's explicit deferred verdict.
+fn provider_is_implemented(code: u64) -> (result: bool) {
+    return code == 0 || code == 1;
+}
+
+fn provider_is_native(code: u64) -> (result: bool) {
+    return code == 1 || code == 2 || code == 3;
+}
+
+// --- Lifecycle converters and predicates ---
+
+fn lifecycle_of(code: u64) -> (result: Lifecycle) {
+    if code == 1 {
+        return Lifecycle.Compiled;
+    }
+    if code == 2 {
+        return Lifecycle.Published;
+    }
+    if code == 3 {
+        return Lifecycle.Active;
+    }
+    if code == 4 {
+        return Lifecycle.Retired;
+    }
+    return Lifecycle.Empty;
+}
+
+fn lifecycle_code(l: Lifecycle) -> (result: u64) {
+    return match l {
+        Empty => 0,
+        Compiled => 1,
+        Published => 2,
+        Active => 3,
+        Retired => 4,
+    };
+}
+
+fn lifecycle_is_known(code: u64) -> (result: bool) {
+    return code <= 4;
+}
+
+// Live artifacts occupy provider memory and may still be published
+// or invoked; only Active artifacts serve new calls through bindings.
+fn lifecycle_is_live(code: u64) -> (result: bool) {
+    return code == 1 || code == 2 || code == 3;
+}
+
+fn lifecycle_is_terminal(code: u64) -> (result: bool) {
+    return code == 4;
+}
+
+// --- Tier converters ---
+
+fn tier_of(code: u64) -> (result: Tier) {
+    if code == 1 {
+        return Tier.Warm;
+    }
+    if code == 2 {
+        return Tier.Hot;
+    }
+    return Tier.Cold;
+}
+
+fn tier_code(t: Tier) -> (result: u64) {
+    return match t {
+        Cold => 0,
+        Warm => 1,
+        Hot => 2,
+    };
+}
+
+fn tier_is_known(code: u64) -> (result: bool) {
+    return code <= 2;
+}
+
+// --- Change-kind converters and policy ---
+
+fn change_of(code: u64) -> (result: ChangeKind) {
+    if code == 1 {
+        return ChangeKind.Signature;
+    }
+    if code == 2 {
+        return ChangeKind.Contract;
+    }
+    return ChangeKind.BodyOnly;
+}
+
+fn change_code(c: ChangeKind) -> (result: u64) {
+    return match c {
+        BodyOnly => 0,
+        Signature => 1,
+        Contract => 2,
+    };
+}
+
+fn change_is_known(code: u64) -> (result: bool) {
+    return code <= 2;
+}
+
+// Only body-only changes leave dependents untouched. Signature and
+// contract changes force dependent review; the edge kind then decides
+// between ValidRoutesNew and RequiresRecompile.
+fn change_forces_dependent_review(code: u64) -> (result: bool) {
+    return code == 1 || code == 2;
+}
+
+// --- Dependency-kind converters ---
+
+fn dep_kind_of(code: u64) -> (result: DepKind) {
+    if code == 1 {
+        return DepKind.Signature;
+    }
+    if code == 2 {
+        return DepKind.Layout;
+    }
+    return DepKind.Call;
+}
+
+fn dep_kind_code(k: DepKind) -> (result: u64) {
+    return match k {
+        Call => 0,
+        Signature => 1,
+        Layout => 2,
+    };
+}
+
+fn dep_kind_is_known(code: u64) -> (result: bool) {
+    return code <= 2;
+}
+
+// --- Verdict and validity converters ---
+
+fn verdict_code(v: DepVerdict) -> (result: u64) {
+    return match v {
+        Unaffected => 0,
+        ValidRoutesNew => 1,
+        RequiresRecompile => 2,
+    };
+}
+
+fn verdict_requires_recompile(code: u64) -> (result: bool) {
+    return code == 2;
+}
+
+fn validity_of(code: u64) -> (result: Validity) {
+    if code == 1 {
+        return Validity.Stale;
+    }
+    if code == 2 {
+        return Validity.Retired;
+    }
+    return Validity.Valid;
+}
+
+fn validity_code(v: Validity) -> (result: u64) {
+    return match v {
+        Valid => 0,
+        Stale => 1,
+        Retired => 2,
+    };
+}
+
+fn validity_is_known(code: u64) -> (result: bool) {
+    return code <= 2;
+}
+
+// --- Workload converters ---
+
+fn workload_of(code: u64) -> (result: Workload) {
+    if code == 1 {
+        return Workload.Interactive;
+    }
+    if code == 2 {
+        return Workload.HotStable;
+    }
+    if code == 3 {
+        return Workload.Accelerator;
+    }
+    return Workload.OneShot;
+}
+
+fn workload_code(w: Workload) -> (result: u64) {
+    return match w {
+        OneShot => 0,
+        Interactive => 1,
+        HotStable => 2,
+        Accelerator => 3,
+    };
+}
+
+fn workload_is_known(code: u64) -> (result: bool) {
+    return code <= 3;
+}
+
+// --- Executable entry points (scalar shapes for backend corpora) ---
+
+// Provider table: implemented and native bits over codes 0..3 with
+// weights 8/4/2/1. Implemented = codes {0, 1} -> 12; native =
+// codes {1, 2, 3} -> 7; packed 12 *% 16 +% 7 = 199.
+fn candidate_provider_table() -> (result: i64) {
+    let impl_pack: u64 = select(provider_is_implemented(0), 8, 0) as u64
+        +% select(provider_is_implemented(1), 4, 0) as u64
+        +% select(provider_is_implemented(2), 2, 0) as u64
+        +% select(provider_is_implemented(3), 1, 0) as u64;
+    let nat_pack: u64 = select(provider_is_native(0), 8, 0) as u64
+        +% select(provider_is_native(1), 4, 0) as u64
+        +% select(provider_is_native(2), 2, 0) as u64
+        +% select(provider_is_native(3), 1, 0) as u64;
+    return impl_pack as i64 *% 16 +% nat_pack as i64;
+}
+
+// Lifecycle table: live bits over codes 0..4 (Compiled/Published/
+// Active = 01110 = 14) plus terminal bit for Retired (1): 14*2+1=29.
+fn candidate_lifecycle_table() -> (result: i64) {
+    let live: u64 = select(lifecycle_is_live(0), 16, 0) as u64
+        +% select(lifecycle_is_live(1), 8, 0) as u64
+        +% select(lifecycle_is_live(2), 4, 0) as u64
+        +% select(lifecycle_is_live(3), 2, 0) as u64
+        +% select(lifecycle_is_live(4), 1, 0) as u64;
+    return live as i64 *% 2 +% select(lifecycle_is_terminal(4), 1, 0) as i64;
+}
+
+// Change policy: review bits over BodyOnly/Signature/Contract
+// (011 = 3) and recompile-require bits (RequiresRecompile is code 2:
+// verdict_requires_recompile over 0/1/2 = 001 = 1): 3*4+1 = 13.
+fn candidate_change_policy() -> (result: i64) {
+    let review: u64 = select(change_forces_dependent_review(0), 4, 0) as u64
+        +% select(change_forces_dependent_review(1), 2, 0) as u64
+        +% select(change_forces_dependent_review(2), 1, 0) as u64;
+    let recomp: u64 = select(verdict_requires_recompile(0), 4, 0) as u64
+        +% select(verdict_requires_recompile(1), 2, 0) as u64
+        +% select(verdict_requires_recompile(2), 1, 0) as u64;
+    return review as i64 *% 4 +% recomp as i64;
+}
+
+// Converter round-trips: every *_of(*_code(x)) is the identity over
+// the known domain. Pack of eight round-trip bits, all set: 255.
+fn candidate_codes_roundtrip() -> (result: i64) {
+    let ok_provider: bool = provider_code(provider_of(0)) == 0
+        && provider_code(provider_of(1)) == 1
+        && provider_code(provider_of(2)) == 2
+        && provider_code(provider_of(3)) == 3;
+    let ok_lifecycle: bool = lifecycle_code(lifecycle_of(0)) == 0
+        && lifecycle_code(lifecycle_of(4)) == 4;
+    let ok_tier: bool = tier_code(tier_of(0)) == 0 && tier_code(tier_of(2)) == 2;
+    let ok_change: bool = change_code(change_of(0)) == 0 && change_code(change_of(2)) == 2;
+    let ok_dep: bool = dep_kind_code(dep_kind_of(0)) == 0 && dep_kind_code(dep_kind_of(2)) == 2;
+    let ok_validity: bool = validity_code(validity_of(1)) == 1;
+    let ok_workload: bool = workload_code(workload_of(3)) == 3;
+    let ok_known: bool = provider_is_known(3)
+        && logic.bool_not(provider_is_known(4))
+        && lifecycle_is_known(4)
+        && logic.bool_not(lifecycle_is_known(5))
+        && workload_is_known(0)
+        && logic.bool_not(workload_is_known(9));
+    let pack: u64 = select(ok_provider, 128, 0) as u64
+        +% select(ok_lifecycle, 64, 0) as u64
+        +% select(ok_tier, 32, 0) as u64
+        +% select(ok_change, 16, 0) as u64
+        +% select(ok_dep, 8, 0) as u64
+        +% select(ok_validity, 4, 0) as u64
+        +% select(ok_workload, 2, 0) as u64
+        +% select(ok_known, 1, 0) as u64;
+    return pack as i64;
+}

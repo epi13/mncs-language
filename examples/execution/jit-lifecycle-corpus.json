@@ -1,0 +1,75 @@
+{
+ "schema_version": "0.1",
+ "name": "jit-lifecycle",
+ "cases": [
+  {
+   "id": "transition-matrix",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.lifecycle.v1",
+     "function": "candidate_matrix"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 8555680,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "retire-window",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.lifecycle.v1",
+     "function": "candidate_retire_window"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2040404,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unknown-closed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.lifecycle.v1",
+     "function": "candidate_unknown_closed"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

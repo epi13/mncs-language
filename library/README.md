@@ -117,6 +117,14 @@ resolution provenance.
 | `core/proof_check.mncs` | `mncs.core.proof_check.v1` (Profile 0.10) | the MNCS-native proof kernel: single forward pass deciding well-formedness, universes, typing, and closed definitional equality to `PASS`/`FAIL`/`UNKNOWN`; dependent application, dependent motives, and open terms stay `UNKNOWN`, never `PASS` |
 | `family/rfc_status.mncs` | `mncs.family.rfc_status.v1` (Profile 0.10) | MNCS-native RFC status gates: `gate_experimental`/`gate_implemented` over criterion tallies plus evidence flags, and `transition_allowed` (upgrades need `PASS`, downgrades always pass); the RFC 0007 tally executes here |
 | `family/journal.mncs` | `mncs.family.journal.v1` (Profile 0.10) | MNCS-native Journal admission policy: bounded 16-kind event vocabulary, `gate_admit` over evidence tallies, `admission_decision` (duplicates and model-only claims rejected), stepwise `trust_transition` with legacy quarantine, lineage-delegated `chain_ok`, constantly-false `model_may_admit`, and the `may_render_public` redaction guard |
+| `jit/types.mncs` | `mncs.jit.types.v1` (Profile 0.10) | JIT execution vocabulary: Provider/Lifecycle/Tier/ChangeKind/DepKind/DepVerdict/Validity/Workload enums with u64 code converters, Session/Definition/Binding/Executable/DepEdge tables (8/8/16/16), host-assigned-code boundary convention |
+| `jit/session.mncs` | `mncs.jit.session.v1` (Profile 0.10) | persistent JIT session value: create/define (new + redefine with duplicate/overflow/closed guards), dependent staleness via `depends`, era advance, idempotent close, introspection getters |
+| `jit/binding.mncs` | `mncs.jit.binding.v1` (Profile 0.10) | generational publication: note_compiled/publish (owner, generation, lifecycle, proof-era checks), atomic binding swing with supersession demotion, abandon rollback, artifact retirement, resolve with proof currency |
+| `jit/depends.mncs` | `mncs.jit.depends.v1` (Profile 0.10) | dependency edges with explicit invalidation policy matrix (BodyOnly/Signature/Contract x Call/Signature/Layout), transitive escalation, bounded closure, stale application over binding windows |
+| `jit/lifecycle.mncs` | `mncs.jit.lifecycle.v1` (Profile 0.10) | provider-neutral artifact lifecycle table (Retired terminal), retire_window for session close |
+| `jit/plan.mncs` | `mncs.jit.plan.v1` (Profile 0.10) | provider-neutral execution planning: workload-class selection with degraded-route and accelerator-refusal verdicts, parameterized tier policy, plan validation |
+| `jit/profile.mncs` | `mncs.jit.profile.v1` (Profile 0.10) | saturating execution observations (calls, exec/compile millis, means, steady-state hooks) for future adaptive tiering |
+| `jit/proof.mncs` | `mncs.jit.proof.v1` (Profile 0.10) | proof-aware execution metadata: era currency, exact assumption match, dual-key (micro-verifier + kernel) specialization admission |
 
 ## Current module boundary
 

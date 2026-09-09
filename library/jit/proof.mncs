@@ -1,0 +1,114 @@
+mncs 0.10;
+
+// mncs.jit.proof — proof-aware execution metadata for the MNCS-native
+// JIT orchestration layer.
+//
+// Proof information is intrinsic execution metadata, not a bolt-on:
+// every definition row and every compiled artifact carries the
+// (semantic_generation, proof_generation, assumption_bits) triple
+// under which it was validated, and publication refuses artifacts
+// whose triple no longer matches the session's current era.
+//
+// The model is deliberately exact-match in this first step:
+// assumption_bits compare for equality and never interpret
+// kernel-owned bitmaps. Subset/capability reasoning is future work
+// (recorded as pressure, not approximated here).
+//
+// The specialization flow is represented, not executed:
+//   runtime observation -> candidate specialization
+//     -> micro-verifier -> proof kernel validation
+//     -> new executable generation.
+// `admit_specialization` takes the micro-verifier and kernel verdicts
+// as explicit evidence parameters: a specialization is admitted only
+// when both accept. There is no path that admits an unvalidated
+// specialization, and no speculative unsafe optimization exists to
+// demonstrate tiering.
+//
+// INVALIDATION FLOW: when the proof era advances (session
+// `advance_proof`), artifacts bound to the old triple fail
+// `artifact_proof_valid`; bindings over them report proof-stale at
+// resolve time, so the driver falls back, recompiles, or retires
+// them through the ordinary lifecycle transitions.
+//
+// Complexity bounds: every check is O(1). No operation allocates;
+// every function is total.
+module mncs.jit.proof.v1;
+
+use mncs.core.logic.v1 as logic;
+
+// True when a (semantic, proof) pair validated `then` still matches
+// the session era `now`. Assumption bits compare separately so
+// callers can distinguish era drift from assumption drift.
+fn proof_current(sem_then: u64, proof_then: u64, sem_now: u64, proof_now: u64) -> (result: bool) {
+    return sem_then == sem_now && proof_then == proof_now;
+}
+
+// Exact assumption match. Subset semantics are future work; an
+// inexact match today is invalid, never silently narrowed.
+fn assumptions_match(art_bits: u64, required_bits: u64) -> (result: bool) {
+    return art_bits == required_bits;
+}
+
+// Full artifact proof check: era currency plus exact assumptions.
+// This is the predicate publication enforces.
+fn artifact_proof_valid(art_sem: u64, art_proof: u64, art_bits: u64, sess_sem: u64, sess_proof: u64, required_bits: u64) -> (result: bool) {
+    return proof_current(art_sem, art_proof, sess_sem, sess_proof) && assumptions_match(art_bits, required_bits);
+}
+
+record Specialization {
+    base_generation: u64,
+    assumption_bits: u64,
+    validated: bool,
+}
+
+// Admit a candidate specialization only on dual evidence: the
+// micro-verifier accepts the candidate AND the proof kernel
+// validates it. Either refusal leaves it unvalidated; the record
+// still carries the evidence for introspection.
+fn admit_specialization(base_generation: u64, assumption_bits: u64, verifier_accepted: bool, kernel_accepted: bool) -> (result: Specialization) {
+    return Specialization {
+        base_generation: base_generation,
+        assumption_bits: assumption_bits,
+        validated: verifier_accepted && kernel_accepted,
+    };
+}
+
+// --- Executable entry points (scalar shapes for backend corpora) ---
+
+// Era matrix: same era valid; proof drift, semantic drift, and
+// assumption drift each invalid; combined drift invalid.
+fn candidate_era_matrix() -> (result: i64) {
+    let same: bool = artifact_proof_valid(3, 7, 11, 3, 7, 11);
+    let proof_drift: bool = artifact_proof_valid(3, 7, 11, 3, 8, 11);
+    let sem_drift: bool = artifact_proof_valid(3, 7, 11, 4, 7, 11);
+    let bits_drift: bool = artifact_proof_valid(3, 7, 11, 3, 7, 12);
+    let all_drift: bool = artifact_proof_valid(3, 7, 11, 4, 8, 12);
+    return select(same, 10000, 0) as i64
+        +% select(proof_drift, 1000, 0) as i64
+        +% select(sem_drift, 100, 0) as i64
+        +% select(bits_drift, 10, 0) as i64
+        +% select(all_drift, 1, 0) as i64;
+}
+
+// Dual-key admission: both accept -> validated; either refusal ->
+// unvalidated; evidence (base, bits) always carried.
+fn candidate_dual_key() -> (result: i64) {
+    let full: Specialization = admit_specialization(5, 9, true, true);
+    let no_verifier: Specialization = admit_specialization(5, 9, false, true);
+    let no_kernel: Specialization = admit_specialization(5, 9, true, false);
+    let neither: Specialization = admit_specialization(5, 9, false, false);
+    return select(full.validated, 1000, 0) as i64
+        +% select(no_verifier.validated, 100, 0) as i64
+        +% select(no_kernel.validated, 10, 0) as i64
+        +% select(neither.validated, 1, 0) as i64
+        +% full.base_generation as i64 *% 10000
+        +% full.assumption_bits as i64 *% 100000;
+}
+
+// proof_current distinguishes the two era axes independently.
+fn candidate_axes() -> (result: i64) {
+    let both: bool = proof_current(1, 2, 1, 2);
+    let sem_only: bool = proof_current(1, 2, 9, 2);
+    let proof_only: bool = proof_current(1, 2, 1, 9);
+    return select(both, 100, 0) as i64 +% select(sem_only, 10, 0) as i64 +% select(proof_only, 1, 0) as i64;
+}
