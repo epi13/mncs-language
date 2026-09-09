@@ -597,6 +597,18 @@ pub enum AstExpr {
     HostRead {
         span: SourceSpan,
     },
+    /// Host-realized bounded append `host_write(view)` (Profile 0.12).
+    /// Authority comes from the enclosing function's declarations
+    /// (`effect host_write` plus its capability), granted via
+    /// `--grant-write capability=path`. The operand is a byte view; the
+    /// executor appends exactly the view's runtime bytes (at most 64 per
+    /// call) to the granted path and returns the appended count as `u64`.
+    /// Append-only: no read-back, no truncation, no ambient path. Other
+    /// backends refuse host calls explicitly at lowering.
+    HostWrite {
+        view: Box<AstExpr>,
+        span: SourceSpan,
+    },
     /// Host-realized wall-clock read `clock_read()` (Profile 0.8).
     /// Authority comes from the enclosing function's declarations
     /// (`effect clock_read` plus its capability), never from arguments:
@@ -676,6 +688,7 @@ impl AstExpr {
             | Self::HostRead { span, .. }
             | Self::ClockRead { span, .. }
             | Self::Sha256Digest { span, .. }
+            | Self::HostWrite { span, .. }
             | Self::Ed25519Verify { span, .. }
             | Self::VectorIntrinsic { span, .. } => *span,
         }
@@ -2803,6 +2816,24 @@ impl<'a> Parser<'a> {
                 );
                 None
             }
+            ("host_write", 1) => {
+                let mut iter = arguments.into_iter();
+                let (Some(view),) = (iter.next(),) else {
+                    return None;
+                };
+                Some(AstExpr::HostWrite {
+                    view: Box::new(view),
+                    span,
+                })
+            }
+            ("host_write", _) => {
+                self.error(
+                    "MNP202",
+                    "host_write takes exactly one byte-view argument; authority comes from the enclosing function's declarations",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
             ("ed25519_verify", 3) => {
                 let mut iter = arguments.into_iter();
                 let (Some(pubkey), Some(message), Some(signature)) =
@@ -3962,6 +3993,7 @@ fn is_profile08_intrinsic(name: &str) -> bool {
         "select"
             | "replace"
             | "host_read"
+            | "host_write"
             | "clock_read"
             | "sha256_digest"
             | "ed25519_verify"

@@ -1,0 +1,23 @@
+[package]
+name = "mncs-embed"
+description = "Minimal host-callable in-process execution surface for verified MNCS artifacts (P-010)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "mncs_embed"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+mncs-model = { path = "../mncs-model" }
+mncs-codegen = { path = "../mncs-codegen" }
+mncs-compiler = { path = "../mncs-compiler" }
+mncs-syntax = { path = "../mncs-syntax" }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

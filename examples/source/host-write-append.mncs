@@ -1,0 +1,27 @@
+mncs 0.10;
+
+// Positive fixture: bounded append-only storage through the
+// host-capability boundary (P-006 storage slice). Authority is declared,
+// never ambient: the function names its capability and its `host_write`
+// effect, and the executor appends exactly the operand view's runtime
+// bytes (at most 64 per call) to the operator-granted path. Without a
+// grant the call fails closed. There is no read-back: the ledger is
+// host-observed, and the realized effect carries the appended bytes'
+// digest as evidence.
+module examples.host_write_append;
+
+fn append_word(word: [byte; up_to 64]) -> (result: u64)
+    capability ledger_writer
+    effect host_write authorized_by ledger_writer
+{
+    return host_write(word);
+}
+
+fn append_two(first: [byte; up_to 64], second: [byte; up_to 64]) -> (result: u64)
+    capability ledger_writer
+    effect host_write authorized_by ledger_writer
+{
+    let a: u64 = host_write(first);
+    let b: u64 = host_write(second);
+    return a +% b;
+}

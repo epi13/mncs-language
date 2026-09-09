@@ -2974,6 +2974,7 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
             }
         }
         AstExpr::Sha256Digest { view, .. } => calls_in_expr(view, calls),
+        AstExpr::HostWrite { view, .. } => calls_in_expr(view, calls),
         AstExpr::FloatIntrinsic { argument, .. } => calls_in_expr(argument, calls),
         AstExpr::Ed25519Verify {
             pubkey,
@@ -4404,6 +4405,61 @@ impl<'a> BodyBuilder<'a> {
             kind: BodyOperationKind::HostCall {
                 capability,
                 operation: "sha256_digest".to_owned(),
+            },
+            operands: vec![operand.id.clone()],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
+    /// Elaborate the `host_write(view)` intrinsic (P-006 storage slice).
+    /// Bounded append-only storage through the host-capability boundary:
+    /// the executor appends exactly the view's runtime bytes (at most 64
+    /// per call) to the operator-granted path and returns the appended
+    /// count as `u64`. Authority is the declared `host_write` effect plus
+    /// its capability (`--grant-write`); the operand carries data only.
+    /// There is no read-back, no truncation, and no ambient path: without
+    /// a grant the call fails closed at realization.
+    fn elaborate_host_write(
+        &mut self,
+        view: &AstExpr,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let result_ty = BodyType::Integer(IntegerType {
+            bits: 64,
+            signed: false,
+        });
+        if expected.is_some_and(|expected| expected != &result_ty) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE255",
+                format!(
+                    "host_write produces {} which does not satisfy the required type",
+                    result_ty.semantic_name()
+                ),
+                span,
+            ));
+            return None;
+        }
+        let capability =
+            self.check_host_authority("host_write", "MNE253", "MNE254", span, diagnostics)?;
+        let operand = self.elaborate_crypto_view(view, "host_write", "MNE255", env, diagnostics)?;
+        let id = self.new_value("hostwrite");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability,
+                operation: "blob_append".to_owned(),
             },
             operands: vec![operand.id.clone()],
             results: vec![BodyValue {
@@ -6188,6 +6244,9 @@ impl<'a> BodyBuilder<'a> {
             AstExpr::Sha256Digest { view, span } => {
                 self.elaborate_sha256_digest(view, *span, expected, env, diagnostics)
             }
+            AstExpr::HostWrite { view, span } => {
+                self.elaborate_host_write(view, *span, expected, env, diagnostics)
+            }
             AstExpr::FloatIntrinsic {
                 name,
                 argument,
@@ -6576,7 +6635,12 @@ impl<'a> BodyBuilder<'a> {
                 if left_value.ty != right_value.ty {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE119",
-                        "binary operands must have the same type",
+                        format!(
+                            "binary operands must have the same type (left: {}, right: {}); convert explicitly with `as` (e.g. `left as {}`)",
+                            left_value.ty.semantic_name(),
+                            right_value.ty.semantic_name(),
+                            right_value.ty.semantic_name()
+                        ),
                         expr.span(),
                     ));
                     return None;

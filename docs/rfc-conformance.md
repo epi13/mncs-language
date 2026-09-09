@@ -210,13 +210,14 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 46 RFCs: 70 
 - Stages: semantic program.
 - Depends on: RFC 0001, RFC 0002.
 - Required by: RFC 0009, RFC 0010.
-- Tests: `crates/mncs-cli/tests/semantic_commands.rs`, `examples/source/cre2-*.mncs`.
+- Tests: `crates/mncs-cli/tests/semantic_commands.rs`, `examples/source/cre2-*.mncs`, `crates/mncs-cli/tests/host_write.rs`, `crates/mncs-embed/tests/embedding.rs`.
 - Acceptance criteria:
   - [x] 0008-C1: Effect/capability declarations with closure checking — evidence: `spec/effects-and-capabilities.md`, `crates/mncs-model/src/authority.rs`
   - [~] 0008-C2: Authority preservation across calls — evidence: `crates/mncs-model/src/obligations.rs`
   - [ ] 0008-C3: General I/O, resource, and event semantics
 - Known gaps:
   - I/O and resource vocabularies beyond capabilities are not yet modeled.
+- Note: Bounded append-only storage (host_write/blob_append, Profile 0.12) added alongside host_read/clock/crypto: explicit capability + --grant-write path, 64-byte-per-call bound, recorded host_write effects with appended-bytes digest, fail-closed without grants, explicit refusal on non-realizing backends. General I/O, networking, processes, and full storage semantics remain open.
 
 ### RFC 0009 — Machine-Native Memory, Reference, Provenance, and Storage Semantics
 

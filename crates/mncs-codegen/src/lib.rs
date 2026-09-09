@@ -1963,6 +1963,111 @@ impl<'a> BackendExecutionSession<'a> {
     }
 }
 
+/// Owned reusable execution session for one verified artifact (P-010
+/// embedding nucleus). Unlike [`BackendExecutionSession`], this owns its
+/// decoded material, so a host can retain it across calls without
+/// borrowing the artifact: research-bytecode payloads reuse validation,
+/// identity, and block indexes, and portable-WASM modules decode once.
+/// Every call still runs the request-specific checks and reports the
+/// exact artifact identity plus digest it executed — no recompilation,
+/// no substitution, no silent fallback. Backends without a prepared path
+/// execute one-shot per call, exactly like the borrowing session.
+pub struct OwnedExecutionSession {
+    artifact: BackendArtifact,
+    research: Option<(Box<ResearchBytecodePayload>, Box<SsaExecutionSession>)>,
+    wasm: Option<crate::wasm::WasmModule>,
+}
+
+impl OwnedExecutionSession {
+    /// Prepare `artifact` once. Fails when the artifact identity is
+    /// invalid; decoding failures for a prepared backend degrade to
+    /// explicit one-shot execution rather than refusing the artifact.
+    pub fn new(artifact: BackendArtifact) -> Result<Self, String> {
+        if !artifact.identity_is_valid() {
+            return Err("backend artifact identity is invalid".to_owned());
+        }
+        let research = if artifact.backend == research_bytecode_backend()
+            && artifact.artifact_kind == RESEARCH_BYTECODE_ARTIFACT_KIND
+        {
+            artifact
+                .bytes()
+                .ok()
+                .and_then(|bytes| {
+                    mncs_model::record_counter("artifact_decode");
+                    serde_json::from_slice::<ResearchBytecodePayload>(&bytes)
+                        .ok()
+                        .filter(|payload| payload.schema_version == "0.1")
+                })
+                .and_then(|payload| {
+                    SsaExecutionSession::from_shared(
+                        Arc::clone(&payload.program),
+                        Arc::clone(&payload.ssa),
+                    )
+                    .ok()
+                    .map(|session| (payload, session))
+                })
+                .map(|(payload, session)| {
+                    mncs_model::record_counter("backend_session");
+                    mncs_model::record_counter("reused_stage");
+                    (Box::new(payload), Box::new(session))
+                })
+        } else {
+            None
+        };
+        let wasm = if research.is_none()
+            && artifact.backend == portable_wasm_backend()
+            && artifact.artifact_kind == PORTABLE_WASM_ARTIFACT_KIND
+        {
+            artifact
+                .bytes()
+                .ok()
+                .and_then(|bytes| {
+                    (bytes.len() >= 8 && bytes[..4] == WASM_MAGIC && bytes[4..8] == WASM_VERSION)
+                        .then(|| decode_module(&bytes).ok())
+                        .flatten()
+                })
+                .inspect(|_| {
+                    mncs_model::record_counter("backend_session");
+                    mncs_model::record_counter("reused_stage");
+                })
+        } else {
+            None
+        };
+        Ok(Self {
+            artifact,
+            research,
+            wasm,
+        })
+    }
+
+    /// True when artifact-level preparation was reused (not per-call one-shot).
+    pub fn reused(&self) -> bool {
+        self.research.is_some() || self.wasm.is_some()
+    }
+
+    pub fn artifact(&self) -> &BackendArtifact {
+        &self.artifact
+    }
+
+    pub fn execute(&self, request: &ExecutionRequest) -> BackendExecutionResult {
+        if let Some((payload, session)) = self.research.as_ref() {
+            mncs_model::record_counter("reused_execution");
+            return execute_research_bytecode_payload(
+                &self.artifact,
+                payload,
+                request,
+                false,
+                Some(session),
+            );
+        }
+        if let Some(module) = self.wasm.as_ref() {
+            mncs_model::record_counter("reused_execution");
+            return execute_portable_wasm_decoded(&self.artifact, module, request);
+        }
+        execute_backend(&self.artifact, request)
+    }
+}
+
 fn stateful_call_result(observation: BackendExecutionResult) -> StatefulCallResult {
     StatefulCallResult {
         status: observation.status,

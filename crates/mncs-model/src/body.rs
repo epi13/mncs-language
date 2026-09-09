@@ -776,7 +776,8 @@ pub enum BodyOperationKind {
 }
 
 /// The declared-effect kind discharged by one host-call operation id
-/// (HARNESS-PRESSURE-004/005/006). `blob_read` discharges `host_read`;
+/// (HARNESS-PRESSURE-004/005/006, P-006 storage slice). `blob_read`
+/// discharges `host_read` and `blob_append` discharges `host_write`;
 /// every other known operation discharges an effect of its own name.
 /// Anything unknown maps to `host_read` so pre-validation lowering keeps
 /// today's shape; unknown operations still fail closed at validation
@@ -786,6 +787,7 @@ pub fn host_call_effect_kind(operation: &str) -> &'static str {
         "clock_read" => "clock_read",
         "sha256_digest" => "sha256_digest",
         "ed25519_verify" => "ed25519_verify",
+        "blob_append" => "host_write",
         _ => "host_read",
     }
 }
@@ -796,7 +798,7 @@ pub fn host_call_effect_kind(operation: &str) -> &'static str {
 pub fn host_call_arity(operation: &str) -> Option<usize> {
     match operation {
         "blob_read" | "clock_read" => Some(0),
-        "sha256_digest" => Some(1),
+        "sha256_digest" | "blob_append" => Some(1),
         "ed25519_verify" => Some(3),
         _ => None,
     }

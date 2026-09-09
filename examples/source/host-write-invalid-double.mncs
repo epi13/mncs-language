@@ -1,0 +1,11 @@
+mncs 0.10;
+
+module examples.host_write_bad_double;
+
+fn append_word(word: [byte; up_to 64]) -> (result: u64)
+    capability ledger_writer
+    effect host_write authorized_by ledger_writer
+    effect host_write authorized_by ledger_writer
+{
+    return host_write(word);
+}

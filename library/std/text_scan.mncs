@@ -78,6 +78,44 @@ fn ends_with<N: Nat>(hay: [byte; up_to 64], hay_length: u64, needle: [byte; N], 
     return select(fits, window_equal<N>(hay, hay_length, start, needle, needle_length), false);
 }
 
+// Exact view equality over explicit lengths: true when both declared
+// lengths agree and every live byte matches. Total like `window_equal`:
+// lengths clamp into their declared bounds, and strict selection keeps
+// every projection inside the view's runtime length. This is the
+// variable-length token matcher: one entrypoint decides tokens of
+// differing runtime widths (3-byte `x86` and 7-byte `aarch64` alike)
+// through their explicit lengths, not through exact-width parameters.
+fn equals<N: Nat>(value: [byte; up_to 64], value_length: u64, target: [byte; N], target_length: u64) -> (result: bool) {
+    if value.len == 0 {
+        return target_length == 0;
+    }
+    let vlen: u64 = select(value_length <= value.len, value_length, value.len);
+    let valid: bool = vlen == target_length && target_length <= target.len;
+    iterate j over target carrying same: bool = valid {
+        let live: bool = j < target_length && j < vlen;
+        let slot: u64 = select(j < vlen, j, 0);
+        next same = same && select(live, value[slot] == target[j], true);
+    }
+    return same;
+}
+
+// ASCII case-insensitive exact match: the `equals` shape with bytes
+// compared through `bytes.eq_ascii_fold`. Locale-free by construction:
+// only the 26 ASCII pairs fold, every other byte must match exactly.
+fn equals_folded<N: Nat>(value: [byte; up_to 64], value_length: u64, target: [byte; N], target_length: u64) -> (result: bool) {
+    if value.len == 0 {
+        return target_length == 0;
+    }
+    let vlen: u64 = select(value_length <= value.len, value_length, value.len);
+    let valid: bool = vlen == target_length && target_length <= target.len;
+    iterate j over target carrying same: bool = valid {
+        let live: bool = j < target_length && j < vlen;
+        let slot: u64 = select(j < vlen, j, 0);
+        next same = same && select(live, bytes.eq_ascii_fold(value[slot], target[j]), true);
+    }
+    return same;
+}
+
 // First occurrence index as i64, or -1 when the needle is absent. The
 // sentinel stays inside the i64 vocabulary; -1 can never be a valid index.
 fn find<N: Nat>(hay: [byte; up_to 64], hay_length: u64, needle: [byte; N], needle_length: u64) -> (result: i64) {
@@ -172,4 +210,12 @@ fn candidate_count_byte(hay: [byte; up_to 64], hay_length: u64, target: byte) ->
 
 fn candidate_count_words(hay: [byte; up_to 64], hay_length: u64) -> (result: u64) {
     return count_words(hay, hay_length);
+}
+
+fn candidate_equals(value: [byte; up_to 64], value_length: u64, target: [byte; 4], target_length: u64) -> (result: bool) {
+    return equals<4>(value, value_length, target, target_length);
+}
+
+fn candidate_equals_folded(value: [byte; up_to 64], value_length: u64, target: [byte; 4], target_length: u64) -> (result: bool) {
+    return equals_folded<4>(value, value_length, target, target_length);
 }

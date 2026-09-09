@@ -11,8 +11,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::execution::{
-    compare_floats, compare_integers, evaluate_float, evaluate_integer, integer_operator_supported,
-    ExecutionEffectEvent,
+    compare_floats, compare_integers, evaluate_float, evaluate_integer, execution_value_summary,
+    integer_operator_supported, ExecutionEffectEvent,
 };
 use crate::identity::{function_id, program_id};
 use crate::{
@@ -2231,6 +2231,55 @@ fn execute_instruction(
                     capability: capability.clone(),
                     provenance: Some("crypto:ed25519".to_owned()),
                 });
+            } else if operation == "blob_append" {
+                let view = instruction
+                    .inputs
+                    .first()
+                    .and_then(|input| crate::execution::host_view_bytes(values.get(input)?));
+                let Some(view) = view else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "host_write requires one byte-view operand",
+                    );
+                    return true;
+                };
+                let appended = match crate::execution::append_grant_bytes(&grant.locator, &view) {
+                    Ok(count) => count,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                };
+                if let Some(output) = instruction.outputs.first() {
+                    values.insert(
+                        output.identity.clone(),
+                        ExecutionValue::Integer {
+                            value: appended as i128,
+                            ty: IntegerType {
+                                bits: 64,
+                                signed: false,
+                            },
+                        },
+                    );
+                }
+                result.effects.push(ExecutionEffectEvent {
+                    operation: instruction_identity(instruction).unwrap_or_else(|| {
+                        crate::identity::SemanticId(format!("host-call:{capability}"))
+                    }),
+                    kind: "host_write".to_owned(),
+                    target: operation.clone(),
+                    capability: capability.clone(),
+                    provenance: Some(format!(
+                        "grant:{} sha256:{}",
+                        grant.locator,
+                        crate::canonical::sha256_hex(&view)
+                    )),
+                });
             } else {
                 if let Some(output) = instruction.outputs.first() {
                     let delivered: Vec<ExecutionValue> = grant
@@ -2298,6 +2347,28 @@ fn declared_effect(
     })
 }
 
+/// Full ABI mismatch diagnostic: function/entrypoint identity, argument
+/// position, expected SSA input type (name + canonical identity), and the
+/// received value summary. Keeps the historical message prefix so existing
+/// consumers keep matching.
+fn abi_mismatch_reason(
+    request: &crate::ExecutionRequest,
+    function: &SsaFunction,
+    index: usize,
+    expected: &BodyType,
+    received: &ExecutionValue,
+) -> String {
+    format!(
+        "argument does not match SSA input type: function {}::{} (ssa function {}), argument index {index}, expected {} ({}) but received {}",
+        request.target.module,
+        request.target.function,
+        function.identity.0,
+        expected.semantic_name(),
+        expected.canonical_identity(),
+        execution_value_summary(received)
+    )
+}
+
 fn initialize_inputs(
     program: &Program,
     function: &SsaFunction,
@@ -2333,10 +2404,11 @@ fn initialize_inputs(
                 .as_ref()
                 .and_then(|arguments| arguments.get(index).and_then(Option::as_ref))?;
             if !value_matches_type(argument, &ty) {
+                let reason = abi_mismatch_reason(request, function, index, &ty, argument);
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     Some(input.identity.clone()),
-                    "argument does not match SSA input type",
+                    reason,
                 );
                 return None;
             }
@@ -2364,10 +2436,11 @@ fn initialize_inputs(
         } else {
             let argument = request.arguments.get(index)?;
             if !value_matches_type(argument, &ty) {
+                let reason = abi_mismatch_reason(request, function, index, &ty, argument);
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     Some(input.identity.clone()),
-                    "argument does not match SSA input type",
+                    reason,
                 );
                 return None;
             }

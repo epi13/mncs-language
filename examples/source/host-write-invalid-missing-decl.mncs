@@ -1,0 +1,7 @@
+mncs 0.10;
+
+module examples.host_write_bad_missing;
+
+fn append_word(word: [byte; up_to 64]) -> (result: u64) {
+    return host_write(word);
+}

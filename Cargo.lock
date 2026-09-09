@@ -516,6 +516,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mncs-embed"
+version = "0.1.0"
+dependencies = [
+ "mncs-codegen",
+ "mncs-compiler",
+ "mncs-model",
+ "mncs-syntax",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mncs-model"
 version = "0.1.0"
 dependencies = [

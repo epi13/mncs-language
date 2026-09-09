@@ -1,0 +1,145 @@
+mncs 0.10;
+
+// mncs.std.token_set — deterministic bounded token-set algebra.
+//
+// A token set is storage plus a logical count: `[byte; N]` holding `count`
+// live entries (`count <= N`). Tokens are small host-assigned codes
+// (0..=255); hosts map spellings to codes at the capability boundary, so
+// classification policy stays byte-exact and allocation-free. There is no
+// first-class set/map syntax and no unbounded allocation: every operation
+// is a total bounded fold, overflow is an explicit verdict (never silent
+// truncation), and ties always resolve to the lowest index.
+//
+// Complexity bounds (N, M <= 64 by MAX_SEQUENCE_BOUND):
+//   contains / first_free_or_duplicate  <= N byte comparisons
+//   require_all / forbid_any / prefer_hits / dedup_count  <= N*M steps
+//   top_index                             <= N comparisons
+// No operation allocates; every function is total over its declared domain.
+module mncs.std.token_set.v1;
+
+use mncs.core.logic.v1 as logic;
+
+// Membership: the token occupies a live slot.
+fn contains<N: Nat>(set: [byte; N], count: u64, token: byte) -> (result: bool) {
+    iterate i over set carrying found: bool = false {
+        let live: bool = i < count;
+        next found = found || (live && set[i] == token);
+    }
+    return found;
+}
+
+// Insertion decision without mutation: the index where `token` already
+// lives, else the first free slot (`count` when `count < N`), else -1 when
+// the storage is full. Callers apply `replace` plus a count bump on
+// non-negative results; a full set stays an explicit verdict, so unique
+// insertion/deduplication never silently drops a token.
+fn first_free_or_duplicate<N: Nat>(set: [byte; N], count: u64, token: byte) -> (result: i64) {
+    let full: bool = count >= set.len;
+    iterate i over set carrying slot: i64 = 0 - 1 {
+        let live: bool = i < count;
+        let hit: bool = live && set[i] == token;
+        let free: bool = logic.bool_not(full) && i == count;
+        next slot = select(slot == 0 - 1 && (hit || free), i as i64, slot);
+    }
+    return slot;
+}
+
+// Intersection predicate: every needed token is present.
+fn require_all<N: Nat, M: Nat>(have: [byte; N], have_count: u64, need: [byte; M], need_count: u64) -> (result: bool) {
+    iterate j over need carrying ok: bool = true {
+        let live: bool = j < need_count;
+        next ok = ok && select(live, contains<N>(have, have_count, need[j]), true);
+    }
+    return ok;
+}
+
+// Exclusion predicate: no banned token is present.
+fn forbid_any<N: Nat, M: Nat>(have: [byte; N], have_count: u64, banned: [byte; M], banned_count: u64) -> (result: bool) {
+    iterate j over banned carrying ok: bool = true {
+        let live: bool = j < banned_count;
+        next ok = ok && select(live, logic.bool_not(contains<N>(have, have_count, banned[j])), true);
+    }
+    return ok;
+}
+
+// Preference-hit counting: how many preferred tokens are present. Bounded
+// aggregation over the preference domain, not over the candidate domain.
+fn prefer_hits<N: Nat, M: Nat>(have: [byte; N], have_count: u64, prefer: [byte; M], prefer_count: u64) -> (result: u64) {
+    iterate j over prefer carrying hits: u64 = 0 {
+        let live: bool = j < prefer_count;
+        next hits = hits +% select(live && contains<N>(have, have_count, prefer[j]), 1, 0);
+    }
+    return hits;
+}
+
+// Distinct-token count over the logical window: read-only deduplication
+// semantics. Token `tokens[i]` is new when no earlier live slot holds it.
+fn dedup_count<N: Nat>(tokens: [byte; N], count: u64) -> (result: u64) {
+    iterate i over tokens carrying distinct: u64 = 0 {
+        let live: bool = i < count;
+        next distinct = distinct +% select(live && is_first_occurrence<N>(tokens, count, i), 1, 0);
+    }
+    return distinct;
+}
+
+fn is_first_occurrence<N: Nat>(tokens: [byte; N], count: u64, at: u64) -> (result: bool) {
+    iterate k over tokens carrying seen: bool = false {
+        next seen = seen || (k < at && k < count && tokens[k] == tokens[at]);
+    }
+    return logic.bool_not(seen);
+}
+
+// Deterministic ranking state: the incumbent maximum index plus whether
+// any live score has been observed. The index defaults to 0, which is a
+// valid projection whenever the storage is non-empty; strict boolean
+// evaluation therefore never projects out of bounds, and no cross-type
+// conversion of a negative sentinel ever evaluates.
+record Top { index: u64, has: bool }
+
+// Deterministic ranking: index of the maximum score over the logical
+// window, or -1 when empty. Ties resolve to the lowest index, so ranking
+// is a total function of the scores with no ambient tie-break. Scores pair
+// with an external identity order (parallel id views compared with
+// `text_scan.compare` where lexicographic ids must decide residual ties).
+fn top_index<N: Nat>(scores: [u64; N], count: u64) -> (result: i64) {
+    let seed: Top = Top { index: 0, has: false };
+    iterate i over scores carrying st: Top = seed {
+        let live: bool = i < count;
+        let better: bool = live && (logic.bool_not(st.has) || scores[i] > scores[st.index]);
+        next st = Top {
+            index: select(better, i, st.index),
+            has: st.has || live
+        };
+    }
+    return select(st.has, st.index as i64, 0 - 1);
+}
+
+// Executable entry points with concrete shapes for backend corpora.
+
+fn candidate_contains(set: [byte; 8], count: u64, token: byte) -> (result: bool) {
+    return contains<8>(set, count, token);
+}
+
+fn candidate_require_all(have: [byte; 8], have_count: u64, need: [byte; 4], need_count: u64) -> (result: bool) {
+    return require_all<8, 4>(have, have_count, need, need_count);
+}
+
+fn candidate_forbid_any(have: [byte; 8], have_count: u64, banned: [byte; 4], banned_count: u64) -> (result: bool) {
+    return forbid_any<8, 4>(have, have_count, banned, banned_count);
+}
+
+fn candidate_prefer_hits(have: [byte; 8], have_count: u64, prefer: [byte; 4], prefer_count: u64) -> (result: u64) {
+    return prefer_hits<8, 4>(have, have_count, prefer, prefer_count);
+}
+
+fn candidate_dedup_count(tokens: [byte; 8], count: u64) -> (result: u64) {
+    return dedup_count<8>(tokens, count);
+}
+
+fn candidate_first_free(set: [byte; 4], count: u64, token: byte) -> (result: i64) {
+    return first_free_or_duplicate<4>(set, count, token);
+}
+
+fn candidate_top_index(scores: [u64; 8], count: u64) -> (result: i64) {
+    return top_index<8>(scores, count);
+}

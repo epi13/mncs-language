@@ -1,0 +1,10 @@
+mncs 0.10;
+
+module examples.host_write_bad_arity;
+
+fn append_none() -> (result: u64)
+    capability ledger_writer
+    effect host_write authorized_by ledger_writer
+{
+    return host_write();
+}

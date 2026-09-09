@@ -233,6 +233,25 @@ pub(crate) fn sha256_digest_bytes(view: &[u8]) -> [u8; 32] {
     Sha256::digest(view).into()
 }
 
+/// Bounded append-only storage write (P-006 storage slice). Appends
+/// `bytes` (at most 64 per call, enforced by the view helpers at the call
+/// site) to the operator-granted path, creating it when absent. Returns
+/// the appended byte count. There is no read-back, no truncation, and no
+/// ambient path: the destination travels only in the capability grant.
+/// Every IO error fails the call; callers record the realized effect with
+/// the appended bytes' digest.
+pub(crate) fn append_grant_bytes(path: &str, bytes: &[u8]) -> Result<u64, String> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|error| format!("host_write append to grant path {path:?} failed: {error}"))?;
+    file.write_all(bytes)
+        .map_err(|error| format!("host_write append to grant path {path:?} failed: {error}"))?;
+    Ok(bytes.len() as u64)
+}
+
 /// Verify-only Ed25519 over raw parts (HARNESS-PRESSURE-006).
 /// `Some(valid)` reports the dalek verdict: a forged signature is
 /// `Some(false)`, never a failure status. `None` marks malformed shapes
@@ -2926,6 +2945,47 @@ fn execute_operation(
                     capability: capability.clone(),
                     provenance: Some("crypto:ed25519".to_owned()),
                 });
+            } else if operation_id == "blob_append" {
+                let Some(view) = host_view_operand(operation, values, 0) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "host_write requires one byte-view operand".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let appended = match append_grant_bytes(&grant.locator, &view) {
+                    Ok(count) => count,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                };
+                values.insert(
+                    operation.results[0].id.clone(),
+                    ExecutionValue::Integer {
+                        value: appended as i128,
+                        ty: IntegerType {
+                            bits: 64,
+                            signed: false,
+                        },
+                    },
+                );
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: "host_write".to_owned(),
+                    target: operation_id.clone(),
+                    capability: capability.clone(),
+                    provenance: Some(format!(
+                        "grant:{} sha256:{}",
+                        grant.locator,
+                        sha256_hex(&view)
+                    )),
+                });
             } else {
                 let delivered: Vec<ExecutionValue> = grant
                     .bytes
@@ -2970,19 +3030,197 @@ pub fn execute_with_policy(program: &Program, request: &ExecutionRequest) -> Exe
     execute(program, request)
 }
 
+/// Machine-readable summary of a received corpus value for ABI mismatch
+/// diagnostics (P-002). Carries the value kind plus the identity that
+/// decides nominal matches, so a `::` typo is visible without dumping
+/// artifact bytes.
+pub(crate) fn execution_value_summary(value: &ExecutionValue) -> String {
+    match value {
+        ExecutionValue::Integer { value, ty } => {
+            format!(
+                "integer(value={value}, type={}{})",
+                if ty.signed { "i" } else { "u" },
+                ty.bits
+            )
+        }
+        ExecutionValue::Float { ty, .. } => format!("float(f{})", ty.bits),
+        ExecutionValue::Boolean { value } => format!("boolean(value={value})"),
+        ExecutionValue::Finite {
+            type_identity,
+            variant_identity,
+            discriminant,
+            ..
+        } => format!(
+            "finite(type_identity=\"{}\", variant=\"{}\", discriminant={discriminant})",
+            type_identity.0, variant_identity.0
+        ),
+        ExecutionValue::Record {
+            type_identity,
+            name,
+            ..
+        } => format!(
+            "record(name=\"{name}\", type_identity=\"{}\")",
+            type_identity.0
+        ),
+        ExecutionValue::Byte { value } => format!("byte(value={value})"),
+        ExecutionValue::Sequence { values } => format!("sequence(len={})", values.len()),
+        ExecutionValue::Vector { values } => format!("vector(lanes={})", values.len()),
+        ExecutionValue::Mask { lanes } => format!("mask(lanes={})", lanes.len()),
+    }
+}
+
+/// One case verdict from toolchain-owned corpus linting (P-003). `ok` is
+/// true when the case would pass every authoring-time check the executor
+/// applies before running: target resolution, budgets, and the exact same
+/// canonical argument validation execution uses. `notes` carry non-failing
+/// observations such as caller-judged expectations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CorpusLintCase {
+    pub case_id: String,
+    pub target: ExecutionTarget,
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
+/// Toolchain-owned corpus lint report (P-003): every case of an execution
+/// corpus checked against the actual program ABI without executing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CorpusLintReport {
+    pub schema_version: String,
+    pub corpus_name: String,
+    pub cases: Vec<CorpusLintCase>,
+    pub error_count: usize,
+}
+
+pub const CORPUS_LINT_REPORT_SCHEMA_VERSION: &str = "0.1";
+
+/// Validate a corpus against a program ABI using the same canonical
+/// type/identity logic as execution (`validate_arguments`), so malformed
+/// arguments fail at authoring time instead of after expensive execution.
+/// Expected-value arity is checked structurally (every MNCS function returns
+/// exactly one value); missing/empty `expected` is caller-judged, never an
+/// error. This lints authoring shape only: budgets still bound execution,
+/// and effects/grants are an execution-time concern.
+pub fn lint_corpus(program: &Program, corpus: &ExecutionCorpus) -> CorpusLintReport {
+    let mut cases = Vec::with_capacity(corpus.cases.len());
+    for case in &corpus.cases {
+        let mut errors = Vec::new();
+        let mut notes = Vec::new();
+        let request = &case.request;
+        if request.schema_version != EXECUTION_REQUEST_SCHEMA_VERSION {
+            errors.push(format!(
+                "unsupported execution request schema {:?}; expected {:?}",
+                request.schema_version, EXECUTION_REQUEST_SCHEMA_VERSION
+            ));
+        }
+        if request.target.module != program.module
+            && !program.functions.iter().any(|function| {
+                function.home_module.as_deref() == Some(request.target.module.as_str())
+            })
+        {
+            errors.push(format!(
+                "execution target module {:?} does not match program {:?}",
+                request.target.module, program.module
+            ));
+        }
+        if request.step_budget == 0 || request.step_budget > MAX_EXECUTION_BUDGET {
+            errors.push(format!(
+                "step_budget must be between 1 and {MAX_EXECUTION_BUDGET}"
+            ));
+        }
+        match program.functions.iter().find(|function| {
+            function.name == request.target.function
+                && function.identity_namespace(&program.module) == request.target.module
+        }) {
+            None => errors.push(format!(
+                "execution target function {:?} does not exist in module {:?}",
+                request.target.function, request.target.module
+            )),
+            Some(function) => match &function.body {
+                None => errors.push(format!(
+                    "execution target function {:?} has no executable body",
+                    request.target.function
+                )),
+                Some(body) => {
+                    if let Err(reason) = validate_arguments(program, body, request) {
+                        errors.push(reason);
+                    }
+                }
+            },
+        }
+        match &case.expected {
+            None => notes.push("caller-judged case: no expected values declared".to_owned()),
+            Some(expected) if expected.is_empty() => {
+                notes.push("caller-judged case: empty expected list".to_owned());
+            }
+            Some(expected) if expected.len() != 1 => {
+                errors.push(format!(
+                    "expected holds {} values but every MNCS function returns exactly one value",
+                    expected.len()
+                ));
+            }
+            Some(_) => {}
+        }
+        let ok = errors.is_empty();
+        cases.push(CorpusLintCase {
+            case_id: case.id.clone(),
+            target: request.target.clone(),
+            ok,
+            errors,
+            notes,
+        });
+    }
+    for stateful in &corpus.stateful_cases {
+        let errors = stateful.validate();
+        let ok = errors.is_empty();
+        cases.push(CorpusLintCase {
+            case_id: stateful.id.clone(),
+            target: ExecutionTarget {
+                module: String::new(),
+                function: String::new(),
+            },
+            ok,
+            errors,
+            notes: Vec::new(),
+        });
+    }
+    let error_count = cases.iter().map(|case| case.errors.len()).sum();
+    CorpusLintReport {
+        schema_version: CORPUS_LINT_REPORT_SCHEMA_VERSION.to_owned(),
+        corpus_name: corpus.name.clone(),
+        cases,
+        error_count,
+    }
+}
+
 fn validate_arguments(
     program: &Program,
     body: &FunctionBody,
     request: &ExecutionRequest,
 ) -> Result<(), String> {
     if body.parameters.len() != request.arguments.len() {
-        return Err("argument count does not match executable body parameters".to_owned());
+        return Err(format!(
+            "argument count does not match executable body parameters for {}::{}: expected {} parameter(s), received {} argument(s)",
+            request.target.module,
+            request.target.function,
+            body.parameters.len(),
+            request.arguments.len()
+        ));
     }
-    for (parameter, argument) in body.parameters.iter().zip(&request.arguments) {
+    for (index, (parameter, argument)) in body.parameters.iter().zip(&request.arguments).enumerate()
+    {
         if !value_matches_type(program, argument, &parameter.ty) {
             return Err(format!(
-                "argument does not match parameter {:?}",
-                parameter.name
+                "argument does not match parameter {:?} (function {}::{}, argument index {index}): expected {} ({}) but received {}",
+                parameter.name,
+                request.target.module,
+                request.target.function,
+                parameter.ty.semantic_name(),
+                parameter.ty.canonical_identity(),
+                execution_value_summary(argument)
             ));
         }
     }

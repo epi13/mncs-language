@@ -95,6 +95,44 @@ fn digit_value(value: byte) -> (result: i64) {
     return (value as i64) - 48;
 }
 
+// ASCII case predicates. Byte-domain classifiers like `is_digit`: the 26
+// pairs only, no locale, no Unicode.
+fn is_ascii_upper(value: byte) -> (result: bool) {
+    let n: i64 = value as i64;
+    return n >= 65 && n <= 90;
+}
+
+fn is_ascii_lower(value: byte) -> (result: bool) {
+    let n: i64 = value as i64;
+    return n >= 97 && n <= 122;
+}
+
+// ASCII case folding. Total: A-Z map to a-z (and a-z to A-Z); every other
+// byte is returned unchanged. Folding is the 26 ASCII pairs only, so
+// classifiers built on it stay byte-exact across realizations. The guarded
+// ranges keep the `as byte` conversions inside 0..=255 on every path.
+fn to_ascii_lower(value: byte) -> (result: byte) {
+    let n: i64 = value as i64;
+    if is_ascii_upper(value) {
+        return (n + 32) as byte;
+    }
+    return value;
+}
+
+fn to_ascii_upper(value: byte) -> (result: byte) {
+    let n: i64 = value as i64;
+    if is_ascii_lower(value) {
+        return (n - 32) as byte;
+    }
+    return value;
+}
+
+// Case-insensitive byte equality over the ASCII pairs: 'A' equals 'a' and
+// every other byte equals only itself.
+fn eq_ascii_fold(left: byte, right: byte) -> (result: bool) {
+    return to_ascii_lower(left) == to_ascii_lower(right);
+}
+
 // Wrapping additive checksum. Deterministic and total; not a cryptographic
 // hash and not a claim of collision resistance.
 fn checksum4(data: [byte; 4]) -> (result: byte) {

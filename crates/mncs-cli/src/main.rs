@@ -130,6 +130,7 @@ fn run_cli() -> ExitCode {
         "compiler-study" => compiler_study_command(args),
         "source-study" => source_study_command(args),
         "experiment" => experiment_command(args),
+        "corpus" => corpus_command(args),
         "diff" => two_manifest_command(args, diff),
         "compare" => two_manifest_command(args, compare),
         "slice" => slice_command(args),
@@ -940,6 +941,12 @@ struct ExperimentOptions {
     /// authority, and realization is a pure function of the operand
     /// views through audited primitives. Empty by default.
     crypto_grants: Vec<String>,
+    /// Explicit storage-append grants (`capability=path`), one per
+    /// capability allowed to append bounded byte views via
+    /// `host_write()`. The path is created when absent and only
+    /// appended to, never read back or truncated. Empty by default: no
+    /// ambient filesystem access exists without a grant.
+    write_grants: Vec<(String, String)>,
 }
 
 /// A `--grant-time` capability as a byte-less host grant. Time has no
@@ -965,13 +972,25 @@ fn crypto_host_grant(capability: &str) -> HostGrant {
     }
 }
 
-/// Fold byte-less time and crypto authority into loaded read grants.
-/// All three are explicit operator authority traveling together into
-/// layered validation and case execution.
+/// A `--grant-write` capability as a path-bound host grant. The locator is
+/// the append destination; no bytes travel in (the operand carries the
+/// data). The path is created when absent and only appended to.
+fn write_host_grant(capability: &str, path: &str) -> HostGrant {
+    HostGrant {
+        capability: capability.to_owned(),
+        locator: path.to_owned(),
+        bytes: Vec::new(),
+    }
+}
+
+/// Fold byte-less time/crypto authority and path-bound write authority
+/// into loaded read grants. All four are explicit operator authority
+/// traveling together into layered validation and case execution.
 fn extend_with_named_grants(
     host_grants: &mut Vec<HostGrant>,
     time_grants: &[String],
     crypto_grants: &[String],
+    write_grants: &[(String, String)],
 ) {
     host_grants.extend(
         time_grants
@@ -982,6 +1001,11 @@ fn extend_with_named_grants(
         crypto_grants
             .iter()
             .map(|capability| crypto_host_grant(capability)),
+    );
+    host_grants.extend(
+        write_grants
+            .iter()
+            .map(|(capability, path)| write_host_grant(capability, path)),
     );
 }
 
@@ -1030,6 +1054,54 @@ struct PreparedExperiment {
     definition: Option<LanguageExperimentDefinition>,
     front_end: Option<SourceFrontEndResult>,
     validation_profile: Option<String>,
+}
+
+/// Toolchain-owned corpus tooling (P-003): `mncs corpus lint` validates an
+/// execution corpus against a source/artifact ABI before expensive
+/// execution, reusing the same canonical type/identity logic as execution.
+fn corpus_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let Some(action) = args.next() else {
+        eprintln!("error: corpus requires lint");
+        return ExitCode::from(2);
+    };
+    match action.as_str() {
+        "lint" => {
+            let (Some(program_path), Some(corpus_path)) = (args.next(), args.next()) else {
+                eprintln!("error: corpus lint requires a program and corpus path");
+                print_usage();
+                return ExitCode::from(2);
+            };
+            if args.next().is_some() {
+                eprintln!("error: unexpected additional arguments");
+                return ExitCode::from(2);
+            }
+            let program = match read_program_for_execution(&program_path) {
+                Ok(program) => program,
+                Err(code) => return code,
+            };
+            let corpus = match read_json::<ExecutionCorpus>(&corpus_path) {
+                Ok(corpus) => corpus,
+                Err(code) => return code,
+            };
+            let report = mncs_model::lint_corpus(&program, &corpus);
+            let failed = report.error_count > 0;
+            if !print_json(&report) {
+                ExitCode::from(2)
+            } else if failed {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
+        _ => {
+            eprintln!("error: unknown corpus action {action:?}; expected lint");
+            ExitCode::from(2)
+        }
+    }
 }
 
 fn experiment_command<I>(args: I) -> ExitCode
@@ -1085,6 +1157,7 @@ where
             let mut grants: Vec<(String, String)> = Vec::new();
             let mut time_grants: Vec<String> = Vec::new();
             let mut crypto_grants: Vec<String> = Vec::new();
+            let mut write_grants: Vec<(String, String)> = Vec::new();
             let mut parse_error = false;
             while let Some(option) = args.next() {
                 let mut take_value = |what: &str| -> Option<String> {
@@ -1141,6 +1214,23 @@ where
                             }
                         }
                     }
+                    "--grant-write" => {
+                        if let Some(grant) = take_value("--grant-write") {
+                            match grant.split_once('=') {
+                                Some((capability, path))
+                                    if !capability.is_empty() && !path.is_empty() =>
+                                {
+                                    write_grants.push((capability.to_owned(), path.to_owned()))
+                                }
+                                _ => {
+                                    eprintln!(
+                                        "error: --grant-write requires capability=path, got {grant:?}"
+                                    );
+                                    parse_error = true;
+                                }
+                            }
+                        }
+                    }
                     other => {
                         eprintln!("error: unknown experiment execute option {other:?}");
                         parse_error = true;
@@ -1171,7 +1261,12 @@ where
                 Ok(grants) => grants,
                 Err(code) => return code,
             };
-            extend_with_named_grants(&mut host_grants, &time_grants, &crypto_grants);
+            extend_with_named_grants(
+                &mut host_grants,
+                &time_grants,
+                &crypto_grants,
+                &write_grants,
+            );
             let backend_session = BackendExecutionSession::new(&artifact);
             let observations = corpus
                 .cases
@@ -1383,6 +1478,7 @@ where
     let mut grants = Vec::new();
     let mut time_grants = Vec::new();
     let mut crypto_grants = Vec::new();
+    let mut write_grants = Vec::new();
     while let Some(option) = args.next() {
         match option.as_str() {
             "--backend" => {
@@ -1453,6 +1549,20 @@ where
                 }
                 crypto_grants.push(capability);
             }
+            "--grant-write" => {
+                let grant = args
+                    .next()
+                    .ok_or_else(|| "--grant-write requires capability=path".to_owned())?;
+                let (capability, path) = grant.split_once('=').ok_or_else(|| {
+                    format!("--grant-write requires capability=path, got {grant:?}")
+                })?;
+                if capability.is_empty() || path.is_empty() {
+                    return Err(format!(
+                        "--grant-write requires capability=path, got {grant:?}"
+                    ));
+                }
+                write_grants.push((capability.to_owned(), path.to_owned()));
+            }
             other => return Err(format!("unknown experiment option {other:?}")),
         }
     }
@@ -1478,6 +1588,7 @@ where
         grants,
         time_grants,
         crypto_grants,
+        write_grants,
     })
 }
 
@@ -1884,6 +1995,7 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
         &mut host_grants,
         &options.time_grants,
         &options.crypto_grants,
+        &options.write_grants,
     );
     let validation = prepared.validation_profile.is_none().then(|| {
         validate_backend_lowering(
@@ -2130,14 +2242,28 @@ struct FrozenReplicationSummary {
     interpretation: String,
 }
 
+/// Caller-judged execution contract (P-013): a missing `expected` field and
+/// an explicitly empty `expected: []` both mean the caller judges the
+/// returned values itself. The empty list is never a matchable expectation:
+/// every MNCS function returns exactly one value, so `[]` can never equal a
+/// real `returned` vector. Judging it as a mismatch would fail corpora that
+/// declare no oracle.
+fn caller_judged(expected: &Option<Vec<mncs_model::ExecutionValue>>) -> bool {
+    expected.as_ref().is_none_or(Vec::is_empty)
+}
+
 fn experiment_case_observation(
     case_: &mncs_model::ExecutionCase,
     observation: mncs_codegen::BackendExecutionResult,
 ) -> LanguageExperimentCaseObservation {
-    let expectation_met = case_
-        .expected
-        .as_ref()
-        .map(|expected| expected == &observation.returned);
+    let expectation_met = if caller_judged(&case_.expected) {
+        None
+    } else {
+        case_
+            .expected
+            .as_ref()
+            .map(|expected| expected == &observation.returned)
+    };
     let status_met = case_
         .expected_status
         .map(|expected| expected == observation.status);
@@ -2195,10 +2321,14 @@ fn stateful_case_observation(
     case_: &StatefulExecutionCase,
     execution: StatefulExecutionResult,
 ) -> LanguageExperimentStatefulCaseObservation {
-    let final_expectation_met = case_
-        .expected_final
-        .as_ref()
-        .map(|expected| expected == &execution.returned);
+    let final_expectation_met = if caller_judged(&case_.expected_final) {
+        None
+    } else {
+        case_
+            .expected_final
+            .as_ref()
+            .map(|expected| expected == &execution.returned)
+    };
     let final_status_met = case_
         .expected_final_status
         .map(|expected| expected == execution.status);
@@ -2211,11 +2341,12 @@ fn stateful_case_observation(
                 step.expected_status
                     .map(|expected| expected == observation.status)
                     .unwrap_or(true)
-                    && step
-                        .expected
-                        .as_ref()
-                        .map(|expected| observation.returned.as_ref() == Some(expected))
-                        .unwrap_or(true)
+                    && (caller_judged(&step.expected)
+                        || step
+                            .expected
+                            .as_ref()
+                            .map(|expected| observation.returned.as_ref() == Some(expected))
+                            .unwrap_or(true))
             });
     let call_bound_met = execution.calls <= case_.maximum_calls;
     let step_bound_met = case_
@@ -3817,6 +3948,7 @@ fn print_usage() {
     );
     eprintln!("  mncs experiment rust-control <result.json> <equivalent-control.rs>");
     eprintln!("  mncs experiment matrix");
+    eprintln!("  mncs corpus lint <program.mncs|program.json> <corpus.json>");
     eprintln!("  mncs diff <before.json> <after.json>");
     eprintln!("  mncs compare <before.json> <after.json>");
     eprintln!("  mncs slice <manifest.json> <semantic-identity>");
