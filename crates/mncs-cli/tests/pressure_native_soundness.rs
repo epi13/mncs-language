@@ -110,6 +110,16 @@ fn pressure_f64_arrays_agree_per_backend() {
 }
 
 #[test]
+fn pressure_f64_records_agree_per_backend() {
+    let source = example("source/pressure-f64-records.mncs");
+    let corpus = example("execution/pressure-f64-records-corpus.json");
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_experiment(&source, backend, &corpus);
+        assert_value_agreement(backend, code, &result, &stderr, 9);
+    }
+}
+
+#[test]
 fn pressure_u64_highbit_agrees_per_backend() {
     let source = example("source/pressure-u64-highbit.mncs");
     let corpus = example("execution/pressure-u64-highbit-corpus.json");

@@ -1,0 +1,33 @@
+mncs 0.12;
+
+// ENG-PRESSURE-0021: same-scope rebinding is shadowing, not mutation.
+// Each initializer elaborates against the previous binding, so the chain
+// below threads 1 -> 2 -> 20. Independent expectations are hand-computed
+// beside each probe.
+module pressure.rebind;
+
+fn probe_chain() -> (result: i64) {
+    let x: i64 = 1;
+    let x: i64 = x + 1;
+    let x: i64 = x * 10;
+    return x;
+}
+
+fn probe_param(x: i64) -> (result: i64) {
+    let x: i64 = x + 1;
+    let x: i64 = x * 2;
+    return x;
+}
+
+fn probe_retype() -> (result: u64) {
+    let v: i64 = 3;
+    let v: u64 = 7;
+    return v;
+}
+
+fn probe_branch_shadow(flag: bool) -> (result: i64) {
+    let y: i64 = 5;
+    let bump: i64 = select(flag, 100, 0);
+    let y: i64 = y + bump;
+    return y;
+}

@@ -1,8 +1,10 @@
 mncs 0.4;
 module examples.profile04.invalid_bound_large;
 
+// The iteration ceiling moved 32 -> 1024 (ENG-PRESSURE-0004); the refusal
+// now sits past the new bound.
 fn invalid(input: u64) -> (result: u64) {
-    iterate retries up_to 33 carrying state: u64 = input {
+    iterate retries up_to 1025 carrying state: u64 = input {
         next state = state;
     }
     return state;

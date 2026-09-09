@@ -115,9 +115,11 @@ fn external_backends_state_their_execution_boundary() {
         };
         proven += 1;
         assert_eq!(envelope["status"], "PASS", "{target} envelope status");
+        // Native symbols are module-qualified (`mncs_<module>__<name>`) so
+        // same-named functions from distinct modules stay distinct natives.
         assert_eq!(
             envelope["exports"],
-            Value::Array(vec!["mncs_bounded_min".into()])
+            Value::Array(vec!["mncs_examples_concepts__bounded__min".into()])
         );
         let sha = envelope["bytes_sha256"].as_str().expect("bytes_sha256");
         assert_eq!(sha.len(), 64, "{target} sha256 length");
@@ -214,11 +216,11 @@ fn ptx_entry_selection_emits_launchable_kernel() {
     assert_eq!(envelope["status"], "PASS", "entry compile envelope status");
     let text = envelope_text(&envelope, &dir);
     assert!(
-        text.contains(".visible .entry mncs_bounded_min("),
+        text.contains(".visible .entry mncs_examples_concepts__bounded__min("),
         "selected entry must lower to a launchable .entry"
     );
     assert!(
-        !text.contains(".visible .func mncs_bounded_min("),
+        !text.contains(".visible .func mncs_examples_concepts__bounded__min("),
         "selected entry must not remain a plain .func"
     );
     let applicability = envelope["execution_applicability"]
@@ -241,11 +243,11 @@ fn ptx_without_entry_stays_callable_device_function() {
     };
     let text = envelope_text(&envelope, &dir);
     assert!(
-        text.contains(".visible .func mncs_bounded_min("),
+        text.contains(".visible .func mncs_examples_concepts__bounded__min("),
         "no entry selected: export stays a callable .func"
     );
     assert!(
-        !text.contains(".visible .entry mncs_bounded_min("),
+        !text.contains(".visible .entry mncs_examples_concepts__bounded__min("),
         "no entry selected: no launchable .entry may appear"
     );
 }
@@ -390,7 +392,7 @@ fn riscv32_qemu_executes_bounded_min() {
 
     for (a, b) in [(200i64, 77i64), (17, 42), (5, 5)] {
         let start = format!(
-            "    .globl _start\n    .text\n_start:\n    addi sp, sp, -32\n    mv s0, sp\n    li a0, {a}\n    li a1, {b}\n    mv a2, s0\n    mv a3, s0\n    call mncs_bounded_min\n    mv t0, a0\n    li a7, 93\n    mv a0, t0\n    ecall\n"
+            "    .globl _start\n    .text\n_start:\n    addi sp, sp, -32\n    mv s0, sp\n    li a0, {a}\n    li a1, {b}\n    mv a2, s0\n    mv a3, s0\n    call mncs_examples_concepts__bounded__min\n    mv t0, a0\n    li a7, 93\n    mv a0, t0\n    ecall\n"
         );
         let stem = format!("start-{a}-{b}");
         std::fs::write(dir.join(format!("{stem}.s")), &start).expect("write start");

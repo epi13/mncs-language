@@ -1,0 +1,67 @@
+mncs 0.10;
+
+// ENG-PRESSURE-0019 regression root: deterministic generic-argument
+// inference. `grow_fill(base, 7)` pins `W` from the type of `base`;
+// `first(42)` pins `T`; a generic caller forwards its own parameter; and
+// explicit `<...>` keeps working. Ambiguous calls (unconstrained,
+// conflicting) still refuse with `MNE220`.
+//
+// Independent expectations (hand-computed):
+//   infer      = fill 8 with 7, read index 3 = 7
+//   infer_ty   = first(42) = 42
+//   explicit   = fill<8> with 7, read index 3 = 7
+//   xmod       = cross-module fill with 7, read index 3 = 7
+//   xmod_ty    = cross-module first(42) = 42
+//   fwd        = outer fills 4 with 9; 9 + 9 = 18
+//   nested     = m[3][1] of row-major 1..8 = 8
+module pressure.generics;
+
+use pressure.generics.lib as lib;
+
+fn probe_infer() -> (result: i64) {
+    let base: [i64; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+    let full: [i64; 8] = grow_fill_local(base, 7);
+    return full[3];
+}
+
+fn grow_fill_local<W: Nat>(row: [i64; W], v: i64) -> (result: [i64; W]) {
+    iterate i over row carrying out: [i64; W] = row {
+        next out = replace(out, i, v);
+    }
+    return out;
+}
+
+fn probe_infer_ty() -> (result: i64) {
+    return lib.first(42);
+}
+
+fn probe_explicit() -> (result: i64) {
+    let base: [i64; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+    let full: [i64; 8] = lib.grow_fill<8>(base, 7);
+    return full[3];
+}
+
+fn probe_xmod() -> (result: i64) {
+    let base: [i64; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+    let full: [i64; 8] = lib.grow_fill(base, 7);
+    return full[3];
+}
+
+fn probe_xmod_ty() -> (result: i64) {
+    return lib.first(42);
+}
+
+fn outer<W: Nat>(row: [i64; W], v: i64) -> (result: [i64; W]) {
+    return lib.grow_fill(row, v);
+}
+
+fn probe_fwd() -> (result: i64) {
+    let base: [i64; 4] = [0, 0, 0, 0];
+    let full: [i64; 4] = outer(base, 9);
+    return full[0] +% full[3];
+}
+
+fn probe_nested() -> (result: i64) {
+    let m: [[i64; 2]; 4] = [[1, 2], [3, 4], [5, 6], [7, 8]];
+    return lib.first(m[3][1]);
+}

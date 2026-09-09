@@ -1,0 +1,287 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-bitops",
+ "cases": [
+  {
+   "id": "unpack",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bitops",
+     "function": "unpack_b"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 4278190335,
+       "type": {
+        "bits": 32,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 32,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "pack",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bitops",
+     "function": "pack_hi"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 171,
+       "type": {
+        "bits": 32,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 205,
+       "type": {
+        "bits": 32,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 43981,
+      "type": {
+       "bits": 32,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "shr-u64-max",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bitops",
+     "function": "shr_u64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 18446744073709551614,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 9223372036854775807,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "shr-u64-high",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bitops",
+     "function": "shr_u64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 9223372036854775808,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 4611686018427387904,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "shr-i64-neg",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bitops",
+     "function": "shr_i64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": -4,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "shr-i64-pos",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bitops",
+     "function": "shr_i64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 3,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "u64arg-max",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bitops",
+     "function": "ident_u64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 18446744073709551615,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 18446744073709551615,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "u64arg-high",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bitops",
+     "function": "ident_u64"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 9223372036854775808,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 9223372036854775808,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

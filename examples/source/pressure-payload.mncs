@@ -1,0 +1,63 @@
+mncs 0.10;
+
+// ENG-PRESSURE-0007 regression root: enums carry ordinary valid MNCS value
+// types — bare sequences, nested sequences, same-module records, and
+// records imported from another module. Construction, qualified
+// construction, projection, qualified pattern consumption, and
+// argument/result flow all cross the boundary.
+//
+// Independent expectations (hand-computed):
+//   xmod_arg    = m[15] of fifteen 0s then 7 = 7
+//   xmod_result = BadParams arm = 99
+//   seq_arg     = 1 + 2 + 3 + 4 = 10
+//   nest_arg    = 1 + 2 + 3 + 4 = 10
+//   local_seq   = 10 + 20 + 30 + 40 = 100
+//   local_rec   = 5 + 6 = 11
+module pressure.payload;
+
+use pressure.payload.lib as lib;
+
+record Pair { a: i64, b: i64 }
+
+enum Local { HasPair { q: Pair }, Empty }
+
+enum Tallies { Hits { v: [i64; 8] }, Miss }
+
+fn probe_xmod_arg() -> (result: i64) {
+    let m: lib.Proj = lib.Proj.Ok { p: lib.ProjMat { m: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7] } };
+    return lib.check(m);
+}
+
+fn probe_xmod_result() -> (result: i64) {
+    let m: lib.Proj = lib.make_bad();
+    return match m {
+        lib.Proj.Ok { p } => p.m[0],
+        lib.Proj.BadParams => 99,
+    };
+}
+
+fn probe_seq_arg() -> (result: i64) {
+    let s: lib.SeqPay = lib.SeqPay.Ok { m: [1, 2, 3, 4] };
+    return lib.sum_seq(s);
+}
+
+fn probe_nest_arg() -> (result: i64) {
+    let n: lib.NestPay = lib.NestPay.Ok { g: [[1, 2], [3, 4]] };
+    return lib.sum_nest(n);
+}
+
+fn probe_local_seq() -> (result: i64) {
+    let t: Tallies = Tallies.Hits { v: [1, 1, 2, 3, 5, 8, 13, 67] };
+    return match t {
+        Tallies.Hits { v } => ((((((v[0] +% v[1]) +% v[2]) +% v[3]) +% v[4]) +% v[5]) +% v[6]) +% v[7],
+        Miss => 0 - 1,
+    };
+}
+
+fn probe_local_rec() -> (result: i64) {
+    let e: Local = Local.HasPair { q: Pair { a: 5, b: 6 } };
+    return match e {
+        Local.HasPair { q } => q.a +% q.b,
+        Empty => 0 - 1,
+    };
+}

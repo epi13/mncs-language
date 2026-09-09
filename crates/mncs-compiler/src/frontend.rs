@@ -1433,20 +1433,61 @@ fn elaborate_linked_module(
     // bindings: cross-module composition requires a record field or variant
     // payload to be able to name an imported type (collisions were already
     // rejected during merging, so the union is unambiguous).
-    let mut declared_finite_names: BTreeSet<String> = ast
+    // Payload type universe: variant payloads resolve against the same
+    // namespace record fields do — local declarations (seeded with
+    // computable nominal identities, exactly as the record-field pass
+    // seeds its provisional map), imported bindings, and alias-qualified
+    // names. Payloads therefore carry ordinary valid value types
+    // (scalars, finite, records including cross-module, bounded sequences
+    // including nested/nominal) instead of raw source spellings
+    // (ENG-PRESSURE-0007).
+    let mut payload_finite_types: BTreeMap<String, FiniteType> = ast
         .finite_types
         .iter()
-        .map(|finite| finite.name.text.clone())
+        .map(|declaration| {
+            (
+                declaration.name.text.clone(),
+                FiniteType {
+                    identity: finite_type_id(&ast.module.text, &declaration.name.text),
+                    name: declaration.name.text.clone(),
+                    variants: Vec::new(),
+                },
+            )
+        })
         .collect();
-    declared_finite_names.extend(context.finite_types_by_name.keys().cloned());
-    declared_finite_names.extend(context.qualified_finite_types.keys().cloned());
-    let mut declared_record_names: BTreeSet<String> = ast
+    payload_finite_types.extend(context.finite_types_by_name.clone());
+    payload_finite_types.extend(context.qualified_finite_types.clone());
+    let mut payload_record_types: BTreeMap<String, RecordType> = ast
         .record_types
         .iter()
-        .map(|record| record.name.text.clone())
+        .map(|declaration| {
+            (
+                declaration.name.text.clone(),
+                RecordType {
+                    identity: record_type_id(
+                        &ast.module.text,
+                        &declaration.name.text,
+                        &declaration
+                            .fields
+                            .iter()
+                            .map(|field| (field.name.text.as_str(), field.value_type.text.as_str()))
+                            .collect::<Vec<_>>(),
+                    ),
+                    name: declaration.name.text.clone(),
+                    fields: declaration
+                        .fields
+                        .iter()
+                        .map(|field| RecordField {
+                            name: field.name.text.clone(),
+                            field_type: field.value_type.text.clone(),
+                        })
+                        .collect(),
+                },
+            )
+        })
         .collect();
-    declared_record_names.extend(context.record_types_by_name.keys().cloned());
-    declared_record_names.extend(context.qualified_record_types.keys().cloned());
+    payload_record_types.extend(context.record_types_by_name.clone());
+    payload_record_types.extend(context.qualified_record_types.clone());
     let mut finite_types = Vec::new();
     let mut finite_type_names = BTreeSet::new();
     for declaration in &ast.finite_types {
@@ -1470,7 +1511,11 @@ fn elaborate_linked_module(
                 continue;
             }
             // Payload fields (Profile 0.6): canonical order, unique names,
-            // types resolvable to supported scalars, finite, or record types.
+            // and the record-field type universe — scalars, finite, records
+            // (including cross-module), and bounded sequences (including
+            // nested/nominal) — stored under canonical spellings so body
+            // validation, lowering, and the ABI rehydrate the same nominal
+            // types (ENG-PRESSURE-0007).
             let mut payload_field_names = BTreeSet::new();
             let mut payload_fields = Vec::new();
             for field in &variant.fields {
@@ -1482,20 +1527,29 @@ fn elaborate_linked_module(
                     ));
                     continue;
                 }
-                if profile_scalar_supported(&field.value_type.text).is_none()
-                    && !declared_finite_names.contains(&field.value_type.text)
-                    && !declared_record_names.contains(&field.value_type.text)
-                {
+                let mut probe_diagnostics = Vec::new();
+                let payload_ty = profile_type(
+                    &field.value_type.text,
+                    field.value_type.span,
+                    &payload_finite_types,
+                    &payload_record_types,
+                    &mut probe_diagnostics,
+                );
+                let supported = probe_diagnostics
+                    .iter()
+                    .all(|diagnostic| diagnostic.code != "MNE105")
+                    && !matches!(payload_ty, BodyType::Named(_));
+                if !supported {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE171",
-                        "variant payload field type does not name a supported scalar, finite, or declared record type",
+                        "variant payload field type does not name a supported scalar, finite, record, or bounded-sequence type",
                         field.value_type.span,
                     ));
                     continue;
                 }
                 payload_fields.push(RecordField {
                     name: field.name.text.clone(),
-                    field_type: field.value_type.text.clone(),
+                    field_type: canonical_value_type(&field.value_type.text, &payload_ty),
                 });
             }
             payload_fields.sort_by(|left, right| left.name.cmp(&right.name));
@@ -2973,6 +3027,9 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
                 calls_in_expr(element, calls);
             }
         }
+        AstExpr::SequenceRepeat { element, .. } => {
+            calls_in_expr(element, calls);
+        }
         AstExpr::Sha256Digest { view, .. } => calls_in_expr(view, calls),
         AstExpr::HostWrite { view, .. } => calls_in_expr(view, calls),
         AstExpr::FloatIntrinsic { argument, .. } => calls_in_expr(argument, calls),
@@ -3002,6 +3059,11 @@ struct BindingEnv {
     scopes: Vec<std::collections::BTreeMap<String, (ResolvedBinding, SourceSpan, BoundNameKind)>>,
     scope_ids: Vec<SemanticId>,
     scope_paths: Vec<String>,
+    /// Monotonic slot allocator per scope. Slots feed `binding_id`, so two
+    /// declarations must never share one — even when a later declaration
+    /// shadows an earlier name in the same scope (ENG-PRESSURE-0021) and the
+    /// map length no longer advances.
+    scope_slots: Vec<usize>,
     next_scope: usize,
     namespace: SemanticId,
     owner: SemanticId,
@@ -3079,6 +3141,7 @@ impl BindingEnv {
             scopes: vec![std::collections::BTreeMap::new()],
             scope_ids: vec![root_scope],
             scope_paths: vec!["body".to_owned()],
+            scope_slots: vec![0],
             next_scope: 0,
             namespace,
             owner,
@@ -3096,20 +3159,39 @@ impl BindingEnv {
         diagnostics: &mut Vec<SourceDiagnostic>,
     ) {
         let scope_index = self.scopes.len() - 1;
+        // ENG-PRESSURE-0021: a plain `let` may rebind a name already bound
+        // to a plain value (a `let` or a parameter) in the same scope. The
+        // initializer already elaborated against the previous binding, and
+        // the fresh SSA value keeps every use dominated by its own
+        // definition, so rebinding is shadowing, not mutation. Index and
+        // iteration-state names stay reserved: rebinding over (or under)
+        // them keeps `MNE110`, so traversal-discharge reasoning, which keys
+        // off the scope map, cannot silently change meaning.
+        if let Some((_, _, existing_kind)) = self
+            .scopes
+            .get(scope_index)
+            .expect("scope stack is non-empty")
+            .get(&name)
+        {
+            let shadows_value = matches!(
+                existing_kind,
+                BoundNameKind::Binding | BoundNameKind::Parameter
+            ) && matches!(kind, BoundNameKind::Binding);
+            if !shadows_value {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE110",
+                    "binding is ambiguous in this lexical scope",
+                    declaration,
+                ));
+                return;
+            }
+        }
+        let slot = self.scope_slots[scope_index];
+        self.scope_slots[scope_index] += 1;
         let scope = self
             .scopes
             .get_mut(scope_index)
             .expect("scope stack is non-empty");
-        if let Some((_, existing, _)) = scope.get(&name) {
-            let _ = existing;
-            diagnostics.push(elaboration_diagnostic(
-                "MNE110",
-                "binding is ambiguous in this lexical scope",
-                declaration,
-            ));
-            return;
-        }
-        let slot = scope.len();
         let scope_identity = self.scope_ids[scope_index].clone();
         let binding = binding_id(&scope_identity, kind.binding_kind(), slot);
         let resolution = NameResolution::new(declaration, declaration, kind.resolved_kind())
@@ -3191,12 +3273,18 @@ impl BindingEnv {
         None
     }
 
-    /// Whether `name` is currently bound as a bounded-traversal index.
+    /// Whether `name` currently resolves to a bounded-traversal index.
+    /// The innermost binding wins, exactly as name resolution does: a
+    /// nested `let` shadowing the index name resolves uses to the plain
+    /// value, so those uses must not inherit the traversal-domain
+    /// discharge (ENG-PRESSURE-0021 companion fix; previously `.any()`
+    /// discharged through the shadow).
     fn is_traversal_index(&self, name: &str) -> bool {
         self.scopes
             .iter()
             .rev()
-            .any(|scope| matches!(scope.get(name), Some((_, _, BoundNameKind::TraversalIndex))))
+            .find_map(|scope| scope.get(name))
+            .is_some_and(|(_, _, kind)| matches!(kind, BoundNameKind::TraversalIndex))
     }
 
     fn binds(&self, name: &str) -> bool {
@@ -3218,12 +3306,14 @@ impl BindingEnv {
         self.scope_ids
             .push(scope_id(&self.namespace, &self.owner, &path));
         self.scope_paths.push(path);
+        self.scope_slots.push(0);
     }
 
     fn pop(&mut self) {
         self.scopes.pop();
         self.scope_ids.pop();
         self.scope_paths.pop();
+        self.scope_slots.pop();
     }
 
     fn take_resolutions(&mut self) -> Vec<NameResolution> {
@@ -5018,46 +5108,84 @@ impl<'a> BodyBuilder<'a> {
                         Vec::new()
                     } else {
                         if generic_args.is_empty() {
-                            diagnostics.push(elaboration_diagnostic(
-                                "MNE220",
-                                format!(
-                                    "generic function '{}' requires {} generic argument(s); inference is not available in this tranche",
-                                    function.text,
-                                    callee_params.len()
-                                ),
-                                function.span,
-                            ));
-                            return None;
-                        }
-                        if generic_args.len() != callee_params.len() {
-                            diagnostics.push(elaboration_diagnostic(
-                                "MNE221",
-                                format!(
-                                    "generic argument count mismatch for '{}': expected {}, got {}",
-                                    function.text,
-                                    callee_params.len(),
-                                    generic_args.len()
-                                ),
-                                function.span,
-                            ));
-                            return None;
-                        }
-                        let mut args_out = Vec::new();
-                        for (param, arg) in callee_params.iter().zip(generic_args) {
-                            match param.kind {
-                                mncs_model::GenericParamKind::Type => {
-                                    let ty = profile_type_with_generics(
-                                        &arg.text.text,
-                                        arg.text.span,
-                                        self.finite_types,
-                                        self.record_types,
-                                        &self.generic_map,
-                                        diagnostics,
-                                    );
-                                    // Reject Nat value being passed as Type
-                                    if arg.text.text.parse::<u32>().is_ok() {
-                                        // If arg text parses as integer but param expects Type, it's wrong kind
-                                        diagnostics.push(elaboration_diagnostic(
+                            // Deterministic inference (ENG-PRESSURE-0019):
+                            // solve directly-constrained parameters from
+                            // the value arguments; anything ambiguous keeps
+                            // the explicit-argument diagnostic with the
+                            // unresolved names spelled out.
+                            match self.infer_generic_args(&signature, arguments, env, diagnostics) {
+                                Ok(inferred) => inferred,
+                                Err(GenericInferenceFailure::ArgError) => return None,
+                                Err(GenericInferenceFailure::Arity) => {
+                                    diagnostics.push(elaboration_diagnostic(
+                                        "MNE220",
+                                        format!(
+                                            "generic function '{}' requires {} generic argument(s); supply explicit <...>",
+                                            function.text,
+                                            callee_params.len()
+                                        ),
+                                        function.span,
+                                    ));
+                                    return None;
+                                }
+                                Err(GenericInferenceFailure::Ambiguous {
+                                    missing,
+                                    conflicting,
+                                }) => {
+                                    let mut reasons = Vec::new();
+                                    if !missing.is_empty() {
+                                        reasons
+                                            .push(format!("cannot infer {}", missing.join(", ")));
+                                    }
+                                    if !conflicting.is_empty() {
+                                        reasons.push(format!(
+                                            "conflicting arguments for {}",
+                                            conflicting.join(", ")
+                                        ));
+                                    }
+                                    diagnostics.push(elaboration_diagnostic(
+                                        "MNE220",
+                                        format!(
+                                            "generic function '{}' requires {} generic argument(s); {}; supply explicit <...>",
+                                            function.text,
+                                            callee_params.len(),
+                                            reasons.join("; ")
+                                        ),
+                                        function.span,
+                                    ));
+                                    return None;
+                                }
+                            }
+                        } else {
+                            if generic_args.len() != callee_params.len() {
+                                diagnostics.push(elaboration_diagnostic(
+                                    "MNE221",
+                                    format!(
+                                        "generic argument count mismatch for '{}': expected {}, got {}",
+                                        function.text,
+                                        callee_params.len(),
+                                        generic_args.len()
+                                    ),
+                                    function.span,
+                                ));
+                                return None;
+                            }
+                            let mut args_out = Vec::new();
+                            for (param, arg) in callee_params.iter().zip(generic_args) {
+                                match param.kind {
+                                    mncs_model::GenericParamKind::Type => {
+                                        let ty = profile_type_with_generics(
+                                            &arg.text.text,
+                                            arg.text.span,
+                                            self.finite_types,
+                                            self.record_types,
+                                            &self.generic_map,
+                                            diagnostics,
+                                        );
+                                        // Reject Nat value being passed as Type
+                                        if arg.text.text.parse::<u32>().is_ok() {
+                                            // If arg text parses as integer but param expects Type, it's wrong kind
+                                            diagnostics.push(elaboration_diagnostic(
                                             "MNE222",
                                             format!(
                                                 "generic type parameter '{}' received value argument '{}'",
@@ -5065,17 +5193,17 @@ impl<'a> BodyBuilder<'a> {
                                             ),
                                             arg.text.span,
                                         ));
-                                        return None;
+                                            return None;
+                                        }
+                                        // If the parsed type is still a generic value param misuse, it will be caught as Named vs GenericParam
+                                        args_out.push(mncs_model::GenericArg::Type { ty });
                                     }
-                                    // If the parsed type is still a generic value param misuse, it will be caught as Named vs GenericParam
-                                    args_out.push(mncs_model::GenericArg::Type { ty });
-                                }
-                                mncs_model::GenericParamKind::Nat => {
-                                    let text = arg.text.text.trim();
-                                    // Try integer literal
-                                    if let Ok(val) = text.parse::<u32>() {
-                                        if val > mncs_model::MAX_SEQUENCE_BOUND {
-                                            diagnostics.push(elaboration_diagnostic(
+                                    mncs_model::GenericParamKind::Nat => {
+                                        let text = arg.text.text.trim();
+                                        // Try integer literal
+                                        if let Ok(val) = text.parse::<u32>() {
+                                            if val > mncs_model::MAX_SEQUENCE_BOUND {
+                                                diagnostics.push(elaboration_diagnostic(
                                                 "MNE225",
                                                 format!(
                                                     "sequence bound value {val} exceeds profile ceiling {}",
@@ -5083,16 +5211,17 @@ impl<'a> BodyBuilder<'a> {
                                                 ),
                                                 arg.text.span,
                                             ));
-                                            return None;
-                                        }
-                                        args_out.push(mncs_model::GenericArg::Value { value: val });
-                                    } else if let Some(kind) = self.generic_map.get(text) {
-                                        if *kind == mncs_model::GenericParamKind::Nat {
-                                            args_out.push(mncs_model::GenericArg::ValueParam {
-                                                name: text.to_owned(),
-                                            });
-                                        } else {
-                                            diagnostics.push(elaboration_diagnostic(
+                                                return None;
+                                            }
+                                            args_out
+                                                .push(mncs_model::GenericArg::Value { value: val });
+                                        } else if let Some(kind) = self.generic_map.get(text) {
+                                            if *kind == mncs_model::GenericParamKind::Nat {
+                                                args_out.push(mncs_model::GenericArg::ValueParam {
+                                                    name: text.to_owned(),
+                                                });
+                                            } else {
+                                                diagnostics.push(elaboration_diagnostic(
                                                 "MNE222",
                                                 format!(
                                                     "generic value parameter '{}' received type argument '{}'",
@@ -5100,14 +5229,14 @@ impl<'a> BodyBuilder<'a> {
                                                 ),
                                                 arg.text.span,
                                             ));
-                                            return None;
-                                        }
-                                    } else if profile_type_supported_for_generic_kind(
-                                        text,
-                                        self.finite_types,
-                                        self.record_types,
-                                    ) {
-                                        diagnostics.push(elaboration_diagnostic(
+                                                return None;
+                                            }
+                                        } else if profile_type_supported_for_generic_kind(
+                                            text,
+                                            self.finite_types,
+                                            self.record_types,
+                                        ) {
+                                            diagnostics.push(elaboration_diagnostic(
                                             "MNE222",
                                             format!(
                                                 "generic value parameter '{}' received type argument '{}'",
@@ -5115,16 +5244,16 @@ impl<'a> BodyBuilder<'a> {
                                             ),
                                             arg.text.span,
                                         ));
-                                        return None;
-                                    } else if text.chars().all(|c| c.is_ascii_digit()) {
-                                        diagnostics.push(elaboration_diagnostic(
+                                            return None;
+                                        } else if text.chars().all(|c| c.is_ascii_digit()) {
+                                            diagnostics.push(elaboration_diagnostic(
                                             "MNE224",
                                             format!("value argument '{text}' is not a valid Nat literal"),
                                             arg.text.span,
                                         ));
-                                        return None;
-                                    } else {
-                                        diagnostics.push(elaboration_diagnostic(
+                                            return None;
+                                        } else {
+                                            diagnostics.push(elaboration_diagnostic(
                                             "MNE224",
                                             format!(
                                                 "value argument for '{}' must be a Nat literal or Nat parameter, got '{text}'",
@@ -5132,12 +5261,13 @@ impl<'a> BodyBuilder<'a> {
                                             ),
                                             arg.text.span,
                                         ));
-                                        return None;
+                                            return None;
+                                        }
                                     }
                                 }
                             }
+                            args_out
                         }
-                        args_out
                     }
                 };
                 // Compute concrete callee signature after substituting generic args (if any)
@@ -6339,6 +6469,84 @@ impl<'a> BodyBuilder<'a> {
                         .unwrap_or_else(|| BodyType::Named("invalid".to_owned())),
                 ))
             }
+            AstExpr::SequenceRepeat {
+                element,
+                count,
+                span,
+            } => {
+                let BodyType::Sequence {
+                    element: element_type,
+                    bound: mncs_model::SequenceBound::Exact(length),
+                } = expected
+                    .cloned()
+                    .unwrap_or(BodyType::Named("invalid".to_owned()))
+                else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE183",
+                        "sequence literals require an exact bounded-sequence expected type",
+                        *span,
+                    ));
+                    return None;
+                };
+                // ENG-PRESSURE-0020: `[value; N]` elaborates once and
+                // duplicates the operand, so element evaluation happens a
+                // single time (the `Copy`-repeat semantics of Rust's
+                // `[value; N]`). Length agreement with the expected exact
+                // bound is checked statically; the declared bound itself
+                // already passed the sequence-length ceiling.
+                let parsed: u32 = count.text.parse().map_or_else(
+                    |_| {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE256",
+                            "repeat count is not a valid sequence length",
+                            count.span,
+                        ));
+                        None
+                    },
+                    Some,
+                )?;
+                if parsed != length {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE184",
+                        format!(
+                            "repeat count {parsed} does not match the declared exact length {length}"
+                        ),
+                        *span,
+                    ));
+                    return None;
+                }
+                let resolved =
+                    self.elaborate_expr(element, Some(&element_type), env, diagnostics)?;
+                if &resolved.ty != element_type.as_ref() {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE185",
+                        "sequence element value does not match the declared element type",
+                        element.span(),
+                    ));
+                }
+                let id = self.new_value("seq");
+                let expected_ty = expected
+                    .cloned()
+                    .unwrap_or_else(|| BodyType::Named("invalid".to_owned()));
+                self.blocks[self.current].operations.push(BodyOperation {
+                    id: id.clone(),
+                    kind: BodyOperationKind::SequenceConstruct {
+                        element_type,
+                        length,
+                    },
+                    operands: vec![resolved.id; parsed as usize],
+                    results: vec![BodyValue {
+                        id: id.clone(),
+                        ty: expected_ty.clone(),
+                    }],
+                    contracts: Vec::new(),
+                    assumptions: Vec::new(),
+                    machine_intent: None,
+                    lowering: None,
+                    portability: None,
+                });
+                Some(ResolvedBinding::plain(id, expected_ty))
+            }
             AstExpr::Index { base, index, span } => {
                 let subject = self.elaborate_expr(base, None, env, diagnostics)?;
                 let BodyType::Sequence {
@@ -7510,6 +7718,111 @@ impl<'a> BodyBuilder<'a> {
         None
     }
 
+    /// Deterministic generic-argument inference (ENG-PRESSURE-0019): solve
+    /// callee generic parameters from directly-constrained value arguments
+    /// — e.g. `grow_fill(base, 7)` with `base: [i64; 8]` pins `W = 8` —
+    /// with no search and no Hindley-Milner machinery. Constraints flow
+    /// through sequence structure (`[i64; W]` against `[i64; 8]`) and
+    /// direct generic positions (`T` against `i64`); nominal wrappers
+    /// (records, finite types) are opaque, views (`up_to`) never pin
+    /// lengths, and every parameter must end with exactly one answer.
+    /// Caller-parameter forwarding (`N := M`, `T := U`) infers the same
+    /// `ValueParam`/generic `Type` the explicit spelling produces.
+    /// Anything else — unconstrained parameters, conflicting constraints,
+    /// arity mismatch — returns the failure so the caller keeps the
+    /// explicit-argument diagnostic; explicit `<...>` always remains.
+    fn infer_generic_args(
+        &mut self,
+        signature: &FunctionSignature,
+        arguments: &[AstExpr],
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Result<Vec<mncs_model::GenericArg>, GenericInferenceFailure> {
+        use GenericInferenceFailure::{Ambiguous, ArgError, Arity};
+        if arguments.len() != signature.inputs.len() {
+            return Err(Arity);
+        }
+        // Speculative elaboration: argument operations, resolutions, and
+        // diagnostics are rolled back below; the real elaboration pass
+        // re-derives them against the solved signature.
+        let ops_len = self.blocks[self.current].operations.len();
+        let resolutions_len = self.resolutions.len();
+        let diagnostics_len = diagnostics.len();
+        let mut actuals = Vec::new();
+        for source_argument in arguments {
+            let Some(binding) = self.elaborate_expr(source_argument, None, env, diagnostics) else {
+                self.blocks[self.current].operations.truncate(ops_len);
+                self.resolutions.truncate(resolutions_len);
+                return Err(ArgError);
+            };
+            actuals.push(binding.ty);
+        }
+        let mut nats: BTreeMap<String, Vec<InferredNat>> = BTreeMap::new();
+        let mut types: BTreeMap<String, Vec<InferredTy>> = BTreeMap::new();
+        for (declared, actual) in signature.inputs.iter().zip(&actuals) {
+            collect_inference_constraints(declared, actual, &mut nats, &mut types);
+        }
+        let mut args_out = Vec::new();
+        let mut missing = Vec::new();
+        let mut conflicting = Vec::new();
+        for param in &signature.generic_params {
+            match param.kind {
+                mncs_model::GenericParamKind::Nat => {
+                    match nats.get(&param.name).map(|options| {
+                        let mut distinct = options.clone();
+                        distinct.sort();
+                        distinct.dedup();
+                        distinct
+                    }) {
+                        Some(options) if options.len() == 1 => args_out.push(match &options[0] {
+                            InferredNat::Value(value) => {
+                                mncs_model::GenericArg::Value { value: *value }
+                            }
+                            InferredNat::Forward(name) => {
+                                mncs_model::GenericArg::ValueParam { name: name.clone() }
+                            }
+                        }),
+                        Some(_) => conflicting.push(param.name.clone()),
+                        None => missing.push(param.name.clone()),
+                    }
+                }
+                mncs_model::GenericParamKind::Type => {
+                    match types.get(&param.name).map(|options| {
+                        let mut distinct = options.clone();
+                        distinct.dedup();
+                        distinct
+                    }) {
+                        Some(options) if options.len() == 1 => args_out.push(match &options[0] {
+                            InferredTy::Concrete(ty) => {
+                                mncs_model::GenericArg::Type { ty: ty.clone() }
+                            }
+                            InferredTy::Forward(name) => mncs_model::GenericArg::Type {
+                                ty: BodyType::GenericParam { name: name.clone() },
+                            },
+                        }),
+                        Some(_) => conflicting.push(param.name.clone()),
+                        None => missing.push(param.name.clone()),
+                    }
+                }
+            }
+        }
+        // Roll back the speculative pass in every outcome; success
+        // re-elaborates against solved expectations, failure emits no
+        // artifact, and diagnostics rollback is safe because a successful
+        // speculative pass carries no errors for the real pass to lose.
+        self.blocks[self.current].operations.truncate(ops_len);
+        self.resolutions.truncate(resolutions_len);
+        if missing.is_empty() && conflicting.is_empty() {
+            diagnostics.truncate(diagnostics_len);
+            Ok(args_out)
+        } else {
+            Err(Ambiguous {
+                missing,
+                conflicting,
+            })
+        }
+    }
+
     /// Borrow an exact sequence as a bounded view (`[E; N]` to `[E; up_to M]`
     /// with `N <= M`, same element type) by synthesizing the full-range
     /// slice. The borrow is explicit in the body and lowers through the
@@ -7733,6 +8046,97 @@ fn profile_type_with_generics(
     profile_type(name, span, finite_types, record_types, diagnostics)
 }
 
+/// Why generic-argument inference declined a call (ENG-PRESSURE-0019).
+/// The caller maps every variant back to the explicit-argument diagnostic
+/// so inference never invents a new failure mode.
+enum GenericInferenceFailure {
+    /// Arity differs; the standard arity diagnostic follows.
+    Arity,
+    /// An argument failed elaboration on its own; its diagnostics stand.
+    ArgError,
+    /// These parameters admit no unique answer: `missing` drew no
+    /// constraint from any argument, `conflicting` drew two or more
+    /// distinct answers.
+    Ambiguous {
+        missing: Vec<String>,
+        conflicting: Vec<String>,
+    },
+}
+
+/// One Nat constraint from one argument position: an exact length or a
+/// caller-parameter forward.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum InferredNat {
+    Value(u32),
+    Forward(String),
+}
+
+/// One type constraint from one argument position: a concrete type or a
+/// caller-parameter forward.
+#[derive(Clone, PartialEq, Eq)]
+enum InferredTy {
+    Concrete(BodyType),
+    Forward(String),
+}
+
+/// Collect Nat/type constraints by walking declared and actual types in
+/// lockstep. Sequences recurse structurally; a direct generic position
+/// pins its parameter; everything else (nominals, views against views,
+/// mismatched shapes) constrains nothing and lets ambiguity refuse.
+fn collect_inference_constraints(
+    declared: &BodyType,
+    actual: &BodyType,
+    nats: &mut BTreeMap<String, Vec<InferredNat>>,
+    types: &mut BTreeMap<String, Vec<InferredTy>>,
+) {
+    match (declared, actual) {
+        (BodyType::GenericParam { name }, BodyType::GenericParam { name: caller }) => {
+            types
+                .entry(name.clone())
+                .or_default()
+                .push(InferredTy::Forward(caller.clone()));
+        }
+        (BodyType::GenericParam { name }, actual) => {
+            types
+                .entry(name.clone())
+                .or_default()
+                .push(InferredTy::Concrete(actual.clone()));
+        }
+        (
+            BodyType::Sequence {
+                element: declared_element,
+                bound: declared_bound,
+            },
+            BodyType::Sequence {
+                element: actual_element,
+                bound: actual_bound,
+            },
+        ) => {
+            match (declared_bound, actual_bound) {
+                (
+                    mncs_model::SequenceBound::Param(name),
+                    mncs_model::SequenceBound::Exact(value),
+                ) => {
+                    nats.entry(name.clone())
+                        .or_default()
+                        .push(InferredNat::Value(*value));
+                }
+                (
+                    mncs_model::SequenceBound::Param(name),
+                    mncs_model::SequenceBound::Param(caller),
+                ) => {
+                    nats.entry(name.clone())
+                        .or_default()
+                        .push(InferredNat::Forward(caller.clone()));
+                }
+                _ => {}
+            }
+            collect_inference_constraints(declared_element, actual_element, nats, types);
+        }
+        _ => {}
+    }
+}
+
 fn substitute_body_type(
     ty: BodyType,
     type_map: &std::collections::BTreeMap<String, BodyType>,
@@ -7831,9 +8235,20 @@ fn canonical_sequence_element_type(source: &str, ty: &BodyType) -> String {
     match ty {
         BodyType::Finite { identity, .. } | BodyType::Record { identity, .. } => identity.0.clone(),
         BodyType::Sequence { element, bound } => {
+            // Descend the source spelling alongside the type: passing the
+            // outer spelling down re-wrapped one nesting level per import
+            // (ENG-PRESSURE-0011: `[[i64; 2]; 2]` linked as three levels).
+            let inner_source = source
+                .strip_prefix('[')
+                .and_then(|text| text.strip_suffix(']'))
+                .and_then(|inner| {
+                    let separator = inner.rfind(';')?;
+                    Some(inner[..separator].trim().to_owned())
+                })
+                .unwrap_or_else(|| element.semantic_name());
             format!(
                 "[{}; {}]",
-                canonical_sequence_element_type(source, element),
+                canonical_sequence_element_type(&inner_source, element),
                 bound.canonical_text()
             )
         }

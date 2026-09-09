@@ -1,0 +1,24 @@
+mncs 0.10;
+
+// ENG-PRESSURE-0011 regression leaf: bare nested sequences in cross-module
+// argument/result signatures, plus a nested sequence inside a record and a
+// second element width.
+module pressure.nested.lib;
+
+fn read_cell(grid: [[i64; 2]; 2], r: u64, c: u64) -> (result: i64) {
+    return grid[r][c];
+}
+
+fn make_grid() -> (result: [[i64; 2]; 2]) {
+    return [[5, 6], [7, 8]];
+}
+
+record Grid2 { cells: [[i64; 2]; 2] }
+
+fn read_rec(g: Grid2, r: u64, c: u64) -> (result: i64) {
+    return g.cells[r][c];
+}
+
+fn sum_u16(grid: [[u16; 2]; 2]) -> (result: u64) {
+    return (grid[0][0] as u64) +% (grid[0][1] as u64) +% (grid[1][0] as u64) +% (grid[1][1] as u64);
+}

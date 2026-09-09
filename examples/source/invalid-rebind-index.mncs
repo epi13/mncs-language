@@ -1,0 +1,15 @@
+mncs 0.12;
+
+// ENG-PRESSURE-0021 negative pin: the traversal index name stays reserved
+// in the loop-body scope, so rebinding it is still MNE110. (A nested scope
+// may shadow the name; those uses resolve to the plain value and no longer
+// inherit the traversal-domain discharge.)
+module pressure.rebind_index;
+
+fn probe(xs: [i64; 4]) -> (result: i64) {
+    iterate i over xs carrying total: i64 = 0 {
+        let i: u64 = 0;
+        next total = total + xs[0];
+    }
+    return total;
+}

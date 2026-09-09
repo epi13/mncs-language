@@ -1,0 +1,13 @@
+mncs 0.12;
+
+// ENG-PRESSURE-0010: `[u64; N]` is a traversal domain. The index `k`
+// carries the traversal-domain discharge, so `keys[k]` needs no per-site
+// cast or check. Hand-computed expectation: 10 + 20 + 30 + 40 = 100.
+module pressure.u64domain;
+
+fn sum_keys(keys: [u64; 4]) -> (result: u64) {
+    iterate k over keys carrying total: u64 = 0 {
+        next total = total + keys[k];
+    }
+    return total;
+}

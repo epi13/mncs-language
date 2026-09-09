@@ -600,16 +600,18 @@ pub fn lower_external(
     };
     if spec.triple == "nvptx64" {
         let entries = kernel_entries.join(",");
+        let decls = crate::support::entry_decls(program, ssa);
         let mut unknown = Vec::new();
         for entry in entries
             .split(',')
             .map(str::trim)
             .filter(|name| !name.is_empty())
         {
-            // Entries arrive as logical MNCS names; exports are physical
-            // `mncs_` symbols (see `support::c_symbol`).
-            let physical = crate::support::c_symbol(entry);
-            if !export_names.iter().any(|export| export == &physical) {
+            // Entries arrive as logical MNCS names (short when unambiguous,
+            // `module::name` otherwise); exports are module-qualified native
+            // symbols (see `support::qualified_c_symbol`).
+            let resolved = crate::support::resolve_kernel_entry(entry, &decls);
+            if resolved.is_none_or(|symbol| !export_names.iter().any(|export| export == &symbol)) {
                 unknown.push(entry.to_owned());
             }
         }
@@ -625,7 +627,7 @@ pub fn lower_external(
         }
     }
     // The shared LLVM lowering is the source IR for every external target.
-    let ir = crate::llvm::emit_llvm_module(&scalar, plan);
+    let ir = crate::llvm::emit_llvm_module(program, ssa, &scalar, plan);
     let (bytes, toolchain) = match spec.realize(&ir) {
         Ok(outcome) => outcome,
         Err(error) => return realize_failure(spec, error),

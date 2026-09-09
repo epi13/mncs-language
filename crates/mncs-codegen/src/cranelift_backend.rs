@@ -1445,10 +1445,11 @@ pub fn execute_cranelift(
             );
         }
     };
-    let Some(contract) = artifact
-        .function_value_contracts
-        .get(&request.target.function)
-    else {
+    let Some(contract) = crate::support::entry_value_contract(
+        &artifact.function_value_contracts,
+        &request.target.module,
+        &request.target.function,
+    ) else {
         return execution_failure(
             result,
             ExecutionStatus::InvalidRequest,
@@ -1477,7 +1478,14 @@ pub fn execute_cranelift(
         });
     }
     JIT_OOB.store(false, std::sync::atomic::Ordering::Relaxed);
-    match jit_execute_with_arguments(&payload, request.target.function.as_str(), &raw_args) {
+    // The JIT trampoline table is keyed by module-qualified native symbol
+    // (ENG-PRESSURE-0017); resolve the entry the same way here.
+    let entry = crate::support::entry_native_symbol(
+        &payload.exports,
+        &request.target.module,
+        &request.target.function,
+    );
+    match jit_execute_with_arguments(&payload, &entry, &raw_args) {
         Ok((status, value)) => {
             if JIT_OOB.load(std::sync::atomic::Ordering::Relaxed) {
                 // A host slot access escaped the installed arena image
@@ -1555,10 +1563,11 @@ fn aot_fallback_execute(
     arena_image: &Option<Vec<u8>>,
 ) -> Result<crate::support::NativeRunView, String> {
     use crate::native::{compile_object_and_run_full, probe_clang, probe_gcc};
-    let Some(contract) = artifact
-        .function_value_contracts
-        .get(&request.target.function)
-    else {
+    let Some(contract) = crate::support::entry_value_contract(
+        &artifact.function_value_contracts,
+        &request.target.module,
+        &request.target.function,
+    ) else {
         return Err(
             "Cranelift AOT execution requires a language-owned function value contract".to_owned(),
         );
@@ -1576,18 +1585,20 @@ fn aot_fallback_execute(
         .ok_or_else(|| "neither clang nor gcc is present".to_owned())?;
     // The linked object contains every module function, so the driver must
     // define the cell runtime whenever any function manipulates cells.
+    // The entry symbol is module-qualified (ENG-PRESSURE-0017).
+    let entry = crate::support::entry_native_symbol(
+        &payload.exports,
+        &request.target.module,
+        &request.target.function,
+    );
     let driver = if crate::support::scalar_module_needs_arena_symbols(&scalar) {
         crate::support::process_driver_cell_runtime(
-            &request.target.function,
+            &entry,
             &contract.inputs,
             contract.outputs.first(),
         )
     } else {
-        crate::support::process_driver(
-            &request.target.function,
-            &contract.inputs,
-            contract.outputs.first(),
-        )
+        crate::support::process_driver(&entry, &contract.inputs, contract.outputs.first())
     };
     // The C driver parses scalar words itself (`strtod` for floats), so
     // argv carries the decimal request spellings, not the bit-carried
@@ -3443,11 +3454,11 @@ pub fn prepare_stateful_session<'a>(
 impl CraneliftStatefulSession<'_> {
     pub fn execute(&mut self, request: &ExecutionRequest) -> BackendExecutionResult {
         let mut result = empty_execution(self.artifact, request);
-        let Some(contract) = self
-            .artifact
-            .function_value_contracts
-            .get(&request.target.function)
-        else {
+        let Some(contract) = crate::support::entry_value_contract(
+            &self.artifact.function_value_contracts,
+            &request.target.module,
+            &request.target.function,
+        ) else {
             return execution_failure(
                 result,
                 ExecutionStatus::InvalidRequest,
@@ -3472,7 +3483,14 @@ impl CraneliftStatefulSession<'_> {
                 arena.extend_from_slice(image);
             });
         }
-        match self.jit.call(request.target.function.as_str(), &raw_args) {
+        // Trampolines are keyed by module-qualified native symbol
+        // (ENG-PRESSURE-0017).
+        let entry = crate::support::entry_native_symbol(
+            &self.artifact.exports,
+            &request.target.module,
+            &request.target.function,
+        );
+        match self.jit.call(&entry, &raw_args) {
             Ok((status, value)) => {
                 result.status = status;
                 result.steps = 1;

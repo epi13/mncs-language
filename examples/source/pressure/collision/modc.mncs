@@ -1,0 +1,16 @@
+mncs 0.10;
+
+// ENG-PRESSURE-0017 regression middle: defines a third same-named local
+// `helper` while transitively linking leaf B, so the collision reach is
+// transitive, not just same-program text.
+module pressure.collision.modc;
+
+use pressure.collision.modb as mb;
+
+fn helper(x: i64) -> (result: i64) {
+    return x +% 1000;
+}
+
+fn probe_c(x: i64) -> (result: i64) {
+    return helper(x) +% mb.probe_b(x);
+}

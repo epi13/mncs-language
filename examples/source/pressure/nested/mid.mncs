@@ -1,0 +1,16 @@
+mncs 0.10;
+
+// ENG-PRESSURE-0011 regression middle: forwards bare nested sequences one
+// more module boundary outward, so the repair is proven across at least two
+// hops rather than a single direct import.
+module pressure.nested.mid;
+
+use pressure.nested.lib as lib;
+
+fn fwd_read(grid: [[i64; 2]; 2], r: u64, c: u64) -> (result: i64) {
+    return lib.read_cell(grid, r, c);
+}
+
+fn fwd_make() -> (result: [[i64; 2]; 2]) {
+    return lib.make_grid();
+}

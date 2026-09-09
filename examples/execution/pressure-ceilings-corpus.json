@@ -1,0 +1,54 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-ceilings",
+ "cases": [
+  {
+   "id": "count64",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.ceilings",
+     "function": "count64"
+    },
+    "arguments": [],
+    "step_budget": 64000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 64,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "sum128",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.ceilings",
+     "function": "sum128"
+    },
+    "arguments": [],
+    "step_budget": 64000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 128,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

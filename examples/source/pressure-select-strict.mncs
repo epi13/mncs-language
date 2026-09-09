@@ -1,0 +1,24 @@
+mncs 0.12;
+
+// ENG-PRESSURE-0022: `select` is strict — both arms evaluate before
+// selection. These probes must trap on every backend: a lazy backend
+// would return 7 / 9 instead. The zero divisor arrives through a call
+// argument so no backend can constant-fold the trap away; the open
+// divisor-nonzero obligation becomes its runtime check.
+module pressure.select_strict;
+
+fn boom(d: i64) -> (result: i64) {
+    return 1 / d;
+}
+
+fn probe_strict_true() -> (result: i64) {
+    return select(true, 7, boom(0));
+}
+
+fn probe_strict_false() -> (result: i64) {
+    return select(false, boom(0), 9);
+}
+
+fn probe_strict_control() -> (result: i64) {
+    return select(true, 7, 8);
+}

@@ -1,0 +1,63 @@
+mncs 0.12;
+
+// Pressure (ENG-PRESSURE-0002 remainder): coherent f64 record fields across
+// every executable backend. Scalar, array, nested, conversion, comparison,
+// and sin shapes already agreed; record fields silently read back zeros on
+// portable WASM because the WASM composite layout width fell through to
+// W32 while slots are 8 bytes. Values ride bit-carried through record
+// cells exactly like integer fields.
+module examples.pressure.f64records;
+
+record Pt { x: f64, y: f64 }
+
+fn entry_add() -> (result: f64) {
+    let p: Pt = Pt { x: 1.5, y: 2.5 };
+    return p.x + p.y;
+}
+
+fn entry_x() -> (result: f64) {
+    let p: Pt = Pt { x: 1.5, y: 2.5 };
+    return p.x;
+}
+
+fn entry_y() -> (result: f64) {
+    let p: Pt = Pt { x: 1.5, y: 2.5 };
+    return p.y;
+}
+
+record Solo { v: f64 }
+
+fn entry_solo() -> (result: f64) {
+    let s: Solo = Solo { v: 3.25 };
+    return s.v;
+}
+
+record Mix { a: i64, b: f64 }
+
+fn entry_mix() -> (result: f64) {
+    let m: Mix = Mix { a: 10, b: 2.5 };
+    return m.b;
+}
+
+fn entry_mix_a() -> (result: i64) {
+    let m: Mix = Mix { a: 10, b: 2.5 };
+    return m.a;
+}
+
+enum Meter { Reading { v: f64 }, Offline }
+
+fn entry_payload() -> (result: f64) {
+    let m: Meter = Meter.Reading { v: 2.5 };
+    return match m {
+        Meter.Reading { v } => v + 1.5,
+        Offline => 0.0 - 1.0,
+    };
+}
+
+fn entry_arg(p: Pt) -> (result: f64) {
+    return p.x + p.y;
+}
+
+fn entry_call() -> (result: f64) {
+    return entry_arg(Pt { x: 1.0, y: 3.0 });
+}

@@ -643,23 +643,10 @@ pub fn lower_selected_ssa(
             diagnostics,
         };
     }
-    let names = ssa
-        .functions
-        .iter()
-        .map(|ssa_function| {
-            program
-                .functions
-                .iter()
-                .find(|function| {
-                    mncs_model::function_id(
-                        function.identity_namespace(&program.module),
-                        &function.name,
-                    ) == ssa_function.semantic_identity
-                })
-                .map(|function| function.name.clone())
-                .unwrap_or_default()
-        })
-        .collect::<Vec<_>>();
+    // WASM exports carry module-qualified native symbols, exactly like the
+    // native backends, so same-named functions from distinct modules stay
+    // distinct exports (ENG-PRESSURE-0017).
+    let names = support::function_names(program, ssa);
     let mut outcome = lower_module(program, ssa, &names);
     trace_timing("backend-lower-module", started);
     if let Some(module) = outcome.module.as_mut() {
@@ -960,9 +947,11 @@ fn execute_portable_wasm_decoded(
         effects: Vec::new(),
         failure: None,
     };
-    let value_contract = artifact
-        .function_value_contracts
-        .get(&request.target.function);
+    let value_contract = support::entry_value_contract(
+        &artifact.function_value_contracts,
+        &request.target.module,
+        &request.target.function,
+    );
     if let Some(contract) = value_contract {
         if contract.inputs.len() != request.arguments.len()
             || !contract
@@ -980,8 +969,14 @@ fn execute_portable_wasm_decoded(
             return result;
         }
     }
-    let (input_contracts, output_contracts) =
-        signature_contracts(artifact, &request.target.function);
+    let entry_contracts = support::entry_value_contract(
+        &artifact.function_value_contracts,
+        &request.target.module,
+        &request.target.function,
+    );
+    let (input_contracts, output_contracts) = entry_contracts
+        .map(|contracts| (contracts.inputs.as_slice(), contracts.outputs.as_slice()))
+        .unwrap_or((&[], &[]));
     let param_tys = input_contracts
         .iter()
         .map(|contract| marshal_ty(contract, &artifact.composite_value_contracts))
@@ -990,9 +985,25 @@ fn execute_portable_wasm_decoded(
         .iter()
         .map(|contract| marshal_ty(contract, &artifact.composite_value_contracts))
         .collect::<Vec<_>>();
+    // WASM exports are module-qualified; fall back to the legacy short
+    // export only for artifacts emitted before qualified lowering.
+    let export_names: Vec<String> = module
+        .functions
+        .iter()
+        .map(|function| function.name.clone())
+        .collect();
+    let entry = if support::exports_contain(
+        &export_names,
+        &request.target.module,
+        &request.target.function,
+    ) {
+        support::qualified_c_symbol(&request.target.module, &request.target.function)
+    } else {
+        request.target.function.clone()
+    };
     match execute_function_typed(
         module,
-        &request.target.function,
+        &entry,
         &request.arguments,
         &param_tys,
         &result_tys,
@@ -1153,6 +1164,12 @@ fn scalar_field_matches(semantic_type: &str, value: &ExecutionValue) -> bool {
             expected == *ty && support::integer_fits(*value, expected)
         }
         (BodyType::Byte, ExecutionValue::Byte { value }) => (0..=255).contains(value),
+        // Binary64 fields match by type exactly like top-level float
+        // arguments; finiteness stays a runtime trap, not a rejection
+        // (ENG-PRESSURE-0002 WASM record-argument divergence).
+        (BodyType::Float(expected), ExecutionValue::Float { ty: actual, .. }) => {
+            expected.is_supported() && actual.is_supported() && expected == *actual
+        }
         (BodyType::Named(_), ExecutionValue::Finite { .. } | ExecutionValue::Record { .. }) => true,
         (
             BodyType::Sequence { .. } | BodyType::Vector { .. } | BodyType::Mask { .. },
@@ -1422,6 +1439,11 @@ fn named_marshal(
     match BodyType::from_semantic_name(semantic_type) {
         BodyType::Named(name) if name == "bool" => crate::wasm::MarshalTy::Bool,
         BodyType::Integer(ty) => crate::wasm::MarshalTy::Int(ty),
+        // Binary64 fields marshal bit-carried through 8-byte slots; without
+        // this arm they collapsed to Int(64) and every float-carrying
+        // composite argument was rejected at the boundary
+        // (ENG-PRESSURE-0002 WASM record-argument divergence).
+        BodyType::Float(ty) if ty.is_supported() => crate::wasm::MarshalTy::Float(ty),
         BodyType::Byte => crate::wasm::MarshalTy::Int(IntegerType {
             bits: 8,
             signed: false,
@@ -1445,17 +1467,6 @@ fn named_marshal(
             signed: true,
         }),
     }
-}
-
-fn signature_contracts<'a>(
-    artifact: &'a BackendArtifact,
-    function: &str,
-) -> (&'a [BackendValueContract], &'a [BackendValueContract]) {
-    artifact
-        .function_value_contracts
-        .get(function)
-        .map(|contracts| (contracts.inputs.as_slice(), contracts.outputs.as_slice()))
-        .unwrap_or((&[], &[]))
 }
 
 fn reinterpret_backend_value(value: i128, ty: IntegerType) -> i128 {

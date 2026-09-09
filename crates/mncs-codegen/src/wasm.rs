@@ -1563,6 +1563,12 @@ fn write_slot(
         {
             runtime.store(address, 4, *value as u64)
         }
+        // Binary64 fields ride bit-carried through their 8-byte slot,
+        // exactly like the in-body I64Store lowering
+        // (ENG-PRESSURE-0002 WASM record-argument divergence).
+        (ExecutionValue::Float { bits, .. }, MarshalTy::Float(_)) => {
+            runtime.store(address, 8, *bits)
+        }
         (ExecutionValue::Mask { lanes }, MarshalTy::Mask { .. }) => {
             runtime.store(address, 8, crate::composite::pack_mask(lanes))
         }

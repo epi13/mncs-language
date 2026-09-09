@@ -552,6 +552,16 @@ pub enum AstExpr {
         elements: Vec<AstExpr>,
         span: SourceSpan,
     },
+    /// A repeat sequence literal `[value; N]` (ENG-PRESSURE-0020): `N`
+    /// copies of one element value. The count is a Nat literal in this
+    /// tranche (symbolic counts stay refused); elaboration shares the
+    /// single elaborated element across the constructed slots, so no
+    /// backend work is needed beyond `SequenceConstruct`.
+    SequenceRepeat {
+        element: Box<AstExpr>,
+        count: SpannedText,
+        span: SourceSpan,
+    },
     /// Element observation `base[index]` (Profile 0.7).
     Index {
         base: Box<AstExpr>,
@@ -680,6 +690,7 @@ impl AstExpr {
             | Self::RecordLiteral { span, .. }
             | Self::FieldProject { span, .. }
             | Self::SequenceLiteral { span, .. }
+            | Self::SequenceRepeat { span, .. }
             | Self::Index { span, .. }
             | Self::Slice { span, .. }
             | Self::Cast { span, .. }
@@ -2554,6 +2565,65 @@ impl<'a> Parser<'a> {
                 span: SourceSpan::covering(&self.envelope.text, path_span, end),
             });
         }
+        if segments.len() >= 3 && self.at_payload_construct() {
+            // Qualified payload construction: `alias.Type.Variant { ... }`
+            // (Profile 0.6, cross-module). Mirrors the two-segment shape
+            // with the qualifier path joined; elaboration retries a
+            // qualified record spelling when no finite type matches, exactly
+            // as for two segments (ENG-PRESSURE-0007).
+            self.cursor += 1;
+            let mut fields = Vec::new();
+            while self.current_kind() != Some(TokenKind::RightBrace)
+                && self.cursor < self.significant.len()
+            {
+                let Some(field_name) = self.spanned(
+                    TokenKind::Identifier,
+                    "MNP140",
+                    "expected payload field name",
+                ) else {
+                    break;
+                };
+                self.expect(
+                    TokenKind::Colon,
+                    "MNP141",
+                    "expected ':' after payload field name",
+                );
+                let Some(field_value) = self.expression() else {
+                    break;
+                };
+                fields.push((field_name, field_value));
+                if self.current_kind() != Some(TokenKind::Comma) {
+                    break;
+                }
+                self.cursor += 1;
+            }
+            let end = self
+                .expect(
+                    TokenKind::RightBrace,
+                    "MNP142",
+                    "expected '}' after payload fields",
+                )
+                .and_then(|i| self.tokens.get(i))
+                .map_or(path_span, |t| t.span);
+            let qualifier = SpannedText {
+                text: segments[..segments.len() - 1]
+                    .iter()
+                    .map(|segment| segment.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("."),
+                span: SourceSpan::covering(
+                    &self.envelope.text,
+                    segments.first()?.span,
+                    segments[segments.len() - 2].span,
+                ),
+            };
+            return Some(AstExpr::FiniteVariant {
+                type_name: qualifier,
+                variant: segments.last()?.clone(),
+                fields,
+                span: SourceSpan::covering(&self.envelope.text, path_span, end),
+            });
+        }
         if self.current_kind() == Some(TokenKind::LeftBrace) && self.at_record_literal() {
             return self.record_literal(path_name);
         }
@@ -2948,14 +3018,20 @@ impl<'a> Parser<'a> {
         base
     }
 
-    /// A bounded-sequence literal: `[e0, e1, ...]`. The expected element
-    /// count is established by elaboration against the declared exact type.
+    /// A bounded-sequence literal: `[e0, e1, ...]` or the repeat form
+    /// `[value; N]` (ENG-PRESSURE-0020). The expected element count is
+    /// established by elaboration against the declared exact type.
     fn sequence_literal(&mut self) -> Option<AstExpr> {
         let open = self.expect(
             TokenKind::LeftBracket,
             "MNP156",
             "expected '[' to open a sequence literal",
         )?;
+        let open_span = self
+            .tokens
+            .get(open)
+            .map(|token| token.span)
+            .unwrap_or(SourceSpan::at(&self.envelope.text, 0, 0));
         let mut elements = Vec::new();
         while self.current_kind() != Some(TokenKind::RightBracket)
             && self.cursor < self.significant.len()
@@ -2964,6 +3040,21 @@ impl<'a> Parser<'a> {
                 break;
             };
             elements.push(element);
+            // A semicolon after the first element opens the repeat form
+            // `[value; N]` (ENG-PRESSURE-0020); `;` is unambiguous here
+            // because `,` separates element lists.
+            if self.current_kind() == Some(TokenKind::Semicolon) {
+                if elements.len() != 1 {
+                    self.error(
+                        "MNP203",
+                        "repeat separators only follow the first sequence element",
+                        vec![TokenKind::RightBracket],
+                    );
+                    return None;
+                }
+                self.cursor += 1;
+                return self.repeat_literal(open_span, elements.pop());
+            }
             if self.current_kind() != Some(TokenKind::Comma) {
                 break;
             }
@@ -2982,6 +3073,38 @@ impl<'a> Parser<'a> {
                 .map_or(self.envelope.text.len(), |token| token.span.end),
         );
         Some(AstExpr::SequenceLiteral { elements, span })
+    }
+
+    /// Repeat tail of [`Self::sequence_literal`] after `[value ;`: parses
+    /// the Nat count and the closing bracket (ENG-PRESSURE-0020).
+    fn repeat_literal(
+        &mut self,
+        open_span: SourceSpan,
+        element: Option<AstExpr>,
+    ) -> Option<AstExpr> {
+        let element = element?;
+        let count = self.spanned(
+            TokenKind::IntegerLiteral,
+            "MNP203",
+            "expected repeat count after ';'",
+        )?;
+        let close = self.expect(
+            TokenKind::RightBracket,
+            "MNP157",
+            "expected ']' after repeat count",
+        );
+        let span = SourceSpan::at(
+            &self.envelope.text,
+            open_span.start,
+            close
+                .and_then(|index| self.tokens.get(index))
+                .map_or(self.envelope.text.len(), |token| token.span.end),
+        );
+        Some(AstExpr::SequenceRepeat {
+            element: Box::new(element),
+            count,
+            span,
+        })
     }
 
     /// Profile 0.5 shares `Name {` between record literals and every construct

@@ -1,0 +1,13 @@
+mncs 0.10;
+
+// ENG-PRESSURE-0017 regression leaf B: defines the same local `helper`
+// name with deliberately different semantics.
+module pressure.collision.modb;
+
+fn helper(x: i64) -> (result: i64) {
+    return x +% 100;
+}
+
+fn probe_b(x: i64) -> (result: i64) {
+    return helper(x);
+}

@@ -1,0 +1,245 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-f64-records",
+ "cases": [
+  {
+   "id": "add",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure.f64records",
+     "function": "entry_add"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "float": {
+      "bits": 4616189618054758400,
+      "type": {
+       "bits": 64
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "x",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure.f64records",
+     "function": "entry_x"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "float": {
+      "bits": 4609434218613702656,
+      "type": {
+       "bits": 64
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "y",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure.f64records",
+     "function": "entry_y"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "float": {
+      "bits": 4612811918334230528,
+      "type": {
+       "bits": 64
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "solo",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure.f64records",
+     "function": "entry_solo"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "float": {
+      "bits": 4614500768194494464,
+      "type": {
+       "bits": 64
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "mix",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure.f64records",
+     "function": "entry_mix"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "float": {
+      "bits": 4612811918334230528,
+      "type": {
+       "bits": 64
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "mix-a",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure.f64records",
+     "function": "entry_mix_a"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 10,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "payload",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure.f64records",
+     "function": "entry_payload"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "float": {
+      "bits": 4616189618054758400,
+      "type": {
+       "bits": 64
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "call",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure.f64records",
+     "function": "entry_call"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "float": {
+      "bits": 4616189618054758400,
+      "type": {
+       "bits": 64
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "arg",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure.f64records",
+     "function": "entry_arg"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:examples.pressure.f64records::Pt::x%3Af64%3By%3Af64%3B",
+       "name": "Pt",
+       "fields": [
+        [
+         "x",
+         {
+          "float": {
+           "bits": 4609434218613702656,
+           "type": {
+            "bits": 64
+           }
+          }
+         }
+        ],
+        [
+         "y",
+         {
+          "float": {
+           "bits": 4612811918334230528,
+           "type": {
+            "bits": 64
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "float": {
+      "bits": 4616189618054758400,
+      "type": {
+       "bits": 64
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

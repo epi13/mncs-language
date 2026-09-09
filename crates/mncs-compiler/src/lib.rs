@@ -1626,17 +1626,25 @@ mod tests {
             .iter()
             .any(|diagnostic| diagnostic.code == "MNE117"));
 
-        let duplicate = SourceEnvelope::inline(
+        // ENG-PRESSURE-0021: a plain `let` may shadow a parameter in the
+        // same scope, so the old same-scope duplicate rejection no longer
+        // applies to value shadowing (index/state names stay `MNE110`,
+        // pinned by `pressure_rebinding::rebind_index_name_stays_reserved`).
+        let shadow = SourceEnvelope::inline(
             SourceArtifactKind::Program,
-            "invalid.duplicate",
-            "mncs 0.2; module invalid.duplicate; fn bad(a: i32) -> (result: i32) { let a: i32 = 1; return a; }",
+            "shadow.param",
+            "mncs 0.2; module shadow.param; fn ok(a: i32) -> (result: i32) { let a: i32 = 1; return a; }",
         );
-        let duplicate = compiler.front_end(duplicate);
-        assert!(!duplicate.is_valid());
-        assert!(duplicate
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "MNE110"));
+        let shadow = compiler.front_end(shadow);
+        assert!(shadow.is_valid(), "{:?}", shadow.diagnostics);
+        assert!(
+            shadow
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "MNE110"),
+            "{:?}",
+            shadow.diagnostics
+        );
 
         let unresolved = SourceEnvelope::inline(
             SourceArtifactKind::Program,

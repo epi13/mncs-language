@@ -36,7 +36,11 @@ let view: [i32; up_to 4] = xs[2..5];
   types (`[[u8; 2]; 3]`).
 - Construction `[e0, ..., eN-1]` must supply exactly the declared count;
   underfill/overfill is an elaboration error (`MNE184`). A bare literal
-  without an expected exact type is rejected (`MNE183`).
+  without an expected exact type is rejected (`MNE183`). The repeat form
+  `[value; N]` elaborates the element once and duplicates the operand, so
+  it lowers exactly like the equivalent N-element literal; a count that
+  disagrees with the declared exact length is `MNE184`, a non-length
+  count is `MNE256`, and a non-integer count is a parse error (`MNP203`).
 - Sequences have pure value semantics: no mutation, aliasing, or ownership
   transfer exists in this profile, so ownership/lifetime theory stays
   explicitly unresolved (RFC 0009).
@@ -143,6 +147,9 @@ own totality obligation.
 | `iterate over` below 0.7 | `MNP144` |
 | bare sequence literal without expected type | `MNE183` |
 | underfilled/overfilled literal | `MNE184` |
+| repeat count / length mismatch | `MNE184` |
+| repeat count not a sequence length | `MNE256` |
+| non-integer repeat count | `MNP203` |
 | element type mismatch | `MNE185` |
 | non-sequence indexing / slicing | `MNE186`, `MNE187` |
 | view type mismatch | `MNE188` |

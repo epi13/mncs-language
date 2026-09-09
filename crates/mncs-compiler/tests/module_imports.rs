@@ -249,9 +249,12 @@ fn profile_010_refuses_unbounded_specialization_expansion() {
 #[test]
 fn profile_010_rejects_invalid_or_ambiguous_generic_arguments() {
     let cases = [
+        // `id(1)` used to be the missing-argument case; deterministic
+        // inference (ENG-PRESSURE-0019) now solves `T = i64`, so the
+        // refusal case is a parameter no argument can constrain.
         (
             "missing",
-            "fn id<T>(value: T) -> (result: T) { return value; }\nfn demo() -> (result: i64) { return id(1); }",
+            "fn phantom<T>() -> (result: i64) { return 0; }\nfn demo() -> (result: i64) { return phantom(); }",
             "MNE220",
         ),
         (
@@ -270,8 +273,10 @@ fn profile_010_rejects_invalid_or_ambiguous_generic_arguments() {
             "MNE224",
         ),
         (
+            // The ceiling moved 64 -> 1024 (ENG-PRESSURE-0018); the
+            // refusal now sits past the new bound.
             "out_of_range",
-            "fn width<N: Nat>(xs: [i64; N]) -> (result: i64) { return xs[0]; }\nfn demo() -> (result: i64) { let xs: [i64; 1] = [1]; return width<65>(xs); }",
+            "fn width<N: Nat>(xs: [i64; N]) -> (result: i64) { return xs[0]; }\nfn demo() -> (result: i64) { let xs: [i64; 1] = [1]; return width<1025>(xs); }",
             "MNE225",
         ),
         (

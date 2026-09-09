@@ -1,0 +1,78 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-repeat-literals",
+ "cases": [
+  {
+   "id": "repeat",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.repeat",
+     "function": "probe_repeat"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "repeat-bound",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.repeat",
+     "function": "probe_repeat_bound"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "repeat-equiv",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.repeat",
+     "function": "probe_repeat_equiv"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

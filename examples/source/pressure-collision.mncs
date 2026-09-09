@@ -1,0 +1,21 @@
+mncs 0.10;
+
+// ENG-PRESSURE-0017 regression root: three legal modules each define the
+// same local function name `helper`. Module-qualified calls are
+// semantically distinct, and native/backend lowering must preserve that
+// distinction instead of refusing the whole program (`unsupported`) or
+// mislinking the callees.
+//
+// Independent expectations (hand-computed):
+//   probe_a(1) = 1 +% 1 = 2
+//   probe_b(1) = 1 +% 100 = 101
+//   probe_c(1) = (1 +% 1000) +% 101 = 1102
+//   probe()    = 2 +% 1102 = 1104
+module pressure.collision;
+
+use pressure.collision.moda as ma;
+use pressure.collision.modc as mc;
+
+fn probe() -> (result: i64) {
+    return ma.probe_a(1) +% mc.probe_c(1);
+}

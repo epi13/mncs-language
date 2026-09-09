@@ -67,22 +67,26 @@ pub fn prepare_stateful_session<'a>(
 impl C11StatefulSession<'_> {
     pub fn execute(&mut self, request: &ExecutionRequest) -> BackendExecutionResult {
         let mut result = empty_execution(self.artifact, request);
-        let Some(contract) = self
-            .artifact
-            .function_value_contracts
-            .get(&request.target.function)
-        else {
+        let Some(contract) = crate::support::entry_value_contract(
+            &self.artifact.function_value_contracts,
+            &request.target.module,
+            &request.target.function,
+        ) else {
             return execution_failure(
                 result,
                 ExecutionStatus::InvalidRequest,
                 "C11 execution requires a language-owned function value contract",
             );
         };
-        let driver = c_driver(
+        // Entry symbols are module-qualified (`mncs_<module>__<name>`), so
+        // same-named functions from distinct modules lower and execute as
+        // distinct natives (ENG-PRESSURE-0017).
+        let entry = crate::support::entry_native_symbol(
+            &self.artifact.exports,
+            &request.target.module,
             &request.target.function,
-            &contract.inputs,
-            contract.outputs.first(),
         );
+        let driver = c_driver(&entry, &contract.inputs, contract.outputs.first());
         let call_blob = match crate::support::build_call_file(
             &request.arguments,
             &contract.inputs,
@@ -109,7 +113,11 @@ impl C11StatefulSession<'_> {
                 }
             },
         };
-        if !self.executables.contains_key(&request.target.function) {
+        // The driver names its entry symbol, so the cache key is the
+        // canonical entry identity: two modules may export the same short
+        // name with different drivers.
+        let cache_key = crate::support::entry_key(&request.target.module, &request.target.function);
+        if !self.executables.contains_key(&cache_key) {
             let executable = match NativeExecutable::compile_or_reuse(
                 &[
                     ("module.c", self.source.as_str()),
@@ -122,15 +130,14 @@ impl C11StatefulSession<'_> {
                 Err(error) => return execution_failure(result, error.status(), error.reason()),
             };
             let compiled = executable.was_compiled();
-            self.executables
-                .insert(request.target.function.clone(), executable);
+            self.executables.insert(cache_key.clone(), executable);
             if compiled {
                 mncs_model::record_counter("backend_compile");
             }
         }
         let executable = self
             .executables
-            .get(&request.target.function)
+            .get(&cache_key)
             .expect("C11 executable inserted above");
         match executable.run(&argv, call_path.as_deref()) {
             Ok(run) => {
@@ -1629,10 +1636,11 @@ pub fn execute_c11(
         Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
         Err(reason) => return execution_failure(result, ExecutionStatus::InvalidRequest, reason),
     };
-    let Some(contract) = artifact
-        .function_value_contracts
-        .get(&request.target.function)
-    else {
+    let Some(contract) = crate::support::entry_value_contract(
+        &artifact.function_value_contracts,
+        &request.target.module,
+        &request.target.function,
+    ) else {
         return execution_failure(
             result,
             ExecutionStatus::InvalidRequest,
@@ -1641,11 +1649,13 @@ pub fn execute_c11(
     };
     // Composite arguments and results cross through the canonical call
     // file; pure scalar calls keep the historical argv-only protocol.
-    let driver = c_driver(
+    // The entry symbol is module-qualified (ENG-PRESSURE-0017).
+    let entry = crate::support::entry_native_symbol(
+        &artifact.exports,
+        &request.target.module,
         &request.target.function,
-        &contract.inputs,
-        contract.outputs.first(),
     );
+    let driver = c_driver(&entry, &contract.inputs, contract.outputs.first());
     let call_blob = match crate::support::build_call_file(
         &request.arguments,
         &contract.inputs,

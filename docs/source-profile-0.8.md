@@ -57,6 +57,14 @@ artifact evidence. Branchlessness does not establish constant-time behavior,
 which also depends on target timing, memory access, speculation, and the wider
 execution context.
 
+Eagerness is semantic, not an optimization detail (ENG-PRESSURE-0022): a
+discarded arm that traps still traps — `select(true, 7, boom(0))` fails
+with the arm's trap on every executable backend rather than returning 7.
+Guarded divisions must therefore be total on both arms (guard the divisor
+value, e.g. `fx_div(n, select(d == 0, 1, d))`), and whole-value lazy choice
+belongs to statement-level `if`, not `select`. There is no lazy conditional
+expression in this profile.
+
 ## Realization envelope
 
 The research backend executes semantic lanes and masks directly. Portable WASM

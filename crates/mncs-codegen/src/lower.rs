@@ -175,6 +175,11 @@ impl CompositeInfo {
             }
             match mncs_model::BodyType::from_semantic_name(semantic_type) {
                 mncs_model::BodyType::Integer(ty) if ty.bits == 64 => SlotWidth::W64,
+                // Binary64 fields occupy a full 8-byte slot bit-carried as
+                // u64 (I64Store/I64Load are bitwise); without this arm f64
+                // fields collapsed to W32 and projections read back zeros
+                // (ENG-PRESSURE-0002 WASM record divergence).
+                mncs_model::BodyType::Float(ty) if ty.is_supported() => SlotWidth::W64,
                 // Packed view descriptors and masks are full i64 values.
                 // Exact sequences and vectors are i32 cell references, like
                 // nested records above.

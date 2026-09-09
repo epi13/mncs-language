@@ -94,24 +94,127 @@ pub(crate) fn validate_realizable_ssa(
     Err(Box::new(failed(diagnostics)))
 }
 
+/// Native symbol for one MNCS function, derived from its canonical
+/// (declaring-module, name) identity.
+///
+/// Every lowered function — root or imported, generic specialization or
+/// plain — owns a distinct native symbol, so two legal modules may each
+/// define the same local name and link into one program without backend
+/// redefinition failures (ENG-PRESSURE-0017). The spelling is a pure
+/// function of the canonical identity: `mncs_<namespace>__<name>` with
+/// injective escaping (`_` doubles, any other non-alphanumeric byte folds
+/// to a single `_`), so distinct identities never spell the same symbol
+/// and C never sees a bare `main`. Drivers and module emission share this
+/// exact function, so they agree by construction. Execution requests keep
+/// addressing entries by `(module, function)`; the execute path derives
+/// the same symbol from the request target.
+pub(crate) fn qualified_c_symbol(namespace: &str, name: &str) -> String {
+    format!(
+        "mncs_{}__{}",
+        mangle_symbol_part(namespace),
+        mangle_symbol_part(name)
+    )
+}
+
+/// Injective mangle for one namespace/name part: `_` escapes to `__` first
+/// (so pre-existing underscores stay distinguishable), then every remaining
+/// non-alphanumeric byte (notably the `.` module separators) folds to a
+/// single `_`. The output is always a valid C identifier tail.
+fn mangle_symbol_part(part: &str) -> String {
+    part.replace('_', "__")
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Map key addressing one function value contract by canonical identity.
+/// Distinct from the native symbol on purpose: contracts are looked up by
+/// entry identity, symbols name emitted code.
+pub(crate) fn entry_key(namespace: &str, name: &str) -> String {
+    format!("{namespace}::{name}")
+}
+
+/// One lowered function's declaration facts: canonical identity plus the
+/// emitted native symbol. Built once per lowering so name-based selections
+/// (PTX kernel entries) and entry resolution share the module's mapping.
+pub(crate) struct EntryDecl {
+    pub namespace: String,
+    pub name: String,
+    pub symbol: String,
+}
+
+/// Declaration facts for every SSA function in lowering order. Functions
+/// without a program declaration (unreachable for a valid pipeline) carry
+/// their fallback export spelling under an empty namespace.
+pub(crate) fn entry_decls(program: &Program, ssa: &mncs_model::SsaModule) -> Vec<EntryDecl> {
+    let names = function_names(program, ssa);
+    ssa.functions
+        .iter()
+        .zip(names)
+        .map(|(ssa_function, symbol)| {
+            match program.functions.iter().find(|function| {
+                mncs_model::function_id(
+                    function.identity_namespace(&program.module),
+                    &function.name,
+                ) == ssa_function.semantic_identity
+            }) {
+                Some(function) => EntryDecl {
+                    namespace: function.identity_namespace(&program.module).to_owned(),
+                    name: function.name.clone(),
+                    symbol,
+                },
+                None => EntryDecl {
+                    namespace: String::new(),
+                    name: symbol.clone(),
+                    symbol,
+                },
+            }
+        })
+        .collect()
+}
+
+/// Resolve one logical kernel-entry selection to a physical export symbol:
+/// an exact symbol, a `module::name` identity, or a short name that is
+/// unambiguous in this program. Ambiguous or unknown entries resolve to
+/// `None` so callers fail closed with a structured diagnostic as before.
+pub(crate) fn resolve_kernel_entry(entry: &str, decls: &[EntryDecl]) -> Option<String> {
+    if let Some(exact) = decls.iter().find(|decl| decl.symbol == entry) {
+        return Some(exact.symbol.clone());
+    }
+    if let Some((namespace, name)) = entry.split_once("::") {
+        return decls
+            .iter()
+            .find(|decl| decl.namespace == namespace && decl.name == name)
+            .map(|decl| decl.symbol.clone());
+    }
+    let mut matches = decls.iter().filter(|decl| decl.name == entry);
+    match (matches.next(), matches.next()) {
+        (Some(only), None) => Some(only.symbol.clone()),
+        _ => None,
+    }
+}
+
 pub(crate) fn function_names(program: &Program, ssa: &SsaModule) -> Vec<String> {
     ssa.functions
         .iter()
         .map(|ssa_function| {
-            let base = program
-                .functions
-                .iter()
-                .find(|function| {
-                    mncs_model::function_id(
-                        function.identity_namespace(&program.module),
-                        &function.name,
-                    ) == ssa_function.semantic_identity
-                })
-                .map(|function| function.name.clone())
-                .unwrap_or_else(|| export_name(&ssa_function.semantic_identity.0));
-            // Module symbols follow the native-symbol rule (`main` is
-            // reserved by C), matching what the driver declares and calls.
-            c_symbol(&base)
+            match program.functions.iter().find(|function| {
+                mncs_model::function_id(
+                    function.identity_namespace(&program.module),
+                    &function.name,
+                ) == ssa_function.semantic_identity
+            }) {
+                Some(function) => {
+                    qualified_c_symbol(function.identity_namespace(&program.module), &function.name)
+                }
+                None => export_name(&ssa_function.semantic_identity.0),
+            }
         })
         .collect()
 }
@@ -322,13 +425,62 @@ pub(crate) fn function_value_contracts(
         // slot; otherwise an imported generic declaration can overwrite the
         // wrapper contract and reject a valid composite request on strict
         // backends.  Imported-only names remain available as before.
+        //
+        // Every declaration additionally owns its canonical `module::name`
+        // slot, so entry resolution can disambiguate same-named functions
+        // from distinct modules (ENG-PRESSURE-0017) instead of inheriting
+        // whichever short-name shape won the slot above.
         if function.home_module.is_none() {
-            contracts.insert(function.name.clone(), contract);
+            contracts.insert(function.name.clone(), contract.clone());
         } else {
-            contracts.entry(function.name.clone()).or_insert(contract);
+            contracts
+                .entry(function.name.clone())
+                .or_insert(contract.clone());
         }
+        contracts.insert(
+            entry_key(function.identity_namespace(&program.module), &function.name),
+            contract,
+        );
     }
     contracts
+}
+
+/// Language-owned value contract for one execution entry, resolved by
+/// canonical `(module, function)` identity first and by legacy short name
+/// second. The qualified slot always names the requested declaration
+/// exactly; the short-name fallback keeps requests against artifacts
+/// emitted before qualified symbols (and single-module programs, where the
+/// two agree) working.
+pub(crate) fn entry_value_contract<'a>(
+    contracts: &'a std::collections::BTreeMap<String, mncs_model::BackendFunctionValueContract>,
+    module: &str,
+    function: &str,
+) -> Option<&'a mncs_model::BackendFunctionValueContract> {
+    contracts
+        .get(&entry_key(module, function))
+        .or_else(|| contracts.get(function))
+}
+
+/// Native code symbol for one execution entry. Prefers the canonical
+/// qualified spelling; falls back to the legacy short spelling only when
+/// the artifact at hand does not export the qualified symbol (artifacts
+/// emitted before qualified lowering, loaded from disk via
+/// `experiment execute`). The fallback keeps old artifacts executable;
+/// freshly lowered programs always take the qualified branch.
+pub(crate) fn entry_native_symbol(exports: &[String], module: &str, function: &str) -> String {
+    let qualified = qualified_c_symbol(module, function);
+    if exports.iter().any(|export| export == &qualified) {
+        qualified
+    } else {
+        c_symbol(function)
+    }
+}
+
+/// Whether one emitted module (WASM export list or decoded function table)
+/// carries an entry under its qualified spelling.
+pub(crate) fn exports_contain(exports: &[String], module: &str, function: &str) -> bool {
+    let qualified = qualified_c_symbol(module, function);
+    exports.iter().any(|export| export == &qualified)
 }
 
 pub(crate) fn artifact_ref(artifact: &BackendArtifact) -> CompilerArtifactRef {

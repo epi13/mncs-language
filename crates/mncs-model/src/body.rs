@@ -9,11 +9,28 @@ use crate::{
 };
 
 pub const EXECUTABLE_BODY_SCHEMA_VERSION: &str = "0.2";
-pub const SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND: u32 = 32;
+/// Inclusive upper bound for `iterate ... up_to N` counter loops and
+/// sequence-traversal steps (ENG-PRESSURE-0004).
+///
+/// Why 1024: every backend lowers bounded iteration to a native loop (the
+/// C/LLVM/Cranelift emitters use a program-counter state machine, WASM
+/// uses real `loop` opcodes), so compile-time cost is O(1) in the bound
+/// and the ceiling is purely a runtime-step policy. The reference
+/// interpreter retires roughly eight steps per iteration (measured), so a
+/// single 1024-loop costs ~8K steps against the 8M execution budget, and
+/// the retained two-level nesting cap keeps fully-nested loops inside
+/// caller-sized step budgets. 1024 also matches the sequence bound, so any
+/// well-typed sequence is fully traversable.
+pub const SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND: u32 = 1024;
 /// Inclusive upper bound for sequence lengths and view capacities
-/// (Source Profile 0.7). Bounds are semantic facts carried by types, so they
-/// must stay small enough to remain machine-checkable everywhere.
-pub const MAX_SEQUENCE_BOUND: u32 = 64;
+/// (Source Profile 0.7; ENG-PRESSURE-0018). Bounds are semantic facts
+/// carried by types, so they must stay small enough to remain
+/// machine-checkable everywhere: 1024 keeps one i64 axis to 8 KiB on the
+/// stack-backed native emitters, stays far inside the 16 MiB composite
+/// cell arena, and fits comfortably in WASM linear memory. Larger shapes
+/// compose from these (records of sequences, nested sequences); genuinely
+/// unbounded growth stays out of scope under deterministic allocation.
+pub const MAX_SEQUENCE_BOUND: u32 = 1024;
 /// Semantic vectors and masks are deliberately bounded in the first Profile
 /// 0.8 tranche. Lane count is logical identity and never a register width.
 pub const MAX_VECTOR_LANES: u32 = 64;

@@ -1,0 +1,12 @@
+mncs 0.10;
+
+// ENG-PRESSURE-0017 regression leaf A: defines a local `helper`.
+module pressure.collision.moda;
+
+fn helper(x: i64) -> (result: i64) {
+    return x +% 1;
+}
+
+fn probe_a(x: i64) -> (result: i64) {
+    return helper(x);
+}
