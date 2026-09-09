@@ -1,0 +1,98 @@
+{
+ "schema_version": "0.1",
+ "name": "jit-session",
+ "cases": [
+  {
+   "id": "create-define",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.session.v1",
+     "function": "candidate_create_define"
+    },
+    "arguments": [],
+    "step_budget": 262144
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 101101100,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "redefine-flow",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.session.v1",
+     "function": "candidate_redefine_flow"
+    },
+    "arguments": [],
+    "step_budget": 262144
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 211140602,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "define-guards",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.session.v1",
+     "function": "candidate_guards"
+    },
+    "arguments": [],
+    "step_budget": 262144
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2757,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "era-close",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.session.v1",
+     "function": "candidate_era_close"
+    },
+    "arguments": [],
+    "step_budget": 262144
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 221200001,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

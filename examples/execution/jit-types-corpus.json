@@ -1,0 +1,98 @@
+{
+ "schema_version": "0.1",
+ "name": "jit-types",
+ "cases": [
+  {
+   "id": "provider-table",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.types.v1",
+     "function": "candidate_provider_table"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 199,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "lifecycle-table",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.types.v1",
+     "function": "candidate_lifecycle_table"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 29,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "change-policy",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.types.v1",
+     "function": "candidate_change_policy"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 13,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "codes-roundtrip",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.types.v1",
+     "function": "candidate_codes_roundtrip"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 255,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

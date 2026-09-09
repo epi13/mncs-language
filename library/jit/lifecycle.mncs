@@ -1,0 +1,212 @@
+mncs 0.10;
+
+// mncs.jit.lifecycle — provider-neutral executable-artifact lifecycle.
+//
+// The lifecycle table (codes from `mncs.jit.types.v1`):
+//   Empty(0) -> Compiled(1): recording a fresh compilation.
+//   Compiled(1) -> Published(2): making the artifact visible to plans.
+//   Compiled(1) -> Retired(4): compiled but never activated.
+//   Published(2) -> Active(3): selection by a logical binding.
+//   Published(2) -> Retired(4): superseded before ever serving.
+//   Active(3) -> Published(2): superseded; stays alive, serves no
+//     new calls through bindings, but remains directly invocable
+//     while legitimately referenced (generational publication never
+//     overwrites emitted code).
+//   Active(3) -> Retired(4): reclamation once unreferenced.
+// Every other transition is refused, in particular:
+//   Retired(4) -> anything: retired is terminal; a retired artifact
+//     can never become active again, even if provider memory for it
+//     is still alive.
+//   anything -> Empty(0): no resurrection of cleared slots.
+//   self-transitions: republication is a new artifact generation,
+//     never a state flip on the same code.
+//
+// Unknown codes fail closed (refused). Session close retires every
+// live artifact through `retire_window`.
+//
+// Complexity bounds: `transition_allowed` is O(1); `retire_window`
+// is one pass over the 16-slot window. No operation allocates;
+// every function is total.
+module mncs.jit.lifecycle.v1;
+
+use mncs.core.logic.v1 as logic;
+use mncs.jit.types.v1 as types;
+
+// Explicit transition table. Unknown codes are refused.
+fn transition_allowed(from_code: u64, to_code: u64) -> (result: bool) {
+    if logic.bool_not(types.lifecycle_is_known(from_code)) {
+        return false;
+    }
+    if logic.bool_not(types.lifecycle_is_known(to_code)) {
+        return false;
+    }
+    if from_code == 0 {
+        return to_code == 1;
+    }
+    if from_code == 1 {
+        return to_code == 2 || to_code == 4;
+    }
+    if from_code == 2 {
+        return to_code == 3 || to_code == 4;
+    }
+    if from_code == 3 {
+        return to_code == 2 || to_code == 4;
+    }
+    return false;
+}
+
+record RetireOut {
+    artifacts: [types.Executable; 16],
+    retired: u64,
+}
+
+// Retire every live artifact in the window (Compiled, Published, or
+// Active become Retired); other slots pass through untouched.
+// Returns the updated window plus the number retired.
+fn retire_window(artifacts: [types.Executable; 16], count: u64) -> (result: RetireOut) {
+    let seed: RetireOut = RetireOut { artifacts: artifacts, retired: 0 };
+    iterate i over artifacts carrying st: RetireOut = seed {
+        let live: bool = i < count;
+        let art: types.Executable = st.artifacts[i];
+        let kill: bool = live && types.lifecycle_is_live(art.lifecycle_code);
+        let slot: u64 = select(kill, i, 0);
+        let next_art: types.Executable = types.Executable {
+            code: art.code,
+            logical: art.logical,
+            generation: art.generation,
+            provider_code: art.provider_code,
+            lifecycle_code: select(kill, 4, art.lifecycle_code),
+            semantic_generation: art.semantic_generation,
+            proof_generation: art.proof_generation,
+            assumption_bits: art.assumption_bits,
+            compile_ms: art.compile_ms,
+            publish_seq: art.publish_seq,
+        };
+        next st = RetireOut {
+            artifacts: replace(st.artifacts, slot, select_executable(kill, next_art, st.artifacts[slot])),
+            retired: st.retired +% select(kill, 1, 0) as u64,
+        };
+    }
+    return st;
+}
+
+// Record-typed conditional without a composite-valued select.
+fn select_executable(flag: bool, a: types.Executable, b: types.Executable) -> (result: types.Executable) {
+    return types.Executable {
+        code: select(flag, a.code, b.code),
+        logical: select(flag, a.logical, b.logical),
+        generation: select(flag, a.generation, b.generation),
+        provider_code: select(flag, a.provider_code, b.provider_code),
+        lifecycle_code: select(flag, a.lifecycle_code, b.lifecycle_code),
+        semantic_generation: select(flag, a.semantic_generation, b.semantic_generation),
+        proof_generation: select(flag, a.proof_generation, b.proof_generation),
+        assumption_bits: select(flag, a.assumption_bits, b.assumption_bits),
+        compile_ms: select(flag, a.compile_ms, b.compile_ms),
+        publish_seq: select(flag, a.publish_seq, b.publish_seq),
+    };
+}
+
+// --- Executable entry points (scalar shapes for backend corpora) ---
+
+// Full 5x5 transition matrix as 25 bits: each row packs the five
+// `to` bits (Empty/Compiled/Published/Active/Retired) with weights
+// 16/8/4/2/1. Empty -> {Compiled} = 8; Compiled -> {Published,
+// Retired} = 5; Published -> {Active, Retired} = 3; Active ->
+// {Published, Retired} = 5; Retired -> {} = 0.
+fn candidate_matrix() -> (result: i64) {
+    let r0: u64 = select(transition_allowed(0, 0), 16, 0) as u64
+        +% select(transition_allowed(0, 1), 8, 0) as u64
+        +% select(transition_allowed(0, 2), 4, 0) as u64
+        +% select(transition_allowed(0, 3), 2, 0) as u64
+        +% select(transition_allowed(0, 4), 1, 0) as u64;
+    let r1: u64 = select(transition_allowed(1, 0), 16, 0) as u64
+        +% select(transition_allowed(1, 1), 8, 0) as u64
+        +% select(transition_allowed(1, 2), 4, 0) as u64
+        +% select(transition_allowed(1, 3), 2, 0) as u64
+        +% select(transition_allowed(1, 4), 1, 0) as u64;
+    let r2: u64 = select(transition_allowed(2, 0), 16, 0) as u64
+        +% select(transition_allowed(2, 1), 8, 0) as u64
+        +% select(transition_allowed(2, 2), 4, 0) as u64
+        +% select(transition_allowed(2, 3), 2, 0) as u64
+        +% select(transition_allowed(2, 4), 1, 0) as u64;
+    let r3: u64 = select(transition_allowed(3, 0), 16, 0) as u64
+        +% select(transition_allowed(3, 1), 8, 0) as u64
+        +% select(transition_allowed(3, 2), 4, 0) as u64
+        +% select(transition_allowed(3, 3), 2, 0) as u64
+        +% select(transition_allowed(3, 4), 1, 0) as u64;
+    let r4: u64 = select(transition_allowed(4, 0), 16, 0) as u64
+        +% select(transition_allowed(4, 1), 8, 0) as u64
+        +% select(transition_allowed(4, 2), 4, 0) as u64
+        +% select(transition_allowed(4, 3), 2, 0) as u64
+        +% select(transition_allowed(4, 4), 1, 0) as u64;
+    return r0 as i64 *% 1048576 +% r1 as i64 *% 32768 +% r2 as i64 *% 1024 +% r3 as i64 *% 32 +% r4 as i64;
+}
+
+// Retire a mixed window: Compiled + Active retire, Retired and Empty
+// slots pass through. retired = 2, survivors keep codes.
+fn candidate_retire_window() -> (result: i64) {
+    let zero: types.Executable = types.Executable {
+        code: 0,
+        logical: 0,
+        generation: 0,
+        provider_code: 0,
+        lifecycle_code: 0,
+        semantic_generation: 0,
+        proof_generation: 0,
+        assumption_bits: 0,
+        compile_ms: 0,
+        publish_seq: 0,
+    };
+    let live_c: types.Executable = types.Executable {
+        code: 7,
+        logical: 1,
+        generation: 1,
+        provider_code: 1,
+        lifecycle_code: 1,
+        semantic_generation: 1,
+        proof_generation: 1,
+        assumption_bits: 0,
+        compile_ms: 5,
+        publish_seq: 0,
+    };
+    let live_a: types.Executable = types.Executable {
+        code: 8,
+        logical: 1,
+        generation: 2,
+        provider_code: 1,
+        lifecycle_code: 3,
+        semantic_generation: 1,
+        proof_generation: 1,
+        assumption_bits: 0,
+        compile_ms: 6,
+        publish_seq: 2,
+    };
+    let dead: types.Executable = types.Executable {
+        code: 9,
+        logical: 2,
+        generation: 1,
+        provider_code: 0,
+        lifecycle_code: 4,
+        semantic_generation: 1,
+        proof_generation: 1,
+        assumption_bits: 0,
+        compile_ms: 1,
+        publish_seq: 1,
+    };
+    let window: [types.Executable; 16] = [
+        live_c, live_a, dead, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero, zero,
+    ];
+    let done: RetireOut = retire_window(window, 3);
+    let first: types.Executable = done.artifacts[0];
+    let second: types.Executable = done.artifacts[1];
+    let third: types.Executable = done.artifacts[2];
+    return done.retired as i64 *% 1000000 +% first.lifecycle_code as i64 *% 10000 +% second.lifecycle_code as i64 *% 100 +% third.lifecycle_code as i64;
+}
+
+// Unknown codes fail closed in both positions.
+fn candidate_unknown_closed() -> (result: i64) {
+    let a: u64 = select(transition_allowed(9, 1), 100, 0) as u64;
+    let b: u64 = select(transition_allowed(1, 9), 10, 0) as u64;
+    let c: u64 = select(transition_allowed(4, 3), 1, 0) as u64;
+    return a as i64 +% b as i64 +% c as i64;
+}

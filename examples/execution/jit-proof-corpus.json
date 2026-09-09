@@ -1,0 +1,75 @@
+{
+ "schema_version": "0.1",
+ "name": "jit-proof",
+ "cases": [
+  {
+   "id": "era-matrix",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.proof.v1",
+     "function": "candidate_era_matrix"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 10000,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "dual-key",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.proof.v1",
+     "function": "candidate_dual_key"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 951000,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "era-axes",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.jit.proof.v1",
+     "function": "candidate_axes"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 100,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

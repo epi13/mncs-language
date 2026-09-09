@@ -1,0 +1,549 @@
+mncs 0.10;
+
+// mncs.jit.binding — logical bindings and generational publication
+// for the MNCS-native JIT orchestration layer.
+//
+// A Binding selects at most one Executable per logical definition.
+// Publication is generational and atomic at the value level: `define`
+// (in `mncs.jit.session.v1`) moves the current selection into
+// previous_* and parks the binding Stale with no artifact;
+// `note_compiled` records a provider compilation as a Compiled
+// artifact; `publish` validates the artifact and swings the binding
+// to it in one total step. A failed generation therefore CANNOT
+// replace the active binding: until `publish` accepts, the previous
+// selection stays intact in previous_*, and `abandon` restores it.
+//
+// PUBLISH POLICY (`publish` reasons):
+//   0 ok,
+//   1 rejected-closed, 2 rejected-unknown-artifact,
+//   3 rejected-wrong-owner-or-generation (the artifact names a
+//     different logical definition or a superseded generation),
+//   4 rejected-bad-lifecycle (only Compiled or Published artifacts
+//     activate; Active republication is a new generation, and
+//     Retired artifacts never reactivate),
+//   5 rejected-stale-proof (the artifact triple or its definition
+//     triple no longer matches the session era).
+// Every rejection returns the session unchanged.
+// NOTE-COMPILED POLICY (`note_compiled` reasons):
+//   0 ok,
+//   1 rejected-closed, 2 rejected-artifacts-full,
+//   3 rejected-unknown-logical, 4 rejected-unknown-provider,
+//   5 rejected-stale-generation (only the latest source generation
+//     of a logical definition may gain executables),
+//   6 rejected-unimplemented-provider (recording an LLVM/Native
+//     compile would fake execution that never happened).
+//
+// SUPERSESSION: publishing a new artifact for a logical definition
+// demotes the previously Active artifact for that definition to
+// Published: still alive and directly invocable while referenced,
+// serving no new calls through bindings. Retirement (`retire_
+// artifact`) moves a live artifact to Retired and marks bindings
+// that selected it Stale (reason 4); resolve then refuses them.
+//
+// RESOLVE POLICY: `resolve` reports the binding honestly — found,
+// generation, artifact, state — plus `proof_current` (the selected
+// generation's definition era still matches the session era). The
+// driver invokes only Valid + proof-current selections; anything
+// else falls back, recompiles, or retires through these same entry
+// points.
+//
+// Complexity bounds: every scan is over the 8/16-slot windows;
+// publish touches at most one extra artifact row. No operation
+// allocates; every function is total.
+module mncs.jit.binding.v1;
+
+use mncs.core.logic.v1 as logic;
+use mncs.jit.lifecycle.v1 as lifecycle;
+use mncs.jit.proof.v1 as proof;
+use mncs.jit.session.v1 as session;
+use mncs.jit.types.v1 as types;
+
+record NoteOut {
+    session: types.Session,
+    artifact_code: u64,
+    accepted: bool,
+    reason: u64,
+}
+
+record PublishOut {
+    session: types.Session,
+    accepted: bool,
+    reason: u64,
+}
+
+record AbandonOut {
+    session: types.Session,
+    restored: bool,
+}
+
+record RetireArtifactOut {
+    session: types.Session,
+    retired: bool,
+}
+
+record ResolveOut {
+    found: bool,
+    generation: u64,
+    artifact: u64,
+    state_code: u64,
+    proof_current: bool,
+}
+
+// --- Window scans (single level projections only) ---
+
+fn binding_slot(session: types.Session, logical: u64) -> (result: u64) {
+    let binds: [types.Binding; 8] = session.bindings;
+    iterate i over binds carrying slot: u64 = session.binding_count {
+        let hit: bool = i < session.binding_count && binds[i].logical == logical;
+        next slot = select(hit, i, slot);
+    }
+    return slot;
+}
+
+fn artifact_slot(session: types.Session, code: u64) -> (result: u64) {
+    let arts: [types.Executable; 16] = session.artifacts;
+    iterate i over arts carrying slot: u64 = session.artifact_count {
+        let hit: bool = i < session.artifact_count && arts[i].code == code;
+        next slot = select(hit, i, slot);
+    }
+    return slot;
+}
+
+fn latest_generation(session: types.Session, logical: u64) -> (result: u64) {
+    let rows: [types.Definition; 8] = session.defs;
+    iterate i over rows carrying gen: u64 = 0 {
+        let hit: bool = i < session.def_count && rows[i].logical == logical;
+        next gen = select(hit, rows[i].generation, gen);
+    }
+    return gen;
+}
+
+fn def_slot(session: types.Session, logical: u64, generation: u64) -> (result: u64) {
+    let rows: [types.Definition; 8] = session.defs;
+    iterate i over rows carrying slot: u64 = session.def_count {
+        let hit: bool = i < session.def_count && rows[i].logical == logical && rows[i].generation == generation;
+        next slot = select(hit, i, slot);
+    }
+    return slot;
+}
+
+// --- Record a provider compilation ---
+
+fn note_compiled(session: types.Session, logical: u64, generation: u64, provider_code: u64, compile_ms: u64, sem: u64, proof_gen: u64, bits: u64) -> (result: NoteOut) {
+    if session.closed {
+        return NoteOut { session: session, artifact_code: 0, accepted: false, reason: 1 };
+    } else {
+    }
+    if logic.bool_not(types.provider_is_known(provider_code)) {
+        return NoteOut { session: session, artifact_code: 0, accepted: false, reason: 4 };
+    } else {
+    }
+    if logic.bool_not(types.provider_is_implemented(provider_code)) {
+        return NoteOut { session: session, artifact_code: 0, accepted: false, reason: 6 };
+    } else {
+    }
+    let bslot: u64 = binding_slot(session, logical);
+    if bslot >= session.binding_count {
+        return NoteOut { session: session, artifact_code: 0, accepted: false, reason: 3 };
+    } else {
+    }
+    if generation != latest_generation(session, logical) {
+        return NoteOut { session: session, artifact_code: 0, accepted: false, reason: 5 };
+    } else {
+    }
+    if session.artifact_count >= 16 {
+        return NoteOut { session: session, artifact_code: 0, accepted: false, reason: 2 };
+    } else {
+    }
+    let code: u64 = session.next_artifact;
+    let art: types.Executable = types.Executable {
+        code: code,
+        logical: logical,
+        generation: generation,
+        provider_code: provider_code,
+        lifecycle_code: 1,
+        semantic_generation: sem,
+        proof_generation: proof_gen,
+        assumption_bits: bits,
+        compile_ms: compile_ms,
+        publish_seq: 0,
+    };
+    let done: types.Session = types.Session {
+        semantic_generation: session.semantic_generation,
+        proof_generation: session.proof_generation,
+        next_logical: session.next_logical,
+        next_generation: session.next_generation,
+        next_artifact: session.next_artifact +% 1,
+        publish_seq: session.publish_seq,
+        closed: session.closed,
+        defs: session.defs,
+        def_count: session.def_count,
+        bindings: session.bindings,
+        binding_count: session.binding_count,
+        artifacts: replace(session.artifacts, session.artifact_count, art),
+        artifact_count: session.artifact_count +% 1,
+        edges: session.edges,
+        edge_count: session.edge_count,
+    };
+    return NoteOut { session: done, artifact_code: code, accepted: true, reason: 0 };
+}
+
+// --- Publish (atomic binding swing) ---
+
+record PublishScan {
+    artifacts: [types.Executable; 16],
+}
+
+fn publish(session: types.Session, logical: u64, artifact_code: u64) -> (result: PublishOut) {
+    if session.closed {
+        return PublishOut { session: session, accepted: false, reason: 1 };
+    } else {
+    }
+    let aslot: u64 = artifact_slot(session, artifact_code);
+    if aslot >= session.artifact_count {
+        return PublishOut { session: session, accepted: false, reason: 2 };
+    } else {
+    }
+    let arts: [types.Executable; 16] = session.artifacts;
+    let art: types.Executable = arts[aslot];
+    if art.logical != logical {
+        return PublishOut { session: session, accepted: false, reason: 3 };
+    } else {
+    }
+    if art.generation != latest_generation(session, logical) {
+        return PublishOut { session: session, accepted: false, reason: 3 };
+    } else {
+    }
+    if logic.bool_not(art.lifecycle_code == 1 || art.lifecycle_code == 2) {
+        return PublishOut { session: session, accepted: false, reason: 4 };
+    } else {
+    }
+    let dslot: u64 = def_slot(session, logical, art.generation);
+    if dslot >= session.def_count {
+        return PublishOut { session: session, accepted: false, reason: 3 };
+    } else {
+    }
+    let rows: [types.Definition; 8] = session.defs;
+    let def: types.Definition = rows[dslot];
+    let era_ok: bool = proof.artifact_proof_valid(art.semantic_generation, art.proof_generation, art.assumption_bits, session.semantic_generation, session.proof_generation, def.assumption_bits)
+        && proof.proof_current(def.semantic_generation, def.proof_generation, session.semantic_generation, session.proof_generation);
+    if logic.bool_not(era_ok) {
+        return PublishOut { session: session, accepted: false, reason: 5 };
+    } else {
+    }
+    let seq: u64 = session.publish_seq +% 1;
+    let seed: PublishScan = PublishScan { artifacts: session.artifacts };
+    iterate i over arts carrying fold: PublishScan = seed {
+        let live: bool = i < session.artifact_count;
+        let cur: types.Executable = fold.artifacts[i];
+        let supersede: bool = live && cur.logical == logical && cur.lifecycle_code == 3 && cur.code != artifact_code;
+        let activate: bool = live && i == aslot;
+        let next_code: u64 = select(activate, 3, select(supersede, 2, cur.lifecycle_code));
+        let next_seq: u64 = select(activate, seq, cur.publish_seq);
+        let stepped: types.Executable = types.Executable {
+            code: cur.code,
+            logical: cur.logical,
+            generation: cur.generation,
+            provider_code: cur.provider_code,
+            lifecycle_code: next_code,
+            semantic_generation: cur.semantic_generation,
+            proof_generation: cur.proof_generation,
+            assumption_bits: cur.assumption_bits,
+            compile_ms: cur.compile_ms,
+            publish_seq: next_seq,
+        };
+        next fold = PublishScan { artifacts: replace(fold.artifacts, i, stepped) };
+    }
+    let bslot: u64 = binding_slot(session, logical);
+    if bslot >= session.binding_count {
+        return PublishOut { session: session, accepted: false, reason: 3 };
+    } else {
+    }
+    let binds: [types.Binding; 8] = session.bindings;
+    let cur_b: types.Binding = binds[bslot];
+    let swung: types.Binding = types.Binding {
+        logical: logical,
+        generation: art.generation,
+        artifact: artifact_code,
+        previous_generation: cur_b.previous_generation,
+        previous_artifact: cur_b.previous_artifact,
+        state_code: 0,
+        stale_reason: 0,
+    };
+    let done: types.Session = types.Session {
+        semantic_generation: session.semantic_generation,
+        proof_generation: session.proof_generation,
+        next_logical: session.next_logical,
+        next_generation: session.next_generation,
+        next_artifact: session.next_artifact,
+        publish_seq: seq,
+        closed: session.closed,
+        defs: session.defs,
+        def_count: session.def_count,
+        bindings: replace(binds, bslot, swung),
+        binding_count: session.binding_count,
+        artifacts: fold.artifacts,
+        artifact_count: session.artifact_count,
+        edges: session.edges,
+        edge_count: session.edge_count,
+    };
+    return PublishOut { session: done, accepted: true, reason: 0 };
+}
+
+// --- Abandon (explicit rollback to the previous selection) ---
+
+fn abandon(session: types.Session, logical: u64) -> (result: AbandonOut) {
+    let bslot: u64 = binding_slot(session, logical);
+    if bslot >= session.binding_count {
+        return AbandonOut { session: session, restored: false };
+    } else {
+    }
+    let binds: [types.Binding; 8] = session.bindings;
+    let cur: types.Binding = binds[bslot];
+    let can: bool = cur.state_code == 1 && cur.previous_generation != 0;
+    if logic.bool_not(can) {
+        return AbandonOut { session: session, restored: false };
+    } else {
+    }
+    let back: types.Binding = types.Binding {
+        logical: logical,
+        generation: cur.previous_generation,
+        artifact: cur.previous_artifact,
+        previous_generation: 0,
+        previous_artifact: 0,
+        state_code: 0,
+        stale_reason: 0,
+    };
+    let done: types.Session = types.Session {
+        semantic_generation: session.semantic_generation,
+        proof_generation: session.proof_generation,
+        next_logical: session.next_logical,
+        next_generation: session.next_generation,
+        next_artifact: session.next_artifact,
+        publish_seq: session.publish_seq,
+        closed: session.closed,
+        defs: session.defs,
+        def_count: session.def_count,
+        bindings: replace(binds, bslot, back),
+        binding_count: session.binding_count,
+        artifacts: session.artifacts,
+        artifact_count: session.artifact_count,
+        edges: session.edges,
+        edge_count: session.edge_count,
+    };
+    return AbandonOut { session: done, restored: true };
+}
+
+// --- Retire one artifact ---
+
+record RetireBindFold {
+    bindings: [types.Binding; 8],
+}
+
+fn retire_artifact(session: types.Session, code: u64) -> (result: RetireArtifactOut) {
+    let aslot: u64 = artifact_slot(session, code);
+    if aslot >= session.artifact_count {
+        return RetireArtifactOut { session: session, retired: false };
+    } else {
+    }
+    let arts: [types.Executable; 16] = session.artifacts;
+    let art: types.Executable = arts[aslot];
+    if logic.bool_not(lifecycle.transition_allowed(art.lifecycle_code, 4)) {
+        return RetireArtifactOut { session: session, retired: false };
+    } else {
+    }
+    let dead: types.Executable = types.Executable {
+        code: art.code,
+        logical: art.logical,
+        generation: art.generation,
+        provider_code: art.provider_code,
+        lifecycle_code: 4,
+        semantic_generation: art.semantic_generation,
+        proof_generation: art.proof_generation,
+        assumption_bits: art.assumption_bits,
+        compile_ms: art.compile_ms,
+        publish_seq: art.publish_seq,
+    };
+    let retired_window: [types.Executable; 16] = replace(arts, aslot, dead);
+    let binds: [types.Binding; 8] = session.bindings;
+    let bseed: RetireBindFold = RetireBindFold { bindings: binds };
+    iterate j over binds carrying bfold: RetireBindFold = bseed {
+        let live: bool = j < session.binding_count;
+        let b: types.Binding = bfold.bindings[j];
+        let hit: bool = live && b.artifact == code && b.state_code == 0;
+        let marked: types.Binding = types.Binding {
+            logical: b.logical,
+            generation: b.generation,
+            artifact: b.artifact,
+            previous_generation: b.previous_generation,
+            previous_artifact: b.previous_artifact,
+            state_code: select(hit, 1, b.state_code),
+            stale_reason: select(hit, 4, b.stale_reason),
+        };
+        next bfold = RetireBindFold { bindings: replace(bfold.bindings, j, marked) };
+    }
+    let done: types.Session = types.Session {
+        semantic_generation: session.semantic_generation,
+        proof_generation: session.proof_generation,
+        next_logical: session.next_logical,
+        next_generation: session.next_generation,
+        next_artifact: session.next_artifact,
+        publish_seq: session.publish_seq,
+        closed: session.closed,
+        defs: session.defs,
+        def_count: session.def_count,
+        bindings: bfold.bindings,
+        binding_count: session.binding_count,
+        artifacts: retired_window,
+        artifact_count: session.artifact_count,
+        edges: session.edges,
+        edge_count: session.edge_count,
+    };
+    return RetireArtifactOut { session: done, retired: true };
+}
+
+// --- Resolve ---
+
+fn resolve(session: types.Session, logical: u64) -> (result: ResolveOut) {
+    let bslot: u64 = binding_slot(session, logical);
+    let found: bool = bslot < session.binding_count;
+    let binds: [types.Binding; 8] = session.bindings;
+    let b: types.Binding = binds[select(found, bslot, 0)];
+    let dslot: u64 = def_slot(session, logical, b.generation);
+    let rows: [types.Definition; 8] = session.defs;
+    let row: types.Definition = rows[select(dslot < session.def_count, dslot, 0)];
+    let current: bool = found && dslot < session.def_count && proof.proof_current(row.semantic_generation, row.proof_generation, session.semantic_generation, session.proof_generation);
+    return ResolveOut {
+        found: found,
+        generation: select(found, b.generation, 0),
+        artifact: select(found, b.artifact, 0),
+        state_code: select(found, b.state_code, 0),
+        proof_current: current,
+    };
+}
+
+// --- Executable entry points (scalar shapes for backend corpora) ---
+
+fn nodeps() -> (result: [u64; 4]) {
+    return [0, 0, 0, 0];
+}
+
+// Define, compile, publish, resolve: the binding swings to
+// generation 1 / artifact 1, Valid, proof-current; the artifact is
+// Active with publish_seq 1.
+fn candidate_publish_flow() -> (result: i64) {
+    let s0: types.Session = session.create();
+    let d1: session.DefineOut = session.define(s0, 0, 100, 0, 0, nodeps(), 0, 0);
+    let n1: NoteOut = note_compiled(d1.session, 1, 1, 1, 12, 1, 1, 0);
+    let p1: PublishOut = publish(n1.session, 1, 1);
+    let r: ResolveOut = resolve(p1.session, 1);
+    let a: session.ArtifactQuery = session.artifact_of(p1.session, 1);
+    return select(p1.accepted, 100000000, 0) as i64
+        +% r.generation as i64 *% 1000000
+        +% r.artifact as i64 *% 100000
+        +% r.state_code as i64 *% 10000
+        +% select(r.proof_current, 1000, 0) as i64
+        +% a.lifecycle_code as i64 *% 100
+        +% a.publish_seq as i64;
+}
+
+// Supersession: publishing generation 2 demotes artifact 1 to
+// Published while artifact 2 goes Active; the binding follows.
+fn candidate_supersede() -> (result: i64) {
+    let s0: types.Session = session.create();
+    let d1: session.DefineOut = session.define(s0, 0, 100, 0, 0, nodeps(), 0, 0);
+    let n1: NoteOut = note_compiled(d1.session, 1, 1, 1, 12, 1, 1, 0);
+    let p1: PublishOut = publish(n1.session, 1, 1);
+    let d2: session.DefineOut = session.define(p1.session, 1, 200, 0, 0, nodeps(), 0, 0);
+    let n2: NoteOut = note_compiled(d2.session, 1, 2, 1, 15, 1, 1, 0);
+    let p2: PublishOut = publish(n2.session, 1, 2);
+    let r: ResolveOut = resolve(p2.session, 1);
+    let old: session.ArtifactQuery = session.artifact_of(p2.session, 1);
+    let new: session.ArtifactQuery = session.artifact_of(p2.session, 2);
+    return r.generation as i64 *% 1000000
+        +% r.artifact as i64 *% 100000
+        +% old.lifecycle_code as i64 *% 10000
+        +% new.lifecycle_code as i64 *% 1000
+        +% new.publish_seq as i64 *% 100
+        +% select(p2.accepted, 10, 0) as i64
+        +% r.state_code as i64;
+}
+
+// Abandon: after a failed second generation, rollback restores
+// generation 1 / artifact 1 as Valid.
+fn candidate_abandon() -> (result: i64) {
+    let s0: types.Session = session.create();
+    let d1: session.DefineOut = session.define(s0, 0, 100, 0, 0, nodeps(), 0, 0);
+    let n1: NoteOut = note_compiled(d1.session, 1, 1, 1, 12, 1, 1, 0);
+    let p1: PublishOut = publish(n1.session, 1, 1);
+    let d2: session.DefineOut = session.define(p1.session, 1, 200, 0, 0, nodeps(), 0, 0);
+    let mid: ResolveOut = resolve(d2.session, 1);
+    let back: AbandonOut = abandon(d2.session, 1);
+    let r: ResolveOut = resolve(back.session, 1);
+    return mid.state_code as i64 *% 1000000
+        +% select(back.restored, 100000, 0) as i64
+        +% r.generation as i64 *% 10000
+        +% r.artifact as i64 *% 1000
+        +% r.state_code as i64 *% 100
+        +% select(r.proof_current, 10, 0) as i64
+        +% mid.artifact as i64;
+}
+
+// Retire the active artifact: the binding goes Stale with reason 4
+// and republication of the retired code is refused (reason 4).
+fn candidate_retire() -> (result: i64) {
+    let s0: types.Session = session.create();
+    let d1: session.DefineOut = session.define(s0, 0, 100, 0, 0, nodeps(), 0, 0);
+    let n1: NoteOut = note_compiled(d1.session, 1, 1, 1, 12, 1, 1, 0);
+    let p1: PublishOut = publish(n1.session, 1, 1);
+    let k1: RetireArtifactOut = retire_artifact(p1.session, 1);
+    let r: ResolveOut = resolve(k1.session, 1);
+    let repub: PublishOut = publish(k1.session, 1, 1);
+    let q: session.BindingQuery = session.binding_of(k1.session, 1);
+    return select(k1.retired, 1000000, 0) as i64
+        +% r.state_code as i64 *% 100000
+        +% q.stale_reason as i64 *% 10000
+        +% repub.reason as i64 *% 1000
+        +% select(repub.accepted, 100, 0) as i64
+        +% r.artifact as i64;
+}
+
+// Stale proof: advancing the era then publishing an artifact bound
+// to the old triple is refused (reason 5); resolve reports the old
+// binding as proof-stale.
+fn candidate_stale_proof() -> (result: i64) {
+    let s0: types.Session = session.create();
+    let d1: session.DefineOut = session.define(s0, 0, 100, 0, 0, nodeps(), 0, 0);
+    let n1: NoteOut = note_compiled(d1.session, 1, 1, 1, 12, 1, 1, 0);
+    let p1: PublishOut = publish(n1.session, 1, 1);
+    let aged: types.Session = session.advance_proof(p1.session);
+    let d2: session.DefineOut = session.define(aged, 1, 200, 0, 0, nodeps(), 0, 0);
+    let n2: NoteOut = note_compiled(d2.session, 1, 2, 1, 15, 1, 1, 0);
+    let p2: PublishOut = publish(n2.session, 1, 2);
+    let r: ResolveOut = resolve(p1.session, 1);
+    let r2: ResolveOut = resolve(aged, 1);
+    return p2.reason as i64 *% 100000
+        +% select(p2.accepted, 10000, 0) as i64
+        +% select(r.proof_current, 1000, 0) as i64
+        +% select(r2.proof_current, 100, 0) as i64
+        +% r2.state_code as i64 *% 10
+        +% r2.generation as i64;
+}
+
+// Note guards: unknown logical (3), stale generation (5),
+// unimplemented provider (6), unknown provider (4).
+fn candidate_note_guards() -> (result: i64) {
+    let s0: types.Session = session.create();
+    let d1: session.DefineOut = session.define(s0, 0, 100, 0, 0, nodeps(), 0, 0);
+    let ghost: NoteOut = note_compiled(d1.session, 99, 1, 1, 5, 1, 1, 0);
+    let stale: NoteOut = note_compiled(d1.session, 1, 99, 1, 5, 1, 1, 0);
+    let future: NoteOut = note_compiled(d1.session, 1, 1, 2, 5, 1, 1, 0);
+    let bogus: NoteOut = note_compiled(d1.session, 1, 1, 9, 5, 1, 1, 0);
+    let good: NoteOut = note_compiled(d1.session, 1, 1, 0, 5, 1, 1, 0);
+    return ghost.reason as i64 *% 100000
+        +% stale.reason as i64 *% 10000
+        +% future.reason as i64 *% 1000
+        +% bogus.reason as i64 *% 100
+        +% good.artifact_code as i64 *% 10
+        +% select(good.accepted, 1, 0) as i64;
+}

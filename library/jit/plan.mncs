@@ -1,0 +1,171 @@
+mncs 0.10;
+
+// mncs.jit.plan — provider-neutral execution planning for the
+// MNCS-native JIT orchestration layer.
+//
+// Planning answers three questions without naming provider
+// internals: which provider serves a workload class, which tier a
+// definition sits in, and whether a concrete (logical, generation,
+// artifact, provider, tier) tuple forms a plannable unit.
+//
+// PROVIDER SELECTION (first policy; thresholds stay parameters):
+//   OneShot(0)     -> Reference(0): tiny/one-shot expressions run
+//     directly; no native compile is spent on them.
+//   Interactive(1) -> Cranelift(1) when ready and implemented;
+//     otherwise Reference(0) with deferred=true: an explicit
+//     degraded route, never a silent substitution.
+//   HotStable(2)   -> Cranelift(1) when ready (llvm_advisory=true
+//     records LLVM candidacy for the future optimizer); otherwise
+//     Reference(0) with deferred=true.
+//   Accelerator(3) -> refused (ok=false): no accelerator provider
+//     exists, and planning must not fake one.
+// Unknown workload codes are refused. Readiness flags are host
+// observations threaded in by the driver; the policy only decides.
+//
+// TIER POLICY: `recommend_tier` takes its warm/hot call thresholds
+// as parameters, so future adaptive policies tune them without
+// touching this module. `hot_candidate` additionally gates on total
+// execution time, so a cold-but-chatty definition does not promote.
+//
+// A plan binds one logical definition generation to one artifact on
+// one provider at one tier. `build_plan` accepts only nonzero
+// identities, implemented providers, and known tiers.
+//
+// Complexity bounds: all decisions are O(1). No operation
+// allocates; every function is total.
+module mncs.jit.plan.v1;
+
+use mncs.core.logic.v1 as logic;
+use mncs.jit.types.v1 as types;
+
+// Provider selection outcome. `ok` false means no provider was
+// selected (nothing executes); `deferred` true means the route is
+// degraded (Reference fallback) and should be revisited;
+// `llvm_advisory` true marks a hot definition as a future LLVM
+// tiering candidate. provider_code 9 is the refused sentinel.
+record PlanDecision {
+    provider_code: u64,
+    ok: bool,
+    deferred: bool,
+    llvm_advisory: bool,
+}
+
+fn select_provider(class_code: u64, cranelift_ready: bool, llvm_ready: bool) -> (result: PlanDecision) {
+    if logic.bool_not(types.workload_is_known(class_code)) {
+        return PlanDecision { provider_code: 9, ok: false, deferred: false, llvm_advisory: false };
+    }
+    if class_code == 0 {
+        return PlanDecision { provider_code: 0, ok: true, deferred: false, llvm_advisory: false };
+    }
+    if class_code == 3 {
+        return PlanDecision { provider_code: 9, ok: false, deferred: false, llvm_advisory: false };
+    }
+    if cranelift_ready && types.provider_is_implemented(1) {
+        return PlanDecision { provider_code: 1, ok: true, deferred: false, llvm_advisory: class_code == 2 && llvm_ready };
+    } else {
+    }
+    return PlanDecision { provider_code: 0, ok: true, deferred: true, llvm_advisory: false };
+}
+
+// Tier recommendation from call counts against caller-supplied
+// thresholds. Inverted thresholds (hot below warm) fail closed to
+// Cold: a misconfigured policy must not promote.
+fn recommend_tier(calls: u64, warm_threshold: u64, hot_threshold: u64) -> (result: u64) {
+    if hot_threshold < warm_threshold {
+        return 0;
+    }
+    if calls >= hot_threshold {
+        return 2;
+    }
+    if calls >= warm_threshold {
+        return 1;
+    }
+    return 0;
+}
+
+// Promotion candidacy: enough calls AND enough total execution time.
+// Both thresholds are parameters.
+fn hot_candidate(calls: u64, exec_ms_total: u64, call_threshold: u64, ms_threshold: u64) -> (result: bool) {
+    return calls >= call_threshold && exec_ms_total >= ms_threshold;
+}
+
+record Plan {
+    logical: u64,
+    generation: u64,
+    artifact: u64,
+    provider_code: u64,
+    tier_code: u64,
+    accepted: bool,
+}
+
+// A plan is accepted only for nonzero identities, an implemented
+// provider, and a known tier. Anything else is an explicit reject;
+// the caller keeps its previous plan.
+fn build_plan(logical: u64, generation: u64, artifact: u64, provider_code: u64, tier_code: u64) -> (result: Plan) {
+    let ok: bool = logical != 0 && generation != 0 && artifact != 0 && types.provider_is_implemented(provider_code) && types.tier_is_known(tier_code);
+    if ok {
+        return Plan { logical: logical, generation: generation, artifact: artifact, provider_code: provider_code, tier_code: tier_code, accepted: true };
+    } else {
+    }
+    return Plan { logical: 0, generation: 0, artifact: 0, provider_code: 9, tier_code: 0, accepted: false };
+}
+
+// --- Executable entry points (scalar shapes for backend corpora) ---
+
+// Selection rows: OneShot, Interactive ready/unready, HotStable
+// ready/unready, Accelerator, unknown class. Packed provider codes
+// (9 = refused): 0 1 0 1 0 9 9 -> 0101099.
+fn candidate_selection_rows() -> (result: i64) {
+    let one: PlanDecision = select_provider(0, true, false);
+    let int_ready: PlanDecision = select_provider(1, true, false);
+    let int_down: PlanDecision = select_provider(1, false, false);
+    let hot_ready: PlanDecision = select_provider(2, true, true);
+    let hot_down: PlanDecision = select_provider(2, false, false);
+    let accel: PlanDecision = select_provider(3, true, true);
+    let unknown: PlanDecision = select_provider(9, true, true);
+    return one.provider_code as i64 *% 1000000
+        +% int_ready.provider_code as i64 *% 100000
+        +% int_down.provider_code as i64 *% 10000
+        +% hot_ready.provider_code as i64 *% 1000
+        +% hot_down.provider_code as i64 *% 100
+        +% accel.provider_code as i64 *% 10
+        +% unknown.provider_code as i64;
+}
+
+// Flags: Interactive-down defers, HotStable-ready advises LLVM,
+// Accelerator and unknown refuse, OneShot is direct.
+fn candidate_selection_flags() -> (result: i64) {
+    let int_down: PlanDecision = select_provider(1, false, false);
+    let hot_ready: PlanDecision = select_provider(2, true, true);
+    let hot_no_llvm: PlanDecision = select_provider(2, true, false);
+    let accel: PlanDecision = select_provider(3, true, true);
+    let one: PlanDecision = select_provider(0, true, false);
+    return select(int_down.deferred, 10000, 0) as i64
+        +% select(hot_ready.llvm_advisory, 1000, 0) as i64
+        +% select(hot_no_llvm.llvm_advisory, 100, 0) as i64
+        +% select(accel.ok, 10, 0) as i64
+        +% select(one.deferred, 1, 0) as i64;
+}
+
+// Tier boundaries at warm=10, hot=100: 9->Cold, 10->Warm, 99->Warm,
+// 100->Hot; inverted thresholds pin Cold; candidacy gates both axes.
+fn candidate_tier_policy() -> (result: i64) {
+    let cold: u64 = recommend_tier(9, 10, 100);
+    let warm: u64 = recommend_tier(10, 10, 100);
+    let warm_hi: u64 = recommend_tier(99, 10, 100);
+    let hot: u64 = recommend_tier(100, 10, 100);
+    let invert: u64 = recommend_tier(1000, 100, 10);
+    let cand: bool = hot_candidate(100, 5000, 100, 5000);
+    let chatty: bool = hot_candidate(100000, 3, 100, 5000);
+    return cold as i64 *% 1000000 +% warm as i64 *% 100000 +% warm_hi as i64 *% 10000 +% hot as i64 *% 1000 +% invert as i64 *% 100 +% select(cand, 10, 0) as i64 +% select(chatty, 1, 0) as i64;
+}
+
+// Plan acceptance: valid tuple accepted; zero artifact, LLVM
+// provider, and unknown tier each rejected.
+fn candidate_plan_accept() -> (result: i64) {
+    let good: Plan = build_plan(1, 2, 7, 1, 0);
+    let zero_art: Plan = build_plan(1, 2, 0, 1, 0);
+    let llvm: Plan = build_plan(1, 2, 7, 2, 0);
+    let tier: Plan = build_plan(1, 2, 7, 1, 9);
+    return select(good.accepted, 1000, 0) as i64 +% select(zero_art.accepted, 100, 0) as i64 +% select(llvm.accepted, 10, 0) as i64 +% select(tier.accepted, 1, 0) as i64;
+}
