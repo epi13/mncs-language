@@ -1,0 +1,75 @@
+mncs 0.10;
+
+// Fabric P-014 pressure reproducer, language-owned: variable-length
+// architecture-alias classification over caller-supplied bounded bytes.
+//
+// One entrypoint accepts any runtime length up to 64; aliases with
+// differing widths (`x86`, `i386`, `amd64`, `arm64`, `x86_64`, `aarch64`,
+// `riscv64`) classify through total bounded scans with ASCII case folding.
+// There is deliberately no heap String: text is a borrowed byte view plus
+// an explicit runtime length, and matching is exact over the declared
+// lengths (`mncs.std.text_scan.v1` equality, not exact-width parameters).
+//
+// Family codes: 0 = unknown, 1 = x86-64, 2 = aarch64, 3 = riscv64,
+// 4 = x86-32. Codes are small so hosts can match them without parsing.
+//
+// This module is deliberately pure (no host calls): backend lowering is
+// whole-program, so one effectful entrypoint would refuse the classifier
+// on every non-realizing backend. Host-fed composition lives in
+// `arch.host`, which imports this module.
+module arch.classify;
+
+use mncs.std.text_scan.v1 as text;
+
+fn token_x86_64() -> (result: [byte; 6]) {
+    return [(120) as byte, (56) as byte, (54) as byte, (95) as byte, (54) as byte, (52) as byte];
+}
+
+fn token_amd64() -> (result: [byte; 5]) {
+    return [(97) as byte, (109) as byte, (100) as byte, (54) as byte, (52) as byte];
+}
+
+fn token_x86() -> (result: [byte; 3]) {
+    return [(120) as byte, (56) as byte, (54) as byte];
+}
+
+fn token_i386() -> (result: [byte; 4]) {
+    return [(105) as byte, (51) as byte, (56) as byte, (54) as byte];
+}
+
+fn token_aarch64() -> (result: [byte; 7]) {
+    return [(97) as byte, (97) as byte, (114) as byte, (99) as byte, (104) as byte, (54) as byte, (52) as byte];
+}
+
+fn token_arm64() -> (result: [byte; 5]) {
+    return [(97) as byte, (114) as byte, (109) as byte, (54) as byte, (52) as byte];
+}
+
+fn token_riscv64() -> (result: [byte; 7]) {
+    return [(114) as byte, (105) as byte, (115) as byte, (99) as byte, (118) as byte, (54) as byte, (52) as byte];
+}
+
+fn classify_arch(word: [byte; up_to 64], word_length: u64) -> (result: i64) {
+    if text.equals_folded<6>(word, word_length, token_x86_64(), 6) {
+        return 1;
+    }
+    if text.equals_folded<5>(word, word_length, token_amd64(), 5) {
+        return 1;
+    }
+    if text.equals_folded<7>(word, word_length, token_aarch64(), 7) {
+        return 2;
+    }
+    if text.equals_folded<5>(word, word_length, token_arm64(), 5) {
+        return 2;
+    }
+    if text.equals_folded<7>(word, word_length, token_riscv64(), 7) {
+        return 3;
+    }
+    if text.equals_folded<3>(word, word_length, token_x86(), 3) {
+        return 4;
+    }
+    if text.equals_folded<4>(word, word_length, token_i386(), 4) {
+        return 4;
+    }
+    return 0;
+}

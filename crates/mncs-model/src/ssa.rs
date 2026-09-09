@@ -58,6 +58,19 @@ pub enum SsaInstructionKind {
         predicate: String,
         operand_type: crate::IntegerType,
     },
+    FloatConstant {
+        bits: u64,
+        ty: crate::FloatType,
+    },
+    Float {
+        operator: String,
+    },
+    FloatCompare {
+        predicate: String,
+    },
+    FloatIntrinsic {
+        function: String,
+    },
     BooleanOp {
         operator: String,
     },
@@ -189,6 +202,13 @@ pub enum SsaInstructionKind {
         required_capabilities: Vec<SemanticId>,
     },
     Effect,
+    /// A value-producing host-realized operation. Reference executors
+    /// realize it from an explicit `HostGrant`; every other backend must
+    /// refuse it with Unsupported rather than manufacturing a value.
+    HostCall {
+        capability: String,
+        operation: String,
+    },
     RuntimeCheck {
         obligation: SemanticId,
         fact: SemanticId,
@@ -2071,6 +2091,26 @@ fn ssa_kind(kind: &IrOperationKind) -> SsaInstructionKind {
             required_capabilities: required_capabilities.clone(),
         },
         IrOperationKind::Effect => SsaInstructionKind::Effect,
+        IrOperationKind::FloatConstant { bits, ty } => SsaInstructionKind::FloatConstant {
+            bits: *bits,
+            ty: *ty,
+        },
+        IrOperationKind::Float { operator } => SsaInstructionKind::Float {
+            operator: operator.clone(),
+        },
+        IrOperationKind::FloatCompare { predicate } => SsaInstructionKind::FloatCompare {
+            predicate: predicate.clone(),
+        },
+        IrOperationKind::FloatIntrinsic { function } => SsaInstructionKind::FloatIntrinsic {
+            function: function.clone(),
+        },
+        IrOperationKind::HostCall {
+            capability,
+            operation,
+        } => SsaInstructionKind::HostCall {
+            capability: capability.clone(),
+            operation: operation.clone(),
+        },
         IrOperationKind::RuntimeCheck {
             obligation,
             fact,
@@ -2105,6 +2145,19 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
         } => SsaInstructionKind::IntegerCompare {
             predicate: predicate.clone(),
             operand_type: *operand_type,
+        },
+        BodyOperationKind::FloatConstant { bits, ty } => SsaInstructionKind::FloatConstant {
+            bits: *bits,
+            ty: *ty,
+        },
+        BodyOperationKind::Float { operator } => SsaInstructionKind::Float {
+            operator: operator.clone(),
+        },
+        BodyOperationKind::FloatCompare { predicate } => SsaInstructionKind::FloatCompare {
+            predicate: predicate.clone(),
+        },
+        BodyOperationKind::FloatIntrinsic { function } => SsaInstructionKind::FloatIntrinsic {
+            function: function.clone(),
         },
         BodyOperationKind::BooleanOp { operator } => SsaInstructionKind::BooleanOp {
             operator: operator.clone(),
@@ -2286,6 +2339,13 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
                 .collect(),
         },
         BodyOperationKind::Effect { .. } => SsaInstructionKind::Effect,
+        BodyOperationKind::HostCall {
+            capability,
+            operation,
+        } => SsaInstructionKind::HostCall {
+            capability: capability.clone(),
+            operation: operation.clone(),
+        },
         BodyOperationKind::RuntimeCheck {
             obligation,
             fact,

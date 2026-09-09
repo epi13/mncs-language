@@ -18,5 +18,6 @@ Normative terms such as **MUST**, **SHOULD**, and **MAY** indicate intended requ
 - [Compiler Pipeline Contracts](compiler-pipeline.md)
 - [Bounded Reference Execution](reference-execution.md)
 - [Recursive Introspection and Refinement](recursive-refinement.md)
+- [Host ABI](host-abi.md)
 
 RFCs explain proposed changes and rationale. Accepted RFC content should eventually be consolidated into these specification documents.

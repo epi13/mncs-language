@@ -1,0 +1,125 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-nested-sequences",
+ "cases": [
+  {
+   "id": "unused",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.nested",
+     "function": "probe_unused_import"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 42,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "two-hop",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.nested",
+     "function": "probe_two_hop"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 8,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "rec",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.nested",
+     "function": "probe_rec"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 3,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "u16",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.nested",
+     "function": "probe_u16"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 10,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "f64",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.nested",
+     "function": "probe_f64"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "float": {
+      "bits": 4621819117588971520,
+      "type": {
+       "bits": 64
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

@@ -1,0 +1,13 @@
+mncs 0.6;
+
+// Negative fixture (HARNESS-PRESSURE-012): a non-literal iteration bound is
+// exactly one precise MNP094 diagnostic, not a cascade. Recovery skips the
+// offending bound token and still parses the header.
+module examples.profile06_invalid_iteration_bound;
+
+fn scan(n: i64) -> (result: i64) {
+    iterate retries up_to n carrying acc: i64 = 0 {
+        next acc = acc +% 1;
+    }
+    return acc;
+}

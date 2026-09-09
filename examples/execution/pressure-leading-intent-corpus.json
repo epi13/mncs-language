@@ -1,0 +1,254 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-leading-intent",
+ "cases": [
+  {
+   "id": "neg-pos",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.leading_intent",
+     "function": "neg_wrap"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -5,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "neg-neg",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.leading_intent",
+     "function": "neg_wrap"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": -7,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "add",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.leading_intent",
+     "function": "add_wrap"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 13,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 13,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "mul",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.leading_intent",
+     "function": "mul_wrap"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 99,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "sel-true",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.leading_intent",
+     "function": "sel_wrap"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -5,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "sel-false",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.leading_intent",
+     "function": "sel_wrap"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 5,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "let",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.leading_intent",
+     "function": "let_wrap"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 9,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -9,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

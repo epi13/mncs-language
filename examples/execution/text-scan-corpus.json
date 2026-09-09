@@ -1,0 +1,3162 @@
+{
+ "schema_version": "0.1",
+ "name": "text-scan",
+ "cases": [
+  {
+   "id": "contains-fence",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_contains"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "contains-absent",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_contains"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 122
+         }
+        },
+        {
+         "byte": {
+          "value": 122
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "contains-empty-needle",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_contains"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "starts-with-ab",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_starts_with"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "starts-with-cd",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_starts_with"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "ends-with-cd",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_ends_with"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "ends-with-ab",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_ends_with"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "ends-with-overlong",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_ends_with"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "find-fence",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_find"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "find-absent",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_find"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 122
+         }
+        },
+        {
+         "byte": {
+          "value": 122
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "find-the",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_find"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 104
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 32
+         }
+        },
+        {
+         "byte": {
+          "value": 116
+         }
+        },
+        {
+         "byte": {
+          "value": 104
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 116
+         }
+        },
+        {
+         "byte": {
+          "value": 104
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 3,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "compare-less",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_compare"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "compare-greater",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_compare"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "compare-equal",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_compare"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "compare-prefix-shorter",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_compare"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "compare-prefix-longer",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_compare"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "count-fence-bytes",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_count_byte"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "byte": {
+       "value": 96
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 3,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "count-absent-byte",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_count_byte"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "byte": {
+       "value": 122
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "count-words-two",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_count_words"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 104
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 32
+         }
+        },
+        {
+         "byte": {
+          "value": 116
+         }
+        },
+        {
+         "byte": {
+          "value": 104
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "count-words-one",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_count_words"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 96
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "count-words-empty",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_count_words"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": []
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "equals-exact",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_equals"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "equals-length-mismatch",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_equals"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "equals-content-mismatch",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_equals"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "equals-empty-both",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_equals"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "folded-same-case",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_equals_folded"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "folded-upper-hay",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_equals_folded"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "folded-upper-needle",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_equals_folded"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "folded-mixed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_equals_folded"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "folded-nonalpha-unchanged",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_equals_folded"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 95
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "folded-length-mismatch",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_equals_folded"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "folded-digit-vs-letter",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_scan.v1",
+     "function": "candidate_equals_folded"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 49
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  }
+ ]
+}

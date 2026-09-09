@@ -138,3 +138,24 @@ fn u64_roundtrip(value: u64) -> (result: bool) {
     let encoded: [byte; 8] = encode_u64(value);
     return decode_u64(encoded) == value;
 }
+
+// Little-endian readers over bounded views: one reusable reader serves any
+// exact window that borrows into the view bound ([byte; 44], [byte; 46],
+// [byte; 22], ...), so multi-format wire modules share readers instead of
+// duplicating one per width. Reads are partial in the offset: indexing a
+// view traps deterministically when offset+width exceeds the runtime
+// length, exactly like every other dynamic view index. Callers that need a
+// total read must gate the offset against window.len first.
+fn read_u16_le(window: [byte; up_to 64], offset: u64) -> (result: u16) {
+    let lo: u64 = window[offset] as u64;
+    let hi: u64 = window[offset +% 1] as u64;
+    return (lo +% hi *% 256) as u16;
+}
+
+fn read_u32_le(window: [byte; up_to 64], offset: u64) -> (result: u32) {
+    let b0: u64 = window[offset] as u64;
+    let b1: u64 = window[offset +% 1] as u64;
+    let b2: u64 = window[offset +% 2] as u64;
+    let b3: u64 = window[offset +% 3] as u64;
+    return (b0 +% b1 *% 256 +% b2 *% 65536 +% b3 *% 16777216) as u32;
+}

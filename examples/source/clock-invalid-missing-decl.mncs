@@ -1,0 +1,12 @@
+mncs 0.8;
+
+// Negative fixture: `clock_read()` without a declared `clock_read` effect
+// is rejected (MNE238). Authority cannot be assumed.
+module examples.clock_invalid_missing_decl;
+
+fn tick() -> (result: u64)
+    capability ticker
+{
+    let now: u64 = clock_read();
+    return now;
+}

@@ -1,0 +1,10 @@
+mncs 0.10;
+
+module examples.profile11.counted_index_on_010;
+
+fn index_old_profile() -> (result: u64) {
+    iterate step up_to 8 carrying total: u64 = 0 {
+        next total = total +% step;
+    }
+    return total;
+}

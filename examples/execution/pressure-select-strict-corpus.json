@@ -1,0 +1,57 @@
+{
+ "schema_version": "0.2",
+ "name": "pressure-select-strict",
+ "properties": [],
+ "cases": [
+  {
+   "id": "strict-true",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.select_strict",
+     "function": "probe_strict_true"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected_status": "runtime_failure"
+  },
+  {
+   "id": "strict-false",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.select_strict",
+     "function": "probe_strict_false"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected_status": "runtime_failure"
+  },
+  {
+   "id": "control",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.select_strict",
+     "function": "probe_strict_control"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

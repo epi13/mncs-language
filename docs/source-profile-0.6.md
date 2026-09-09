@@ -37,8 +37,46 @@ match verdict {
 - Payload binders bind each declared field exactly once: `{ score }` (shorthand)
   or `{ score: s }` (renamed). Bindings scope to the arm body.
 - The wildcard `{ .. }` carries but does not observe a payload.
+- Arm-spelling rule for payload-free variants: a variant that declares no
+  payload is matched bare (`Defer => …`). The empty braces form (`Defer { }`)
+  also parses and means the same thing — it binds zero fields, which is
+  exactly the declared payload. A variant that declares a payload must bind
+  every field (`Accept { score }`); empty braces on it are rejected per
+  missing field (`MNE179`), not silently accepted.
 - Exhaustiveness is unchanged and remains mandatory over variants (RFC 0042):
   a match that omits a variant is rejected regardless of wildcards inside arms.
+
+### Boolean match patterns
+
+```text
+match flag {
+    true => 1,
+    false => 0,
+}
+```
+
+- `match` over a `bool` subject accepts `true`/`false` arms with the same
+  exhaustiveness rule as a two-variant finite type: each must appear exactly
+  once (`MNE140` on omission, `MNE139` on duplication, `MNE138` on any other
+  arm name). Boolean patterns carry no qualifier and no payload.
+- Lowering is the branchless selection every backend already realizes, so
+  boolean matches execute identically on all backends.
+- This is a profile-independent surface completion: `true`/`false` arms were
+  previously a hard parse error (`MNP084`) in every profile, so no existing
+  program changes meaning.
+
+### Term-level `capability` names
+
+- `capability` is a legal term-level name: parameter names, `let` bindings,
+  iteration identities, carried-state names, function names, and expression
+  references may all spell `capability` (e.g.
+  `fn eligible(capability: Capability) -> (result: bool)`).
+- This is unambiguous because capability *declarations* only occur in the
+  function-header clause position (`capability NAME` after the parameter
+  lists), which no binding or reference position can be confused with.
+- `capability` remains reserved in type, variant, field, effect-kind, clause,
+  and declaration-name positions. Like boolean patterns, this is a
+  profile-independent completion over a previous hard parse error.
 
 ### Strict boolean operators
 
@@ -199,6 +237,26 @@ Library roots are a discovery convenience only: compatibility still comes from
 elaborating the resolved module against its declared identity, so a stale
 `MNCS_LIBRARY_PATH` entry degrades into an honest miss rather than silent
 substitution.
+
+Duplicate identities fail closed: when several roots offer compatible
+candidates for one module name with byte-distinct content, resolution is
+rejected with `MNE234`, naming every conflicting source. Byte-identical
+copies (one file reachable through several roots or spellings) are one
+authority, not a conflict. There is no precedence order between roots to
+memorize and no silent shadowing: two authorities for one lattice are a
+compile error, never a quiet preference. Search itself stays deterministic
+(source directory, then its parent, then each `MNCS_LIBRARY_PATH` entry in
+order; candidates within a root in the fixed spelling order above), so the
+same tree always resolves the same way.
+
+Installed and distributed consumers resolve through the same mechanism: a
+deployment that ships the compiler alongside the `library/` tree points
+`MNCS_LIBRARY_PATH` at that tree (exactly as the test suite points it at
+this repository's `library/`). Successful source studies expose
+`module_resolutions` — requested and declared names, source identity,
+logical source name, module identity, and the linked module fingerprint —
+so build and evidence pipelines record the actual resolved identity rather
+than the request.
 
 ## Non-goals for this profile
 

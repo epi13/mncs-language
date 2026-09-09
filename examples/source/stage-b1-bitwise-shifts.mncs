@@ -1,0 +1,177 @@
+mncs 0.9;
+
+// Stage B1: total integer bitwise operators and shifts, all widths.
+// Bitwise `^ & |` are pure (no overflow obligations); shift counts
+// are u64 and reduce modulo the value width, so oversized counts
+// are well-defined on every backend, not poison or UB.
+module examples.stage.bitwise;
+
+fn xor_u8(a: u8, b: u8) -> (result: u8) {
+    return a ^ b;
+}
+
+fn band_u8(a: u8, b: u8) -> (result: u8) {
+    return a & b;
+}
+
+fn bor_u8(a: u8, b: u8) -> (result: u8) {
+    return a | b;
+}
+
+fn shl_u8(value: u8, count: u64) -> (result: u8) {
+    return value << count;
+}
+
+fn shr_u8(value: u8, count: u64) -> (result: u8) {
+    return value >> count;
+}
+
+fn xor_u16(a: u16, b: u16) -> (result: u16) {
+    return a ^ b;
+}
+
+fn band_u16(a: u16, b: u16) -> (result: u16) {
+    return a & b;
+}
+
+fn bor_u16(a: u16, b: u16) -> (result: u16) {
+    return a | b;
+}
+
+fn shl_u16(value: u16, count: u64) -> (result: u16) {
+    return value << count;
+}
+
+fn shr_u16(value: u16, count: u64) -> (result: u16) {
+    return value >> count;
+}
+
+fn xor_u32(a: u32, b: u32) -> (result: u32) {
+    return a ^ b;
+}
+
+fn band_u32(a: u32, b: u32) -> (result: u32) {
+    return a & b;
+}
+
+fn bor_u32(a: u32, b: u32) -> (result: u32) {
+    return a | b;
+}
+
+fn shl_u32(value: u32, count: u64) -> (result: u32) {
+    return value << count;
+}
+
+fn shr_u32(value: u32, count: u64) -> (result: u32) {
+    return value >> count;
+}
+
+fn xor_u64(a: u64, b: u64) -> (result: u64) {
+    return a ^ b;
+}
+
+fn band_u64(a: u64, b: u64) -> (result: u64) {
+    return a & b;
+}
+
+fn bor_u64(a: u64, b: u64) -> (result: u64) {
+    return a | b;
+}
+
+fn shl_u64(value: u64, count: u64) -> (result: u64) {
+    return value << count;
+}
+
+fn shr_u64(value: u64, count: u64) -> (result: u64) {
+    return value >> count;
+}
+
+fn xor_i8(a: i8, b: i8) -> (result: i8) {
+    return a ^ b;
+}
+
+fn band_i8(a: i8, b: i8) -> (result: i8) {
+    return a & b;
+}
+
+fn bor_i8(a: i8, b: i8) -> (result: i8) {
+    return a | b;
+}
+
+fn shl_i8(value: i8, count: u64) -> (result: i8) {
+    return value << count;
+}
+
+fn shr_i8(value: i8, count: u64) -> (result: i8) {
+    return value >> count;
+}
+
+fn xor_i16(a: i16, b: i16) -> (result: i16) {
+    return a ^ b;
+}
+
+fn band_i16(a: i16, b: i16) -> (result: i16) {
+    return a & b;
+}
+
+fn bor_i16(a: i16, b: i16) -> (result: i16) {
+    return a | b;
+}
+
+fn shl_i16(value: i16, count: u64) -> (result: i16) {
+    return value << count;
+}
+
+fn shr_i16(value: i16, count: u64) -> (result: i16) {
+    return value >> count;
+}
+
+fn xor_i32(a: i32, b: i32) -> (result: i32) {
+    return a ^ b;
+}
+
+fn band_i32(a: i32, b: i32) -> (result: i32) {
+    return a & b;
+}
+
+fn bor_i32(a: i32, b: i32) -> (result: i32) {
+    return a | b;
+}
+
+fn shl_i32(value: i32, count: u64) -> (result: i32) {
+    return value << count;
+}
+
+fn shr_i32(value: i32, count: u64) -> (result: i32) {
+    return value >> count;
+}
+
+fn xor_i64(a: i64, b: i64) -> (result: i64) {
+    return a ^ b;
+}
+
+fn band_i64(a: i64, b: i64) -> (result: i64) {
+    return a & b;
+}
+
+fn bor_i64(a: i64, b: i64) -> (result: i64) {
+    return a | b;
+}
+
+fn shl_i64(value: i64, count: u64) -> (result: i64) {
+    return value << count;
+}
+
+fn shr_i64(value: i64, count: u64) -> (result: i64) {
+    return value >> count;
+}
+
+// CRC32 single-bit step: the former P-009 pressure probe, now a workload.
+fn crc32_bit(crc: u32, bit: u32) -> (result: u32) {
+    let mixed: u32 = crc ^ bit;
+    let shifted: u32 = mixed >> (1 as u64);
+    if mixed % (2 as u32) == (1 as u32) {
+        return (3988292384 as u32) ^ shifted;
+    }
+    return shifted;
+}

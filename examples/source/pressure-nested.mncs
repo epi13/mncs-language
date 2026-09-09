@@ -1,0 +1,42 @@
+mncs 0.12;
+
+// ENG-PRESSURE-0011 regression root. Bare nested
+// sequences cross every module boundary here: as arguments, as results,
+// inside records, at a second element width, across two hops, as binary64,
+// and — critically — as merely-imported-but-unused signatures, which used
+// to poison the importer's elaboration.
+//
+// Independent expectations (hand-computed):
+//   unused  = 42
+//   two_hop = make_grid()[1][1] = 8
+//   rec     = [[1,2],[3,4]][1][0] = 3
+//   u16     = 1 + 2 + 3 + 4 = 10
+//   f64sum  = 1 + 4 + 2 + 3 = 10.0
+module pressure.nested;
+
+use pressure.nested.lib as lib;
+use pressure.nested.mid as mid;
+use pressure.nested.flib as flib;
+
+fn probe_unused_import() -> (result: i64) {
+    return 42;
+}
+
+fn probe_two_hop() -> (result: i64) {
+    let grid: [[i64; 2]; 2] = mid.fwd_make();
+    return mid.fwd_read(grid, 1, 1);
+}
+
+fn probe_rec() -> (result: i64) {
+    let g: lib.Grid2 = lib.Grid2 { cells: [[1, 2], [3, 4]] };
+    return lib.read_rec(g, 1, 0);
+}
+
+fn probe_u16() -> (result: u64) {
+    let grid: [[u16; 2]; 2] = [[1, 2], [3, 4]];
+    return lib.sum_u16(grid);
+}
+
+fn probe_f64() -> (result: f64) {
+    return flib.sum_f64();
+}

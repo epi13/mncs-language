@@ -1,0 +1,251 @@
+{
+ "schema_version": "0.1",
+ "name": "task",
+ "cases": [
+  {
+   "id": "lifecycle-completes",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.task.v1",
+     "function": "candidate_lifecycle"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.std.task.v1::Task::cancel_requested%3Abool%3Bphase%3APhase%3Bstep_budget%3Au64%3Bsteps_taken%3Au64%3B",
+      "name": "Task",
+      "fields": [
+       [
+        "cancel_requested",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "phase",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.std.task.v1::Phase",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.std.task.v1::Phase::DONE",
+          "discriminant": 3
+         }
+        }
+       ],
+       [
+        "step_budget",
+        {
+         "integer": {
+          "value": 3,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "steps_taken",
+        {
+         "integer": {
+          "value": 3,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "lifecycle-empty-budget",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.task.v1",
+     "function": "candidate_lifecycle"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.std.task.v1::Task::cancel_requested%3Abool%3Bphase%3APhase%3Bstep_budget%3Au64%3Bsteps_taken%3Au64%3B",
+      "name": "Task",
+      "fields": [
+       [
+        "cancel_requested",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "phase",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.std.task.v1::Phase",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.std.task.v1::Phase::DONE",
+          "discriminant": 3
+         }
+        }
+       ],
+       [
+        "step_budget",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "steps_taken",
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "cancel-terminates-cleanly",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.task.v1",
+     "function": "candidate_cancel"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:mncs.std.task.v1::Task::cancel_requested%3Abool%3Bphase%3APhase%3Bstep_budget%3Au64%3Bsteps_taken%3Au64%3B",
+      "name": "Task",
+      "fields": [
+       [
+        "cancel_requested",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "phase",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:mncs.std.task.v1::Phase",
+          "variant_identity": "mncs:0.2:finite-variant:mncs.std.task.v1::Phase::CANCELLED",
+          "discriminant": 2
+         }
+        }
+       ],
+       [
+        "step_budget",
+        {
+         "integer": {
+          "value": 8,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ],
+       [
+        "steps_taken",
+        {
+         "integer": {
+          "value": 2,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "invalid-transitions-rejected",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.task.v1",
+     "function": "candidate_invalid"
+    },
+    "arguments": [],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

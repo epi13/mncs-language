@@ -1,0 +1,203 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-checked-division",
+ "cases": [
+  {
+   "id": "lit",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.division",
+     "function": "probe_lit"
+    },
+    "arguments": [],
+    "step_budget": 4000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "chan",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.division",
+     "function": "probe_chan"
+    },
+    "arguments": [],
+    "step_budget": 4000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 121,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "elem",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.division",
+     "function": "probe_elem"
+    },
+    "arguments": [],
+    "step_budget": 4000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 25,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "u64",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.division",
+     "function": "probe_u64"
+    },
+    "arguments": [],
+    "step_budget": 4000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 3,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "neg1lit",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.division",
+     "function": "probe_neg1lit"
+    },
+    "arguments": [],
+    "step_budget": 4000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -10,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "unk",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.division",
+     "function": "probe_unk"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 100,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 4000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 25,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "neg1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.division",
+     "function": "probe_neg1"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 100,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 4000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -100,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

@@ -1,0 +1,9 @@
+mncs 0.11;
+
+// Negative fixture: float intrinsics require source profile 0.12 or
+// later (MNP201).
+module examples.trig_invalid_profile;
+
+fn bad(x: f64) -> (result: f64) {
+    return sin(x);
+}

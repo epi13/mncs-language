@@ -1,0 +1,39 @@
+{
+  "artifact_kind": "mncs.capability_gap",
+  "contract_revision": "0.1",
+  "gap_id": "scratchtrack/p010-view-borrow",
+  "producer": "scratchtrack-pressure",
+  "compiler_identity": null,
+  "source_revision": null,
+  "source_artifact": "examples.subtype.windows",
+  "source_location": "<local-path>/subtype-windows.mncs",
+  "requested_semantics": "pass an exact [E; N] sequence wherever [E; up_to M] is expected with N <= M, with no copy, preserved bound, and preserved element identity",
+  "obstruction": "typing",
+  "active_profile": "0.7",
+  "backends": [
+    "mncs-c11",
+    "mncs-cranelift",
+    "mncs-llvm-ir",
+    "mncs-portable-wasm-mvp",
+    "mncs-research-bytecode"
+  ],
+  "closest_supported_semantics": "one hand-duplicated reader per exact width",
+  "reproducer": "subtype_attempt.mncs (MNE133) superseded by the automatic borrow plus shared stdlib LE readers",
+  "protected_properties": [
+    "exact borrows into a compatible bounded view with no copy"
+  ],
+  "approximation_prohibited": true,
+  "evidence_requirements": [
+    "crates/mncs-cli/tests/abi_boundary.rs: exact_sequences_borrow_into_bounded_views_per_backend",
+    "docs/source-profile-0.7.md: Exact-to-bounded-view borrow rule",
+    "examples/source/subtype-windows.mncs + examples/execution/subtype-windows-corpus.json via scripts/gen_subtype_windows_corpus.py (10 cases on all five backends)",
+    "mncs-compiler borrow_tests: accept, oversize/element refusal, nested and tail-return borrows",
+    "mncs.std.encoding.v1 read_u16_le/read_u32_le over [byte; up_to 64]"
+  ],
+  "status": "PASS",
+  "unresolved_fields": [
+    "integer-overflow obligations in the readers remain UNKNOWN (P-003)",
+    "view-to-view capacity relaxation is not part of the rule (declared caps are invariant)"
+  ],
+  "identity": "mncs:0.2:capability-gap:c93a3b5d6e0d6322577fc90a77b759c0d534dd35215d71f06138ec9b82953094"
+}

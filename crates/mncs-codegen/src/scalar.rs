@@ -21,6 +21,8 @@ use crate::promises::{
 pub enum ScalarTy {
     Bool,
     Int(IntegerType),
+    /// IEEE-754 binary64 (Profile 0.12), realized in one 64-bit cell.
+    Float,
     /// A byte-oriented 8-bit unsigned logical value (Profile 0.7),
     /// realized in one unsigned 8-bit cell.
     Byte,
@@ -71,6 +73,29 @@ pub enum ScalarInst {
         operand: IntegerType,
         lhs: SemanticId,
         rhs: SemanticId,
+    },
+    FloatConst {
+        dest: ScalarValue,
+        bits: u64,
+    },
+    /// Binary64 arithmetic with the non-finite trap rule; backends emit
+    /// the input/result finiteness guards as the conservative fallback.
+    Float {
+        dest: ScalarValue,
+        operator: String,
+        lhs: SemanticId,
+        rhs: SemanticId,
+    },
+    FloatCompare {
+        dest: ScalarValue,
+        predicate: String,
+        lhs: SemanticId,
+        rhs: SemanticId,
+    },
+    FloatIntrinsic {
+        dest: ScalarValue,
+        function: String,
+        src: SemanticId,
     },
     Boolean {
         dest: ScalarValue,
@@ -255,6 +280,10 @@ pub fn lower_to_scalar(program: &Program, ssa: &SsaModule, names: &[String]) -> 
     let mut features = Vec::new();
     let mut promise_decisions = Vec::new();
     let layout = CompositeLayout::from_program(program);
+    // Native symbols are hygienic by construction (`support::c_symbol`):
+    // every lowered entry gains the `mncs_` namespace so generated symbols
+    // cannot collide with libc/libm. The mapping is idempotent, so already
+    // namespaced inputs keep their spelling and artifact bytes stay stable.
     let callees: BTreeMap<SemanticId, String> = ssa
         .functions
         .iter()
@@ -264,15 +293,15 @@ pub fn lower_to_scalar(program: &Program, ssa: &SsaModule, names: &[String]) -> 
                 function.semantic_identity.clone(),
                 names
                     .get(index)
-                    .cloned()
-                    .unwrap_or_else(|| function.semantic_identity.0.clone()),
+                    .map(|name| crate::support::c_symbol(name))
+                    .unwrap_or_else(|| crate::support::export_name(&function.semantic_identity.0)),
             )
         })
         .collect();
     for (index, function) in ssa.functions.iter().enumerate() {
         let name = names
             .get(index)
-            .cloned()
+            .map(|name| crate::support::c_symbol(name))
             .unwrap_or_else(|| crate::support::export_name(&function.semantic_identity.0));
         match lower_function(ssa, function, name, &callees, &layout) {
             Ok(lowered) => {
@@ -439,6 +468,47 @@ fn lower_instruction(
             lhs: operand(instruction, 0)?,
             rhs: operand(instruction, 1)?,
         }),
+        SsaInstructionKind::FloatConstant { bits, ty } => {
+            if !ty.is_supported() {
+                return Err("only binary64 float constants are supported".to_owned());
+            }
+            Ok(ScalarInst::FloatConst { dest, bits: *bits })
+        }
+        SsaInstructionKind::Float { operator } => {
+            if !matches!(operator.as_str(), "add" | "sub" | "mul" | "div") {
+                return Err(format!("unsupported float operator {operator}"));
+            }
+            Ok(ScalarInst::Float {
+                dest,
+                operator: operator.clone(),
+                lhs: operand(instruction, 0)?,
+                rhs: operand(instruction, 1)?,
+            })
+        }
+        SsaInstructionKind::FloatCompare { predicate } => {
+            if !matches!(
+                predicate.as_str(),
+                "eq" | "ne" | "lt" | "le" | "gt" | "ge"
+            ) {
+                return Err(format!("unsupported float comparison predicate {predicate}"));
+            }
+            Ok(ScalarInst::FloatCompare {
+                dest,
+                predicate: predicate.clone(),
+                lhs: operand(instruction, 0)?,
+                rhs: operand(instruction, 1)?,
+            })
+        }
+        SsaInstructionKind::FloatIntrinsic { function } => {
+            if !matches!(function.as_str(), "sin" | "cos") {
+                return Err(format!("unsupported float intrinsic {function}"));
+            }
+            Ok(ScalarInst::FloatIntrinsic {
+                dest,
+                function: function.clone(),
+                src: operand(instruction, 0)?,
+            })
+        }
         SsaInstructionKind::FiniteConstruct {
             type_identity,
             discriminant,
@@ -833,6 +903,10 @@ fn lower_instruction(
         SsaInstructionKind::Effect => {
             Err("effects are unsupported on this scalar realization envelope".to_owned())
         }
+        SsaInstructionKind::HostCall { .. } => Err(
+            "host calls are unsupported on this scalar realization envelope; run on the research bytecode backend with an explicit grant"
+                .to_owned(),
+        ),
         SsaInstructionKind::RuntimeCheck { .. } => {
             Err("runtime checks have no executable condition in the current SSA subset".to_owned())
         }
@@ -1388,6 +1462,7 @@ pub fn scalar_ty_in(ty: &IrType, layout: &CompositeLayout) -> Result<ScalarTy, S
             BodyType::Integer(integer) if matches!(integer.bits, 8 | 16 | 32 | 64) => {
                 Ok(ScalarTy::Int(integer))
             }
+            BodyType::Float(float) if float.is_supported() => Ok(ScalarTy::Float),
             // Bytes realize as unsigned 8-bit cells.
             BodyType::Byte => Ok(ScalarTy::Byte),
             // Exact sequences are canonical cells; bounded views are packed
@@ -1414,6 +1489,7 @@ pub fn abi_bits(ty: ScalarTy) -> u16 {
         ScalarTy::Bool | ScalarTy::Finite => 32,
         ScalarTy::Byte => 8,
         ScalarTy::Int(integer) => integer.bits.clamp(32, 64),
+        ScalarTy::Float => 64,
     }
 }
 
@@ -1423,6 +1499,7 @@ pub fn c_type(ty: ScalarTy) -> &'static str {
         // descriptors pack offset and length into one unsigned word.
         ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => "uint64_t",
         ScalarTy::Byte => "uint8_t",
+        ScalarTy::Float => "double",
         _ => match abi_bits(ty) {
             64 => "int64_t",
             _ => "int32_t",
@@ -1436,6 +1513,7 @@ pub fn llvm_type(ty: ScalarTy) -> String {
         ScalarTy::Bool | ScalarTy::Finite => "i32".to_owned(),
         ScalarTy::Byte => "i8".to_owned(),
         ScalarTy::Int(integer) => format!("i{}", integer.bits),
+        ScalarTy::Float => "double".to_owned(),
     }
 }
 
@@ -1457,9 +1535,16 @@ fn ir_type_of(ty: &mncs_model::BodyType) -> IrType {
 }
 
 /// Canonical slot width for a sequence element inside an exact cell.
+///
+/// Every exact-sequence element occupies one 8-byte canonical slot. 64-bit
+/// integers, cell/view/mask descriptors, and binary64 floats all ride as
+/// full 64-bit patterns (floats bit-carried, never numerically converted);
+/// narrower scalars stay in 32-bit slots. This is the single MNCS
+/// representation contract shared by all executable backends.
 pub fn slot_width_of(ty: ScalarTy) -> SlotWidth {
     match ty {
         ScalarTy::Int(integer) if integer.bits == 64 => SlotWidth::W64,
+        ScalarTy::Float => SlotWidth::W64,
         ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => SlotWidth::W64,
         _ => SlotWidth::W32,
     }

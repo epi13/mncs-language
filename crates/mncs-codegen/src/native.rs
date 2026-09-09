@@ -237,7 +237,9 @@ impl NativeExecutable {
                     }
                 }
             }
-            command.arg("-o").arg(&temporary_exe);
+            // Float conversions lower through libm `trunc`; link it alongside
+            // libc (a no-op for modules that never reference it).
+            command.arg("-o").arg(&temporary_exe).arg("-lm");
             let compile_output = command.output().map_err(|error| {
                 let _ = fs::remove_file(&temporary_exe);
                 NativeError::ToolchainUnavailable(format!(
@@ -509,6 +511,7 @@ pub fn compile_object_and_run_full(
             .arg(&temporary_exe)
             .arg(driver_path.file_name().unwrap_or(driver_path.as_os_str()))
             .arg(object_path.file_name().unwrap_or(object_path.as_os_str()))
+            .arg("-lm")
             .output()
             .map_err(|error| {
                 let _ = fs::remove_file(&temporary_exe);

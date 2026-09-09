@@ -94,30 +94,34 @@ pub(crate) fn validate_realizable_ssa(
     Err(Box::new(failed(diagnostics)))
 }
 
-pub(crate) fn function_names(program: &Program, ssa: &SsaModule) -> Vec<String> {
-    ssa.functions
-        .iter()
-        .map(|ssa_function| {
-            program
-                .functions
-                .iter()
-                .find(|function| {
-                    mncs_model::function_id(
-                        function.identity_namespace(&program.module),
-                        &function.name,
-                    ) == ssa_function.semantic_identity
-                })
-                .map(|function| function.name.clone())
-                .unwrap_or_else(|| export_name(&ssa_function.semantic_identity.0))
-        })
-        .collect()
+/// Native symbol for one MNCS function, derived from its canonical
+/// (declaring-module, name) identity.
+///
+/// Every lowered function — root or imported, generic specialization or
+/// plain — owns a distinct native symbol, so two legal modules may each
+/// define the same local name and link into one program without backend
+/// redefinition failures (ENG-PRESSURE-0017). The spelling is a pure
+/// function of the canonical identity: `mncs_<namespace>__<name>` with
+/// injective escaping (`_` doubles, any other non-alphanumeric byte folds
+/// to a single `_`), so distinct identities never spell the same symbol
+/// and C never sees a bare `main`. Drivers and module emission share this
+/// exact function, so they agree by construction. Execution requests keep
+/// addressing entries by `(module, function)`; the execute path derives
+/// the same symbol from the request target.
+pub(crate) fn qualified_c_symbol(namespace: &str, name: &str) -> String {
+    format!(
+        "mncs_{}__{}",
+        mangle_symbol_part(namespace),
+        mangle_symbol_part(name)
+    )
 }
 
-pub(crate) fn export_name(identity: &str) -> String {
-    identity
-        .rsplit(':')
-        .next()
-        .unwrap_or(identity)
+/// Injective mangle for one namespace/name part: `_` escapes to `__` first
+/// (so pre-existing underscores stay distinguishable), then every remaining
+/// non-alphanumeric byte (notably the `.` module separators) folds to a
+/// single `_`. The output is always a valid C identifier tail.
+fn mangle_symbol_part(part: &str) -> String {
+    part.replace('_', "__")
         .chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || ch == '_' {
@@ -127,6 +131,135 @@ pub(crate) fn export_name(identity: &str) -> String {
             }
         })
         .collect()
+}
+
+/// Map key addressing one function value contract by canonical identity.
+/// Distinct from the native symbol on purpose: contracts are looked up by
+/// entry identity, symbols name emitted code.
+pub(crate) fn entry_key(namespace: &str, name: &str) -> String {
+    format!("{namespace}::{name}")
+}
+
+/// One lowered function's declaration facts: canonical identity plus the
+/// emitted native symbol. Built once per lowering so name-based selections
+/// (PTX kernel entries) and entry resolution share the module's mapping.
+pub(crate) struct EntryDecl {
+    pub namespace: String,
+    pub name: String,
+    pub symbol: String,
+}
+
+/// Declaration facts for every SSA function in lowering order. Functions
+/// without a program declaration (unreachable for a valid pipeline) carry
+/// their fallback export spelling under an empty namespace.
+pub(crate) fn entry_decls(program: &Program, ssa: &mncs_model::SsaModule) -> Vec<EntryDecl> {
+    let names = function_names(program, ssa);
+    ssa.functions
+        .iter()
+        .zip(names)
+        .map(|(ssa_function, symbol)| {
+            match program.functions.iter().find(|function| {
+                mncs_model::function_id(
+                    function.identity_namespace(&program.module),
+                    &function.name,
+                ) == ssa_function.semantic_identity
+            }) {
+                Some(function) => EntryDecl {
+                    namespace: function.identity_namespace(&program.module).to_owned(),
+                    name: function.name.clone(),
+                    symbol,
+                },
+                None => EntryDecl {
+                    namespace: String::new(),
+                    name: symbol.clone(),
+                    symbol,
+                },
+            }
+        })
+        .collect()
+}
+
+/// Resolve one logical kernel-entry selection to a physical export symbol:
+/// an exact symbol, a `module::name` identity, or a short name that is
+/// unambiguous in this program. Ambiguous or unknown entries resolve to
+/// `None` so callers fail closed with a structured diagnostic as before.
+pub(crate) fn resolve_kernel_entry(entry: &str, decls: &[EntryDecl]) -> Option<String> {
+    if let Some(exact) = decls.iter().find(|decl| decl.symbol == entry) {
+        return Some(exact.symbol.clone());
+    }
+    if let Some((namespace, name)) = entry.split_once("::") {
+        return decls
+            .iter()
+            .find(|decl| decl.namespace == namespace && decl.name == name)
+            .map(|decl| decl.symbol.clone());
+    }
+    let mut matches = decls.iter().filter(|decl| decl.name == entry);
+    match (matches.next(), matches.next()) {
+        (Some(only), None) => Some(only.symbol.clone()),
+        _ => None,
+    }
+}
+
+pub(crate) fn function_names(program: &Program, ssa: &SsaModule) -> Vec<String> {
+    ssa.functions
+        .iter()
+        .map(|ssa_function| {
+            match program.functions.iter().find(|function| {
+                mncs_model::function_id(
+                    function.identity_namespace(&program.module),
+                    &function.name,
+                ) == ssa_function.semantic_identity
+            }) {
+                Some(function) => {
+                    qualified_c_symbol(function.identity_namespace(&program.module), &function.name)
+                }
+                None => export_name(&ssa_function.semantic_identity.0),
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn export_name(identity: &str) -> String {
+    c_symbol(
+        &identity
+            .rsplit(':')
+            .next()
+            .unwrap_or(identity)
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>(),
+    )
+}
+
+/// Native symbol for an MNCS function base name.
+///
+/// All MNCS-generated function symbols live under the `mncs_` namespace so
+/// they cannot collide with libc/libm (`trunc`, `min`, `exp`, `log`, ...),
+/// compiler/runtime support symbols, or platform names. `fn main` is the
+/// natural MNCS entry shape but C reserves `main`, so it maps to
+/// `mncs_main` like every other function. Names already under `mncs_` keep
+/// their spelling (idempotent); everything else gains the prefix. The C11,
+/// LLVM, and Cranelift drivers map through this same function, so module
+/// and driver always agree. This is hygienic by construction, not a
+/// blacklist: any present or future libc name is namespaced away.
+pub(crate) fn c_symbol(name: &str) -> String {
+    if name == "main" || name == "mncs_main" {
+        "mncs_main".to_owned()
+    } else if let Some(stripped) = name.strip_prefix("mncs_") {
+        // Already namespaced. Re-prefix only if the remainder would still
+        // collide with the runtime helper surface is unnecessary: the full
+        // `mncs_` spelling is already reserved for generated symbols, and
+        // keeping it stable preserves artifact determinism.
+        format!("mncs_{stripped}")
+    } else {
+        format!("mncs_{name}")
+    }
 }
 
 /// Logical composite types (records and payload-bearing finite variants) used
@@ -292,13 +425,62 @@ pub(crate) fn function_value_contracts(
         // slot; otherwise an imported generic declaration can overwrite the
         // wrapper contract and reject a valid composite request on strict
         // backends.  Imported-only names remain available as before.
+        //
+        // Every declaration additionally owns its canonical `module::name`
+        // slot, so entry resolution can disambiguate same-named functions
+        // from distinct modules (ENG-PRESSURE-0017) instead of inheriting
+        // whichever short-name shape won the slot above.
         if function.home_module.is_none() {
-            contracts.insert(function.name.clone(), contract);
+            contracts.insert(function.name.clone(), contract.clone());
         } else {
-            contracts.entry(function.name.clone()).or_insert(contract);
+            contracts
+                .entry(function.name.clone())
+                .or_insert(contract.clone());
         }
+        contracts.insert(
+            entry_key(function.identity_namespace(&program.module), &function.name),
+            contract,
+        );
     }
     contracts
+}
+
+/// Language-owned value contract for one execution entry, resolved by
+/// canonical `(module, function)` identity first and by legacy short name
+/// second. The qualified slot always names the requested declaration
+/// exactly; the short-name fallback keeps requests against artifacts
+/// emitted before qualified symbols (and single-module programs, where the
+/// two agree) working.
+pub(crate) fn entry_value_contract<'a>(
+    contracts: &'a std::collections::BTreeMap<String, mncs_model::BackendFunctionValueContract>,
+    module: &str,
+    function: &str,
+) -> Option<&'a mncs_model::BackendFunctionValueContract> {
+    contracts
+        .get(&entry_key(module, function))
+        .or_else(|| contracts.get(function))
+}
+
+/// Native code symbol for one execution entry. Prefers the canonical
+/// qualified spelling; falls back to the legacy short spelling only when
+/// the artifact at hand does not export the qualified symbol (artifacts
+/// emitted before qualified lowering, loaded from disk via
+/// `experiment execute`). The fallback keeps old artifacts executable;
+/// freshly lowered programs always take the qualified branch.
+pub(crate) fn entry_native_symbol(exports: &[String], module: &str, function: &str) -> String {
+    let qualified = qualified_c_symbol(module, function);
+    if exports.iter().any(|export| export == &qualified) {
+        qualified
+    } else {
+        c_symbol(function)
+    }
+}
+
+/// Whether one emitted module (WASM export list or decoded function table)
+/// carries an entry under its qualified spelling.
+pub(crate) fn exports_contain(exports: &[String], module: &str, function: &str) -> bool {
+    let qualified = qualified_c_symbol(module, function);
+    exports.iter().any(|export| export == &qualified)
 }
 
 pub(crate) fn artifact_ref(artifact: &BackendArtifact) -> CompilerArtifactRef {
@@ -356,6 +538,10 @@ pub(crate) fn argument_bits(value: &ExecutionValue) -> i128 {
         ExecutionValue::Finite { discriminant, .. } => i128::from(*discriminant),
         // Bytes marshal through their unsigned 8-bit domain.
         ExecutionValue::Byte { value } => *value,
+        // Floats marshal through their bit pattern (lossless: i128 holds
+        // every u64). The argv front door uses the decimal spelling
+        // instead; this arm serves bit-exact callers.
+        ExecutionValue::Float { bits, .. } => i128::from(*bits),
         // Collection and record values cross through the canonical call
         // file, never as a scalar argv word. Reaching this arm is a
         // driver-selection bug, not a representation choice.
@@ -381,6 +567,10 @@ pub(crate) fn argument_argv(value: &ExecutionValue) -> Result<String, String> {
         ExecutionValue::Finite { payload, .. } if !payload.is_empty() => Err(
             "composite or collection value requires the canonical call-file boundary".to_owned(),
         ),
+        // Float words are shortest round-trip decimals (exact through
+        // `strtod`); boundary values are finite by the trap rule, so the
+        // spelling always parses.
+        ExecutionValue::Float { bits, .. } => Ok(format!("{}", f64::from_bits(*bits))),
         other => Ok(argument_bits(other).to_string()),
     }
 }
@@ -438,6 +628,19 @@ pub(crate) fn contract_is_cell(contract: &BackendValueContract) -> bool {
     }
 }
 
+/// Whether one value contract crosses the boundary as a binary64 float
+/// word (decimal argv spelling, bit-carried JIT word).
+pub(crate) fn contract_is_float(contract: &BackendValueContract) -> bool {
+    matches!(
+        contract,
+        BackendValueContract::Scalar { semantic_type }
+            if matches!(
+                mncs_model::BodyType::from_semantic_name(semantic_type),
+                mncs_model::BodyType::Float(float) if float.is_supported()
+            )
+    )
+}
+
 /// Whether executing this contract requires the canonical arena image.
 /// Views store their elements in the arena even though the ABI word is a
 /// packed descriptor, not a cell root. Masks are packed bits and do not.
@@ -450,8 +653,8 @@ pub(crate) fn contract_needs_arena(contract: &BackendValueContract) -> bool {
 ///
 /// Masks do not occupy arena cells, but they are still not argv scalars:
 /// they travel as packed 64-bit words in the same call-file entry array
-/// as cell roots and view descriptors. Forcing them onto argv would use
-/// signed `strtoll` and `argument_argv` currently rejects them.
+/// as cell roots and view descriptors. `argument_argv` currently rejects
+/// them, so forcing them onto argv has no encoder.
 pub(crate) fn contract_uses_call_file(contract: &BackendValueContract) -> bool {
     contract_needs_arena(contract) || matches!(contract, BackendValueContract::Mask { .. })
 }
@@ -578,7 +781,9 @@ pub(crate) fn process_driver_cell_runtime(
     inputs: &[BackendValueContract],
     _output: Option<&BackendValueContract>,
 ) -> String {
-    let base = process_driver_full(function, inputs);
+    // Same native-symbol rule as the scalar driver: module and driver
+    // must agree on `mncs_main`.
+    let base = process_driver_full(&c_symbol(function), inputs);
     // Replace the extern declarations with local definitions of the same
     // names so imported cell libcalls resolve against this driver.
     let pattern = format!(
@@ -644,6 +849,13 @@ fn scalar_inst_uses_cells(inst: &crate::scalar::ScalarInst) -> bool {
         | ScalarInst::CellStore { .. }
         | ScalarInst::CellLoad { .. }
         | ScalarInst::SequenceReplace { .. } => true,
+        // Sequence projection lowers to canonical slot loads
+        // (`mncs_slot_load32/64`) on every native backend, so a module that
+        // only indexes into sequences or views still needs the cell helpers
+        // in its prelude. Omitting them produced undeclared-function C
+        // failures (and unresolved-symbol JIT failures) for pure
+        // index-into-view modules.
+        ScalarInst::SequenceProject { .. } => true,
         ScalarInst::Sequence(nested) => nested.iter().any(scalar_inst_uses_cells),
         _ => false,
     }
@@ -679,12 +891,15 @@ pub(crate) fn process_driver(
     inputs: &[mncs_model::BackendValueContract],
     output: Option<&mncs_model::BackendValueContract>,
 ) -> String {
+    // The driver declares and calls the module symbol, so it maps through
+    // the same native-symbol rule as lowering (notably `main`).
+    let symbol = c_symbol(function);
     let uses_call_file =
         inputs.iter().any(contract_uses_call_file) || output.is_some_and(contract_uses_call_file);
     if !uses_call_file {
-        return process_driver_scalar_only(function, inputs);
+        return process_driver_scalar_only(&symbol, inputs);
     }
-    process_driver_full(function, inputs)
+    process_driver_full(&symbol, inputs)
 }
 
 fn uses_uint64_abi(contract: &mncs_model::BackendValueContract) -> bool {
@@ -706,6 +921,7 @@ fn process_driver_scalar_only(
             mncs_model::BackendValueContract::Scalar { semantic_type } => {
                 match mncs_model::BodyType::from_semantic_name(semantic_type) {
                     mncs_model::BodyType::Integer(ty) if ty.bits == 64 => "int64_t",
+                    mncs_model::BodyType::Float(ty) if ty.is_supported() => "double",
                     _ => "int32_t",
                 }
             }
@@ -715,17 +931,36 @@ fn process_driver_scalar_only(
             _ => "int64_t",
         }
     }
+    fn is_float_contract(contract: &mncs_model::BackendValueContract) -> bool {
+        matches!(
+            contract,
+            mncs_model::BackendValueContract::Scalar { semantic_type }
+                if matches!(
+                    mncs_model::BodyType::from_semantic_name(semantic_type),
+                    mncs_model::BodyType::Float(ty) if ty.is_supported()
+                )
+        )
+    }
     let parse_and_args = inputs
         .iter()
         .enumerate()
         .map(|(index, ty)| {
-            (
+            // Float words parse with `strtod` (shortest round-trip decimal
+            // is exact); integers keep the `strtoull` bit-exact path.
+            let parse = if is_float_contract(ty) {
+                format!("  double a{index} = strtod(argv[{}], 0);", index + 1)
+            } else {
+                // Full-range argv words: `strtoll` saturates u64 values
+                // above i64::MAX to LLONG_MAX, so full-range integers
+                // parse with `strtoull` and narrow by cast (bit-exact on
+                // two's-complement targets, including negative words,
+                // which wrap around and cast back exactly).
                 format!(
-                    "  long long a{index} = strtoll(argv[{}], 0, 10);",
+                    "  unsigned long long a{index} = strtoull(argv[{}], 0, 10);",
                     index + 1
-                ),
-                format!("({})a{index}", scalar_c_type(ty)),
-            )
+                )
+            };
+            (parse, format!("({})a{index}", scalar_c_type(ty)))
         })
         .collect::<Vec<_>>();
     let parse = parse_and_args
@@ -778,6 +1013,7 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
             mncs_model::BackendValueContract::Scalar { semantic_type } => {
                 match mncs_model::BodyType::from_semantic_name(semantic_type) {
                     mncs_model::BodyType::Integer(ty) if ty.bits == 64 => "int64_t",
+                    mncs_model::BodyType::Float(ty) if ty.is_supported() => "double",
                     _ => "int32_t",
                 }
             }
@@ -788,6 +1024,16 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
             }
             _ => "int64_t",
         }
+    }
+    fn is_float_contract(contract: &mncs_model::BackendValueContract) -> bool {
+        matches!(
+            contract,
+            mncs_model::BackendValueContract::Scalar { semantic_type }
+                if matches!(
+                    mncs_model::BodyType::from_semantic_name(semantic_type),
+                    mncs_model::BodyType::Float(ty) if ty.is_supported()
+                )
+        )
     }
     fn arg_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
         if uses_uint64_abi(contract) {
@@ -801,21 +1047,35 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
         .enumerate()
         .map(|(index, ty)| {
             // Every parameter crosses through the call file in this mode:
-            // scalar bits and cell roots share the same entry array.
-            let ctype = arg_c_type(ty);
-            format!(
-                "  {ctype} a{index} = (arg_count > {index}) ? ({ctype})values[{index}] : ({ctype})0;"
-            )
+            // scalar bits and cell roots share the same entry array. Float
+            // entries are bit patterns, so they reinterpret (never convert)
+            // into doubles.
+            if is_float_contract(ty) {
+                format!(
+                    "  double a{index} = (arg_count > {index}) ? mncs_bits_to_double(values[{index}]) : 0.0;"
+                )
+            } else {
+                let ctype = arg_c_type(ty);
+                format!(
+                    "  {ctype} a{index} = (arg_count > {index}) ? ({ctype})values[{index}] : ({ctype})0;"
+                )
+            }
         })
         .collect::<Vec<_>>();
     let parse = prepare.join("\n");
     let prepare_legacy = inputs
         .iter()
         .enumerate()
-        .map(|(index, _ty)| {
-            format!(
-                "  long long a{index} = ({index} < scalar_argc) ? strtoll(scalar_argv[{index}], 0, 10) : 0;"
-            )
+        .map(|(index, ty)| {
+            if is_float_contract(ty) {
+                format!(
+                    "  double a{index} = ({index} < scalar_argc) ? strtod(scalar_argv[{index}], 0) : 0.0;"
+                )
+            } else {
+                format!(
+                    "  unsigned long long a{index} = ({index} < scalar_argc) ? strtoull(scalar_argv[{index}], 0, 10) : 0;"
+                )
+            }
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -848,6 +1108,12 @@ extern unsigned char mncs_arena[{NATIVE_ARENA_BYTES}];
 extern uint64_t mncs_bump;
 
 void {function}({proto});
+
+static double mncs_bits_to_double(uint64_t bits) {{
+  double value = 0.0;
+  memcpy(&value, &bits, 8);
+  return value;
+}}
 
 static unsigned char *mncs_read_file(const char *path, long *out_len) {{
   FILE *f = fopen(path, "rb");
@@ -1027,5 +1293,65 @@ mod driver_tests {
         let payload = u64::from_le_bytes(blob[24..32].try_into().unwrap());
         assert_eq!(kind, 0, "mask travels as packed bits, not a cell root");
         assert_eq!(payload, packed);
+    }
+
+    #[test]
+    fn index_only_module_reports_cell_use_for_its_prelude() {
+        // A module whose only cell-touching operation is indexing into a
+        // view still needs the canonical slot helpers: every native backend
+        // lowers SequenceProject to mncs_slot_load32/64. Missing helpers
+        // surfaced as undeclared-function C failures and unresolved-symbol
+        // JIT failures for pure index-into-view modules.
+        use crate::scalar::{
+            ScalarBlock, ScalarFunction, ScalarInst, ScalarModule, ScalarTerm, ScalarTy,
+            ScalarValue,
+        };
+        use mncs_model::{BoundsEvidence, FailureMode, SemanticId, SequenceBound};
+        let sid = |name: &str| SemanticId(name.to_owned());
+        let project = ScalarInst::SequenceProject {
+            dest: ScalarValue {
+                id: sid("v"),
+                ty: ScalarTy::Byte,
+            },
+            seq: sid("window"),
+            index: sid("at"),
+            bound: SequenceBound::UpTo(8),
+            evidence: BoundsEvidence::RuntimeChecked {
+                failure: FailureMode::Fatal,
+            },
+            width: crate::composite::SlotWidth::W32,
+        };
+        let module = ScalarModule {
+            functions: vec![ScalarFunction {
+                export_name: "pick".to_owned(),
+                params: vec![ScalarValue {
+                    id: sid("window"),
+                    ty: ScalarTy::View,
+                }],
+                result: ScalarValue {
+                    id: sid("v"),
+                    ty: ScalarTy::Byte,
+                },
+                blocks: vec![ScalarBlock {
+                    id: sid("entry"),
+                    params: Vec::new(),
+                    insts: vec![project],
+                    term: ScalarTerm::Return { value: sid("v") },
+                }],
+                promises: Vec::new(),
+                promise_decisions: Vec::new(),
+            }],
+            unsupported: Vec::new(),
+            features: Vec::new(),
+            promise_decisions: Vec::new(),
+        };
+        assert!(
+            scalar_module_uses_cells(&module),
+            "index-into-view needs the cell-helper prelude"
+        );
+        assert!(
+            scalar_module_needs_arena_symbols(&module),
+            "index-into-view needs arena symbols"
+        );
     }
 }

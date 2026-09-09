@@ -1,0 +1,163 @@
+{
+ "schema_version": "0.1",
+ "name": "host-read-scan",
+ "cases": [
+  {
+   "id": "hit",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.host_read_scan",
+     "function": "has_term"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 116
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 107
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8192
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ],
+   "expected_effects": [
+    {
+     "kind": "host_read",
+     "target": "blob_read",
+     "capability": "note_reader"
+    }
+   ],
+   "prohibit_unexpected_effects": true
+  },
+  {
+   "id": "miss",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.host_read_scan",
+     "function": "has_term"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 122
+         }
+        },
+        {
+         "byte": {
+          "value": 122
+         }
+        },
+        {
+         "byte": {
+          "value": 122
+         }
+        },
+        {
+         "byte": {
+          "value": 122
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8192
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ],
+   "expected_effects": [
+    {
+     "kind": "host_read",
+     "target": "blob_read",
+     "capability": "note_reader"
+    }
+   ],
+   "prohibit_unexpected_effects": true
+  },
+  {
+   "id": "blob-len",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.host_read_scan",
+     "function": "blob_len"
+    },
+    "arguments": [],
+    "step_budget": 8192
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 27,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_effects": [
+    {
+     "kind": "host_read",
+     "target": "blob_read",
+     "capability": "note_reader"
+    }
+   ],
+   "prohibit_unexpected_effects": true
+  }
+ ]
+}

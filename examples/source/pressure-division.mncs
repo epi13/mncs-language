@@ -1,0 +1,49 @@
+mncs 0.10;
+
+// ENG-PRESSURE-0008 regression: checked division with statically obvious
+// divisors. Literal nonzero divisors discharge both division facts
+// (`divisor-nonzero`, `signed-division-overflow`); unknown, zero, and
+// `MIN / -1`-shaped divisors keep precise open obligations instead of one
+// opaque `integer-overflow` hash.
+//
+// Independent expectations (hand-computed):
+//   lit        = 255 / 255 = 1
+//   chan       = ((200 * 55) + (100 * 200)) / 255 = (11000 + 20000) / 255
+//              = 31000 / 255 = 121 (truncation toward zero)
+//   elem       = 100 / 4 = 25
+//   u64div     = 1000 / 256 = 3
+//   neg1lit    = 10 / -1 = -10
+//   unk(x, y)  = x / y (open obligations; values checked per case)
+//   neg1(x)    = x / -1 (overflow stays open)
+//   zerodiv(x) = x / 0 (both stay open; execution traps)
+module pressure.division;
+
+fn probe_lit() -> (result: i64) {
+    return 255 / 255;
+}
+
+fn probe_chan() -> (result: i64) {
+    return ((200 *% 55) +% (100 *% 200)) / 255;
+}
+
+fn probe_elem() -> (result: i64) {
+    return 100 / 4;
+}
+
+fn probe_u64() -> (result: u64) {
+    let a: u64 = 1000;
+    let b: u64 = 256;
+    return a / b;
+}
+
+fn probe_neg1lit() -> (result: i64) {
+    return 10 / -1;
+}
+
+fn probe_unk(x: i64, y: i64) -> (result: i64) {
+    return x / y;
+}
+
+fn probe_neg1(x: i64) -> (result: i64) {
+    return x / -1;
+}

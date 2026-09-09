@@ -1,0 +1,74 @@
+name: Backend matrix (weekly)
+
+# Weekly multi-backend conformance evidence (Fabric P-011 remainder):
+# every campaign corpus re-executes on all five executable backends plus
+# the machine-readable `experiment matrix` envelope. Push/PR CI already
+# runs `cargo test --workspace`; this job is the scheduled breadth signal
+# with backend-specific failures recorded separately per run.
+on:
+  schedule:
+    - cron: '13 7 * * 1'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    env:
+      MNCS_LIBRARY_PATH: ${{ github.workspace }}/library
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install LLVM toolchain for external-target backends
+        run: |
+          if ! command -v llc >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends llvm
+          fi
+          llc --version | head -2
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --release -p mncs-cli
+      - name: Campaign corpora on all executable backends
+        shell: bash
+        run: |
+          set -euo pipefail
+          MNCS=./target/release/mncs
+          check() {
+            local program="$1" corpus="$2" extra="${3:-}"
+            for backend in mncs-research-bytecode mncs-portable-wasm-mvp mncs-c11 mncs-llvm-ir mncs-cranelift; do
+              # shellcheck disable=SC2086
+              $MNCS experiment run "$program" --backend "$backend" --corpus "$corpus" $extra \
+                > /tmp/matrix-out.json
+              jq -e --arg b "$backend" --arg p "$program" \
+                '(.cases | length) as $n | ([.cases[] | select(.status == "returned" and .expectation_met == true)] | length) == $n' \
+                /tmp/matrix-out.json > /dev/null \
+                || { echo "MATRIX FAIL: $program $backend"; exit 1; }
+              echo "MATRIX PASS: $program $backend"
+            done
+          }
+          check examples/source/arch/classify.mncs examples/execution/arch-classify-corpus.json
+          check library/std/token_set.mncs examples/execution/token-set-corpus.json
+          check examples/source/fleet-tokens.mncs examples/execution/fleet-tokens-corpus.json
+          check library/std/text_scan.mncs examples/execution/text-scan-corpus.json
+          check examples/source/host-read-scan.mncs examples/execution/host-read-scan-corpus.json \
+            "--grant-read note_reader=examples/execution/host-read-note.txt"
+          check examples/source/host-write-append.mncs examples/execution/host-write-append-corpus.json \
+            "--grant-write ledger_writer=/tmp/matrix-ledger.bin"
+          check examples/source/clock-scan.mncs examples/execution/clock-scan-corpus.json \
+            "--grant-time ticker"
+          check examples/source/crypto-verify.mncs examples/execution/crypto-verify-corpus.json \
+            "--grant-crypto verifier"
+      - name: Machine-readable backend envelope
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./target/release/mncs experiment matrix > /tmp/matrix-envelope.json
+          jq -e '.backends | length >= 5' /tmp/matrix-envelope.json > /dev/null
+      - name: Backend-heavy regression targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --release -p mncs-cli --test backend_family --test text_scan \
+            --test host_effects --test clock_effects --test crypto_verify --test host_write

@@ -1,0 +1,93 @@
+{
+ "schema_version": "0.1",
+ "name": "abi-view-returns-traps",
+ "cases": [
+  {
+   "id": "pick_oob",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "pick"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 9,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "rev_slice",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "rev_slice"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

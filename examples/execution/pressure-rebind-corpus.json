@@ -1,0 +1,148 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-rebind-shadowing",
+ "cases": [
+  {
+   "id": "chain",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.rebind",
+     "function": "probe_chain"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 20,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "param",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.rebind",
+     "function": "probe_param"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 10,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 22,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "retype",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.rebind",
+     "function": "probe_retype"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "branch-true",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.rebind",
+     "function": "probe_branch_shadow"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 105,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "branch-false",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.rebind",
+     "function": "probe_branch_shadow"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 5,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

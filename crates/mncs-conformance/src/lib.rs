@@ -270,6 +270,7 @@ impl ConformanceReport {
                         arguments: case.arguments.clone(),
                         step_budget: 16384,
                         policy: Default::default(),
+                        host_grants: Vec::new(),
                     },
                     expected: Some(vec![ExecutionValue::Boolean { value: true }]),
                     expected_status: None,
@@ -842,6 +843,7 @@ pub fn run_conformance(program: &Program, options: &ConformanceOptions) -> Confo
                 arguments: arguments.clone(),
                 step_budget: options.step_budget,
                 policy: Default::default(),
+                host_grants: Vec::new(),
             };
             let first = mncs_model::execute(program, &request);
             let second = mncs_model::execute(program, &request);

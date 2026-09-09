@@ -6,9 +6,20 @@ use crate::body::BodyOperationKind;
 use crate::canonical::sha256_hex;
 use crate::identity::{assumption_id, capability_id, contract_id, effect_id, function_id};
 use crate::ir::effect_obligation_identity;
-use crate::{EvidenceFreshness, MachineIntentExpression, ObligationStatus, Program, SemanticId};
+use crate::{
+    Effect, EvidenceFreshness, MachineIntentExpression, ObligationStatus, Program, SemanticId,
+};
 
 pub const OBLIGATION_SCHEMA_VERSION: &str = "0.2";
+
+/// Whether a body operation identity names the elaborator's bounded-loop
+/// counter decrement. Elaborator temporaries live under the unspellable
+/// `$mncs$` namespace, so no source binding can match this shape; matching
+/// the hygienic form (rather than a bare `iteration_decrement` prefix, which
+/// source code could once spell) keeps the discharge both total and sound.
+fn is_iteration_decrement(id: &str) -> bool {
+    id.starts_with("$mncs$iteration_decrement$")
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObligationRecord {
@@ -107,6 +118,14 @@ impl Program {
                 });
             }
             if let Some(body) = &function.body {
+                // Compiler-known integer literals by value identity, so
+                // checked-division facts with literal divisors discharge
+                // statically below (ENG-PRESSURE-0008). The table maps a
+                // constant result value to its exact value and width; it is
+                // generation-time routing over elaborated facts, never proof
+                // authority — admission of any proof claim stays in the MNCS
+                // proof-kernel path.
+                let body_constants = collect_body_constants(body);
                 for iteration in &body.bounded_iterations {
                     let subject =
                         crate::identity::iteration_id(namespace, &function.name, &iteration.id);
@@ -189,9 +208,11 @@ impl Program {
                             | BodyOperationKind::RecordProject { .. }
                             | BodyOperationKind::FinitePayloadProject { .. }
                             | BodyOperationKind::BooleanOp { .. }
-                            // Byte bitwise/shift/compare and explicit
-                            // conversions are total by definition; sequence
-                            // construction and length observations cannot fail.
+                            // Byte bitwise/shift/compare, float constants, and
+                            // explicit conversions are total by definition;
+                            // sequence construction and length observations
+                            // cannot fail.
+                            | BodyOperationKind::FloatConstant { .. }
                             | BodyOperationKind::ByteBitwise { .. }
                             | BodyOperationKind::ByteShift { .. }
                             | BodyOperationKind::ByteCompare { .. }
@@ -307,13 +328,72 @@ impl Program {
                                     ),
                                 });
                             }
+                            BodyOperationKind::Float { .. }
+                            | BodyOperationKind::FloatCompare { .. }
+                            | BodyOperationKind::FloatIntrinsic { .. } => {
+                                // Binary64 operators and comparisons trap on
+                                // non-finite inputs (and operators on
+                                // non-finite results); the trap is the
+                                // conservative fallback, exactly like checked
+                                // division's zero guard, so the obligation
+                                // stays unknown until finiteness is proven
+                                // upstream.
+                                let requirement = requirement_id("float-finite", &subject);
+                                obligations.push(ObligationRecord {
+                                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                    identity: body_obligation_id("float-finite", &subject),
+                                    subject: subject.clone(),
+                                    requirement,
+                                    status: ObligationStatus::Unknown,
+                                    method: "symbolic-float-finite".to_owned(),
+                                    assumptions: function
+                                        .assumptions
+                                        .iter()
+                                        .map(|assumption| {
+                                            assumption_id(namespace, assumption)
+                                        })
+                                        .collect(),
+                                    dependencies: vec![function_identity.clone(), subject],
+                                    freshness: EvidenceFreshness::Unknown,
+                                    fallback: Some(
+                                        "retain the non-finite trap or prove finiteness upstream"
+                                            .to_owned(),
+                                    ),
+                                });
+                            }
+                            // Checked division/modulo trap on exactly two
+                            // singular inputs — a zero divisor, and (signed
+                            // division only) `MIN / -1`. Both facts are
+                            // represented explicitly with canonical
+                            // digest-bound identities instead of one opaque
+                            // `integer-overflow` hash, and literal divisors
+                            // discharge statically by language semantics
+                            // (ENG-PRESSURE-0008). The runtime guards are
+                            // retained regardless: discharge records the
+                            // static fact, it never removes the check.
+                            BodyOperationKind::Integer {
+                                operator,
+                                operand_type,
+                                ..
+                            } if operator == "div" || operator == "mod" => {
+                                push_division_obligations(
+                                    &mut obligations,
+                                    function,
+                                    &function_identity,
+                                    namespace,
+                                    &subject,
+                                    operation,
+                                    operand_type,
+                                    &body_constants,
+                                );
+                            }
                             BodyOperationKind::Integer { intent, .. }
                             | BodyOperationKind::VectorBinary { intent, .. }
                             | BodyOperationKind::VectorReduce { intent, .. } => {
                                 let bounded_counter_step =
                                     body.bounded_iterations.iter().any(|iteration| {
                                         iteration.backedge == block.id
-                                            && operation.id.starts_with("iteration_decrement")
+                                            && is_iteration_decrement(&operation.id)
                                     });
                                 let total_by_semantics = matches!(
                                     intent,
@@ -384,6 +464,52 @@ impl Program {
                                         ObligationStatus::Fail
                                     },
                                     method: "body-effect-closure".to_owned(),
+                                    assumptions: Vec::new(),
+                                    dependencies: vec![subject, effect_identity],
+                                    freshness: EvidenceFreshness::Current,
+                                    fallback: None,
+                                });
+                            }
+                            BodyOperationKind::HostCall {
+                                capability,
+                                operation,
+                            } => {
+                                // A host call authorizes exactly like a
+                                // declared effect: the obligation passes
+                                // when the capability is declared, and the
+                                // executor discharges the grant at run time.
+                                let granted = Effect {
+                                    kind: crate::host_call_effect_kind(operation).to_owned(),
+                                    target: String::new(),
+                                    capability: capability.clone(),
+                                };
+                                let effect_identity = effect_id(
+                                    namespace,
+                                    &function.name,
+                                    &serde_json::to_string(&crate::canonical::canonical_effect(
+                                        &granted,
+                                    ))
+                                    .expect("host call effect"),
+                                    function
+                                        .effects
+                                        .iter()
+                                        .position(|declared| {
+                                            declared.kind == granted.kind
+                                                && declared.capability == *capability
+                                        })
+                                        .unwrap_or(0),
+                                );
+                                obligations.push(ObligationRecord {
+                                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                    identity: body_obligation_id("effect-authorized", &subject),
+                                    subject: subject.clone(),
+                                    requirement: requirement_id("effect-authorized", &subject),
+                                    status: if function.capabilities.contains(capability) {
+                                        ObligationStatus::Pass
+                                    } else {
+                                        ObligationStatus::Fail
+                                    },
+                                    method: "host-call-closure".to_owned(),
                                     assumptions: Vec::new(),
                                     dependencies: vec![subject, effect_identity],
                                     freshness: EvidenceFreshness::Current,
@@ -537,13 +663,349 @@ pub(crate) fn body_obligation_id(kind: &str, subject: &SemanticId) -> SemanticId
     ))
 }
 
+/// Compiler-known integer literals by result value identity, covering one
+/// function body. Used only to route literal-operand facts (notably
+/// nonzero literal divisors) to static discharge; it decides no proof.
+fn collect_body_constants(
+    body: &crate::FunctionBody,
+) -> BTreeMap<String, (i128, crate::IntegerType)> {
+    let mut constants = BTreeMap::new();
+    for block in &body.blocks {
+        for operation in &block.operations {
+            if let BodyOperationKind::Constant { value, ty } = &operation.kind {
+                if let crate::BodyType::Integer(int_ty) = ty {
+                    for result in &operation.results {
+                        constants.insert(result.id.clone(), (*value, *int_ty));
+                    }
+                }
+            }
+        }
+    }
+    constants
+}
+
+/// Push the explicit checked-division obligations for one scalar `div`/`mod`
+/// operation (ENG-PRESSURE-0008):
+///
+/// - `divisor-nonzero`: the divisor is never zero. Discharges statically
+///   exactly when the divisor operand is a nonzero integer literal.
+/// - `signed-division-overflow`: signed `MIN / -1` (and the `mod`
+///   counterpart, conservatively) traps. Discharges statically exactly
+///   when the divisor is a nonzero literal other than `-1`, or the
+///   dividend is a literal other than the signed minimum.
+///
+/// Both obligations carry canonical digest-bound identities through the
+/// existing constructors, record the same function assumptions as every
+/// other body obligation, and keep a runtime-guard fallback while
+/// UNKNOWN. Discharge marks a language-semantic fact (a literal value
+/// cannot be zero) the way wrapping-intent totality already does; it
+/// never removes a runtime check and never admits a proof — proof claims
+/// still belong to the MNCS proof-kernel path.
+#[allow(clippy::too_many_arguments)]
+fn push_division_obligations(
+    obligations: &mut Vec<ObligationRecord>,
+    function: &crate::Function,
+    function_identity: &SemanticId,
+    namespace: &str,
+    subject: &SemanticId,
+    operation: &crate::BodyOperation,
+    operand_type: &crate::IntegerType,
+    body_constants: &BTreeMap<String, (i128, crate::IntegerType)>,
+) {
+    let assumptions: Vec<SemanticId> = function
+        .assumptions
+        .iter()
+        .map(|assumption| assumption_id(namespace, assumption))
+        .collect();
+    let divisor = operation
+        .operands
+        .get(1)
+        .and_then(|operand| body_constants.get(operand))
+        .copied();
+    let dividend = operation
+        .operands
+        .first()
+        .and_then(|operand| body_constants.get(operand))
+        .copied();
+    let divisor_nonzero = divisor.is_some_and(|(value, _)| value != 0);
+    push_single_obligation(
+        obligations,
+        function_identity,
+        &assumptions,
+        subject,
+        "divisor-nonzero",
+        divisor_nonzero,
+        "language-literal-divisor-nonzero",
+        "runtime-checked-division",
+        Some("retain the zero-divisor runtime guard"),
+    );
+    if operand_type.signed {
+        // Signed minimum for this width; only `MIN / -1` (and, by the same
+        // conservative rule, `MIN % -1`) can overflow.
+        let minimum = -(1_i128 << (operand_type.bits.saturating_sub(1)));
+        let bounds_clear = divisor_nonzero
+            && divisor.is_some_and(|(value, _)| {
+                value != -1 || dividend.is_some_and(|(dividend, _)| dividend != minimum)
+            });
+        push_single_obligation(
+            obligations,
+            function_identity,
+            &assumptions,
+            subject,
+            "signed-division-overflow",
+            bounds_clear,
+            "language-literal-division-bounds",
+            "runtime-checked-signed-division",
+            Some("retain the signed-division-overflow runtime guard"),
+        );
+    }
+}
+
+/// Push one body obligation with the pass/unknown method, freshness, and
+/// fallback selected by its statically established state.
+fn push_single_obligation(
+    obligations: &mut Vec<ObligationRecord>,
+    function_identity: &SemanticId,
+    assumptions: &[SemanticId],
+    subject: &SemanticId,
+    kind: &str,
+    discharged: bool,
+    pass_method: &str,
+    unknown_method: &str,
+    unknown_fallback: Option<&str>,
+) {
+    obligations.push(ObligationRecord {
+        schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+        identity: body_obligation_id(kind, subject),
+        subject: subject.clone(),
+        requirement: requirement_id(kind, subject),
+        status: if discharged {
+            ObligationStatus::Pass
+        } else {
+            ObligationStatus::Unknown
+        },
+        method: if discharged {
+            pass_method.to_owned()
+        } else {
+            unknown_method.to_owned()
+        },
+        assumptions: assumptions.to_vec(),
+        dependencies: vec![function_identity.clone(), subject.clone()],
+        freshness: if discharged {
+            EvidenceFreshness::Current
+        } else {
+            EvidenceFreshness::Unknown
+        },
+        fallback: (!discharged).then(|| {
+            unknown_fallback
+                .unwrap_or("retain the runtime guard")
+                .to_owned()
+        }),
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use crate::validation::tests::valid_program;
     use crate::{
-        ArithmeticIntent, EvidenceFreshness, IntegerOperation, IntegerType, Intent,
-        MachineIntentExpression, ObligationStatus, Requirement, SemanticId,
+        ArithmeticIntent, BodyBlock, BodyOperation, BodyOperationKind, BodyTerminator, BodyType,
+        BodyValue, EvidenceFreshness, Function, FunctionBody, IntegerOperation, IntegerType,
+        Intent, MachineIntentExpression, ObligationStatus, Program, Requirement, SemanticId,
+        SUPPORTED_SCHEMA_VERSION,
     };
+
+    fn div_program(divisor: Option<i128>, dividend: Option<i128>, signed: bool) -> Program {
+        let int_ty = IntegerType { bits: 64, signed };
+        let mut operations = Vec::new();
+        let mut next = 0_usize;
+        let mut constant = |value: i128| {
+            let id = format!("c{next}");
+            next += 1;
+            operations.push(BodyOperation {
+                id: id.clone(),
+                kind: BodyOperationKind::Constant {
+                    value,
+                    ty: BodyType::Integer(int_ty),
+                },
+                operands: Vec::new(),
+                results: vec![BodyValue {
+                    id: id.clone(),
+                    ty: BodyType::Integer(int_ty),
+                }],
+                contracts: Vec::new(),
+                assumptions: Vec::new(),
+                machine_intent: None,
+                lowering: None,
+                portability: None,
+            });
+            id
+        };
+        let dividend_id = match dividend {
+            Some(value) => constant(value),
+            None => "param_x".to_owned(),
+        };
+        let divisor_id = match divisor {
+            Some(value) => constant(value),
+            None => "param_y".to_owned(),
+        };
+        operations.push(BodyOperation {
+            id: "div0".to_owned(),
+            kind: BodyOperationKind::Integer {
+                operator: "div".to_owned(),
+                operand_type: int_ty,
+                intent: ArithmeticIntent::Checked,
+            },
+            operands: vec![dividend_id, divisor_id],
+            results: vec![BodyValue {
+                id: "div0".to_owned(),
+                ty: BodyType::Integer(int_ty),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Program {
+            schema_version: SUPPORTED_SCHEMA_VERSION.to_owned(),
+            module: "test.division".to_owned(),
+            dependencies: Vec::new(),
+            finite_types: Vec::new(),
+            record_types: Vec::new(),
+            assumptions: Vec::new(),
+            binding_table: None,
+            functions: vec![Function {
+                name: "probe".to_owned(),
+                home_module: None,
+                generic_params: Vec::new(),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                contracts: Vec::new(),
+                effects: Vec::new(),
+                capabilities: Vec::new(),
+                assumptions: Vec::new(),
+                evidence: Vec::new(),
+                failure: crate::FailureMode::Isolated,
+                body: Some(FunctionBody {
+                    schema_version: crate::body::EXECUTABLE_BODY_SCHEMA_VERSION.to_owned(),
+                    entry: "entry".to_owned(),
+                    parameters: Vec::new(),
+                    generic_params: Vec::new(),
+                    cycle_policy: crate::BodyCyclePolicy::Legacy,
+                    bounded_iterations: Vec::new(),
+                    blocks: vec![BodyBlock {
+                        id: "entry".to_owned(),
+                        parameters: Vec::new(),
+                        operations,
+                        terminator: BodyTerminator::Return {
+                            values: vec!["div0".to_owned()],
+                        },
+                    }],
+                }),
+            }],
+            generic_specializations: Vec::new(),
+        }
+    }
+
+    fn obligation_statuses(program: &Program) -> Vec<(String, ObligationStatus, String)> {
+        program
+            .generate_obligations()
+            .obligations
+            .iter()
+            .map(|obligation| {
+                let kind = obligation.identity.0.clone();
+                (kind, obligation.status, obligation.method.clone())
+            })
+            .collect()
+    }
+
+    /// Literal nonzero divisors discharge both division facts statically
+    /// with canonical digest-bound identities (ENG-PRESSURE-0008).
+    #[test]
+    fn literal_nonzero_divisor_discharges_both_division_facts() {
+        let entries = obligation_statuses(&div_program(Some(255), Some(255), true));
+        assert_eq!(entries.len(), 2, "{entries:?}");
+        for (identity, status, _) in &entries {
+            assert!(
+                identity.starts_with("mncs:0.2:obligation:body:divisor-nonzero:")
+                    || identity.starts_with("mncs:0.2:obligation:body:signed-division-overflow:"),
+                "explicit division kinds, got {identity}"
+            );
+            assert!(
+                !identity.contains("integer-overflow"),
+                "no opaque hash: {identity}"
+            );
+            assert_eq!(*status, ObligationStatus::Pass, "{identity}");
+        }
+        assert!(entries
+            .iter()
+            .any(|(_, _, method)| method == "language-literal-divisor-nonzero"));
+        assert!(entries
+            .iter()
+            .any(|(_, _, method)| method == "language-literal-division-bounds"));
+    }
+
+    /// Unknown divisors refuse: both facts stay UNKNOWN with runtime-guard
+    /// fallbacks (ENG-PRESSURE-0008 refusal case).
+    #[test]
+    fn unknown_divisor_keeps_both_division_facts_open() {
+        let entries = obligation_statuses(&div_program(None, None, true));
+        assert_eq!(entries.len(), 2, "{entries:?}");
+        for (identity, status, _) in &entries {
+            assert_eq!(*status, ObligationStatus::Unknown, "{identity}");
+        }
+        let generation = div_program(None, None, true).generate_obligations();
+        for obligation in &generation.obligations {
+            assert!(obligation.fallback.is_some(), "{:?}", obligation.identity);
+            assert_eq!(
+                obligation.freshness,
+                crate::EvidenceFreshness::Unknown,
+                "{:?}",
+                obligation.identity
+            );
+        }
+    }
+
+    /// A literal zero divisor never discharges, and `x / -1` discharges
+    /// only divisor-nonzero: the `MIN / -1` overflow stays open.
+    #[test]
+    fn zero_and_neg_one_divisors_refuse_precisely() {
+        let zero = obligation_statuses(&div_program(Some(0), Some(7), true));
+        assert!(
+            zero.iter()
+                .all(|(_, status, _)| *status == ObligationStatus::Unknown),
+            "{zero:?}"
+        );
+        let neg_one = obligation_statuses(&div_program(Some(-1), None, true));
+        let nonzero = neg_one
+            .iter()
+            .find(|(identity, _, _)| identity.contains("divisor-nonzero"))
+            .expect("divisor-nonzero present");
+        assert_eq!(nonzero.1, ObligationStatus::Pass);
+        let overflow = neg_one
+            .iter()
+            .find(|(identity, _, _)| identity.contains("signed-division-overflow"))
+            .expect("overflow present");
+        assert_eq!(overflow.1, ObligationStatus::Unknown);
+        // A literal dividend away from MIN closes the edge: `10 / -1`.
+        let lit = obligation_statuses(&div_program(Some(-1), Some(10), true));
+        assert!(
+            lit.iter()
+                .all(|(_, status, _)| *status == ObligationStatus::Pass),
+            "{lit:?}"
+        );
+    }
+
+    /// Unsigned division carries no signed-overflow obligation at all.
+    #[test]
+    fn unsigned_division_has_no_signed_overflow_obligation() {
+        let entries = obligation_statuses(&div_program(None, None, false));
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert!(entries[0].0.contains("divisor-nonzero"), "{entries:?}");
+        let lit = obligation_statuses(&div_program(Some(256), Some(10), false));
+        assert_eq!(lit.len(), 1, "{lit:?}");
+        assert_eq!(lit[0].1, ObligationStatus::Pass);
+    }
 
     #[test]
     fn language_generation_marks_effect_closure_pass_and_missing_contract_evidence_unknown() {

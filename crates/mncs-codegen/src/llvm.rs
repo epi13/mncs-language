@@ -80,22 +80,24 @@ pub fn prepare_stateful_session<'a>(
 impl LlvmStatefulSession<'_> {
     pub fn execute(&mut self, request: &ExecutionRequest) -> BackendExecutionResult {
         let mut result = empty_execution(self.artifact, request);
-        let Some(contract) = self
-            .artifact
-            .function_value_contracts
-            .get(&request.target.function)
-        else {
+        let Some(contract) = crate::support::entry_value_contract(
+            &self.artifact.function_value_contracts,
+            &request.target.module,
+            &request.target.function,
+        ) else {
             return execution_failure(
                 result,
                 ExecutionStatus::InvalidRequest,
                 "LLVM execution requires a language-owned function value contract",
             );
         };
-        let driver = llvm_driver(
+        // The entry symbol is module-qualified (ENG-PRESSURE-0017).
+        let entry = crate::support::entry_native_symbol(
+            &self.artifact.exports,
+            &request.target.module,
             &request.target.function,
-            &contract.inputs,
-            contract.outputs.first(),
         );
+        let driver = llvm_driver(&entry, &contract.inputs, contract.outputs.first());
         let call_blob = match crate::support::build_call_file(
             &request.arguments,
             &contract.inputs,
@@ -122,7 +124,10 @@ impl LlvmStatefulSession<'_> {
                 }
             },
         };
-        if !self.executables.contains_key(&request.target.function) {
+        // The driver names its entry symbol, so the cache key is the
+        // canonical entry identity (ENG-PRESSURE-0017).
+        let cache_key = crate::support::entry_key(&request.target.module, &request.target.function);
+        if !self.executables.contains_key(&cache_key) {
             let executable = match NativeExecutable::compile_or_reuse(
                 &[
                     ("module.ll", self.ir.as_str()),
@@ -135,15 +140,14 @@ impl LlvmStatefulSession<'_> {
                 Err(error) => return execution_failure(result, error.status(), error.reason()),
             };
             let compiled = executable.was_compiled();
-            self.executables
-                .insert(request.target.function.clone(), executable);
+            self.executables.insert(cache_key.clone(), executable);
             if compiled {
                 mncs_model::record_counter("backend_compile");
             }
         }
         let executable = self
             .executables
-            .get(&request.target.function)
+            .get(&cache_key)
             .expect("LLVM executable inserted above");
         match executable.run(&args, call_path.as_deref()) {
             Ok(run) => {
@@ -424,7 +428,7 @@ pub fn lower_llvm(
         }
         return unknown(diagnostics);
     }
-    let ir = emit_llvm_module(&scalar, plan);
+    let ir = emit_llvm_module(program, ssa, &scalar, plan);
     let mut assumptions = plan.assumptions_introduced.clone();
     assumptions.extend(
         scalar
@@ -483,7 +487,12 @@ pub fn lower_llvm(
     }
 }
 
-pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan) -> String {
+pub(crate) fn emit_llvm_module(
+    program: &mncs_model::Program,
+    ssa: &mncs_model::SsaModule,
+    module: &ScalarModule,
+    plan: &TargetLoweringPlan,
+) -> String {
     let triple = plan
         .target
         .facts
@@ -532,12 +541,23 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
             );
         }
     }
+    // Trigonometry lowers to the LLVM sin/cos intrinsics, which reach the
+    // same host libm as every other backend (bit-exact agreement).
+    for name in ["sin", "cos"] {
+        let _ = writeln!(out, "declare double @llvm.{name}.f64(double)");
+    }
     out.push('\n');
     // PTX kernel entries are explicit per-compilation selections carried in
     // the plan backend options (`ptx-kernel-entries`). Only the NVPTX triple
     // honors them; every other target lowers all functions as ordinary
     // callable definitions. Options (not target facts) carry the selection
     // so the request/plan target identity stays exact.
+    // Entries arrive as logical MNCS names (short when unambiguous,
+    // `module::name` otherwise); native symbols are module-qualified
+    // (`support::qualified_c_symbol`), so resolve before comparing against
+    // the physical export names. Unresolvable entries select nothing here;
+    // the external adapter rejects them with a structured diagnostic.
+    let decls = crate::support::entry_decls(program, ssa);
     let kernel_entries: std::collections::BTreeSet<String> = plan
         .backend
         .as_ref()
@@ -546,7 +566,7 @@ pub(crate) fn emit_llvm_module(module: &ScalarModule, plan: &TargetLoweringPlan)
             list.split(',')
                 .map(str::trim)
                 .filter(|name| !name.is_empty())
-                .map(str::to_owned)
+                .filter_map(|name| crate::support::resolve_kernel_entry(name, &decls))
                 .collect()
         })
         .unwrap_or_default();
@@ -622,28 +642,43 @@ fn emit_block(
         ScalarTerm::Return { value } => {
             let loaded = load_value(out, names, value, "retv", split);
             let ty = names.ty(value);
-            let bits = abi_bits(ty);
-            if bits < 64 {
-                // Unsigned narrow values extend by zero so a wrapping edge
-                // value (u16 `0xFFFF`) decodes as its declared magnitude.
-                let ext = if matches!(ty, ScalarTy::Int(integer) if !integer.signed) {
-                    "zext"
-                } else {
-                    "sext"
-                };
+            // Float results cross as bit-carried words: bitcast the double
+            // into the i64 cell (a converting store would truncate).
+            if matches!(ty, ScalarTy::Float) {
                 let _ = writeln!(
                     out,
-                    "  %ret_ext_{} = {ext} {} %{loaded} to i64",
-                    names.value(value),
-                    llvm_type(ty)
+                    "  %ret_bits_{} = bitcast double %{loaded} to i64",
+                    names.value(value)
                 );
                 let _ = writeln!(
                     out,
-                    "  store i64 %ret_ext_{}, ptr %mncs_value",
+                    "  store i64 %ret_bits_{}, ptr %mncs_value",
                     names.value(value)
                 );
             } else {
-                let _ = writeln!(out, "  store i64 %{loaded}, ptr %mncs_value");
+                let bits = abi_bits(ty);
+                if bits < 64 {
+                    // Unsigned narrow values extend by zero so a wrapping edge
+                    // value (u16 `0xFFFF`) decodes as its declared magnitude.
+                    let ext = if matches!(ty, ScalarTy::Int(integer) if !integer.signed) {
+                        "zext"
+                    } else {
+                        "sext"
+                    };
+                    let _ = writeln!(
+                        out,
+                        "  %ret_ext_{} = {ext} {} %{loaded} to i64",
+                        names.value(value),
+                        llvm_type(ty)
+                    );
+                    let _ = writeln!(
+                        out,
+                        "  store i64 %ret_ext_{}, ptr %mncs_value",
+                        names.value(value)
+                    );
+                } else {
+                    let _ = writeln!(out, "  store i64 %{loaded}, ptr %mncs_value");
+                }
             }
             out.push_str("  store i32 0, ptr %mncs_status\n");
             out.push_str("  ret void\n");
@@ -747,6 +782,96 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             );
             store_dest(out, names, dest, &tmp);
         }
+        ScalarInst::FloatConst { dest, bits } => {
+            *split += 1;
+            let tmp = format!("fk{split}");
+            // Exact hexadecimal float literal; always finite.
+            let _ = writeln!(out, "  %{tmp} = fadd double 0x{bits:016X}, 0.0");
+            store_dest(out, names, dest, &tmp);
+        }
+        ScalarInst::Float {
+            dest,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            let llvm_op = match operator.as_str() {
+                "add" => "fadd",
+                "sub" => "fsub",
+                "mul" => "fmul",
+                "div" => "fdiv",
+                // Unreachable: scalar lowering rejects unknown float
+                // operators before LLVM emission. Fail loudly anyway.
+                _ => {
+                    let _ = writeln!(out, "  br label %mncs_fail");
+                    return;
+                }
+            };
+            let left = load_value(out, names, lhs, "fl", split);
+            let right = load_value(out, names, rhs, "fr", split);
+            emit_float_finite_guard(out, &left, split);
+            emit_float_finite_guard(out, &right, split);
+            *split += 1;
+            let tmp = format!("fbin{split}");
+            let _ = writeln!(out, "  %{tmp} = {llvm_op} double %{left}, %{right}");
+            store_dest(out, names, dest, &tmp);
+            emit_float_finite_guard(out, &tmp, split);
+        }
+        ScalarInst::FloatIntrinsic {
+            dest,
+            function,
+            src,
+        } => {
+            if !matches!(function.as_str(), "sin" | "cos") {
+                let _ = writeln!(out, "  br label %mncs_fail");
+                return;
+            }
+            let input = load_value(out, names, src, "fi", split);
+            emit_float_finite_guard(out, &input, split);
+            *split += 1;
+            let tmp = format!("fintrin{split}");
+            let _ = writeln!(
+                out,
+                "  %{tmp} = call double @llvm.{function}.f64(double %{input})"
+            );
+            store_dest(out, names, dest, &tmp);
+            emit_float_finite_guard(out, &tmp, split);
+        }
+        ScalarInst::FloatCompare {
+            dest,
+            predicate,
+            lhs,
+            rhs,
+        } => {
+            // Ordered comparisons: operands are guarded finite first, so
+            // `oeq` et al never observe NaN (which would make every
+            // predicate but `ne` false).
+            let llvm_pred = match predicate.as_str() {
+                "eq" => "oeq",
+                "ne" => "une",
+                "lt" => "olt",
+                "le" => "ole",
+                "gt" => "ogt",
+                "ge" => "oge",
+                // Unreachable: scalar lowering rejects unknown float
+                // operators before LLVM emission. Fail loudly anyway.
+                _ => {
+                    let _ = writeln!(out, "  br label %mncs_fail");
+                    return;
+                }
+            };
+            let left = load_value(out, names, lhs, "fl", split);
+            let right = load_value(out, names, rhs, "fr", split);
+            emit_float_finite_guard(out, &left, split);
+            emit_float_finite_guard(out, &right, split);
+            *split += 1;
+            let tmp = format!("fcmp{split}");
+            let _ = writeln!(out, "  %{tmp} = fcmp {llvm_pred} double %{left}, %{right}");
+            *split += 1;
+            let ext = format!("fx{split}");
+            let _ = writeln!(out, "  %{ext} = zext i1 %{tmp} to i32");
+            store_dest(out, names, dest, &ext);
+        }
         ScalarInst::Integer {
             dest,
             operator,
@@ -821,6 +946,36 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 && !no_overflow
             {
                 emit_checked(out, dest, operator, &left, &right, names, split);
+            } else if matches!(operator.as_str(), "shl" | "shr") {
+                // Total shifts: counts reduce modulo the declared width.
+                // Without this, oversized counts are LLVM poison (not just a
+                // wrong value), so even today's u64-only shifts need it.
+                // Counts are uniformly u64 in the scalar IR (body
+                // validation admits only u64 shift counts), so reduce in
+                // i64 lane width, then truncate to the value width.
+                let width = match dest.ty {
+                    ScalarTy::Int(integer) => integer.bits,
+                    _ => 64,
+                };
+                *split += 1;
+                let raw_modulus = format!("shmod{split}");
+                let _ = writeln!(out, "  %{raw_modulus} = urem i64 %{right}, {width}");
+                let count_reg = if width == 64 {
+                    raw_modulus
+                } else {
+                    *split += 1;
+                    let narrowed = format!("shmod{split}");
+                    let _ = writeln!(out, "  %{narrowed} = trunc i64 %{raw_modulus} to {ty}");
+                    narrowed
+                };
+                *split += 1;
+                let tmp = format!("bin{split}");
+                let flags = overflow_flag.map_or(String::new(), |flag| format!(" {flag}"));
+                let _ = writeln!(
+                    out,
+                    "  %{tmp} = {llvm_op}{flags} {ty} %{left}, %{count_reg}"
+                );
+                store_dest(out, names, dest, &tmp);
             } else {
                 *split += 1;
                 let tmp = format!("bin{split}");
@@ -1053,6 +1208,61 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let to_ty = llvm_type(*to);
             let converted = if from_ty == to_ty {
                 srcv
+            } else if matches!(to, crate::scalar::ScalarTy::Float) {
+                // Integer, byte, and boolean domains convert to binary64
+                // exactly rounded by hardware (`sitofp`/`uitofp`); every
+                // source value is finite, so no guard is needed.
+                *split += 1;
+                let tmp = format!("cv{split}");
+                if signed_of(*from) {
+                    let _ = writeln!(out, "  %{tmp} = sitofp {from_ty} %{srcv} to {to_ty}");
+                } else {
+                    let _ = writeln!(out, "  %{tmp} = uitofp {from_ty} %{srcv} to {to_ty}");
+                }
+                tmp
+            } else if matches!(from, crate::scalar::ScalarTy::Float) {
+                // Float to integer truncates toward zero and traps on
+                // non-finite or out-of-range inputs (the float trap rule).
+                // The range check runs first: `fptosi`/`fptoui` on a bad
+                // value is poison, and ordered comparisons reject NaN. The
+                // check runs on the untruncated value with sliver-safe
+                // bounds: the upper bound is exact as-is, while the lower
+                // bound admits the fractional sliver `(lo - 1, lo)` whose
+                // truncation still lands in domain (`v > -1` for unsigned
+                // covers `-0.0`, which truncates to zero).
+                let (bits, signed) = match to {
+                    crate::scalar::ScalarTy::Int(integer) => (integer.bits, integer.signed),
+                    crate::scalar::ScalarTy::Byte => (8, false),
+                    _ => {
+                        // No float-to-bool cast exists in the language: fail
+                        // closed with an unreachable trap rather than a
+                        // meaningless conversion.
+                        *split += 1;
+                        let tag = *split;
+                        let _ = writeln!(out, "  br label %mncs_fail");
+                        let _ = writeln!(out, "cv{tag}_dead:");
+                        (8, false)
+                    }
+                };
+                let (lo_pred, lo, hi) = float_domain_guard(bits, signed);
+                *split += 1;
+                let tag = *split;
+                let _ = writeln!(out, "  %cv{tag}_lo = fcmp {lo_pred} double %{srcv}, {lo}");
+                let _ = writeln!(out, "  %cv{tag}_hi = fcmp olt double %{srcv}, {hi}");
+                let _ = writeln!(out, "  %cv{tag}_ok = and i1 %cv{tag}_lo, %cv{tag}_hi");
+                let _ = writeln!(
+                    out,
+                    "  br i1 %cv{tag}_ok, label %cv{tag}_go, label %mncs_fail"
+                );
+                let _ = writeln!(out, "cv{tag}_go:");
+                *split += 1;
+                let tmp = format!("cv{split}");
+                if signed {
+                    let _ = writeln!(out, "  %{tmp} = fptosi double %{srcv} to {to_ty}");
+                } else {
+                    let _ = writeln!(out, "  %{tmp} = fptoui double %{srcv} to {to_ty}");
+                }
+                tmp
             } else {
                 *split += 1;
                 let tmp = format!("cv{split}");
@@ -1388,6 +1598,11 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let dest_ty = llvm_type(dest.ty);
             if dest_ty == "i64" {
                 let _ = writeln!(out, "  %{tmp}_v = add i64 %{tmp}_raw, 0");
+            } else if dest_ty == "double" {
+                // Float results cross as bit-carried words (see Return):
+                // `trunc` is int-to-int only and clang rejects it; the
+                // 64-bit pattern must be bitcast into the `double`.
+                let _ = writeln!(out, "  %{tmp}_v = bitcast i64 %{tmp}_raw to double");
             } else {
                 let _ = writeln!(out, "  %{tmp}_v = trunc i64 %{tmp}_raw to {dest_ty}");
             }
@@ -1517,9 +1732,28 @@ fn emit_checked(
     store_dest(out, names, dest, &format!("{tmp}_v"));
 }
 
+/// Non-finite trap guard for one f64 register (Profile 0.12): `x - x == 0`
+/// holds exactly for finite values (same operand, no rounding) and is NaN
+/// otherwise. Guards branch to mncs_fail so statuses match the reference
+/// executors exactly.
+fn emit_float_finite_guard(out: &mut String, reg: &str, split: &mut u32) {
+    *split += 1;
+    let tag = *split;
+    let _ = writeln!(out, "  %fsub{tag} = fsub double %{reg}, %{reg}");
+    let _ = writeln!(out, "  %ffinite{tag} = fcmp oeq double %fsub{tag}, 0.0");
+    let _ = writeln!(
+        out,
+        "  br i1 %ffinite{tag}, label %ffinite{tag}_ok, label %mncs_fail"
+    );
+    let _ = writeln!(out, "ffinite{tag}_ok:");
+}
+
 /// Guarded division/remainder: a zero divisor always fails; signed division
-/// by MIN / -1 fails under checked intent. Guards branch to mncs_fail so
-/// statuses match the reference executors exactly.
+/// by MIN / -1 fails under checked intent. MNCS pins `MIN % -1 == 0`
+/// without trapping (only `MIN / -1` traps), so signed remainder guards
+/// the same edge into a total zero instead of `srem` poison. Guards branch
+/// to mncs_fail (or to the zero fast-path) so statuses match the reference
+/// executors exactly.
 fn emit_checked_division(
     out: &mut String,
     dest: &ScalarValue,
@@ -1554,6 +1788,40 @@ fn emit_checked_division(
             "  br i1 %ov{inner}, label %mncs_fail, label %dv{inner}_ok"
         );
         let _ = writeln!(out, "dv{inner}_ok:");
+    }
+    if operator == "mod" && signed {
+        let min = match dest.ty {
+            ScalarTy::Int(integer) => {
+                let magnitude = 1_i128 << (integer.bits.max(1) - 1);
+                format!("-{magnitude}")
+            }
+            _ => "-2147483648".to_owned(),
+        };
+        *split += 1;
+        let inner = *split;
+        let _ = writeln!(out, "  %mm1{inner} = icmp eq {ty} %{rhs}, -1");
+        let _ = writeln!(out, "  %mmn{inner} = icmp eq {ty} %{lhs}, {min}");
+        let _ = writeln!(out, "  %mov{inner} = and i1 %mm1{inner}, %mmn{inner}");
+        let _ = writeln!(
+            out,
+            "  br i1 %mov{inner}, label %modzero{inner}, label %modcalc{inner}"
+        );
+        let _ = writeln!(out, "modzero{inner}:");
+        *split += 1;
+        let zero_tmp = format!("q{}", *split);
+        let _ = writeln!(out, "  %{zero_tmp} = add {ty} 0, 0");
+        store_dest(out, names, dest, &zero_tmp);
+        *split += 1;
+        let cont = *split;
+        let _ = writeln!(out, "  br label %modcont{cont}");
+        let _ = writeln!(out, "modcalc{inner}:");
+        *split += 1;
+        let calc_tmp = format!("q{}", *split);
+        let _ = writeln!(out, "  %{calc_tmp} = srem {ty} %{lhs}, %{rhs}");
+        store_dest(out, names, dest, &calc_tmp);
+        let _ = writeln!(out, "  br label %modcont{cont}");
+        let _ = writeln!(out, "modcont{cont}:");
+        return;
     }
     let native = match (operator, signed) {
         ("div", false) => "udiv",
@@ -1609,6 +1877,10 @@ fn flatten_scalar_insts(insts: &[ScalarInst]) -> Vec<&ScalarInst> {
 fn scalar_inst_dest(inst: &ScalarInst) -> Option<&ScalarValue> {
     match inst {
         ScalarInst::Const { dest, .. }
+        | ScalarInst::FloatConst { dest, .. }
+        | ScalarInst::Float { dest, .. }
+        | ScalarInst::FloatCompare { dest, .. }
+        | ScalarInst::FloatIntrinsic { dest, .. }
         | ScalarInst::Integer { dest, .. }
         | ScalarInst::Boolean { dest, .. }
         | ScalarInst::Compare { dest, .. }
@@ -1652,7 +1924,36 @@ fn bits_of(ty: ScalarTy) -> u16 {
         ScalarTy::Byte => 8,
         ScalarTy::Int(integer) => integer.bits,
         ScalarTy::Cell | ScalarTy::View | ScalarTy::Mask(_) => 64,
+        ScalarTy::Float => 64,
     }
+}
+
+/// Sliver-safe lower predicate and exact bounds for a guarded
+/// float-to-integer conversion (Profile 0.12), checked against the
+/// *untruncated* value. The upper bound is exact as-is; the lower bound
+/// admits the fractional sliver `(lo - 1, lo)` whose truncation still
+/// lands in domain. The i64 sliver is empty (no double lies strictly
+/// between `-2^63 - 1` and `-2^63`), so `oge` is exact there; narrower
+/// signed domains spell `lo - 1` exactly; unsigned uses `v > -1`, which
+/// also admits `-0.0` (truncates to zero, in domain). Every spelling is
+/// exactly representable in binary64.
+fn float_domain_guard(bits: u16, signed: bool) -> (String, String, String) {
+    let hi: u128 = if signed {
+        1_u128 << (bits - 1)
+    } else {
+        1_u128 << bits
+    };
+    let (predicate, lo) = if signed && bits == 64 {
+        ("oge".to_owned(), format!("-{}.0", 1_u128 << 63))
+    } else if signed {
+        (
+            "ogt".to_owned(),
+            format!("-{}.0", (1_u128 << (bits - 1)) + 1),
+        )
+    } else {
+        ("ogt".to_owned(), "-1.0".to_owned())
+    };
+    (predicate, lo, format!("{hi}.0"))
 }
 
 /// Signedness of a scalar realization kind for widening decisions.
@@ -1773,10 +2074,11 @@ pub fn execute_llvm(
             return execution_failure(result, ExecutionStatus::InvalidRequest, reason);
         }
     };
-    let Some(contract) = artifact
-        .function_value_contracts
-        .get(&request.target.function)
-    else {
+    let Some(contract) = crate::support::entry_value_contract(
+        &artifact.function_value_contracts,
+        &request.target.module,
+        &request.target.function,
+    ) else {
         return execution_failure(
             result,
             ExecutionStatus::InvalidRequest,
@@ -1792,11 +2094,13 @@ pub fn execute_llvm(
     }
     // Composite arguments and results cross through the canonical call
     // file; pure scalar calls keep the historical argv-only protocol.
-    let driver = llvm_driver(
+    // The entry symbol is module-qualified (ENG-PRESSURE-0017).
+    let entry = crate::support::entry_native_symbol(
+        &artifact.exports,
+        &request.target.module,
         &request.target.function,
-        &contract.inputs,
-        contract.outputs.first(),
     );
+    let driver = llvm_driver(&entry, &contract.inputs, contract.outputs.first());
     let call_blob = match crate::support::build_call_file(
         &request.arguments,
         &contract.inputs,

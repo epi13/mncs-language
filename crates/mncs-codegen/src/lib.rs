@@ -28,7 +28,7 @@ use mncs_model::{
     BackendFunctionValueContract, BackendIdentity, BackendResult, BackendValueContract,
     BodyExecutionSession, BodyType, CompilerArtifactRef, CompilerDiagnostic,
     CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure, ExecutionRequest, ExecutionResult,
-    ExecutionStatus, ExecutionTarget, ExecutionValue, IntegerType, Program, SemanticId,
+    ExecutionStatus, ExecutionTarget, ExecutionValue, HostGrant, IntegerType, Program, SemanticId,
     SsaExecutionSession, SsaModule, StatefulCallResult, StatefulExecutionCase,
     StatefulExecutionCheckpoint, StatefulExecutionResult, TargetContractRef, TargetLoweringPlan,
     TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION, COMPILER_ARTIFACT_SCHEMA_VERSION,
@@ -43,6 +43,11 @@ use crate::wasm::{decode_module, encode_module, execute_function_typed, WASM_MAG
 
 pub const PORTABLE_WASM_FORMAT: &str = "application/wasm; mncs-portable-wasm-mvp-0.1";
 pub const PORTABLE_WASM_ARTIFACT_KIND: &str = "wasm_module";
+/// Version of the language-owned host calling contract in
+/// `spec/host-abi.md`. Hosts must check this version (surfaced by
+/// `mncs abi` as `host_abi_version`) before applying that document: the
+/// contract evolves independently of any single backend's artifact format.
+pub const HOST_ABI_VERSION: &str = "1";
 pub const RESEARCH_BYTECODE_BACKEND_NAME: &str = "mncs-research-bytecode";
 pub const RESEARCH_BYTECODE_BACKEND_VERSION: &str = "0.1";
 pub const RESEARCH_BYTECODE_TARGET: &str = "mncs:target:research-bytecode-0.1";
@@ -638,23 +643,10 @@ pub fn lower_selected_ssa(
             diagnostics,
         };
     }
-    let names = ssa
-        .functions
-        .iter()
-        .map(|ssa_function| {
-            program
-                .functions
-                .iter()
-                .find(|function| {
-                    mncs_model::function_id(
-                        function.identity_namespace(&program.module),
-                        &function.name,
-                    ) == ssa_function.semantic_identity
-                })
-                .map(|function| function.name.clone())
-                .unwrap_or_default()
-        })
-        .collect::<Vec<_>>();
+    // WASM exports carry module-qualified native symbols, exactly like the
+    // native backends, so same-named functions from distinct modules stay
+    // distinct exports (ENG-PRESSURE-0017).
+    let names = support::function_names(program, ssa);
     let mut outcome = lower_module(program, ssa, &names);
     trace_timing("backend-lower-module", started);
     if let Some(module) = outcome.module.as_mut() {
@@ -955,9 +947,11 @@ fn execute_portable_wasm_decoded(
         effects: Vec::new(),
         failure: None,
     };
-    let value_contract = artifact
-        .function_value_contracts
-        .get(&request.target.function);
+    let value_contract = support::entry_value_contract(
+        &artifact.function_value_contracts,
+        &request.target.module,
+        &request.target.function,
+    );
     if let Some(contract) = value_contract {
         if contract.inputs.len() != request.arguments.len()
             || !contract
@@ -975,8 +969,14 @@ fn execute_portable_wasm_decoded(
             return result;
         }
     }
-    let (input_contracts, output_contracts) =
-        signature_contracts(artifact, &request.target.function);
+    let entry_contracts = support::entry_value_contract(
+        &artifact.function_value_contracts,
+        &request.target.module,
+        &request.target.function,
+    );
+    let (input_contracts, output_contracts) = entry_contracts
+        .map(|contracts| (contracts.inputs.as_slice(), contracts.outputs.as_slice()))
+        .unwrap_or((&[], &[]));
     let param_tys = input_contracts
         .iter()
         .map(|contract| marshal_ty(contract, &artifact.composite_value_contracts))
@@ -985,9 +985,25 @@ fn execute_portable_wasm_decoded(
         .iter()
         .map(|contract| marshal_ty(contract, &artifact.composite_value_contracts))
         .collect::<Vec<_>>();
+    // WASM exports are module-qualified; fall back to the legacy short
+    // export only for artifacts emitted before qualified lowering.
+    let export_names: Vec<String> = module
+        .functions
+        .iter()
+        .map(|function| function.name.clone())
+        .collect();
+    let entry = if support::exports_contain(
+        &export_names,
+        &request.target.module,
+        &request.target.function,
+    ) {
+        support::qualified_c_symbol(&request.target.module, &request.target.function)
+    } else {
+        request.target.function.clone()
+    };
     match execute_function_typed(
         module,
-        &request.target.function,
+        &entry,
         &request.arguments,
         &param_tys,
         &result_tys,
@@ -1043,6 +1059,11 @@ fn backend_input_matches(
                 }
                 // Bytes marshal through their unsigned 8-bit domain.
                 (BodyType::Byte, ExecutionValue::Byte { value }) => (0..=255).contains(value),
+                // Binary64 arguments match by type: finiteness is a
+                // runtime trap, not a request rejection.
+                (BodyType::Float(expected), ExecutionValue::Float { ty: actual, .. }) => {
+                    expected.is_supported() && actual.is_supported() && expected == *actual
+                }
                 _ => false,
             }
         }
@@ -1143,6 +1164,12 @@ fn scalar_field_matches(semantic_type: &str, value: &ExecutionValue) -> bool {
             expected == *ty && support::integer_fits(*value, expected)
         }
         (BodyType::Byte, ExecutionValue::Byte { value }) => (0..=255).contains(value),
+        // Binary64 fields match by type exactly like top-level float
+        // arguments; finiteness stays a runtime trap, not a rejection
+        // (ENG-PRESSURE-0002 WASM record-argument divergence).
+        (BodyType::Float(expected), ExecutionValue::Float { ty: actual, .. }) => {
+            expected.is_supported() && actual.is_supported() && expected == *actual
+        }
         (BodyType::Named(_), ExecutionValue::Finite { .. } | ExecutionValue::Record { .. }) => true,
         (
             BodyType::Sequence { .. } | BodyType::Vector { .. } | BodyType::Mask { .. },
@@ -1184,6 +1211,31 @@ pub(crate) fn backend_output_value(
                         value,
                         ty: expected,
                     })
+                }
+                // Float results cross the native boundary as bit-carried
+                // words (the driver prints the i64 cell holding the bits);
+                // finiteness is rechecked because only finite values are
+                // language-owned float results.
+                (BodyType::Float(expected), ExecutionValue::Integer { value, .. })
+                    if expected.is_supported() =>
+                {
+                    let bits = value as u64;
+                    if !f64::from_bits(bits).is_finite() {
+                        return Err("backend returned a non-finite float result".to_owned());
+                    }
+                    Ok(ExecutionValue::Float { bits, ty: expected })
+                }
+                // Backends with native binary64 realizations (WASM MVP,
+                // Cranelift) return the float value itself instead of a
+                // bit-carried integer word; finiteness is rechecked at the
+                // boundary either way.
+                (BodyType::Float(expected), ExecutionValue::Float { bits, ty: observed })
+                    if expected.is_supported() && observed.is_supported() =>
+                {
+                    if !f64::from_bits(bits).is_finite() {
+                        return Err("backend returned a non-finite float result".to_owned());
+                    }
+                    Ok(ExecutionValue::Float { bits, ty: expected })
                 }
                 // Byte results normalize through the unsigned byte domain.
                 (BodyType::Byte, ExecutionValue::Integer { value, .. })
@@ -1286,6 +1338,7 @@ fn marshal_ty(
             match BodyType::from_semantic_name(semantic_type) {
                 BodyType::Named(name) if name == "bool" => MarshalTy::Bool,
                 BodyType::Integer(ty) => MarshalTy::Int(ty),
+                BodyType::Float(ty) if ty.is_supported() => MarshalTy::Float(ty),
                 // Bytes marshal as unsigned 8-bit scalar cells.
                 BodyType::Byte => MarshalTy::Int(IntegerType {
                     bits: 8,
@@ -1386,6 +1439,11 @@ fn named_marshal(
     match BodyType::from_semantic_name(semantic_type) {
         BodyType::Named(name) if name == "bool" => crate::wasm::MarshalTy::Bool,
         BodyType::Integer(ty) => crate::wasm::MarshalTy::Int(ty),
+        // Binary64 fields marshal bit-carried through 8-byte slots; without
+        // this arm they collapsed to Int(64) and every float-carrying
+        // composite argument was rejected at the boundary
+        // (ENG-PRESSURE-0002 WASM record-argument divergence).
+        BodyType::Float(ty) if ty.is_supported() => crate::wasm::MarshalTy::Float(ty),
         BodyType::Byte => crate::wasm::MarshalTy::Int(IntegerType {
             bits: 8,
             signed: false,
@@ -1409,17 +1467,6 @@ fn named_marshal(
             signed: true,
         }),
     }
-}
-
-fn signature_contracts<'a>(
-    artifact: &'a BackendArtifact,
-    function: &str,
-) -> (&'a [BackendValueContract], &'a [BackendValueContract]) {
-    artifact
-        .function_value_contracts
-        .get(function)
-        .map(|contracts| (contracts.inputs.as_slice(), contracts.outputs.as_slice()))
-        .unwrap_or((&[], &[]))
 }
 
 fn reinterpret_backend_value(value: i128, ty: IntegerType) -> i128 {
@@ -1927,6 +1974,111 @@ impl<'a> BackendExecutionSession<'a> {
     }
 }
 
+/// Owned reusable execution session for one verified artifact (P-010
+/// embedding nucleus). Unlike [`BackendExecutionSession`], this owns its
+/// decoded material, so a host can retain it across calls without
+/// borrowing the artifact: research-bytecode payloads reuse validation,
+/// identity, and block indexes, and portable-WASM modules decode once.
+/// Every call still runs the request-specific checks and reports the
+/// exact artifact identity plus digest it executed — no recompilation,
+/// no substitution, no silent fallback. Backends without a prepared path
+/// execute one-shot per call, exactly like the borrowing session.
+pub struct OwnedExecutionSession {
+    artifact: BackendArtifact,
+    research: Option<(Box<ResearchBytecodePayload>, Box<SsaExecutionSession>)>,
+    wasm: Option<crate::wasm::WasmModule>,
+}
+
+impl OwnedExecutionSession {
+    /// Prepare `artifact` once. Fails when the artifact identity is
+    /// invalid; decoding failures for a prepared backend degrade to
+    /// explicit one-shot execution rather than refusing the artifact.
+    pub fn new(artifact: BackendArtifact) -> Result<Self, String> {
+        if !artifact.identity_is_valid() {
+            return Err("backend artifact identity is invalid".to_owned());
+        }
+        let research = if artifact.backend == research_bytecode_backend()
+            && artifact.artifact_kind == RESEARCH_BYTECODE_ARTIFACT_KIND
+        {
+            artifact
+                .bytes()
+                .ok()
+                .and_then(|bytes| {
+                    mncs_model::record_counter("artifact_decode");
+                    serde_json::from_slice::<ResearchBytecodePayload>(&bytes)
+                        .ok()
+                        .filter(|payload| payload.schema_version == "0.1")
+                })
+                .and_then(|payload| {
+                    SsaExecutionSession::from_shared(
+                        Arc::clone(&payload.program),
+                        Arc::clone(&payload.ssa),
+                    )
+                    .ok()
+                    .map(|session| (payload, session))
+                })
+                .map(|(payload, session)| {
+                    mncs_model::record_counter("backend_session");
+                    mncs_model::record_counter("reused_stage");
+                    (Box::new(payload), Box::new(session))
+                })
+        } else {
+            None
+        };
+        let wasm = if research.is_none()
+            && artifact.backend == portable_wasm_backend()
+            && artifact.artifact_kind == PORTABLE_WASM_ARTIFACT_KIND
+        {
+            artifact
+                .bytes()
+                .ok()
+                .and_then(|bytes| {
+                    (bytes.len() >= 8 && bytes[..4] == WASM_MAGIC && bytes[4..8] == WASM_VERSION)
+                        .then(|| decode_module(&bytes).ok())
+                        .flatten()
+                })
+                .inspect(|_| {
+                    mncs_model::record_counter("backend_session");
+                    mncs_model::record_counter("reused_stage");
+                })
+        } else {
+            None
+        };
+        Ok(Self {
+            artifact,
+            research,
+            wasm,
+        })
+    }
+
+    /// True when artifact-level preparation was reused (not per-call one-shot).
+    pub fn reused(&self) -> bool {
+        self.research.is_some() || self.wasm.is_some()
+    }
+
+    pub fn artifact(&self) -> &BackendArtifact {
+        &self.artifact
+    }
+
+    pub fn execute(&self, request: &ExecutionRequest) -> BackendExecutionResult {
+        if let Some((payload, session)) = self.research.as_ref() {
+            mncs_model::record_counter("reused_execution");
+            return execute_research_bytecode_payload(
+                &self.artifact,
+                payload,
+                request,
+                false,
+                Some(session),
+            );
+        }
+        if let Some(module) = self.wasm.as_ref() {
+            mncs_model::record_counter("reused_execution");
+            return execute_portable_wasm_decoded(&self.artifact, module, request);
+        }
+        execute_backend(&self.artifact, request)
+    }
+}
+
 fn stateful_call_result(observation: BackendExecutionResult) -> StatefulCallResult {
     StatefulCallResult {
         status: observation.status,
@@ -2071,6 +2223,7 @@ pub fn compare_body_ssa_and_backend(
     ssa: &SsaModule,
     artifact: &BackendArtifact,
     corpus: &ExecutionCorpus,
+    host_grants: &[HostGrant],
 ) -> LayeredExecutionComparison {
     let started = Instant::now();
     let mut matching = 0usize;
@@ -2089,17 +2242,21 @@ pub fn compare_body_ssa_and_backend(
     // (nested) call. Request-specific checks still run every time.
     let body_session = BodyExecutionSession::new(program);
     for case_ in &corpus.cases {
-        let body = body_session.execute(&case_.request);
+        // Granted requests replay the same explicit host authority the
+        // experiment runner attaches, so host-effect corpora compare the
+        // realized observations instead of unanimous refusals.
+        let request = case_.request.with_host_grants(host_grants);
+        let body = body_session.execute(&request);
         trace_timing("compare-body", started);
         let ssa_result = ssa_session.as_ref().map_or_else(
-            || execute_ssa_module(program, ssa, &case_.request),
+            || execute_ssa_module(program, ssa, &request),
             |session| {
                 mncs_model::record_counter("reused_execution");
-                session.execute(&case_.request)
+                session.execute(&request)
             },
         );
         trace_timing("compare-ssa", started);
-        let backend = backend_session.execute(&case_.request);
+        let backend = backend_session.execute(&request);
         trace_timing("compare-backend", started);
         unsupported |= matches!(body.status, ExecutionStatus::Unsupported)
             || matches!(ssa_result.status, ExecutionStatus::Unsupported)
@@ -2235,6 +2392,20 @@ fn values_agree(left: &[ExecutionValue], right: &[ExecutionValue]) -> bool {
             (ExecutionValue::Byte { value: left }, ExecutionValue::Byte { value: right }) => {
                 left == right
             }
+            // Binary64 values agree on exact bit patterns: bits (not
+            // `f64`) are the serialized form, so bitwise equality is the
+            // language-owned comparison. Boundary values are finite by
+            // the float trap rule, so no NaN-bit ambiguity reaches here.
+            (
+                ExecutionValue::Float {
+                    bits: left_bits,
+                    ty: left_ty,
+                },
+                ExecutionValue::Float {
+                    bits: right_bits,
+                    ty: right_ty,
+                },
+            ) => left_ty.bits == right_ty.bits && left_bits == right_bits,
             // A byte returned from a scalar realization may surface as an
             // integer observation; agree through the byte domain when the
             // value fits.
@@ -2359,6 +2530,7 @@ mod tests {
             ],
             step_budget: 64,
             policy: ExecutionPolicy::default(),
+            host_grants: Vec::new(),
         }
     }
 
@@ -2413,7 +2585,7 @@ mod tests {
                 },
             ],
         };
-        let comparison = compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus);
+        let comparison = compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus, &[]);
         assert_eq!(
             comparison.interpretation,
             LAYERED_EXECUTION_COMPARISON_INTERPRETATION
@@ -2519,6 +2691,7 @@ mod tests {
             }],
             step_budget: budget,
             policy: mncs_model::ExecutionPolicy::default(),
+            host_grants: Vec::new(),
         };
         let generous = session.execute(&request(10_000));
         assert_eq!(generous.status, mncs_model::ExecutionStatus::Returned);
@@ -2565,7 +2738,7 @@ mod tests {
             let artifact = lower_with_backend(backend, &program, &ssa, selected.clone(), &plan)
                 .artifact
                 .expect("arithmetic artifact");
-            let comparison = compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus);
+            let comparison = compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus, &[]);
             assert_eq!(
                 comparison.status,
                 LayeredExecutionStatus::ConsistentOverCorpus,
@@ -2891,6 +3064,7 @@ mod record_tests {
             }],
             step_budget: 256,
             policy: ExecutionPolicy::default(),
+            host_grants: Vec::new(),
         }
     }
 

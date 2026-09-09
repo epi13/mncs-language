@@ -1,0 +1,13 @@
+mncs 0.10;
+
+module examples.profile11.nested_on_010;
+
+fn nested_old_profile() -> (result: u64) {
+    iterate outer up_to 2 carrying a: u64 = 0 {
+        iterate inner up_to 2 carrying b: u64 = a {
+            next b = b +% 1;
+        }
+        next a = b;
+    }
+    return a;
+}

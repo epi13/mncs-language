@@ -1,0 +1,150 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-enum-payloads",
+ "cases": [
+  {
+   "id": "xmod-arg",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.payload",
+     "function": "probe_xmod_arg"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "xmod-result",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.payload",
+     "function": "probe_xmod_result"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 99,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "seq-arg",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.payload",
+     "function": "probe_seq_arg"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 10,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "nest-arg",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.payload",
+     "function": "probe_nest_arg"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 10,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "local-seq",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.payload",
+     "function": "probe_local_seq"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 100,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "local-rec",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.payload",
+     "function": "probe_local_rec"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 11,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

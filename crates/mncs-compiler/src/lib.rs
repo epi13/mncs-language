@@ -10,8 +10,8 @@ mod resolution;
 
 pub use frontend::{
     elaborate_program, elaborate_program_with_resolutions, elaborate_program_with_resolver,
-    elaborate_program_with_resolver_and_modules, ModuleResolution, ModuleResolver, NullResolver,
-    SourceFrontEndResult, SourceStudyOutput,
+    elaborate_program_with_resolver_and_modules, ModuleResolution, ModuleResolutionOutcome,
+    ModuleResolver, NullResolver, SourceFrontEndResult, SourceStudyOutput,
 };
 pub use proof_admission::{
     admission_library_roots, admit_artifact, authorize_reuse, lower_with_proofs, AdmissionError,
@@ -1574,6 +1574,7 @@ mod tests {
                 }],
                 step_budget: 10_000,
                 policy: mncs_model::ExecutionPolicy::default(),
+                host_grants: Vec::new(),
             };
             let body = mncs_model::execute_with_policy(&program, &request);
             let ssa = mncs_model::execute_ssa(&program, &request);
@@ -1625,17 +1626,25 @@ mod tests {
             .iter()
             .any(|diagnostic| diagnostic.code == "MNE117"));
 
-        let duplicate = SourceEnvelope::inline(
+        // ENG-PRESSURE-0021: a plain `let` may shadow a parameter in the
+        // same scope, so the old same-scope duplicate rejection no longer
+        // applies to value shadowing (index/state names stay `MNE110`,
+        // pinned by `pressure_rebinding::rebind_index_name_stays_reserved`).
+        let shadow = SourceEnvelope::inline(
             SourceArtifactKind::Program,
-            "invalid.duplicate",
-            "mncs 0.2; module invalid.duplicate; fn bad(a: i32) -> (result: i32) { let a: i32 = 1; return a; }",
+            "shadow.param",
+            "mncs 0.2; module shadow.param; fn ok(a: i32) -> (result: i32) { let a: i32 = 1; return a; }",
         );
-        let duplicate = compiler.front_end(duplicate);
-        assert!(!duplicate.is_valid());
-        assert!(duplicate
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "MNE110"));
+        let shadow = compiler.front_end(shadow);
+        assert!(shadow.is_valid(), "{:?}", shadow.diagnostics);
+        assert!(
+            shadow
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "MNE110"),
+            "{:?}",
+            shadow.diagnostics
+        );
 
         let unresolved = SourceEnvelope::inline(
             SourceArtifactKind::Program,
@@ -2073,5 +2082,155 @@ mod tests {
         "conformant".clone_into(&mut laundered.interpretation);
         laundered.seal();
         assert!(!laundered.identity_is_valid());
+    }
+}
+
+#[cfg(test)]
+mod borrow_tests {
+    use super::*;
+    use mncs_syntax::{SourceArtifactKind, SourceEnvelope};
+
+    fn study(source: &str) -> SourceFrontEndResult {
+        let compiler = ReferenceCompiler::default();
+        compiler.front_end(SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "app.borrow",
+            source.to_owned(),
+        ))
+    }
+
+    const READER: &str = "fn read16(window: [byte; up_to 64], offset: u64) -> (result: u16) { \
+          let lo: u64 = window[offset] as u64; \
+          let hi: u64 = window[offset +% 1] as u64; \
+          return (lo +% hi *% 256) as u16; }";
+
+    #[test]
+    fn exact_sequence_borrows_into_compatible_bounded_view() {
+        let source = format!(
+            "mncs 0.7; module app.borrow; {READER} \
+             fn probe44(header: [byte; 44]) -> (result: u16) {{ return read16(header, 20); }}"
+        );
+        let front_end = study(&source);
+        assert!(
+            front_end.is_valid(),
+            "borrow must elaborate: {:#?}",
+            front_end.diagnostics
+        );
+        // The borrow is explicit in the body: probe44 materializes exactly
+        // one full-range view over its exact parameter.
+        let program = front_end.program.expect("elaborated program");
+        let probe = program
+            .functions
+            .iter()
+            .find(|function| function.name == "probe44")
+            .expect("probe44");
+        let body = probe.body.as_ref().expect("body");
+        let borrows: Vec<_> = body
+            .blocks
+            .iter()
+            .flat_map(|block| block.operations.iter())
+            .filter_map(|operation| match &operation.kind {
+                mncs_model::BodyOperationKind::ViewConstruct {
+                    source_bound,
+                    view_bound,
+                } => Some((source_bound.clone(), view_bound.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            borrows.len(),
+            1,
+            "exactly one synthesized borrow, got {borrows:?}"
+        );
+        assert_eq!(
+            borrows[0],
+            (
+                mncs_model::SequenceBound::Exact(44),
+                mncs_model::SequenceBound::UpTo(64)
+            )
+        );
+    }
+
+    #[test]
+    fn oversize_exact_sequence_is_refused_at_the_view_boundary() {
+        let source = "mncs 0.7; module app.borrow; \
+             fn read8(window: [byte; up_to 8], offset: u64) -> (result: u16) { return (window[offset] as u16); } \
+             fn probe44(header: [byte; 44]) -> (result: u16) { return read8(header, 0); }";
+        let front_end = study(source);
+        assert!(!front_end.is_valid(), "N > M must not borrow");
+        assert!(
+            front_end
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "MNE133"),
+            "oversize borrow keeps MNE133: {:#?}",
+            front_end.diagnostics
+        );
+    }
+
+    #[test]
+    fn mismatched_element_borrow_is_refused() {
+        let source = format!(
+            "mncs 0.7; module app.borrow; {READER} \
+             fn probe_words(words: [u16; 4]) -> (result: u16) {{ return read16(words, 0); }}"
+        );
+        let front_end = study(&source);
+        assert!(!front_end.is_valid(), "element mismatch must not borrow");
+        assert!(
+            front_end
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "MNE133"),
+            "element mismatch keeps MNE133: {:#?}",
+            front_end.diagnostics
+        );
+    }
+
+    #[test]
+    fn tail_name_return_borrows_into_the_declared_view() {
+        // Bodyless `return header;` takes the general elaboration path when
+        // only the exact-to-view borrow separates the types.
+        let source = "mncs 0.7; module app.borrow; \
+             fn passthrough(header: [byte; 44]) -> (result: [byte; up_to 64]) { return header; }";
+        let front_end = study(source);
+        assert!(
+            front_end.is_valid(),
+            "tail return must borrow: {:#?}",
+            front_end.diagnostics
+        );
+        let program = front_end.program.expect("elaborated program");
+        let body = program
+            .functions
+            .iter()
+            .find(|function| function.name == "passthrough")
+            .expect("passthrough")
+            .body
+            .as_ref()
+            .expect("body");
+        assert!(
+            body.blocks
+                .iter()
+                .flat_map(|block| block.operations.iter())
+                .any(|operation| matches!(
+                    operation.kind,
+                    mncs_model::BodyOperationKind::ViewConstruct { .. }
+                )),
+            "tail return synthesizes the borrow"
+        );
+    }
+
+    #[test]
+    fn nested_call_result_borrows_into_the_view_parameter() {
+        let source = format!(
+            "mncs 0.7; module app.borrow; {READER} \
+             fn dup44(header: [byte; 44]) -> (result: [byte; 44]) {{ return header; }} \
+             fn via_call(header: [byte; 44]) -> (result: u16) {{ return read16(dup44(header), 20); }}"
+        );
+        let front_end = study(&source);
+        assert!(
+            front_end.is_valid(),
+            "nested exact result must borrow: {:#?}",
+            front_end.diagnostics
+        );
     }
 }

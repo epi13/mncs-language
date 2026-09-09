@@ -1,0 +1,16 @@
+mncs 0.10;
+
+// Round-trip witness: `mncs.std.json_emit.v1` output scans clean through
+// `mncs.std.json.v1` (HARNESS-PRESSURE-009). The emitted metrics row
+// carries one object and four strings, so the scanner summary is
+// 1_000_000 + 1*1_000 + 0*10 + 4. The slice `w.buf[0..w.len]` bridges the
+// exact writer buffer to the view-typed scanner input.
+module examples.json_emit_roundtrip;
+
+use mncs.std.json_emit.v1 as emit;
+use mncs.std.json.v1 as json;
+
+fn row_score(model: [byte; 8], model_length: u64, score_millis: i64, ok_flag: bool) -> (result: i64) {
+    let w: emit.Writer = emit.candidate_metrics_row(model, model_length, score_millis, ok_flag);
+    return json.scan(w.buf[0..w.len]);
+}

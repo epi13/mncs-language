@@ -1,0 +1,16 @@
+mncs 0.10;
+
+// ENG-PRESSURE-0019 regression leaf: Nat- and type-generic functions whose
+// arguments determine the parameters.
+module pressure.generics.lib;
+
+fn grow_fill<W: Nat>(row: [i64; W], v: i64) -> (result: [i64; W]) {
+    iterate i over row carrying out: [i64; W] = row {
+        next out = replace(out, i, v);
+    }
+    return out;
+}
+
+fn first<T>(value: T) -> (result: T) {
+    return value;
+}

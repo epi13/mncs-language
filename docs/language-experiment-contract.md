@@ -22,7 +22,12 @@ typed backend artifact, translation-validation results, per-case execution obser
 property observations, stateful transition observations, unresolved obligations, and one conservative
 status. An execution corpus may
 bind an exact expected return for a case and finite-domain laws (`commutative`, `associative`,
-`idempotent`, `neutral`, `absorbing`, and `preserved`). A property `FAIL` retains its first
+`idempotent`, `neutral`, `absorbing`, and `preserved`). A missing `expected`
+field and an explicitly empty `expected: []` both mean the case is
+caller-judged: the runner records the returned values with no judgment
+(`expectation_met` absent), and the case cannot fail on its values. The
+empty list is never a matchable expectation — every MNCS function returns
+exactly one value, so `[]` can never equal a real return. A property `FAIL` retains its first
 deterministic counterexample:
 
 - `FAIL` if compilation, validation, expected return, or property observation fails;
@@ -46,7 +51,14 @@ mncs experiment inspect DIR/result.json
 mncs experiment compare LEFT/result.json RIGHT/result.json
 mncs experiment execute DIR/backend-artifact.json CORPUS
 mncs experiment execute DIR/backend-artifact.json CORPUS --baseline BASELINE/result.json --output-dir REPLICA
+mncs corpus lint PROGRAM.[mncs|json] CORPUS
 ```
+
+`corpus lint` validates a corpus against the program ABI before expensive
+execution — target resolution, budgets, and the same canonical
+argument validation execution uses — and reports per-case errors without
+executing. Host-effect grants (`--grant-read/--grant-time/--grant-crypto/--grant-write`)
+are execution-time authority and stay outside linting.
 
 `plan` freezes the source-to-selected-SSA identity and realization requirements. `run` performs the
 language-owned compilation, realization, validation, and bounded observation. `execute` accepts an

@@ -1,0 +1,2280 @@
+{
+ "schema_version": "0.1",
+ "name": "arch-classify",
+ "cases": [
+  {
+   "id": "x86_64-lower",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 120
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 95
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "x86_64-upper",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 88
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 95
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "x86_64-mixed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 120
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 95
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "amd64-lower",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 109
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "amd64-upper",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 77
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "amd64-mixed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 77
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "aarch64-lower",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 104
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "aarch64-upper",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 82
+         }
+        },
+        {
+         "byte": {
+          "value": 67
+         }
+        },
+        {
+         "byte": {
+          "value": 72
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "aarch64-mixed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 67
+         }
+        },
+        {
+         "byte": {
+          "value": 104
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "arm64-lower",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 109
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "arm64-upper",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 82
+         }
+        },
+        {
+         "byte": {
+          "value": 77
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "arm64-mixed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 82
+         }
+        },
+        {
+         "byte": {
+          "value": 109
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "riscv64-lower",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 118
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 3,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "riscv64-upper",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 82
+         }
+        },
+        {
+         "byte": {
+          "value": 73
+         }
+        },
+        {
+         "byte": {
+          "value": 83
+         }
+        },
+        {
+         "byte": {
+          "value": 67
+         }
+        },
+        {
+         "byte": {
+          "value": 86
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 3,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "riscv64-mixed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 73
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 67
+         }
+        },
+        {
+         "byte": {
+          "value": 118
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 3,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "x86-lower",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 120
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 4,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "x86-upper",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 88
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 4,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "x86-mixed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 120
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 4,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "i386-lower",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 4,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "i386-upper",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 73
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 4,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "i386-mixed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 4,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unknown-0",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": []
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unknown-1",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 112
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unknown-2",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 109
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 112
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unknown-3",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 109
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 112
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unknown-4",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 104
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unknown-5",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 120
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 95
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unknown-6",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 120
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 95
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 32
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unknown-7",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 32
+         }
+        },
+        {
+         "byte": {
+          "value": 120
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 95
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unknown-8",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 109
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unknown-9",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 115
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 118
+         }
+        },
+        {
+         "byte": {
+          "value": 51
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unknown-10",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 109
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 53
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unknown-11",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 105
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 56
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unknown-12",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 120
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unknown-13",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.classify",
+     "function": "classify_arch"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 114
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 104
+         }
+        },
+        {
+         "byte": {
+          "value": 54
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

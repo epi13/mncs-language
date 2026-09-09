@@ -1,0 +1,14 @@
+mncs 0.12;
+
+// ENG-PRESSURE-0011 regression leaf (float): nested binary64 sequences in
+// cross-module signatures, where valid under the float tranche.
+module pressure.nested.flib;
+
+fn read_f64(grid: [[f64; 2]; 2], r: u64, c: u64) -> (result: f64) {
+    return grid[r][c];
+}
+
+fn sum_f64() -> (result: f64) {
+    let grid: [[f64; 2]; 2] = [[1.0, 2.0], [3.0, 4.0]];
+    return (read_f64(grid, 0, 0) + read_f64(grid, 1, 1)) + (read_f64(grid, 0, 1) + read_f64(grid, 1, 0));
+}

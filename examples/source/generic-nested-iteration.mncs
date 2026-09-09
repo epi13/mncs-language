@@ -1,0 +1,28 @@
+mncs 0.10;
+
+// Positive fixture: a generic function whose iteration body calls another
+// generic function must specialize with an exact call/authority closure.
+// Specialization rewrites the nested call target to the concrete
+// instantiation; the recorded iteration closure must follow, or SSA
+// validation fails closed (SSA022). Regression for the defect found while
+// building `mncs.std.text_scan.v1`, whose `contains` nests `window_equal`.
+module examples.generic_nested_iteration;
+
+fn leaf<N: Nat>(needle: [byte; N], needle_length: u64, probe: byte) -> (result: bool) {
+    iterate j over needle carrying same: bool = true {
+        next same = same && select(j < needle_length, needle[j] == probe, true);
+    }
+    return same;
+}
+
+fn mid<N: Nat>(hay: [byte; up_to 64], hay_length: u64, needle: [byte; N], needle_length: u64) -> (result: bool) {
+    iterate i over hay carrying found: bool = false {
+        let live: bool = i < hay_length;
+        next found = found || (live && leaf<N>(needle, needle_length, hay[i]));
+    }
+    return found;
+}
+
+fn run(hay: [byte; up_to 64], hay_length: u64, needle: [byte; 4], needle_length: u64) -> (result: bool) {
+    return mid<4>(hay, hay_length, needle, needle_length);
+}

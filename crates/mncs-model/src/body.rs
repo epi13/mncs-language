@@ -4,16 +4,33 @@ use serde::{Deserialize, Serialize};
 
 use crate::identity::{block_id, body_id, operation_id, value_id};
 use crate::{
-    ArithmeticIntent, Diagnostic, Effect, Fact, FailureMode, Function, IntegerType, Intent,
-    MachinePreference, Obligation, Program, Requirement, SemanticId,
+    ArithmeticIntent, Diagnostic, Effect, Fact, FailureMode, FloatType, Function, IntegerType,
+    Intent, MachinePreference, Obligation, Program, Requirement, SemanticId,
 };
 
 pub const EXECUTABLE_BODY_SCHEMA_VERSION: &str = "0.2";
-pub const SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND: u32 = 32;
+/// Inclusive upper bound for `iterate ... up_to N` counter loops and
+/// sequence-traversal steps (ENG-PRESSURE-0004).
+///
+/// Why 1024: every backend lowers bounded iteration to a native loop (the
+/// C/LLVM/Cranelift emitters use a program-counter state machine, WASM
+/// uses real `loop` opcodes), so compile-time cost is O(1) in the bound
+/// and the ceiling is purely a runtime-step policy. The reference
+/// interpreter retires roughly eight steps per iteration (measured), so a
+/// single 1024-loop costs ~8K steps against the 8M execution budget, and
+/// the retained two-level nesting cap keeps fully-nested loops inside
+/// caller-sized step budgets. 1024 also matches the sequence bound, so any
+/// well-typed sequence is fully traversable.
+pub const SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND: u32 = 1024;
 /// Inclusive upper bound for sequence lengths and view capacities
-/// (Source Profile 0.7). Bounds are semantic facts carried by types, so they
-/// must stay small enough to remain machine-checkable everywhere.
-pub const MAX_SEQUENCE_BOUND: u32 = 64;
+/// (Source Profile 0.7; ENG-PRESSURE-0018). Bounds are semantic facts
+/// carried by types, so they must stay small enough to remain
+/// machine-checkable everywhere: 1024 keeps one i64 axis to 8 KiB on the
+/// stack-backed native emitters, stays far inside the 16 MiB composite
+/// cell arena, and fits comfortably in WASM linear memory. Larger shapes
+/// compose from these (records of sequences, nested sequences); genuinely
+/// unbounded growth stays out of scope under deterministic allocation.
+pub const MAX_SEQUENCE_BOUND: u32 = 1024;
 /// Semantic vectors and masks are deliberately bounded in the first Profile
 /// 0.8 tranche. Lane count is logical identity and never a register width.
 pub const MAX_VECTOR_LANES: u32 = 64;
@@ -251,6 +268,11 @@ pub struct BodyValue {
 pub enum BodyType {
     Named(String),
     Integer(IntegerType),
+    /// IEEE-754 binary64 floating point (Profile 0.12). The only float
+    /// width; NaN and infinities never cross operation boundaries (float
+    /// operators trap on non-finite inputs and results, like checked
+    /// division traps on its singular inputs).
+    Float(FloatType),
     /// A byte-oriented 8-bit unsigned logical value (Profile 0.7). Distinct
     /// from `u8`: bytes support byte-appropriate operations only.
     Byte,
@@ -302,6 +324,15 @@ impl BodyType {
         }
         if name == "byte" {
             return Self::Byte;
+        }
+        if let Some(digits) = name.strip_prefix('f') {
+            // `f32` parses (so validation, not name resolution, reports
+            // the single-width rule) but only binary64 is supported.
+            if let Ok(bits) = digits.parse::<u16>() {
+                if bits > 0 {
+                    return Self::Float(FloatType { bits });
+                }
+            }
         }
         let (signed, digits) = if let Some(digits) = name.strip_prefix('i') {
             (true, digits)
@@ -436,6 +467,7 @@ impl BodyType {
             Self::Integer(integer) => {
                 format!("{}{}", if integer.signed { 'i' } else { 'u' }, integer.bits)
             }
+            Self::Float(float) => format!("f{}", float.bits),
             Self::Byte => "byte".to_owned(),
             Self::Sequence { element, bound } => {
                 format!("[{}; {}]", element.semantic_name(), bound.canonical_text())
@@ -461,6 +493,7 @@ impl BodyType {
                 if integer.signed { "signed" } else { "unsigned" },
                 integer.bits
             ),
+            Self::Float(float) => format!("float:{}", float.bits),
             Self::Byte => "byte".to_owned(),
             Self::Sequence { element, bound } => format!(
                 "sequence<{};{}>",
@@ -539,6 +572,32 @@ pub enum BodyOperationKind {
     IntegerCompare {
         predicate: String,
         operand_type: IntegerType,
+    },
+    /// A binary64 float literal (Profile 0.12). Bits keep the payload
+    /// exact through every serialization; literals are always finite
+    /// (the parser refuses non-finite spellings).
+    FloatConstant {
+        bits: u64,
+        ty: FloatType,
+    },
+    /// Binary64 arithmetic (Profile 0.12): `add` | `sub` | `mul` | `div`.
+    /// IEEE-754 binary64 semantics; a non-finite input or result is a
+    /// runtime failure (fail-closed, like checked division's singular
+    /// inputs), so NaN payloads never cross backend boundaries.
+    Float {
+        operator: String,
+    },
+    /// Binary64 comparison (Profile 0.12): `eq` | `ne` | `lt` | `le` |
+    /// `gt` | `ge`. Operands are always finite by the `Float` trap rule.
+    FloatCompare {
+        predicate: String,
+    },
+    /// Binary64 trigonometry (Profile 0.12): `sin` | `cos`. Same-process
+    /// libm on every backend, so layers agree bit-exactly. The operand
+    /// must be finite and the result is finite for finite inputs; both
+    /// are guarded like arithmetic.
+    FloatIntrinsic {
+        function: String,
     },
     /// Strict boolean conjunction/disjunction (Profile 0.6). Both operands
     /// are total values; evaluation is not short-circuited.
@@ -714,11 +773,52 @@ pub enum BodyOperationKind {
         effect: Effect,
         capability: String,
     },
+    /// A value-producing host-realized operation
+    /// (HARNESS-PRESSURE-004). Authority comes from the enclosing
+    /// function's declarations, never from ambient access: validation
+    /// requires the named capability in `function.capabilities` and a
+    /// matching declared effect, and executors realize the operation only
+    /// from an explicit `HostGrant` for that capability. `operation`
+    /// selects the realized primitive (`blob_read`, `clock_read`);
+    /// unknown operations fail closed at every layer.
+    HostCall {
+        capability: String,
+        operation: String,
+    },
     RuntimeCheck {
         obligation: SemanticId,
         fact: Fact,
         failure: FailureMode,
     },
+}
+
+/// The declared-effect kind discharged by one host-call operation id
+/// (HARNESS-PRESSURE-004/005/006, P-006 storage slice). `blob_read`
+/// discharges `host_read` and `blob_append` discharges `host_write`;
+/// every other known operation discharges an effect of its own name.
+/// Anything unknown maps to `host_read` so pre-validation lowering keeps
+/// today's shape; unknown operations still fail closed at validation
+/// (MNB123) and at every executor.
+pub fn host_call_effect_kind(operation: &str) -> &'static str {
+    match operation {
+        "clock_read" => "clock_read",
+        "sha256_digest" => "sha256_digest",
+        "ed25519_verify" => "ed25519_verify",
+        "blob_append" => "host_write",
+        _ => "host_read",
+    }
+}
+
+/// The fixed operand arity of one host-call operation id. `None` marks
+/// an unknown operation: validation reports MNB123 and skips the arity
+/// check rather than stacking a second error on it.
+pub fn host_call_arity(operation: &str) -> Option<usize> {
+    match operation {
+        "blob_read" | "clock_read" => Some(0),
+        "sha256_digest" | "blob_append" => Some(1),
+        "ed25519_verify" => Some(3),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1125,15 +1225,17 @@ fn validate_bounded_iterations(
                         ),
                     ));
                 }
-                let expected_counter = BodyType::Integer(IntegerType {
-                    bits: 64,
-                    signed: false,
-                });
+                // Any ordinary scalar element type traverses: all integer
+                // widths in both signednesses, binary64, bytes, and bools.
+                // The traversal index is always an abstract u64 counter, so
+                // a `u64` element type is a legitimate domain, not a missing
+                // resolution (MNB101). Only truly unresolvable nominal types
+                // fail here; generic parameters resolve through substitution.
                 let unresolved_named = matches!(
                     element_type.as_ref(),
                     BodyType::Named(name) if name != "bool"
                 );
-                if **element_type == expected_counter || unresolved_named {
+                if unresolved_named {
                     errors.push(body_diagnostic(
                         "MNB101",
                         format!("{path}.domain"),
@@ -1319,8 +1421,19 @@ fn validate_operation(
                     "integer operations require two operands and one result",
                 ));
             }
-            for operand in &operation.operands {
-                if available.get(operand) != Some(&BodyType::Integer(*operand_type)) {
+            for (index, operand) in operation.operands.iter().enumerate() {
+                // Shift counts are uniformly u64 and reduce modulo the
+                // declared value width at realization; only the shifted
+                // value must match the operation type.
+                let shift_count = matches!(operator.as_str(), "shl" | "shr")
+                    && index == 1
+                    && available.get(operand)
+                        == Some(&BodyType::Integer(IntegerType {
+                            bits: 64,
+                            signed: false,
+                        }));
+                if !shift_count && available.get(operand) != Some(&BodyType::Integer(*operand_type))
+                {
                     errors.push(body_diagnostic(
                         "MNB017",
                         format!("{path}.operands"),
@@ -1382,6 +1495,149 @@ fn validate_operation(
                     "MNB042",
                     format!("{path}.results"),
                     "integer comparison result must have boolean type",
+                ));
+            }
+        }
+        BodyOperationKind::FloatConstant { ty, .. } => {
+            if !ty.is_supported() {
+                errors.push(body_diagnostic(
+                    "MNB126",
+                    format!("{path}.kind"),
+                    "only binary64 float constants are supported",
+                ));
+            }
+            if operation.operands.is_empty() && operation.results.len() == 1 {
+                if operation.results[0].ty != BodyType::Float(*ty) {
+                    errors.push(body_diagnostic(
+                        "MNB013",
+                        format!("{path}.results"),
+                        "constant result type does not match the constant type",
+                    ));
+                }
+            } else {
+                errors.push(body_diagnostic(
+                    "MNB014",
+                    path.to_owned(),
+                    "constant operations require one result and no operands",
+                ));
+            }
+        }
+        BodyOperationKind::Float { operator } => {
+            if !matches!(operator.as_str(), "add" | "sub" | "mul" | "div") {
+                errors.push(body_diagnostic(
+                    "MNB127",
+                    format!("{path}.kind"),
+                    format!("unsupported symbolic float operator {operator:?}"),
+                ));
+            }
+            if operation.operands.len() != 2 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB128",
+                    path.to_owned(),
+                    "float operations require two operands and one result",
+                ));
+            }
+            for operand in &operation.operands {
+                if !matches!(
+                    available.get(operand),
+                    Some(BodyType::Float(ty)) if ty.is_supported()
+                ) {
+                    errors.push(body_diagnostic(
+                        "MNB129",
+                        format!("{path}.operands"),
+                        "float operand type must be binary64",
+                    ));
+                }
+            }
+            if operation.results.first().is_some_and(|result| {
+                !matches!(
+                    result.ty,
+                    BodyType::Float(ty) if ty.is_supported()
+                )
+            }) {
+                errors.push(body_diagnostic(
+                    "MNB130",
+                    format!("{path}.results"),
+                    "float result type must be binary64",
+                ));
+            }
+        }
+        BodyOperationKind::FloatCompare { predicate } => {
+            if !matches!(predicate.as_str(), "eq" | "ne" | "lt" | "le" | "gt" | "ge") {
+                errors.push(body_diagnostic(
+                    "MNB131",
+                    format!("{path}.kind.predicate"),
+                    format!("unsupported float comparison predicate {predicate:?}"),
+                ));
+            }
+            if operation.operands.len() != 2 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB132",
+                    path.to_owned(),
+                    "float comparison requires two operands and one result",
+                ));
+            }
+            for operand in &operation.operands {
+                if !matches!(
+                    available.get(operand),
+                    Some(BodyType::Float(ty)) if ty.is_supported()
+                ) {
+                    errors.push(body_diagnostic(
+                        "MNB133",
+                        format!("{path}.operands"),
+                        "float comparison operand type must be binary64",
+                    ));
+                }
+            }
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| !result.ty.is_boolean())
+            {
+                errors.push(body_diagnostic(
+                    "MNB042",
+                    format!("{path}.results"),
+                    "float comparison result must have boolean type",
+                ));
+            }
+        }
+        BodyOperationKind::FloatIntrinsic { function } => {
+            if !matches!(function.as_str(), "sin" | "cos") {
+                errors.push(body_diagnostic(
+                    "MNB134",
+                    format!("{path}.kind"),
+                    format!("unsupported float intrinsic {function:?}"),
+                ));
+            }
+            if operation.operands.len() != 1 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB135",
+                    path.to_owned(),
+                    "float intrinsics require one operand and one result",
+                ));
+            }
+            for operand in &operation.operands {
+                if !matches!(
+                    available.get(operand),
+                    Some(BodyType::Float(ty)) if ty.is_supported()
+                ) {
+                    errors.push(body_diagnostic(
+                        "MNB136",
+                        format!("{path}.operands"),
+                        "float intrinsic operand type must be binary64",
+                    ));
+                }
+            }
+            if operation.results.first().is_some_and(|result| {
+                !matches!(
+                    result.ty,
+                    BodyType::Float(ty) if ty.is_supported()
+                )
+            }) {
+                errors.push(body_diagnostic(
+                    "MNB137",
+                    format!("{path}.results"),
+                    "float intrinsic result type must be binary64",
                 ));
             }
         }
@@ -1490,7 +1746,7 @@ fn validate_operation(
                 errors.push(body_diagnostic(
                     "MNB077",
                     format!("{path}.kind"),
-                    "explicit conversions require scalar integer or byte types",
+                    "explicit conversions require scalar integer, byte, or binary64 float types",
                 ));
             }
             if operation.operands.len() != 1 || operation.results.len() != 1 {
@@ -2636,6 +2892,57 @@ fn validate_operation(
                 ));
             }
         }
+        BodyOperationKind::HostCall {
+            capability,
+            operation: operation_id,
+        } => {
+            if operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB122",
+                    path.to_owned(),
+                    "host calls produce exactly one value",
+                ));
+            }
+            // Data operands are not authority: verify-only crypto
+            // operations consume byte views, while reads and clocks take
+            // none. Unknown operations skip this check; MNB123 covers them
+            // without stacking a second error.
+            if let Some(arity) = host_call_arity(operation_id) {
+                if operation.operands.len() != arity {
+                    errors.push(body_diagnostic(
+                        "MNB122",
+                        path.to_owned(),
+                        format!("host operation {operation_id:?} takes exactly {arity} operands"),
+                    ));
+                }
+            }
+            if host_call_arity(operation_id).is_none() {
+                errors.push(body_diagnostic(
+                    "MNB123",
+                    format!("{path}.kind"),
+                    format!("unknown host operation {operation_id:?}; fail closed"),
+                ));
+            }
+            if !function.capabilities.contains(capability) {
+                errors.push(body_diagnostic(
+                    "MNB124",
+                    format!("{path}.kind"),
+                    "host call capability is not declared by the enclosing function",
+                ));
+            }
+            let required_kind = host_call_effect_kind(operation_id);
+            if !function.effects.iter().any(|declared| {
+                declared.kind == required_kind && declared.capability == *capability
+            }) {
+                errors.push(body_diagnostic(
+                    "MNB125",
+                    format!("{path}.kind"),
+                    format!(
+                        "host call has no matching declared {required_kind} effect for its capability"
+                    ),
+                ));
+            }
+        }
         BodyOperationKind::RuntimeCheck {
             obligation,
             fact,
@@ -3188,6 +3495,7 @@ fn is_convertible_scalar(ty: &BodyType) -> bool {
     matches!(ty, BodyType::Byte)
         || matches!(ty, BodyType::Integer(integer) if matches!(integer.bits, 1..=64))
         || matches!(ty, BodyType::Named(name) if name == "bool")
+        || matches!(ty, BodyType::Float(float) if float.is_supported())
 }
 
 fn body_diagnostic(code: &str, path: String, message: impl Into<String>) -> Diagnostic {

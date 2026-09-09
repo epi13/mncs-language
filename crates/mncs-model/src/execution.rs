@@ -16,8 +16,55 @@ use crate::canonical::{canonical_json_value, sha256_hex};
 use crate::identity::{function_id, SemanticId};
 use crate::{
     ArithmeticIntent, BodyBlock, BodyOperation, BodyOperationKind, BodyTerminator, BodyType,
-    BoundsEvidence, Function, FunctionBody, IntegerType, Program, SequenceBound,
+    BoundsEvidence, FloatType, Function, FunctionBody, IntegerType, Program, SequenceBound,
 };
+
+/// Recover the `f64` of a float boundary value.
+pub fn float_value(value: &ExecutionValue) -> Option<f64> {
+    match value {
+        ExecutionValue::Float { bits, .. } => Some(f64::from_bits(*bits)),
+        _ => None,
+    }
+}
+
+/// IEEE-754 binary64 arithmetic with the fail-closed trap rule: a
+/// non-finite input or result evaluates to `None` (runtime failure),
+/// so NaN payloads never cross backend boundaries and every backend
+/// agrees on every produced value.
+pub fn evaluate_float(operator: &str, left: f64, right: f64) -> Option<f64> {
+    if !left.is_finite() || !right.is_finite() {
+        return None;
+    }
+    let value = match operator {
+        "add" => left + right,
+        "sub" => left - right,
+        "mul" => left * right,
+        "div" => left / right,
+        _ => return None,
+    };
+    value.is_finite().then_some(value)
+}
+
+/// Binary64 comparison with the fail-closed trap rule: non-finite
+/// operands evaluate to `None` (runtime failure), since only `Float`
+/// results (trapped) and finite constants otherwise reach this point —
+/// except for float-typed parameters, which cross the boundary unchecked.
+pub fn compare_floats(predicate: &str, left: f64, right: f64) -> Option<bool> {
+    if !left.is_finite() || !right.is_finite() {
+        return None;
+    }
+    Some(match predicate {
+        "eq" => left == right,
+        "ne" => left != right,
+        "lt" => left < right,
+        "le" => left <= right,
+        "gt" => left > right,
+        "ge" => left >= right,
+        _ => return None,
+    })
+}
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use sha2::{Digest, Sha256};
 
 pub const EXECUTION_REQUEST_SCHEMA_VERSION: &str = "0.1";
 pub const EXECUTION_RESULT_SCHEMA_VERSION: &str = "0.1";
@@ -56,6 +103,14 @@ pub enum ExecutionValue {
         value: i128,
         #[serde(rename = "type")]
         ty: IntegerType,
+    },
+    /// IEEE-754 binary64 (Profile 0.12). Bits (not `f64`) keep `Eq` and
+    /// make every serialization exact; boundary values are always finite
+    /// by the float trap rule. `float_value` recovers the `f64`.
+    Float {
+        bits: u64,
+        #[serde(rename = "type")]
+        ty: FloatType,
     },
     Boolean {
         value: bool,
@@ -105,6 +160,110 @@ pub enum EffectExecutionPolicy {
     #[default]
     Unsupported,
     Record,
+    /// Realize host-granted effects from `ExecutionRequest.host_grants`.
+    /// A value-producing host operation with no matching grant fails
+    /// closed; grants never confer ambient authority.
+    Realize,
+}
+
+/// One bounded host-granted input (HARNESS-PRESSURE-004). The executor
+/// matches grants by capability name only; the bytes are an explicit
+/// copy (at most 64) supplied with the request, never a live handle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostGrant {
+    pub capability: String,
+    /// Operator-supplied provenance for the grant (file path, fixture
+    /// name, or test provider identity). Recorded into evidence.
+    pub locator: String,
+    pub bytes: Vec<u8>,
+}
+
+/// Maximum bytes in one host grant: the executor ABI's sequence bound.
+pub const HOST_GRANT_MAX_BYTES: usize = 64;
+
+/// Wall-clock epoch milliseconds observed from the host
+/// (HARNESS-PRESSURE-005). `None` when the host clock is unavailable;
+/// callers fail closed. This is wall time, not a monotonic tick: hosts
+/// may adjust it, so programs must compare instants relationally with
+/// wide margins (elapsed/expired), never pin absolute values in corpora.
+pub(crate) fn host_epoch_millis() -> Option<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|elapsed| elapsed.as_millis().min(u128::from(u64::MAX)) as u64)
+}
+
+/// The runtime bytes of one crypto view operand (HARNESS-PRESSURE-006).
+/// Coverage is exactly the view's runtime bytes — callers size views
+/// exactly, since padding is covered, never stripped. Every element
+/// must be a byte-domain value and the view must fit the 64-byte
+/// executor bound; `None` fails the call closed at the call site.
+pub(crate) fn host_view_bytes(value: &ExecutionValue) -> Option<Vec<u8>> {
+    let ExecutionValue::Sequence { values } = value else {
+        return None;
+    };
+    if values.len() > HOST_GRANT_MAX_BYTES {
+        return None;
+    }
+    values
+        .iter()
+        .map(|element| match element {
+            ExecutionValue::Byte { value } => u8::try_from(*value).ok(),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Read one crypto view operand by position. A missing binding or a
+/// non-view value is InvalidRequest: elaboration pins the arity, so
+/// anything else is a malformed request, never a default.
+pub(crate) fn host_view_operand(
+    operation: &BodyOperation,
+    values: &BTreeMap<String, ExecutionValue>,
+    position: usize,
+) -> Option<Vec<u8>> {
+    let binding = operation.operands.get(position)?;
+    host_view_bytes(values.get(binding)?)
+}
+
+/// Verify-only SHA-256 over raw bytes (HARNESS-PRESSURE-006). Pure
+/// function of the input through the audited SHA-2 primitive; returns
+/// the 32 digest bytes. Callers size the delivered sequence.
+pub(crate) fn sha256_digest_bytes(view: &[u8]) -> [u8; 32] {
+    Sha256::digest(view).into()
+}
+
+/// Bounded append-only storage write (P-006 storage slice). Appends
+/// `bytes` (at most 64 per call, enforced by the view helpers at the call
+/// site) to the operator-granted path, creating it when absent. Returns
+/// the appended byte count. There is no read-back, no truncation, and no
+/// ambient path: the destination travels only in the capability grant.
+/// Every IO error fails the call; callers record the realized effect with
+/// the appended bytes' digest.
+pub(crate) fn append_grant_bytes(path: &str, bytes: &[u8]) -> Result<u64, String> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|error| format!("host_write append to grant path {path:?} failed: {error}"))?;
+    file.write_all(bytes)
+        .map_err(|error| format!("host_write append to grant path {path:?} failed: {error}"))?;
+    Ok(bytes.len() as u64)
+}
+
+/// Verify-only Ed25519 over raw parts (HARNESS-PRESSURE-006).
+/// `Some(valid)` reports the dalek verdict: a forged signature is
+/// `Some(false)`, never a failure status. `None` marks malformed shapes
+/// (a key that is not 32 bytes, a signature that is not 64, or bytes no
+/// curve point accepts): the authority was granted but the request is
+/// ill-formed. No signing API exists on this path.
+pub(crate) fn ed25519_verify_bytes(key: &[u8], message: &[u8], signature: &[u8]) -> Option<bool> {
+    let key_bytes: [u8; 32] = key.try_into().ok()?;
+    let signature_bytes: [u8; 64] = signature.try_into().ok()?;
+    let verifying = VerifyingKey::from_bytes(&key_bytes).ok()?;
+    let signature = Signature::from_slice(&signature_bytes).ok()?;
+    Some(verifying.verify(message, &signature).is_ok())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -129,6 +288,28 @@ pub struct ExecutionRequest {
     pub step_budget: u64,
     #[serde(default)]
     pub policy: ExecutionPolicy,
+    /// Bounded host-granted inputs, matched by capability name. Empty by
+    /// default, so every existing corpus and request stays Unsupported.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_grants: Vec<HostGrant>,
+}
+
+impl ExecutionRequest {
+    /// Attach explicit host authority to one request
+    /// (HARNESS-PRESSURE-004). Requests without grants are returned
+    /// unchanged; otherwise the effect policy switches to Realize and the
+    /// grants travel with the request, still bounded and still matched by
+    /// capability name. Layered validation replays these granted requests
+    /// so body, SSA, and backend observations stay comparable.
+    pub fn with_host_grants(&self, grants: &[HostGrant]) -> Self {
+        if grants.is_empty() {
+            return self.clone();
+        }
+        let mut granted = self.clone();
+        granted.policy.effects = EffectExecutionPolicy::Realize;
+        granted.host_grants = grants.to_vec();
+        granted
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +342,11 @@ pub struct ExecutionEffectEvent {
     pub kind: String,
     pub target: String,
     pub capability: String,
+    /// Provenance of the realized payload: the grant locator plus the
+    /// hex sha256 of the exact bytes delivered. Absent for record-only
+    /// observations, which realize nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -765,6 +951,7 @@ where
             arguments,
             step_budget: step.step_budget,
             policy: step.policy.clone(),
+            host_grants: Vec::new(),
         };
         let call = execute(request);
         result.calls += 1;
@@ -1517,6 +1704,125 @@ fn execute_operation(
                 ExecutionValue::Boolean { value },
             );
         }
+        BodyOperationKind::FloatConstant { bits, ty } => {
+            if !ty.is_supported() {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    "only binary64 float constants are supported".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Float {
+                    bits: *bits,
+                    ty: *ty,
+                },
+            );
+        }
+        BodyOperationKind::Float { operator } => {
+            let Some((left, right)) = float_operands(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "float operation operands were unavailable or not float values".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(value) = evaluate_float(operator, left, right) else {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    format!("float {operator} trapped on a non-finite input or result"),
+                );
+                return Some(result.clone());
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Float {
+                    bits: value.to_bits(),
+                    ty: FloatType::f64(),
+                },
+            );
+        }
+        BodyOperationKind::FloatCompare { predicate } => {
+            let Some((left, right)) = float_operands(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "float comparison operands were unavailable or not float values".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            if !left.is_finite() || !right.is_finite() {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    "float comparison trapped on a non-finite input".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            let Some(value) = compare_floats(predicate, left, right) else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    format!("unsupported float comparison predicate {predicate:?}"),
+                );
+                return Some(result.clone());
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Boolean { value },
+            );
+        }
+        BodyOperationKind::FloatIntrinsic { function } => {
+            let Some(input) = float_operand(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "float intrinsic operand was unavailable or not a float value".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            if !input.is_finite() {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    format!("float {function} trapped on a non-finite input"),
+                );
+                return Some(result.clone());
+            }
+            // Same-process libm: the reference evaluation every backend
+            // must agree with bit-exactly.
+            let value = match function.as_str() {
+                "sin" => input.sin(),
+                "cos" => input.cos(),
+                _ => {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        Some(identity.clone()),
+                        format!("unsupported float intrinsic {function:?}"),
+                    );
+                    return Some(result.clone());
+                }
+            };
+            if !value.is_finite() {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    format!("float {function} trapped on a non-finite result"),
+                );
+                return Some(result.clone());
+            }
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Float {
+                    bits: value.to_bits(),
+                    ty: FloatType::f64(),
+                },
+            );
+        }
         BodyOperationKind::BooleanOp { operator } => {
             let Some((left, right)) = boolean_operands(operation, values) else {
                 result.fail(
@@ -1622,48 +1928,27 @@ fn execute_operation(
                 );
                 return Some(result.clone());
             };
-            let converted = match (operand_value, from, to) {
-                (
-                    ExecutionValue::Integer { value, .. },
-                    BodyType::Integer(_),
-                    BodyType::Integer(target),
-                ) => wrap_to_bits(*value, target.bits, target.signed)
-                    .map(|value| ExecutionValue::Integer { value, ty: *target }),
-                (ExecutionValue::Integer { value, .. }, BodyType::Integer(_), BodyType::Byte) => {
-                    wrap_to_bits(*value, 8, false).map(|value| ExecutionValue::Byte { value })
+            match convert_scalar_value(operand_value, from, to) {
+                Ok(converted) => {
+                    values.insert(operation.results[0].id.clone(), converted);
                 }
-                (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Integer(target)) => {
-                    wrap_to_bits(*value, target.bits, target.signed)
-                        .map(|value| ExecutionValue::Integer { value, ty: *target })
+                Err(ExecutionStatus::RuntimeFailure) => {
+                    result.fail(
+                        ExecutionStatus::RuntimeFailure,
+                        Some(identity.clone()),
+                        "float conversion trapped on a non-finite or out-of-range input".to_owned(),
+                    );
+                    return Some(result.clone());
                 }
-                (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Byte) => {
-                    Some(ExecutionValue::Byte { value: *value })
+                Err(_) => {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        Some(identity.clone()),
+                        "conversion operands do not match the declared conversion".to_owned(),
+                    );
+                    return Some(result.clone());
                 }
-                // Booleans convert outward as 0/1; never inward.
-                (
-                    ExecutionValue::Boolean { value },
-                    BodyType::Named(name),
-                    BodyType::Integer(target),
-                ) if name == "bool" => wrap_to_bits(i128::from(*value), target.bits, target.signed)
-                    .map(|value| ExecutionValue::Integer { value, ty: *target }),
-                (ExecutionValue::Boolean { value }, BodyType::Named(name), BodyType::Byte)
-                    if name == "bool" =>
-                {
-                    Some(ExecutionValue::Byte {
-                        value: i128::from(*value),
-                    })
-                }
-                _ => None,
-            };
-            let Some(converted) = converted else {
-                result.fail(
-                    ExecutionStatus::Unsupported,
-                    Some(identity.clone()),
-                    "conversion operands do not match the declared conversion".to_owned(),
-                );
-                return Some(result.clone());
-            };
-            values.insert(operation.results[0].id.clone(), converted);
+            }
         }
         BodyOperationKind::SequenceConstruct { length, .. } => {
             let mut element_values = Vec::with_capacity(operation.operands.len());
@@ -2455,6 +2740,10 @@ fn execute_operation(
                 arguments,
                 step_budget: remaining,
                 policy: request.policy.clone(),
+                // Authority flows explicitly to callees within one
+                // execution: nested calls inherit the request's grants,
+                // still bounded and still matched by capability name.
+                host_grants: request.host_grants.clone(),
             };
             let nested = execute_inner(session, &nested_request, record_effects);
             let trace_offset = result.steps;
@@ -2497,7 +2786,232 @@ fn execute_operation(
                 kind: effect.kind.clone(),
                 target: effect.target.clone(),
                 capability: capability.clone(),
+                // Record-only observations realize nothing.
+                provenance: None,
             });
+        }
+        BodyOperationKind::HostCall {
+            capability,
+            operation: operation_id,
+        } => {
+            // Host-realized value-producing operation
+            // (HARNESS-PRESSURE-004/005/006). Authority is the declared
+            // capability, already checked at validation; realization
+            // needs an explicit grant for that capability. `blob_read`
+            // delivers the grant's bounded bytes with their digest;
+            // `clock_read` observes epoch milliseconds from the host
+            // clock (granted via `--grant-time`, no file backs it);
+            // `sha256_digest` and `ed25519_verify` are verify-only
+            // crypto over operand views (granted via `--grant-crypto`).
+            // Anything missing fails closed: no ambient access, no
+            // synthesized values, no silent empty reads.
+            if crate::host_call_arity(operation_id).is_none() {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    format!("unknown host operation {operation_id:?}; fail closed"),
+                );
+                return Some(result.clone());
+            }
+            if !matches!(request.policy.effects, EffectExecutionPolicy::Realize) {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    "host call requires the explicit realize policy with a matching grant; no external access was performed".to_owned(),
+                );
+                return Some(result.clone());
+            }
+            let Some(grant) = request
+                .host_grants
+                .iter()
+                .find(|grant| grant.capability == *capability)
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    format!("no host grant for capability {capability:?}; declared authority was not fulfilled"),
+                );
+                return Some(result.clone());
+            };
+            if grant.bytes.len() > HOST_GRANT_MAX_BYTES {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    format!(
+                        "host grant for capability {capability:?} exceeds the {}-byte bound",
+                        HOST_GRANT_MAX_BYTES
+                    ),
+                );
+                return Some(result.clone());
+            }
+            if operation_id == "clock_read" {
+                let Some(millis) = host_epoch_millis() else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "host clock is unavailable; no instant was observed".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                values.insert(
+                    operation.results[0].id.clone(),
+                    ExecutionValue::Integer {
+                        value: millis as i128,
+                        ty: IntegerType {
+                            bits: 64,
+                            signed: false,
+                        },
+                    },
+                );
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: "clock_read".to_owned(),
+                    target: operation_id.clone(),
+                    capability: capability.clone(),
+                    provenance: Some("host-clock:wall".to_owned()),
+                });
+            } else if operation_id == "sha256_digest" {
+                let Some(view) = host_view_operand(operation, values, 0) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "sha256_digest requires one byte-view operand".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let digest = sha256_digest_bytes(&view);
+                values.insert(
+                    operation.results[0].id.clone(),
+                    ExecutionValue::Sequence {
+                        values: digest
+                            .iter()
+                            .map(|byte| ExecutionValue::Byte {
+                                value: i128::from(*byte),
+                            })
+                            .collect::<Vec<_>>()
+                            .into(),
+                    },
+                );
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: "sha256_digest".to_owned(),
+                    target: operation_id.clone(),
+                    capability: capability.clone(),
+                    provenance: Some("crypto:sha256".to_owned()),
+                });
+            } else if operation_id == "ed25519_verify" {
+                let Some(key_bytes) = host_view_operand(operation, values, 0) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "ed25519_verify requires a byte-view public key".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let Some(message) = host_view_operand(operation, values, 1) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "ed25519_verify requires a byte-view message".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let Some(signature_bytes) = host_view_operand(operation, values, 2) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "ed25519_verify requires a byte-view signature".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let valid = ed25519_verify_bytes(&key_bytes, &message, &signature_bytes);
+                let Some(valid) = valid else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "ed25519_verify requires a 32-byte public key and a 64-byte signature"
+                            .to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                values.insert(
+                    operation.results[0].id.clone(),
+                    ExecutionValue::Boolean { value: valid },
+                );
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: "ed25519_verify".to_owned(),
+                    target: operation_id.clone(),
+                    capability: capability.clone(),
+                    provenance: Some("crypto:ed25519".to_owned()),
+                });
+            } else if operation_id == "blob_append" {
+                let Some(view) = host_view_operand(operation, values, 0) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "host_write requires one byte-view operand".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let appended = match append_grant_bytes(&grant.locator, &view) {
+                    Ok(count) => count,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                };
+                values.insert(
+                    operation.results[0].id.clone(),
+                    ExecutionValue::Integer {
+                        value: appended as i128,
+                        ty: IntegerType {
+                            bits: 64,
+                            signed: false,
+                        },
+                    },
+                );
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: "host_write".to_owned(),
+                    target: operation_id.clone(),
+                    capability: capability.clone(),
+                    provenance: Some(format!(
+                        "grant:{} sha256:{}",
+                        grant.locator,
+                        sha256_hex(&view)
+                    )),
+                });
+            } else {
+                let delivered: Vec<ExecutionValue> = grant
+                    .bytes
+                    .iter()
+                    .map(|byte| ExecutionValue::Byte {
+                        value: *byte as i128,
+                    })
+                    .collect();
+                values.insert(
+                    operation.results[0].id.clone(),
+                    ExecutionValue::Sequence {
+                        values: delivered.into(),
+                    },
+                );
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: "host_read".to_owned(),
+                    target: operation_id.clone(),
+                    capability: capability.clone(),
+                    provenance: Some(format!(
+                        "grant:{} sha256:{}",
+                        grant.locator,
+                        sha256_hex(&grant.bytes)
+                    )),
+                });
+            }
         }
         BodyOperationKind::RuntimeCheck { .. } => {
             result.fail(
@@ -2516,19 +3030,197 @@ pub fn execute_with_policy(program: &Program, request: &ExecutionRequest) -> Exe
     execute(program, request)
 }
 
+/// Machine-readable summary of a received corpus value for ABI mismatch
+/// diagnostics (P-002). Carries the value kind plus the identity that
+/// decides nominal matches, so a `::` typo is visible without dumping
+/// artifact bytes.
+pub(crate) fn execution_value_summary(value: &ExecutionValue) -> String {
+    match value {
+        ExecutionValue::Integer { value, ty } => {
+            format!(
+                "integer(value={value}, type={}{})",
+                if ty.signed { "i" } else { "u" },
+                ty.bits
+            )
+        }
+        ExecutionValue::Float { ty, .. } => format!("float(f{})", ty.bits),
+        ExecutionValue::Boolean { value } => format!("boolean(value={value})"),
+        ExecutionValue::Finite {
+            type_identity,
+            variant_identity,
+            discriminant,
+            ..
+        } => format!(
+            "finite(type_identity=\"{}\", variant=\"{}\", discriminant={discriminant})",
+            type_identity.0, variant_identity.0
+        ),
+        ExecutionValue::Record {
+            type_identity,
+            name,
+            ..
+        } => format!(
+            "record(name=\"{name}\", type_identity=\"{}\")",
+            type_identity.0
+        ),
+        ExecutionValue::Byte { value } => format!("byte(value={value})"),
+        ExecutionValue::Sequence { values } => format!("sequence(len={})", values.len()),
+        ExecutionValue::Vector { values } => format!("vector(lanes={})", values.len()),
+        ExecutionValue::Mask { lanes } => format!("mask(lanes={})", lanes.len()),
+    }
+}
+
+/// One case verdict from toolchain-owned corpus linting (P-003). `ok` is
+/// true when the case would pass every authoring-time check the executor
+/// applies before running: target resolution, budgets, and the exact same
+/// canonical argument validation execution uses. `notes` carry non-failing
+/// observations such as caller-judged expectations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CorpusLintCase {
+    pub case_id: String,
+    pub target: ExecutionTarget,
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
+/// Toolchain-owned corpus lint report (P-003): every case of an execution
+/// corpus checked against the actual program ABI without executing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CorpusLintReport {
+    pub schema_version: String,
+    pub corpus_name: String,
+    pub cases: Vec<CorpusLintCase>,
+    pub error_count: usize,
+}
+
+pub const CORPUS_LINT_REPORT_SCHEMA_VERSION: &str = "0.1";
+
+/// Validate a corpus against a program ABI using the same canonical
+/// type/identity logic as execution (`validate_arguments`), so malformed
+/// arguments fail at authoring time instead of after expensive execution.
+/// Expected-value arity is checked structurally (every MNCS function returns
+/// exactly one value); missing/empty `expected` is caller-judged, never an
+/// error. This lints authoring shape only: budgets still bound execution,
+/// and effects/grants are an execution-time concern.
+pub fn lint_corpus(program: &Program, corpus: &ExecutionCorpus) -> CorpusLintReport {
+    let mut cases = Vec::with_capacity(corpus.cases.len());
+    for case in &corpus.cases {
+        let mut errors = Vec::new();
+        let mut notes = Vec::new();
+        let request = &case.request;
+        if request.schema_version != EXECUTION_REQUEST_SCHEMA_VERSION {
+            errors.push(format!(
+                "unsupported execution request schema {:?}; expected {:?}",
+                request.schema_version, EXECUTION_REQUEST_SCHEMA_VERSION
+            ));
+        }
+        if request.target.module != program.module
+            && !program.functions.iter().any(|function| {
+                function.home_module.as_deref() == Some(request.target.module.as_str())
+            })
+        {
+            errors.push(format!(
+                "execution target module {:?} does not match program {:?}",
+                request.target.module, program.module
+            ));
+        }
+        if request.step_budget == 0 || request.step_budget > MAX_EXECUTION_BUDGET {
+            errors.push(format!(
+                "step_budget must be between 1 and {MAX_EXECUTION_BUDGET}"
+            ));
+        }
+        match program.functions.iter().find(|function| {
+            function.name == request.target.function
+                && function.identity_namespace(&program.module) == request.target.module
+        }) {
+            None => errors.push(format!(
+                "execution target function {:?} does not exist in module {:?}",
+                request.target.function, request.target.module
+            )),
+            Some(function) => match &function.body {
+                None => errors.push(format!(
+                    "execution target function {:?} has no executable body",
+                    request.target.function
+                )),
+                Some(body) => {
+                    if let Err(reason) = validate_arguments(program, body, request) {
+                        errors.push(reason);
+                    }
+                }
+            },
+        }
+        match &case.expected {
+            None => notes.push("caller-judged case: no expected values declared".to_owned()),
+            Some(expected) if expected.is_empty() => {
+                notes.push("caller-judged case: empty expected list".to_owned());
+            }
+            Some(expected) if expected.len() != 1 => {
+                errors.push(format!(
+                    "expected holds {} values but every MNCS function returns exactly one value",
+                    expected.len()
+                ));
+            }
+            Some(_) => {}
+        }
+        let ok = errors.is_empty();
+        cases.push(CorpusLintCase {
+            case_id: case.id.clone(),
+            target: request.target.clone(),
+            ok,
+            errors,
+            notes,
+        });
+    }
+    for stateful in &corpus.stateful_cases {
+        let errors = stateful.validate();
+        let ok = errors.is_empty();
+        cases.push(CorpusLintCase {
+            case_id: stateful.id.clone(),
+            target: ExecutionTarget {
+                module: String::new(),
+                function: String::new(),
+            },
+            ok,
+            errors,
+            notes: Vec::new(),
+        });
+    }
+    let error_count = cases.iter().map(|case| case.errors.len()).sum();
+    CorpusLintReport {
+        schema_version: CORPUS_LINT_REPORT_SCHEMA_VERSION.to_owned(),
+        corpus_name: corpus.name.clone(),
+        cases,
+        error_count,
+    }
+}
+
 fn validate_arguments(
     program: &Program,
     body: &FunctionBody,
     request: &ExecutionRequest,
 ) -> Result<(), String> {
     if body.parameters.len() != request.arguments.len() {
-        return Err("argument count does not match executable body parameters".to_owned());
+        return Err(format!(
+            "argument count does not match executable body parameters for {}::{}: expected {} parameter(s), received {} argument(s)",
+            request.target.module,
+            request.target.function,
+            body.parameters.len(),
+            request.arguments.len()
+        ));
     }
-    for (parameter, argument) in body.parameters.iter().zip(&request.arguments) {
+    for (index, (parameter, argument)) in body.parameters.iter().zip(&request.arguments).enumerate()
+    {
         if !value_matches_type(program, argument, &parameter.ty) {
             return Err(format!(
-                "argument does not match parameter {:?}",
-                parameter.name
+                "argument does not match parameter {:?} (function {}::{}, argument index {index}): expected {} ({}) but received {}",
+                parameter.name,
+                request.target.module,
+                request.target.function,
+                parameter.ty.semantic_name(),
+                parameter.ty.canonical_identity(),
+                execution_value_summary(argument)
             ));
         }
     }
@@ -2599,6 +3291,9 @@ fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) 
         (ExecutionValue::Mask { lanes: bits }, BodyType::Mask { lanes }) => {
             bits.len() == *lanes as usize
         }
+        // Binary64 arguments match by type only: finiteness is a runtime
+        // trap (the guards check inputs), not a request rejection.
+        (ExecutionValue::Float { ty: actual, .. }, BodyType::Float(expected)) => actual == expected,
         _ => false,
     }
 }
@@ -2753,6 +3448,154 @@ fn constant_value(value: i128, ty: &BodyType) -> Option<ExecutionValue> {
     }
 }
 
+/// Shared scalar conversion for both interpreters (Profile 0.12 adds the
+/// float edges). `Ok` is the converted value; `Err(status)` is either
+/// `Unsupported` (no such conversion) or `RuntimeFailure` (the float
+/// fail-closed trap: non-finite or out-of-range).
+pub(crate) fn convert_scalar_value(
+    operand_value: &ExecutionValue,
+    from: &BodyType,
+    to: &BodyType,
+) -> Result<ExecutionValue, ExecutionStatus> {
+    if matches!(from, BodyType::Float(_)) || matches!(to, BodyType::Float(_)) {
+        return convert_float_edge(operand_value, from, to);
+    }
+    convert_scalar_inner(operand_value, from, to).ok_or(ExecutionStatus::Unsupported)
+}
+
+/// Float conversion edges. Int/byte/bool to float rounds per IEEE-754;
+/// float to int/byte truncates toward zero and traps on non-finite or
+/// out-of-range inputs. Same-width float to float is identity.
+fn convert_float_edge(
+    operand_value: &ExecutionValue,
+    from: &BodyType,
+    to: &BodyType,
+) -> Result<ExecutionValue, ExecutionStatus> {
+    let unsupported = Err(ExecutionStatus::Unsupported);
+    let trap = Err(ExecutionStatus::RuntimeFailure);
+    match (operand_value, from, to) {
+        (ExecutionValue::Integer { value, .. }, BodyType::Integer(_), BodyType::Float(ty))
+            if ty.is_supported() =>
+        {
+            let rounded = *value as f64;
+            if rounded.is_finite() {
+                Ok(ExecutionValue::Float {
+                    bits: rounded.to_bits(),
+                    ty: *ty,
+                })
+            } else {
+                trap
+            }
+        }
+        (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Float(ty))
+            if ty.is_supported() =>
+        {
+            Ok(ExecutionValue::Float {
+                bits: (*value as f64).to_bits(),
+                ty: *ty,
+            })
+        }
+        (ExecutionValue::Boolean { value }, BodyType::Named(name), BodyType::Float(ty))
+            if name == "bool" && ty.is_supported() =>
+        {
+            Ok(ExecutionValue::Float {
+                bits: (if *value { 1.0 } else { 0.0f64 }).to_bits(),
+                ty: *ty,
+            })
+        }
+        (ExecutionValue::Float { bits, .. }, BodyType::Float(_), BodyType::Float(to))
+            if to.is_supported() =>
+        {
+            Ok(ExecutionValue::Float {
+                bits: *bits,
+                ty: *to,
+            })
+        }
+        (ExecutionValue::Float { bits, .. }, BodyType::Float(_), BodyType::Integer(target)) => {
+            let truncated = f64::from_bits(*bits);
+            if !truncated.is_finite() {
+                return trap;
+            }
+            let truncated = truncated.trunc();
+            // Range-check in f64 before casting: `as` saturates instead of
+            // trapping, which would hide the failure the rule requires.
+            let (lo, hi_exclusive) = integer_domain_bounds(target.bits, target.signed);
+            if truncated < lo || truncated >= hi_exclusive {
+                return trap;
+            }
+            Ok(ExecutionValue::Integer {
+                value: truncated as i128,
+                ty: *target,
+            })
+        }
+        (ExecutionValue::Float { bits, .. }, BodyType::Float(_), BodyType::Byte) => {
+            let truncated = f64::from_bits(*bits);
+            if !truncated.is_finite() {
+                return trap;
+            }
+            let truncated = truncated.trunc();
+            if !(0.0..256.0).contains(&truncated) {
+                return trap;
+            }
+            Ok(ExecutionValue::Byte {
+                value: truncated as i128,
+            })
+        }
+        _ => unsupported,
+    }
+}
+
+/// Exclusive-upper-bound domain of an integer type as exact `f64`
+/// bounds. All supported widths are exactly representable.
+fn integer_domain_bounds(bits: u16, signed: bool) -> (f64, f64) {
+    if signed {
+        let half = 2f64.powi(i32::from(bits) - 1);
+        (-half, half)
+    } else {
+        (0.0, 2f64.powi(i32::from(bits)))
+    }
+}
+
+fn convert_scalar_inner(
+    operand_value: &ExecutionValue,
+    from: &BodyType,
+    to: &BodyType,
+) -> Option<ExecutionValue> {
+    match (operand_value, from, to) {
+        (
+            ExecutionValue::Integer { value, .. },
+            BodyType::Integer(_),
+            BodyType::Integer(target),
+        ) => wrap_to_bits(*value, target.bits, target.signed)
+            .map(|value| ExecutionValue::Integer { value, ty: *target }),
+        (ExecutionValue::Integer { value, .. }, BodyType::Integer(_), BodyType::Byte) => {
+            wrap_to_bits(*value, 8, false).map(|value| ExecutionValue::Byte { value })
+        }
+        (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Integer(target)) => {
+            wrap_to_bits(*value, target.bits, target.signed)
+                .map(|value| ExecutionValue::Integer { value, ty: *target })
+        }
+        (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Byte) => {
+            Some(ExecutionValue::Byte { value: *value })
+        }
+        // Booleans convert outward as 0/1; never inward.
+        (ExecutionValue::Boolean { value }, BodyType::Named(name), BodyType::Integer(target))
+            if name == "bool" =>
+        {
+            wrap_to_bits(i128::from(*value), target.bits, target.signed)
+                .map(|value| ExecutionValue::Integer { value, ty: *target })
+        }
+        (ExecutionValue::Boolean { value }, BodyType::Named(name), BodyType::Byte)
+            if name == "bool" =>
+        {
+            Some(ExecutionValue::Byte {
+                value: i128::from(*value),
+            })
+        }
+        _ => None,
+    }
+}
+
 fn normalize_value(
     program: &Program,
     value: &ExecutionValue,
@@ -2805,6 +3648,16 @@ fn normalize_value(
         }
         (ExecutionValue::Byte { value }, BodyType::Byte) if (0..=255).contains(value) => {
             Some(ExecutionValue::Byte { value: *value })
+        }
+        // Binary64 arguments normalize to themselves: bits are already the
+        // canonical form, and finiteness is enforced by runtime guards.
+        (ExecutionValue::Float { bits, ty: actual }, BodyType::Float(expected))
+            if actual == expected =>
+        {
+            Some(ExecutionValue::Float {
+                bits: *bits,
+                ty: *actual,
+            })
         }
         (
             ExecutionValue::Sequence { values },
@@ -2903,6 +3756,35 @@ fn integer_operands(
         return None;
     };
     Some((*left, *right))
+}
+
+fn float_operand(
+    operation: &BodyOperation,
+    values: &BTreeMap<String, ExecutionValue>,
+) -> Option<f64> {
+    let [input] = operation.operands.as_slice() else {
+        return None;
+    };
+    let Some(ExecutionValue::Float { bits, .. }) = values.get(input) else {
+        return None;
+    };
+    Some(f64::from_bits(*bits))
+}
+
+fn float_operands(
+    operation: &BodyOperation,
+    values: &BTreeMap<String, ExecutionValue>,
+) -> Option<(f64, f64)> {
+    let [left, right] = operation.operands.as_slice() else {
+        return None;
+    };
+    let Some(ExecutionValue::Float { bits: left, .. }) = values.get(left) else {
+        return None;
+    };
+    let Some(ExecutionValue::Float { bits: right, .. }) = values.get(right) else {
+        return None;
+    };
+    Some((f64::from_bits(*left), f64::from_bits(*right)))
 }
 
 fn byte_operands(
@@ -3611,6 +4493,7 @@ mod tests {
             arguments: Vec::new(),
             step_budget: 1,
             policy: ExecutionPolicy::default(),
+            host_grants: Vec::new(),
         });
         result.trace = (0..MAX_TRACE_ENTRIES)
             .map(|step| ExecutionTraceEntry {

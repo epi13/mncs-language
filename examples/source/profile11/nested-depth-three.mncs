@@ -1,0 +1,16 @@
+mncs 0.11;
+
+module examples.profile11.nested_depth_three;
+
+fn too_deep() -> (result: u64) {
+    iterate outer up_to 2 carrying a: u64 = 0 {
+        iterate middle up_to 2 carrying b: u64 = a {
+            iterate inner up_to 2 carrying c: u64 = b {
+                next c = c +% 1;
+            }
+            next b = c;
+        }
+        next a = b;
+    }
+    return a;
+}

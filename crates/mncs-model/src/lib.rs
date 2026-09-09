@@ -50,12 +50,12 @@ pub use bindings::{
     SemanticNamespace, SemanticReference, SemanticScope, SEMANTIC_BINDING_SCHEMA_VERSION,
 };
 pub use body::{
-    BodyBlock, BodyBoundedIteration, BodyCyclePolicy, BodyOperation, BodyOperationKind,
-    BodyParameter, BodyTerminator, BodyType, BodyValue, BoundedIterationCompletion, BoundsEvidence,
-    FunctionBody, GenericArg, GenericParam, GenericParamKind, IterationDomain, LoweringEnvelope,
-    MachineIntentSpec, PortabilityEnvelope, PortabilityTarget, RealizationClass, SequenceBound,
-    EXECUTABLE_BODY_SCHEMA_VERSION, MAX_SEQUENCE_BOUND, MAX_VECTOR_LANES,
-    SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
+    host_call_arity, host_call_effect_kind, BodyBlock, BodyBoundedIteration, BodyCyclePolicy,
+    BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator, BodyType, BodyValue,
+    BoundedIterationCompletion, BoundsEvidence, FunctionBody, GenericArg, GenericParam,
+    GenericParamKind, IterationDomain, LoweringEnvelope, MachineIntentSpec, PortabilityEnvelope,
+    PortabilityTarget, RealizationClass, SequenceBound, EXECUTABLE_BODY_SCHEMA_VERSION,
+    MAX_SEQUENCE_BOUND, MAX_VECTOR_LANES, SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
 };
 pub use canonical::sha256_hex;
 pub use canonical::{CanonicalError, CanonicalForm, CANONICAL_SCHEMA_VERSION};
@@ -102,20 +102,22 @@ pub use evidence::{
     EvidenceState, EvidenceStatusReport, EVIDENCE_RECEIPT_SCHEMA_VERSION,
 };
 pub use execution::{
-    compare as compare_execution, compare_stateful_results, execute, execute_stateful_case,
-    execute_stateful_case_owned, execute_stateful_case_with_checkpoint,
-    execute_stateful_case_with_checkpoint_scoped, execute_with_policy,
-    execution_corpus_schema_supported, stateful_prefix_identity, BodyExecutionSession,
-    ComparisonStatus, EffectExecutionPolicy, ExecutionCase, ExecutionComparison, ExecutionCorpus,
+    compare as compare_execution, compare_floats, compare_stateful_results, evaluate_float,
+    execute, execute_stateful_case, execute_stateful_case_owned,
+    execute_stateful_case_with_checkpoint, execute_stateful_case_with_checkpoint_scoped,
+    execute_with_policy, execution_corpus_schema_supported, float_value, lint_corpus,
+    stateful_prefix_identity, BodyExecutionSession, ComparisonStatus, CorpusLintCase,
+    CorpusLintReport, EffectExecutionPolicy, ExecutionCase, ExecutionComparison, ExecutionCorpus,
     ExecutionEffectEvent, ExecutionFailure, ExecutionPolicy, ExecutionProperty, ExecutionRequest,
     ExecutionResult, ExecutionStatus, ExecutionSubject, ExecutionTarget, ExecutionTraceEntry,
-    ExecutionValue, ExpectedEffectObservation, StatefulArgument, StatefulCallResult,
+    ExecutionValue, ExpectedEffectObservation, HostGrant, StatefulArgument, StatefulCallResult,
     StatefulExecutionCase, StatefulExecutionCheckpoint, StatefulExecutionComparison,
     StatefulExecutionMismatch, StatefulExecutionResult, StatefulExecutionStep,
-    StatefulStepObservation, EXECUTION_COMPARISON_SCHEMA_VERSION, EXECUTION_CORPUS_SCHEMA_VERSION,
+    StatefulStepObservation, CORPUS_LINT_REPORT_SCHEMA_VERSION,
+    EXECUTION_COMPARISON_SCHEMA_VERSION, EXECUTION_CORPUS_SCHEMA_VERSION,
     EXECUTION_CORPUS_SCHEMA_VERSION_0_2, EXECUTION_CORPUS_SCHEMA_VERSION_0_3,
-    EXECUTION_REQUEST_SCHEMA_VERSION, EXECUTION_RESULT_SCHEMA_VERSION, MAX_EXECUTION_BUDGET,
-    MAX_STATEFUL_CALLS, STATEFUL_EXECUTION_COMPARISON_SCHEMA_VERSION,
+    EXECUTION_REQUEST_SCHEMA_VERSION, EXECUTION_RESULT_SCHEMA_VERSION, HOST_GRANT_MAX_BYTES,
+    MAX_EXECUTION_BUDGET, MAX_STATEFUL_CALLS, STATEFUL_EXECUTION_COMPARISON_SCHEMA_VERSION,
     STATEFUL_EXECUTION_SCHEMA_VERSION,
 };
 pub use experiment::{
@@ -145,7 +147,7 @@ pub use ir::{
 pub use machine_intent::{
     arithmetic_result_type, minimum_widening_bits, AlignmentCapability, ArithmeticIntent,
     BackendPromise, BackendPromiseCertificate, BackendPromiseDecision, DisjointCapability, Fact,
-    HighLevelIrNode, IntegerEvaluation, IntegerOperation, IntegerType, Intent,
+    FloatType, HighLevelIrNode, IntegerEvaluation, IntegerOperation, IntegerType, Intent,
     MachineIntentExpression, MachinePreference, MemoryRange, Obligation, ObligationStatus,
     Preference, Requirement, BACKEND_PROMISE_CERTIFICATE_SCHEMA_VERSION,
 };

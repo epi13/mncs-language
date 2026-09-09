@@ -11,7 +11,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::execution::{
-    compare_integers, evaluate_integer, integer_operator_supported, ExecutionEffectEvent,
+    compare_floats, compare_integers, evaluate_float, evaluate_integer, execution_value_summary,
+    integer_operator_supported, ExecutionEffectEvent,
 };
 use crate::identity::{function_id, program_id};
 use crate::{
@@ -339,6 +340,7 @@ impl SsaExecutionSession {
             arguments,
             step_budget,
             policy,
+            host_grants,
         } = request;
         let request = crate::ExecutionRequest {
             schema_version,
@@ -346,6 +348,7 @@ impl SsaExecutionSession {
             arguments: Vec::new(),
             step_budget,
             policy,
+            host_grants,
         };
         execute_ssa_module_with_validation(
             &self.program,
@@ -901,6 +904,136 @@ fn execute_instruction(
                 values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
             }
         }
+        SsaInstructionKind::FloatConstant { bits, ty } => {
+            if !ty.is_supported() {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    instruction_identity(instruction),
+                    "only binary64 float constants are supported",
+                );
+                return true;
+            }
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Float {
+                        bits: *bits,
+                        ty: *ty,
+                    },
+                );
+            }
+        }
+        SsaInstructionKind::Float { operator } => {
+            if !matches!(operator.as_str(), "add" | "sub" | "mul" | "div") {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    instruction_identity(instruction),
+                    format!("unsupported float operator {operator:?}"),
+                );
+                return true;
+            }
+            let Some((left, right)) = float_operands(instruction, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "float operation operands were unavailable or not float values",
+                );
+                return true;
+            };
+            let Some(value) = evaluate_float(operator, left, right) else {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    instruction_identity(instruction),
+                    format!("float {operator} trapped on a non-finite input or result"),
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Float {
+                        bits: value.to_bits(),
+                        ty: crate::FloatType::f64(),
+                    },
+                );
+            }
+        }
+        SsaInstructionKind::FloatCompare { predicate } => {
+            let Some((left, right)) = float_operands(instruction, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "float comparison operands were unavailable or not float values",
+                );
+                return true;
+            };
+            if !left.is_finite() || !right.is_finite() {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    instruction_identity(instruction),
+                    "float comparison trapped on a non-finite input",
+                );
+                return true;
+            }
+            let Some(value) = compare_floats(predicate, left, right) else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    instruction_identity(instruction),
+                    format!("unsupported float comparison predicate {predicate:?}"),
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
+            }
+        }
+        SsaInstructionKind::FloatIntrinsic { function } => {
+            let Some(input) = float_operand(instruction, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "float intrinsic operand was unavailable or not a float value",
+                );
+                return true;
+            };
+            if !input.is_finite() {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    instruction_identity(instruction),
+                    format!("float {function} trapped on a non-finite input"),
+                );
+                return true;
+            }
+            let value = match function.as_str() {
+                "sin" => input.sin(),
+                "cos" => input.cos(),
+                _ => {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        instruction_identity(instruction),
+                        format!("unsupported float intrinsic {function:?}"),
+                    );
+                    return true;
+                }
+            };
+            if !value.is_finite() {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    instruction_identity(instruction),
+                    format!("float {function} trapped on a non-finite result"),
+                );
+                return true;
+            }
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Float {
+                        bits: value.to_bits(),
+                        ty: crate::FloatType::f64(),
+                    },
+                );
+            }
+        }
         SsaInstructionKind::BooleanOp { operator } => {
             let Some((left, right)) = boolean_operands(instruction, values) else {
                 result.fail(
@@ -1000,51 +1133,28 @@ fn execute_instruction(
                 );
                 return true;
             };
-            let converted = match (operand_value, from, to) {
-                (
-                    ExecutionValue::Integer { value, .. },
-                    BodyType::Integer(_),
-                    BodyType::Integer(target),
-                ) => crate::execution::wrap_to_bits(*value, target.bits, target.signed)
-                    .map(|value| ExecutionValue::Integer { value, ty: *target }),
-                (ExecutionValue::Integer { value, .. }, BodyType::Integer(_), BodyType::Byte) => {
-                    crate::execution::wrap_to_bits(*value, 8, false)
-                        .map(|value| ExecutionValue::Byte { value })
+            match crate::execution::convert_scalar_value(operand_value, from, to) {
+                Ok(converted) => {
+                    if let Some(output) = instruction.outputs.first() {
+                        values.insert(output.identity.clone(), converted);
+                    }
                 }
-                (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Integer(target)) => {
-                    crate::execution::wrap_to_bits(*value, target.bits, target.signed)
-                        .map(|value| ExecutionValue::Integer { value, ty: *target })
+                Err(ExecutionStatus::RuntimeFailure) => {
+                    result.fail(
+                        ExecutionStatus::RuntimeFailure,
+                        instruction_identity(instruction),
+                        "float conversion trapped on a non-finite or out-of-range input",
+                    );
+                    return true;
                 }
-                (ExecutionValue::Byte { value }, BodyType::Byte, BodyType::Byte) => {
-                    Some(ExecutionValue::Byte { value: *value })
+                Err(_) => {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        instruction_identity(instruction),
+                        "conversion operands do not match the declared conversion",
+                    );
+                    return true;
                 }
-                (
-                    ExecutionValue::Boolean { value },
-                    BodyType::Named(name),
-                    BodyType::Integer(target),
-                ) if name == "bool" => {
-                    crate::execution::wrap_to_bits(i128::from(*value), target.bits, target.signed)
-                        .map(|value| ExecutionValue::Integer { value, ty: *target })
-                }
-                (ExecutionValue::Boolean { value }, BodyType::Named(name), BodyType::Byte)
-                    if name == "bool" =>
-                {
-                    Some(ExecutionValue::Byte {
-                        value: i128::from(*value),
-                    })
-                }
-                _ => None,
-            };
-            let Some(converted) = converted else {
-                result.fail(
-                    ExecutionStatus::Unsupported,
-                    instruction_identity(instruction),
-                    "conversion operands do not match the declared conversion",
-                );
-                return true;
-            };
-            if let Some(output) = instruction.outputs.first() {
-                values.insert(output.identity.clone(), converted);
             }
         }
         SsaInstructionKind::SequenceConstruct { length, .. } => {
@@ -1880,6 +1990,10 @@ fn execute_instruction(
                 arguments,
                 step_budget: remaining,
                 policy: request.policy.clone(),
+                // Authority flows explicitly to callees within one
+                // execution: nested calls inherit the request's grants,
+                // still bounded and still matched by capability name.
+                host_grants: request.host_grants.clone(),
             };
             // Re-share the caller-resolved identity (cheap clone) so the
             // nested call never re-fingerprints the module. Resolved here,
@@ -1955,6 +2069,245 @@ fn execute_instruction(
                                 .map(|use_| use_.capability.0.clone())
                         })
                         .unwrap_or_default(),
+                    // Record-only observations realize nothing.
+                    provenance: None,
+                });
+            }
+        }
+        SsaInstructionKind::HostCall {
+            capability,
+            operation,
+        } => {
+            // Host-realized value-producing operation, mirroring the body
+            // reference executor (HARNESS-PRESSURE-004/005/006). Same
+            // fail-closed discipline: explicit realize policy, explicit
+            // grant for the declared capability, bounded operand views
+            // (or a host clock observation for `clock_read`), recorded
+            // provenance.
+            if crate::host_call_arity(operation).is_none() {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    instruction_identity(instruction),
+                    format!("unknown host operation {operation:?}; fail closed"),
+                );
+                return true;
+            }
+            if !matches!(
+                request.policy.effects,
+                crate::EffectExecutionPolicy::Realize
+            ) {
+                result.fail(ExecutionStatus::Unsupported, instruction_identity(instruction), "host call requires the explicit realize policy with a matching grant; no external access was performed");
+                return true;
+            }
+            let Some(grant) = request
+                .host_grants
+                .iter()
+                .find(|grant| grant.capability == *capability)
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    format!("no host grant for capability {capability:?}; declared authority was not fulfilled"),
+                );
+                return true;
+            };
+            if grant.bytes.len() > crate::execution::HOST_GRANT_MAX_BYTES {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    format!(
+                        "host grant for capability {capability:?} exceeds the {}-byte bound",
+                        crate::execution::HOST_GRANT_MAX_BYTES
+                    ),
+                );
+                return true;
+            }
+            if operation == "clock_read" {
+                let Some(millis) = crate::execution::host_epoch_millis() else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "host clock is unavailable; no instant was observed",
+                    );
+                    return true;
+                };
+                if let Some(output) = instruction.outputs.first() {
+                    values.insert(
+                        output.identity.clone(),
+                        ExecutionValue::Integer {
+                            value: millis as i128,
+                            ty: IntegerType {
+                                bits: 64,
+                                signed: false,
+                            },
+                        },
+                    );
+                }
+                result.effects.push(ExecutionEffectEvent {
+                    operation: instruction_identity(instruction).unwrap_or_else(|| {
+                        crate::identity::SemanticId(format!("host-call:{capability}"))
+                    }),
+                    kind: "clock_read".to_owned(),
+                    target: operation.clone(),
+                    capability: capability.clone(),
+                    provenance: Some("host-clock:wall".to_owned()),
+                });
+            } else if operation == "sha256_digest" {
+                let view = instruction
+                    .inputs
+                    .first()
+                    .and_then(|input| crate::execution::host_view_bytes(values.get(input)?));
+                let Some(view) = view else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "sha256_digest requires one byte-view operand",
+                    );
+                    return true;
+                };
+                let digest = crate::execution::sha256_digest_bytes(&view);
+                if let Some(output) = instruction.outputs.first() {
+                    values.insert(
+                        output.identity.clone(),
+                        ExecutionValue::Sequence {
+                            values: digest
+                                .iter()
+                                .map(|byte| ExecutionValue::Byte {
+                                    value: i128::from(*byte),
+                                })
+                                .collect::<Vec<_>>()
+                                .into(),
+                        },
+                    );
+                }
+                result.effects.push(ExecutionEffectEvent {
+                    operation: instruction_identity(instruction).unwrap_or_else(|| {
+                        crate::identity::SemanticId(format!("host-call:{capability}"))
+                    }),
+                    kind: "sha256_digest".to_owned(),
+                    target: operation.clone(),
+                    capability: capability.clone(),
+                    provenance: Some("crypto:sha256".to_owned()),
+                });
+            } else if operation == "ed25519_verify" {
+                let view_at = |position: usize| {
+                    instruction
+                        .inputs
+                        .get(position)
+                        .and_then(|input| crate::execution::host_view_bytes(values.get(input)?))
+                };
+                let (Some(key_bytes), Some(message), Some(signature_bytes)) =
+                    (view_at(0), view_at(1), view_at(2))
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "ed25519_verify requires byte-view public key, message, and signature",
+                    );
+                    return true;
+                };
+                let Some(valid) =
+                    crate::execution::ed25519_verify_bytes(&key_bytes, &message, &signature_bytes)
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "ed25519_verify requires a 32-byte public key and a 64-byte signature",
+                    );
+                    return true;
+                };
+                if let Some(output) = instruction.outputs.first() {
+                    values.insert(
+                        output.identity.clone(),
+                        ExecutionValue::Boolean { value: valid },
+                    );
+                }
+                result.effects.push(ExecutionEffectEvent {
+                    operation: instruction_identity(instruction).unwrap_or_else(|| {
+                        crate::identity::SemanticId(format!("host-call:{capability}"))
+                    }),
+                    kind: "ed25519_verify".to_owned(),
+                    target: operation.clone(),
+                    capability: capability.clone(),
+                    provenance: Some("crypto:ed25519".to_owned()),
+                });
+            } else if operation == "blob_append" {
+                let view = instruction
+                    .inputs
+                    .first()
+                    .and_then(|input| crate::execution::host_view_bytes(values.get(input)?));
+                let Some(view) = view else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "host_write requires one byte-view operand",
+                    );
+                    return true;
+                };
+                let appended = match crate::execution::append_grant_bytes(&grant.locator, &view) {
+                    Ok(count) => count,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                };
+                if let Some(output) = instruction.outputs.first() {
+                    values.insert(
+                        output.identity.clone(),
+                        ExecutionValue::Integer {
+                            value: appended as i128,
+                            ty: IntegerType {
+                                bits: 64,
+                                signed: false,
+                            },
+                        },
+                    );
+                }
+                result.effects.push(ExecutionEffectEvent {
+                    operation: instruction_identity(instruction).unwrap_or_else(|| {
+                        crate::identity::SemanticId(format!("host-call:{capability}"))
+                    }),
+                    kind: "host_write".to_owned(),
+                    target: operation.clone(),
+                    capability: capability.clone(),
+                    provenance: Some(format!(
+                        "grant:{} sha256:{}",
+                        grant.locator,
+                        crate::canonical::sha256_hex(&view)
+                    )),
+                });
+            } else {
+                if let Some(output) = instruction.outputs.first() {
+                    let delivered: Vec<ExecutionValue> = grant
+                        .bytes
+                        .iter()
+                        .map(|byte| ExecutionValue::Byte {
+                            value: *byte as i128,
+                        })
+                        .collect();
+                    values.insert(
+                        output.identity.clone(),
+                        ExecutionValue::Sequence {
+                            values: delivered.into(),
+                        },
+                    );
+                }
+                result.effects.push(ExecutionEffectEvent {
+                    operation: instruction_identity(instruction).unwrap_or_else(|| {
+                        crate::identity::SemanticId(format!("host-call:{capability}"))
+                    }),
+                    kind: "host_read".to_owned(),
+                    target: operation.clone(),
+                    capability: capability.clone(),
+                    provenance: Some(format!(
+                        "grant:{} sha256:{}",
+                        grant.locator,
+                        crate::canonical::sha256_hex(&grant.bytes)
+                    )),
                 });
             }
         }
@@ -1994,6 +2347,28 @@ fn declared_effect(
     })
 }
 
+/// Full ABI mismatch diagnostic: function/entrypoint identity, argument
+/// position, expected SSA input type (name + canonical identity), and the
+/// received value summary. Keeps the historical message prefix so existing
+/// consumers keep matching.
+fn abi_mismatch_reason(
+    request: &crate::ExecutionRequest,
+    function: &SsaFunction,
+    index: usize,
+    expected: &BodyType,
+    received: &ExecutionValue,
+) -> String {
+    format!(
+        "argument does not match SSA input type: function {}::{} (ssa function {}), argument index {index}, expected {} ({}) but received {}",
+        request.target.module,
+        request.target.function,
+        function.identity.0,
+        expected.semantic_name(),
+        expected.canonical_identity(),
+        execution_value_summary(received)
+    )
+}
+
 fn initialize_inputs(
     program: &Program,
     function: &SsaFunction,
@@ -2029,10 +2404,11 @@ fn initialize_inputs(
                 .as_ref()
                 .and_then(|arguments| arguments.get(index).and_then(Option::as_ref))?;
             if !value_matches_type(argument, &ty) {
+                let reason = abi_mismatch_reason(request, function, index, &ty, argument);
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     Some(input.identity.clone()),
-                    "argument does not match SSA input type",
+                    reason,
                 );
                 return None;
             }
@@ -2060,10 +2436,11 @@ fn initialize_inputs(
         } else {
             let argument = request.arguments.get(index)?;
             if !value_matches_type(argument, &ty) {
+                let reason = abi_mismatch_reason(request, function, index, &ty, argument);
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     Some(input.identity.clone()),
-                    "argument does not match SSA input type",
+                    reason,
                 );
                 return None;
             }
@@ -2163,6 +2540,35 @@ fn boolean_operands(
         return None;
     };
     Some((*left, *right))
+}
+
+fn float_operand(
+    instruction: &SsaInstruction,
+    values: &BTreeMap<SemanticId, ExecutionValue>,
+) -> Option<f64> {
+    let [input] = instruction.inputs.as_slice() else {
+        return None;
+    };
+    let ExecutionValue::Float { bits, .. } = values.get(input)? else {
+        return None;
+    };
+    Some(f64::from_bits(*bits))
+}
+
+fn float_operands(
+    instruction: &SsaInstruction,
+    values: &BTreeMap<SemanticId, ExecutionValue>,
+) -> Option<(f64, f64)> {
+    let [left, right] = instruction.inputs.as_slice() else {
+        return None;
+    };
+    let ExecutionValue::Float { bits: left, .. } = values.get(left)? else {
+        return None;
+    };
+    let ExecutionValue::Float { bits: right, .. } = values.get(right)? else {
+        return None;
+    };
+    Some((f64::from_bits(*left), f64::from_bits(*right)))
 }
 
 fn integer_operands(
@@ -2361,6 +2767,9 @@ fn value_matches_type(value: &ExecutionValue, ty: &BodyType) -> bool {
         (ExecutionValue::Mask { lanes: bits }, BodyType::Mask { lanes }) => {
             bits.len() == *lanes as usize
         }
+        // Binary64 arguments match by type only: finiteness is a runtime
+        // trap (the guards check inputs), not a request rejection.
+        (ExecutionValue::Float { ty: actual, .. }, BodyType::Float(expected)) => actual == expected,
         _ => false,
     }
 }
@@ -2406,6 +2815,16 @@ fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionVal
         }
         (ExecutionValue::Byte { value }, BodyType::Byte) if (0..=255).contains(value) => {
             Some(ExecutionValue::Byte { value: *value })
+        }
+        // Binary64 arguments normalize to themselves: bits are already the
+        // canonical form, and finiteness is enforced by runtime guards.
+        (ExecutionValue::Float { bits, ty: actual }, BodyType::Float(expected))
+            if actual == expected =>
+        {
+            Some(ExecutionValue::Float {
+                bits: *bits,
+                ty: *actual,
+            })
         }
         (
             ExecutionValue::Sequence { values },
@@ -2678,6 +3097,7 @@ mod tests {
             }],
             step_budget: 64,
             policy: crate::ExecutionPolicy::default(),
+            host_grants: Vec::new(),
         }
     }
 

@@ -1,0 +1,481 @@
+{
+ "schema_version": "0.1",
+ "name": "import-nominal",
+ "cases": [
+  {
+   "id": "launch",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "test.nominal.consumer",
+     "function": "launch"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:test.nominal.machine::Transport::armed%3Abool%3Bphase%3APhase%3B",
+      "name": "Transport",
+      "fields": [
+       [
+        "armed",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "phase",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:test.nominal.machine::Phase",
+          "variant_identity": "mncs:0.2:finite-variant:test.nominal.machine::Phase::playing",
+          "discriminant": 1,
+          "payload": []
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "launch_unarmed",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "test.nominal.consumer",
+     "function": "launch"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:test.nominal.machine::Transport::armed%3Abool%3Bphase%3APhase%3B",
+      "name": "Transport",
+      "fields": [
+       [
+        "armed",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "phase",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:test.nominal.machine::Phase",
+          "variant_identity": "mncs:0.2:finite-variant:test.nominal.machine::Phase::playing",
+          "discriminant": 1,
+          "payload": []
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "launch_qualified",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "test.nominal.consumer",
+     "function": "launch_qualified"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": true
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:test.nominal.machine::Transport::armed%3Abool%3Bphase%3APhase%3B",
+      "name": "Transport",
+      "fields": [
+       [
+        "armed",
+        {
+         "boolean": {
+          "value": true
+         }
+        }
+       ],
+       [
+        "phase",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:test.nominal.machine::Phase",
+          "variant_identity": "mncs:0.2:finite-variant:test.nominal.machine::Phase::playing",
+          "discriminant": 1,
+          "payload": []
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "describe_idle",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "test.nominal.consumer",
+     "function": "describe"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:test.nominal.machine::Transport::armed%3Abool%3Bphase%3APhase%3B",
+       "name": "Transport",
+       "fields": [
+        [
+         "armed",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "phase",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:test.nominal.machine::Phase",
+           "variant_identity": "mncs:0.2:finite-variant:test.nominal.machine::Phase::stopped",
+           "discriminant": 0,
+           "payload": []
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "describe_playing",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "test.nominal.consumer",
+     "function": "describe"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:test.nominal.machine::Transport::armed%3Abool%3Bphase%3APhase%3B",
+       "name": "Transport",
+       "fields": [
+        [
+         "armed",
+         {
+          "boolean": {
+           "value": false
+          }
+         }
+        ],
+        [
+         "phase",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:test.nominal.machine::Phase",
+           "variant_identity": "mncs:0.2:finite-variant:test.nominal.machine::Phase::playing",
+           "discriminant": 1,
+           "payload": []
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "phase_of",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "test.nominal.consumer",
+     "function": "phase_of"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:test.nominal.machine::Transport::armed%3Abool%3Bphase%3APhase%3B",
+       "name": "Transport",
+       "fields": [
+        [
+         "armed",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "phase",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:test.nominal.machine::Phase",
+           "variant_identity": "mncs:0.2:finite-variant:test.nominal.machine::Phase::paused",
+           "discriminant": 2,
+           "payload": []
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:test.nominal.machine::Phase",
+      "variant_identity": "mncs:0.2:finite-variant:test.nominal.machine::Phase::paused",
+      "discriminant": 2,
+      "payload": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "cycle",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "test.nominal.consumer",
+     "function": "cycle"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:test.nominal.machine::Transport::armed%3Abool%3Bphase%3APhase%3B",
+       "name": "Transport",
+       "fields": [
+        [
+         "armed",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "phase",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:test.nominal.machine::Phase",
+           "variant_identity": "mncs:0.2:finite-variant:test.nominal.machine::Phase::playing",
+           "discriminant": 1,
+           "payload": []
+          }
+         }
+        ]
+       ]
+      }
+     },
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:test.nominal.machine::Evt",
+       "variant_identity": "mncs:0.2:finite-variant:test.nominal.machine::Evt::pause",
+       "discriminant": 1,
+       "payload": []
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:test.nominal.machine::Transport::armed%3Abool%3Bphase%3APhase%3B",
+      "name": "Transport",
+      "fields": [
+       [
+        "armed",
+        {
+         "boolean": {
+          "value": false
+         }
+        }
+       ],
+       [
+        "phase",
+        {
+         "finite": {
+          "type_identity": "mncs:0.2:finite-type:test.nominal.machine::Phase",
+          "variant_identity": "mncs:0.2:finite-variant:test.nominal.machine::Phase::stopped",
+          "discriminant": 0,
+          "payload": []
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "disarm_after_stop",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "test.nominal.consumer",
+     "function": "disarm_after_stop"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:test.nominal.machine::Transport::armed%3Abool%3Bphase%3APhase%3B",
+       "name": "Transport",
+       "fields": [
+        [
+         "armed",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "phase",
+         {
+          "finite": {
+           "type_identity": "mncs:0.2:finite-type:test.nominal.machine::Phase",
+           "variant_identity": "mncs:0.2:finite-variant:test.nominal.machine::Phase::playing",
+           "discriminant": 1,
+           "payload": []
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "arm_then_playing",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "test.nominal.consumer",
+     "function": "arm_then_playing"
+    },
+    "arguments": [
+     {
+      "boolean": {
+       "value": false
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "echo_it",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "test.nominal.consumer",
+     "function": "echo_it"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:test.nominal.machine::Phase",
+       "variant_identity": "mncs:0.2:finite-variant:test.nominal.machine::Phase::playing",
+       "discriminant": 1,
+       "payload": []
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "finite": {
+      "type_identity": "mncs:0.2:finite-type:test.nominal.machine::Phase",
+      "variant_identity": "mncs:0.2:finite-variant:test.nominal.machine::Phase::playing",
+      "discriminant": 1,
+      "payload": []
+     }
+    }
+   ]
+  }
+ ]
+}

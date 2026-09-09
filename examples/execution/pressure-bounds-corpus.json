@@ -1,0 +1,198 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-raised-bounds",
+ "cases": [
+  {
+   "id": "loop64",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bounds",
+     "function": "probe_loop64"
+    },
+    "arguments": [],
+    "step_budget": 200000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 64,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "loop256",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bounds",
+     "function": "probe_loop256"
+    },
+    "arguments": [],
+    "step_budget": 200000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 256,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "loop1024",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bounds",
+     "function": "probe_loop1024"
+    },
+    "arguments": [],
+    "step_budget": 200000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1024,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "sum65",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bounds",
+     "function": "probe_sum65"
+    },
+    "arguments": [],
+    "step_budget": 200000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 65,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "sum256",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bounds",
+     "function": "probe_sum256"
+    },
+    "arguments": [],
+    "step_budget": 200000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 256,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "sum1024",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bounds",
+     "function": "probe_sum1024"
+    },
+    "arguments": [],
+    "step_budget": 200000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1024,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "grid32",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bounds",
+     "function": "probe_grid32"
+    },
+    "arguments": [],
+    "step_budget": 200000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1024,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "trav1024",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.bounds",
+     "function": "probe_trav1024"
+    },
+    "arguments": [],
+    "step_budget": 200000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1024,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

@@ -70,6 +70,18 @@ binding or change a semantic fingerprint. The same resolved declaration
 identity is consumed by body validation, HIR, SSA, and the reference execution
 target lookup.
 
+A plain `let` may rebind a name already bound to a plain value (a `let` or a
+parameter) in the same scope (ENG-PRESSURE-0021). The initializer elaborates
+against the previous binding, and each use resolves to the binding that
+dominates it, so rebinding is shadowing, not mutation; every shadowed
+declaration keeps a distinct binding identity via a monotonic per-scope slot
+allocator (slot numbering — and therefore fingerprints — of programs without
+shadowing is unchanged). Index and iteration-state names stay reserved:
+rebinding over or under them is still `MNE110`, and a nested scope that
+shadows a traversal-index name resolves those uses to the plain value, which
+no longer inherits the traversal-domain discharge (fail-closed to an explicit
+runtime check).
+
 ## Deliberate boundary: generics
 
 This profile does not pretend that repeated nominal code is generic code. A

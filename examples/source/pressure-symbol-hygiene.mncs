@@ -1,0 +1,42 @@
+mncs 0.10;
+
+// Pressure: native symbol hygiene. MNCS-generated symbols live under mncs_
+// so hostile identifiers (libc/libm collisions, platform names) cannot
+// brick a module. Every function below would collide without namespacing.
+
+module examples.pressure.symbols;
+
+fn trunc(x: i64) -> (result: i64) {
+    return x;
+}
+
+fn min(a: i64, b: i64) -> (result: i64) {
+    if a <= b {
+        return a;
+    }
+    return b;
+}
+
+fn exp(x: i64) -> (result: i64) {
+    return x;
+}
+
+fn log(x: i64) -> (result: i64) {
+    return x;
+}
+
+fn index(x: i64) -> (result: i64) {
+    return x;
+}
+
+fn entry_trunc(x: i64) -> (result: i64) {
+    return trunc(x);
+}
+
+fn entry_min(a: i64, b: i64) -> (result: i64) {
+    return min(a, b);
+}
+
+fn entry_exp(x: i64) -> (result: i64) {
+    return exp(x);
+}

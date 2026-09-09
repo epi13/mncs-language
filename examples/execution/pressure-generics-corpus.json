@@ -1,0 +1,174 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-generic-inference",
+ "cases": [
+  {
+   "id": "infer",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.generics",
+     "function": "probe_infer"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "infer-ty",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.generics",
+     "function": "probe_infer_ty"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 42,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "explicit",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.generics",
+     "function": "probe_explicit"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "xmod",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.generics",
+     "function": "probe_xmod"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "xmod-ty",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.generics",
+     "function": "probe_xmod_ty"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 42,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "fwd",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.generics",
+     "function": "probe_fwd"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 18,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "nested",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.generics",
+     "function": "probe_nested"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 8,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

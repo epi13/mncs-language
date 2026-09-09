@@ -1,0 +1,73 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-u64-domain",
+ "cases": [
+  {
+   "id": "sum",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.u64domain",
+     "function": "sum_keys"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "integer": {
+          "value": 10,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 20,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 30,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 40,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ]
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 100,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

@@ -7,6 +7,7 @@ members = [
     "crates/mncs-cli",
     "crates/mncs-syntax",
     "crates/mncs-conformance",
+    "crates/mncs-embed",
 ]
 resolver = "2"
 

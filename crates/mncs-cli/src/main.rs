@@ -15,8 +15,8 @@ use mncs_codegen::{
     BackendExecutionSession, BackendStatefulSession,
 };
 use mncs_compiler::{
-    native_node_profile, reference_compiler_architecture, ModuleResolution, ModuleResolver,
-    ReferenceCompiler, SourceFrontEndResult,
+    native_node_profile, reference_compiler_architecture, ModuleResolution,
+    ModuleResolutionOutcome, ModuleResolver, ReferenceCompiler, SourceFrontEndResult,
 };
 use mncs_model::{
     compare_body_and_ssa, compare_execution, execute_ssa, execute_with_policy,
@@ -24,7 +24,7 @@ use mncs_model::{
     CompilationStatus, CompilationStudyRequest, CompilationStudyResult, Confidence,
     DeterministicVerifier, DiagnosticCategory, DiagnosticObligation, EvidenceFreshness,
     EvidenceManifest, EvidenceState, ExecutionComparison, ExecutionCorpus, ExecutionProperty,
-    ExecutionRequest, ExecutionStatus, ExecutionValue, FunctionBody,
+    ExecutionRequest, ExecutionStatus, ExecutionValue, FunctionBody, HostGrant,
     LanguageExperimentCaseObservation, LanguageExperimentComparison, LanguageExperimentDefinition,
     LanguageExperimentPropertyObservation, LanguageExperimentResult,
     LanguageExperimentStatefulCaseObservation, LoweringExecutionComparison,
@@ -130,6 +130,7 @@ fn run_cli() -> ExitCode {
         "compiler-study" => compiler_study_command(args),
         "source-study" => source_study_command(args),
         "experiment" => experiment_command(args),
+        "corpus" => corpus_command(args),
         "diff" => two_manifest_command(args, diff),
         "compare" => two_manifest_command(args, compare),
         "slice" => slice_command(args),
@@ -694,6 +695,7 @@ where
 #[derive(Debug, Serialize)]
 struct LanguageOwnedAbi {
     schema_version: String,
+    host_abi_version: String,
     source_artifact_identity: String,
     module: String,
     semantic_fingerprint: Option<String>,
@@ -757,6 +759,7 @@ where
     let (functions, composites) = mncs_codegen::language_owned_abi_contracts(&program);
     let abi = LanguageOwnedAbi {
         schema_version: "0.1".to_owned(),
+        host_abi_version: mncs_codegen::HOST_ABI_VERSION.to_owned(),
         source_artifact_identity: envelope.identity,
         module: program.module.clone(),
         semantic_fingerprint: program.content_fingerprint().ok(),
@@ -923,6 +926,124 @@ struct ExperimentOptions {
     output_dir: Option<PathBuf>,
     node_identity: String,
     validation_profile: Option<String>,
+    /// Explicit host-read grants (`capability=path`), each realized as a
+    /// bounded copy for the named capability. Empty by default: no ambient
+    /// filesystem access exists without a grant.
+    grants: Vec<(String, String)>,
+    /// Explicit wall-clock grants (`capability`), one per capability
+    /// allowed to observe the host clock via `clock_read()`. No file
+    /// backs them: the grant names the authority, and the executor
+    /// observes epoch milliseconds from its own clock. Empty by default.
+    time_grants: Vec<String>,
+    /// Explicit verify-only crypto grants (`capability`), one per
+    /// capability allowed to run `sha256_digest()`/`ed25519_verify()`.
+    /// No file backs them and no secrets cross: the grant names the
+    /// authority, and realization is a pure function of the operand
+    /// views through audited primitives. Empty by default.
+    crypto_grants: Vec<String>,
+    /// Explicit storage-append grants (`capability=path`), one per
+    /// capability allowed to append bounded byte views via
+    /// `host_write()`. The path is created when absent and only
+    /// appended to, never read back or truncated. Empty by default: no
+    /// ambient filesystem access exists without a grant.
+    write_grants: Vec<(String, String)>,
+}
+
+/// A `--grant-time` capability as a byte-less host grant. Time has no
+/// file to copy; the grant carries the operator's explicit authorization
+/// for the named capability, matched exactly like read grants at
+/// realization. Wall-clock trust stays at the host boundary.
+fn time_host_grant(capability: &str) -> HostGrant {
+    HostGrant {
+        capability: capability.to_owned(),
+        locator: "host-clock".to_owned(),
+        bytes: Vec::new(),
+    }
+}
+
+/// A `--grant-crypto` capability as a byte-less host grant. Crypto
+/// verification takes no secrets: the grant names the authority, and
+/// the operands carry only public data (views, keys, signatures).
+fn crypto_host_grant(capability: &str) -> HostGrant {
+    HostGrant {
+        capability: capability.to_owned(),
+        locator: "crypto-verify".to_owned(),
+        bytes: Vec::new(),
+    }
+}
+
+/// A `--grant-write` capability as a path-bound host grant. The locator is
+/// the append destination; no bytes travel in (the operand carries the
+/// data). The path is created when absent and only appended to.
+fn write_host_grant(capability: &str, path: &str) -> HostGrant {
+    HostGrant {
+        capability: capability.to_owned(),
+        locator: path.to_owned(),
+        bytes: Vec::new(),
+    }
+}
+
+/// Fold byte-less time/crypto authority and path-bound write authority
+/// into loaded read grants. All four are explicit operator authority
+/// traveling together into layered validation and case execution.
+fn extend_with_named_grants(
+    host_grants: &mut Vec<HostGrant>,
+    time_grants: &[String],
+    crypto_grants: &[String],
+    write_grants: &[(String, String)],
+) {
+    host_grants.extend(
+        time_grants
+            .iter()
+            .map(|capability| time_host_grant(capability)),
+    );
+    host_grants.extend(
+        crypto_grants
+            .iter()
+            .map(|capability| crypto_host_grant(capability)),
+    );
+    host_grants.extend(
+        write_grants
+            .iter()
+            .map(|(capability, path)| write_host_grant(capability, path)),
+    );
+}
+
+/// Load `--grant-read` files into bounded host grants. Missing files,
+/// unreadable files, and payloads beyond the 64-byte executor bound are
+/// hard errors: a grant that cannot be stated exactly is refused, never
+/// truncated or skipped.
+fn load_host_grants(grants: &[(String, String)]) -> Result<Vec<HostGrant>, ExitCode> {
+    let mut loaded = Vec::new();
+    for (capability, path) in grants {
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                eprintln!("error: unable to read grant file {path:?} for capability {capability:?}: {error}");
+                return Err(ExitCode::from(2));
+            }
+        };
+        if bytes.len() > mncs_model::HOST_GRANT_MAX_BYTES {
+            eprintln!(
+                "error: grant file {path:?} for capability {capability:?} is {} bytes, beyond the {}-byte bound; refusing",
+                bytes.len(),
+                mncs_model::HOST_GRANT_MAX_BYTES
+            );
+            return Err(ExitCode::from(2));
+        }
+        loaded.push(HostGrant {
+            capability: capability.clone(),
+            locator: path.clone(),
+            bytes,
+        });
+    }
+    Ok(loaded)
+}
+
+/// Attach loaded grants to one case request and switch its effect policy
+/// to Realize. Requests without grants are untouched.
+fn request_with_grants(request: &ExecutionRequest, grants: &[HostGrant]) -> ExecutionRequest {
+    request.with_host_grants(grants)
 }
 
 struct PreparedExperiment {
@@ -933,6 +1054,54 @@ struct PreparedExperiment {
     definition: Option<LanguageExperimentDefinition>,
     front_end: Option<SourceFrontEndResult>,
     validation_profile: Option<String>,
+}
+
+/// Toolchain-owned corpus tooling (P-003): `mncs corpus lint` validates an
+/// execution corpus against a source/artifact ABI before expensive
+/// execution, reusing the same canonical type/identity logic as execution.
+fn corpus_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let Some(action) = args.next() else {
+        eprintln!("error: corpus requires lint");
+        return ExitCode::from(2);
+    };
+    match action.as_str() {
+        "lint" => {
+            let (Some(program_path), Some(corpus_path)) = (args.next(), args.next()) else {
+                eprintln!("error: corpus lint requires a program and corpus path");
+                print_usage();
+                return ExitCode::from(2);
+            };
+            if args.next().is_some() {
+                eprintln!("error: unexpected additional arguments");
+                return ExitCode::from(2);
+            }
+            let program = match read_program_for_execution(&program_path) {
+                Ok(program) => program,
+                Err(code) => return code,
+            };
+            let corpus = match read_json::<ExecutionCorpus>(&corpus_path) {
+                Ok(corpus) => corpus,
+                Err(code) => return code,
+            };
+            let report = mncs_model::lint_corpus(&program, &corpus);
+            let failed = report.error_count > 0;
+            if !print_json(&report) {
+                ExitCode::from(2)
+            } else if failed {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
+        _ => {
+            eprintln!("error: unknown corpus action {action:?}; expected lint");
+            ExitCode::from(2)
+        }
+    }
 }
 
 fn experiment_command<I>(args: I) -> ExitCode
@@ -985,6 +1154,10 @@ where
             };
             let mut baseline_path: Option<String> = None;
             let mut output_dir: Option<PathBuf> = None;
+            let mut grants: Vec<(String, String)> = Vec::new();
+            let mut time_grants: Vec<String> = Vec::new();
+            let mut crypto_grants: Vec<String> = Vec::new();
+            let mut write_grants: Vec<(String, String)> = Vec::new();
             let mut parse_error = false;
             while let Some(option) = args.next() {
                 let mut take_value = |what: &str| -> Option<String> {
@@ -1000,6 +1173,64 @@ where
                 match option.as_str() {
                     "--baseline" => baseline_path = take_value("--baseline"),
                     "--output-dir" => output_dir = take_value("--output-dir").map(PathBuf::from),
+                    "--grant-read" => {
+                        if let Some(grant) = take_value("--grant-read") {
+                            match grant.split_once('=') {
+                                Some((capability, path))
+                                    if !capability.is_empty() && !path.is_empty() =>
+                                {
+                                    grants.push((capability.to_owned(), path.to_owned()))
+                                }
+                                _ => {
+                                    eprintln!(
+                                        "error: --grant-read requires capability=path, got {grant:?}"
+                                    );
+                                    parse_error = true;
+                                }
+                            }
+                        }
+                    }
+                    "--grant-time" => {
+                        if let Some(capability) = take_value("--grant-time") {
+                            if capability.is_empty() || capability.contains('=') {
+                                eprintln!(
+                                    "error: --grant-time requires a capability, got {capability:?}"
+                                );
+                                parse_error = true;
+                            } else {
+                                time_grants.push(capability);
+                            }
+                        }
+                    }
+                    "--grant-crypto" => {
+                        if let Some(capability) = take_value("--grant-crypto") {
+                            if capability.is_empty() || capability.contains('=') {
+                                eprintln!(
+                                    "error: --grant-crypto requires a capability, got {capability:?}"
+                                );
+                                parse_error = true;
+                            } else {
+                                crypto_grants.push(capability);
+                            }
+                        }
+                    }
+                    "--grant-write" => {
+                        if let Some(grant) = take_value("--grant-write") {
+                            match grant.split_once('=') {
+                                Some((capability, path))
+                                    if !capability.is_empty() && !path.is_empty() =>
+                                {
+                                    write_grants.push((capability.to_owned(), path.to_owned()))
+                                }
+                                _ => {
+                                    eprintln!(
+                                        "error: --grant-write requires capability=path, got {grant:?}"
+                                    );
+                                    parse_error = true;
+                                }
+                            }
+                        }
+                    }
                     other => {
                         eprintln!("error: unknown experiment execute option {other:?}");
                         parse_error = true;
@@ -1026,12 +1257,23 @@ where
                 Err(code) => return code,
             };
             // Issue #108: decode and validate the artifact once for the corpus.
+            let mut host_grants = match load_host_grants(&grants) {
+                Ok(grants) => grants,
+                Err(code) => return code,
+            };
+            extend_with_named_grants(
+                &mut host_grants,
+                &time_grants,
+                &crypto_grants,
+                &write_grants,
+            );
             let backend_session = BackendExecutionSession::new(&artifact);
             let observations = corpus
                 .cases
                 .iter()
                 .map(|case_| {
-                    let observation = backend_session.execute(&case_.request);
+                    let request = request_with_grants(&case_.request, &host_grants);
+                    let observation = backend_session.execute(&request);
                     experiment_case_observation(case_, observation)
                 })
                 .collect::<Vec<_>>();
@@ -1233,6 +1475,10 @@ where
     let mut output_dir = None;
     let mut node_identity = "local-experiment-node".to_owned();
     let mut validation_profile = None;
+    let mut grants = Vec::new();
+    let mut time_grants = Vec::new();
+    let mut crypto_grants = Vec::new();
+    let mut write_grants = Vec::new();
     while let Some(option) = args.next() {
         match option.as_str() {
             "--backend" => {
@@ -1267,6 +1513,56 @@ where
                 }
                 validation_profile = Some(profile);
             }
+            "--grant-read" => {
+                let grant = args
+                    .next()
+                    .ok_or_else(|| "--grant-read requires capability=path".to_owned())?;
+                let (capability, path) = grant.split_once('=').ok_or_else(|| {
+                    format!("--grant-read requires capability=path, got {grant:?}")
+                })?;
+                if capability.is_empty() || path.is_empty() {
+                    return Err(format!(
+                        "--grant-read requires capability=path, got {grant:?}"
+                    ));
+                }
+                grants.push((capability.to_owned(), path.to_owned()));
+            }
+            "--grant-time" => {
+                let capability = args
+                    .next()
+                    .ok_or_else(|| "--grant-time requires a capability".to_owned())?;
+                if capability.is_empty() || capability.contains('=') {
+                    return Err(format!(
+                        "--grant-time requires a capability, got {capability:?}"
+                    ));
+                }
+                time_grants.push(capability);
+            }
+            "--grant-crypto" => {
+                let capability = args
+                    .next()
+                    .ok_or_else(|| "--grant-crypto requires a capability".to_owned())?;
+                if capability.is_empty() || capability.contains('=') {
+                    return Err(format!(
+                        "--grant-crypto requires a capability, got {capability:?}"
+                    ));
+                }
+                crypto_grants.push(capability);
+            }
+            "--grant-write" => {
+                let grant = args
+                    .next()
+                    .ok_or_else(|| "--grant-write requires capability=path".to_owned())?;
+                let (capability, path) = grant.split_once('=').ok_or_else(|| {
+                    format!("--grant-write requires capability=path, got {grant:?}")
+                })?;
+                if capability.is_empty() || path.is_empty() {
+                    return Err(format!(
+                        "--grant-write requires capability=path, got {grant:?}"
+                    ));
+                }
+                write_grants.push((capability.to_owned(), path.to_owned()));
+            }
             other => return Err(format!("unknown experiment option {other:?}")),
         }
     }
@@ -1289,6 +1585,10 @@ where
         output_dir,
         node_identity,
         validation_profile,
+        grants,
+        time_grants,
+        crypto_grants,
+        write_grants,
     })
 }
 
@@ -1681,19 +1981,40 @@ fn run_experiment(options: ExperimentOptions, prepared: PreparedExperiment) -> E
             )
         })
         .unwrap_or_else(|| compiler.study_from_compilation(study_request, &compilation));
-    let validation = prepared
-        .validation_profile
-        .is_none()
-        .then(|| validate_backend_lowering(&prepared.program, ssa, &artifact, &definition.corpus));
-    trace_timing("cli-translation-validation", &started, &mut stage_started);
     // Issue #108: decode and validate the artifact once for the corpus.
+    // Grants load before translation validation so the layered
+    // body/SSA/backend comparison replays the same explicit host
+    // authority the experiment cases execute under. Wall-clock grants
+    // join read grants here: both are explicit operator authority, and
+    // both travel into validation and execution together.
+    let mut host_grants = match load_host_grants(&options.grants) {
+        Ok(grants) => grants,
+        Err(code) => return code,
+    };
+    extend_with_named_grants(
+        &mut host_grants,
+        &options.time_grants,
+        &options.crypto_grants,
+        &options.write_grants,
+    );
+    let validation = prepared.validation_profile.is_none().then(|| {
+        validate_backend_lowering(
+            &prepared.program,
+            ssa,
+            &artifact,
+            &definition.corpus,
+            &host_grants,
+        )
+    });
+    trace_timing("cli-translation-validation", &started, &mut stage_started);
     let backend_session = BackendExecutionSession::new(&artifact);
     let cases = prepared
         .corpus
         .cases
         .iter()
         .map(|case_| {
-            let observation = backend_session.execute(&case_.request);
+            let request = request_with_grants(&case_.request, &host_grants);
+            let observation = backend_session.execute(&request);
             experiment_case_observation(case_, observation)
         })
         .collect();
@@ -1921,14 +2242,28 @@ struct FrozenReplicationSummary {
     interpretation: String,
 }
 
+/// Caller-judged execution contract (P-013): a missing `expected` field and
+/// an explicitly empty `expected: []` both mean the caller judges the
+/// returned values itself. The empty list is never a matchable expectation:
+/// every MNCS function returns exactly one value, so `[]` can never equal a
+/// real `returned` vector. Judging it as a mismatch would fail corpora that
+/// declare no oracle.
+fn caller_judged(expected: &Option<Vec<mncs_model::ExecutionValue>>) -> bool {
+    expected.as_ref().is_none_or(Vec::is_empty)
+}
+
 fn experiment_case_observation(
     case_: &mncs_model::ExecutionCase,
     observation: mncs_codegen::BackendExecutionResult,
 ) -> LanguageExperimentCaseObservation {
-    let expectation_met = case_
-        .expected
-        .as_ref()
-        .map(|expected| expected == &observation.returned);
+    let expectation_met = if caller_judged(&case_.expected) {
+        None
+    } else {
+        case_
+            .expected
+            .as_ref()
+            .map(|expected| expected == &observation.returned)
+    };
     let status_met = case_
         .expected_status
         .map(|expected| expected == observation.status);
@@ -1986,10 +2321,14 @@ fn stateful_case_observation(
     case_: &StatefulExecutionCase,
     execution: StatefulExecutionResult,
 ) -> LanguageExperimentStatefulCaseObservation {
-    let final_expectation_met = case_
-        .expected_final
-        .as_ref()
-        .map(|expected| expected == &execution.returned);
+    let final_expectation_met = if caller_judged(&case_.expected_final) {
+        None
+    } else {
+        case_
+            .expected_final
+            .as_ref()
+            .map(|expected| expected == &execution.returned)
+    };
     let final_status_met = case_
         .expected_final_status
         .map(|expected| expected == execution.status);
@@ -2002,11 +2341,12 @@ fn stateful_case_observation(
                 step.expected_status
                     .map(|expected| expected == observation.status)
                     .unwrap_or(true)
-                    && step
-                        .expected
-                        .as_ref()
-                        .map(|expected| observation.returned.as_ref() == Some(expected))
-                        .unwrap_or(true)
+                    && (caller_judged(&step.expected)
+                        || step
+                            .expected
+                            .as_ref()
+                            .map(|expected| observation.returned.as_ref() == Some(expected))
+                            .unwrap_or(true))
             });
     let call_bound_met = execution.calls <= case_.maximum_calls;
     let step_bound_met = case_
@@ -2563,7 +2903,7 @@ where
         eprintln!("error: portable backend lowering did not produce an artifact");
         return ExitCode::FAILURE;
     };
-    let comparison = compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus);
+    let comparison = compare_body_ssa_and_backend(&program, &ssa, &artifact, &corpus, &[]);
     let ok = comparison.status == mncs_codegen::LayeredExecutionStatus::ConsistentOverCorpus;
     if !print_json(&comparison) {
         ExitCode::from(2)
@@ -2825,7 +3165,7 @@ where
                     return ExitCode::FAILURE;
                 }
             };
-            validate_backend_lowering(&program, &before, &artifact, &corpus)
+            validate_backend_lowering(&program, &before, &artifact, &corpus, &[])
         }
         other => {
             eprintln!("error: unknown translation kind {other:?}");
@@ -3470,6 +3810,13 @@ impl FileModuleResolver {
 
 impl ModuleResolver for FileModuleResolver {
     fn resolve(&self, module: &str) -> Option<SourceEnvelope> {
+        match self.resolve_detailed(module) {
+            ModuleResolutionOutcome::Resolved(envelope) => Some(*envelope),
+            ModuleResolutionOutcome::NotFound | ModuleResolutionOutcome::Conflict(_) => None,
+        }
+    }
+
+    fn resolve_detailed(&self, module: &str) -> ModuleResolutionOutcome {
         if module.is_empty()
             || !module
                 .chars()
@@ -3478,7 +3825,7 @@ impl ModuleResolver for FileModuleResolver {
             || module.ends_with('.')
             || module.contains("..")
         {
-            return None;
+            return ModuleResolutionOutcome::NotFound;
         }
         // Deterministic layout search: the importing file's directory first,
         // then its parent (so files grouped in a subdirectory can import a
@@ -3489,6 +3836,12 @@ impl ModuleResolver for FileModuleResolver {
             roots.push(parent.to_path_buf());
         }
         roots.extend(self.libraries.iter().cloned());
+        // Collect every compatible candidate instead of first-match-wins:
+        // duplicate module identities fail closed (HARNESS-PRESSURE-008)
+        // rather than silently shadowing one authority with another.
+        // Candidates with byte-identical content (one file reachable through
+        // several roots or spellings) are one authority, not a conflict.
+        let mut authorities: Vec<(String, String)> = Vec::new();
         for root in roots {
             for path in Self::candidates(&root, module) {
                 if let Ok(source) = fs::read_to_string(&path) {
@@ -3498,19 +3851,39 @@ impl ModuleResolver for FileModuleResolver {
                     if !mncs_syntax::module_names_compatible(module, &declared) {
                         continue;
                     }
-                    return Some(SourceEnvelope::new(
-                        SourceArtifactKind::Program,
-                        path.to_string_lossy().to_string(),
-                        SourceOrigin {
-                            kind: SourceOriginKind::Path,
-                            locator: Some(path.to_string_lossy().to_string()),
-                        },
-                        source,
-                    ));
+                    let locator = path.to_string_lossy().to_string();
+                    if authorities.iter().any(|(known_locator, known_source)| {
+                        known_locator == &locator || known_source == &source
+                    }) {
+                        continue;
+                    }
+                    authorities.push((locator, source));
                 }
             }
         }
-        None
+        match authorities.len() {
+            0 => ModuleResolutionOutcome::NotFound,
+            1 => {
+                let (locator, source) = authorities.pop().expect("one authority");
+                ModuleResolutionOutcome::Resolved(Box::new(SourceEnvelope::new(
+                    SourceArtifactKind::Program,
+                    locator.clone(),
+                    SourceOrigin {
+                        kind: SourceOriginKind::Path,
+                        locator: Some(locator),
+                    },
+                    source,
+                )))
+            }
+            _ => {
+                let mut locators: Vec<String> = authorities
+                    .into_iter()
+                    .map(|(locator, _)| locator)
+                    .collect();
+                locators.sort();
+                ModuleResolutionOutcome::Conflict(locators)
+            }
+        }
     }
 }
 
@@ -3575,6 +3948,7 @@ fn print_usage() {
     );
     eprintln!("  mncs experiment rust-control <result.json> <equivalent-control.rs>");
     eprintln!("  mncs experiment matrix");
+    eprintln!("  mncs corpus lint <program.mncs|program.json> <corpus.json>");
     eprintln!("  mncs diff <before.json> <after.json>");
     eprintln!("  mncs compare <before.json> <after.json>");
     eprintln!("  mncs slice <manifest.json> <semantic-identity>");

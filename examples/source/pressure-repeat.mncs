@@ -1,0 +1,23 @@
+mncs 0.12;
+
+// ENG-PRESSURE-0020: `[value; N]` repeat literals lower exactly like the
+// equivalent N-element literal. Independent expectation: all three probes
+// observe the three-element sequence [7, 7, 7] and return its middle
+// element, so every probe must produce 7.
+module pressure.repeat;
+
+fn probe_repeat() -> (result: i64) {
+    let row: [i64; 3] = [7; 3];
+    return row[1];
+}
+
+fn probe_repeat_bound() -> (result: i64) {
+    let row: [i64; 3] = [7; 3];
+    return row[0] + row[1] + row[2] - 14;
+}
+
+fn probe_repeat_equiv() -> (result: i64) {
+    let a: [i64; 3] = [7; 3];
+    let b: [i64; 3] = [7, 7, 7];
+    return a[2] - b[0] + 7;
+}

@@ -1,0 +1,554 @@
+{
+  "schema_version": "0.2",
+  "name": "stage-b3-nested-iteration",
+  "cases": [
+    {
+      "id": "index_sum_n-0",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.nested",
+          "function": "index_sum_n"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 1,
+              "type": {
+                "bits": 64,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 2048
+      },
+      "expected": [
+        {
+          "integer": {
+            "value": 0,
+            "type": {
+              "bits": 64,
+              "signed": false
+            }
+          }
+        }
+      ],
+      "expected_status": "returned"
+    },
+    {
+      "id": "index_sum_n-1",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.nested",
+          "function": "index_sum_n"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 2,
+              "type": {
+                "bits": 64,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 2048
+      },
+      "expected": [
+        {
+          "integer": {
+            "value": 1,
+            "type": {
+              "bits": 64,
+              "signed": false
+            }
+          }
+        }
+      ],
+      "expected_status": "returned"
+    },
+    {
+      "id": "index_sum_n-2",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.nested",
+          "function": "index_sum_n"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 5,
+              "type": {
+                "bits": 64,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 2048
+      },
+      "expected": [
+        {
+          "integer": {
+            "value": 10,
+            "type": {
+              "bits": 64,
+              "signed": false
+            }
+          }
+        }
+      ],
+      "expected_status": "returned"
+    },
+    {
+      "id": "index_sum_n-3",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.nested",
+          "function": "index_sum_n"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 8,
+              "type": {
+                "bits": 64,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 2048
+      },
+      "expected": [
+        {
+          "integer": {
+            "value": 28,
+            "type": {
+              "bits": 64,
+              "signed": false
+            }
+          }
+        }
+      ],
+      "expected_status": "returned"
+    },
+    {
+      "id": "nested_grid-4",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.nested",
+          "function": "nested_grid"
+        },
+        "arguments": [],
+        "step_budget": 2048
+      },
+      "expected": [
+        {
+          "integer": {
+            "value": 138,
+            "type": {
+              "bits": 64,
+              "signed": false
+            }
+          }
+        }
+      ],
+      "expected_status": "returned"
+    },
+    {
+      "id": "checksum_word-5",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.nested",
+          "function": "checksum_word"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 4294967295,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": 16909060,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 2048
+      },
+      "expected": [
+        {
+          "integer": {
+            "value": 714134635,
+            "type": {
+              "bits": 32,
+              "signed": false
+            }
+          }
+        }
+      ],
+      "expected_status": "returned"
+    },
+    {
+      "id": "checksum_word-6",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.nested",
+          "function": "checksum_word"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 12345,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": 16909060,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 2048
+      },
+      "expected": [
+        {
+          "integer": {
+            "value": 1483230241,
+            "type": {
+              "bits": 32,
+              "signed": false
+            }
+          }
+        }
+      ],
+      "expected_status": "returned"
+    },
+    {
+      "id": "checksum_words-7",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.nested",
+          "function": "checksum_words"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 16909060,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": 84281096,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 2048
+      },
+      "expected": [
+        {
+          "integer": {
+            "value": 3566313526,
+            "type": {
+              "bits": 32,
+              "signed": false
+            }
+          }
+        }
+      ],
+      "expected_status": "returned"
+    },
+    {
+      "id": "checksum_word-8",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.nested",
+          "function": "checksum_word"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 4294967295,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": 4294967295,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 2048
+      },
+      "expected": [
+        {
+          "integer": {
+            "value": 16777215,
+            "type": {
+              "bits": 32,
+              "signed": false
+            }
+          }
+        }
+      ],
+      "expected_status": "returned"
+    },
+    {
+      "id": "checksum_word-9",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.nested",
+          "function": "checksum_word"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 12345,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": 4294967295,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 2048
+      },
+      "expected": [
+        {
+          "integer": {
+            "value": 1913087925,
+            "type": {
+              "bits": 32,
+              "signed": false
+            }
+          }
+        }
+      ],
+      "expected_status": "returned"
+    },
+    {
+      "id": "checksum_words-10",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.nested",
+          "function": "checksum_words"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 4294967295,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 2048
+      },
+      "expected": [
+        {
+          "integer": {
+            "value": 755110002,
+            "type": {
+              "bits": 32,
+              "signed": false
+            }
+          }
+        }
+      ],
+      "expected_status": "returned"
+    },
+    {
+      "id": "checksum_word-11",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.nested",
+          "function": "checksum_word"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 4294967295,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 2048
+      },
+      "expected": [
+        {
+          "integer": {
+            "value": 771559538,
+            "type": {
+              "bits": 32,
+              "signed": false
+            }
+          }
+        }
+      ],
+      "expected_status": "returned"
+    },
+    {
+      "id": "checksum_word-12",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.nested",
+          "function": "checksum_word"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 12345,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 2048
+      },
+      "expected": [
+        {
+          "integer": {
+            "value": 1594198072,
+            "type": {
+              "bits": 32,
+              "signed": false
+            }
+          }
+        }
+      ],
+      "expected_status": "returned"
+    },
+    {
+      "id": "checksum_words-13",
+      "request": {
+        "schema_version": "0.1",
+        "target": {
+          "module": "examples.stage.nested",
+          "function": "checksum_words"
+        },
+        "arguments": [
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          },
+          {
+            "integer": {
+              "value": 0,
+              "type": {
+                "bits": 32,
+                "signed": false
+              }
+            }
+          }
+        ],
+        "step_budget": 2048
+      },
+      "expected": [
+        {
+          "integer": {
+            "value": 3190222080,
+            "type": {
+              "bits": 32,
+              "signed": false
+            }
+          }
+        }
+      ],
+      "expected_status": "returned"
+    }
+  ],
+  "properties": []
+}

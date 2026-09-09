@@ -1,0 +1,176 @@
+{
+ "schema_version": "0.1",
+ "name": "generic-nested-iteration",
+ "cases": [
+  {
+   "id": "hit",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.generic_nested_iteration",
+     "function": "run"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "miss",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.generic_nested_iteration",
+     "function": "run"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 122
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "boolean": {
+      "value": false
+     }
+    }
+   ]
+  }
+ ]
+}

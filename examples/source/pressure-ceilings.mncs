@@ -1,0 +1,23 @@
+mncs 0.12;
+
+// Raised-ceiling pins with hand-computed expectations:
+//   ENG-0004: `iterate i up_to 64` elaborates (bound 1..=1024) and counts
+//     to 64 in a single loop — no chained 32-step runs.
+//   ENG-0018: flat sequences past 64 lanes elaborate; the 128-lane row is
+//     spelled with the ENG-0020 repeat form and sums to 128.
+module pressure.ceilings;
+
+fn count64() -> (result: i64) {
+    iterate i up_to 64 carrying h: i64 = 0 {
+        next h = h + 1;
+    }
+    return h;
+}
+
+fn sum128() -> (result: i64) {
+    let row: [i64; 128] = [1; 128];
+    iterate i over row carrying total: i64 = 0 {
+        next total = total + row[i];
+    }
+    return total;
+}

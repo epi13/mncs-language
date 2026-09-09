@@ -1,0 +1,37 @@
+{
+ "schema_version": "0.1",
+ "name": "arch-classify-host",
+ "cases": [
+  {
+   "id": "host-aarch64-mixed-case",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "arch.host",
+     "function": "classify_blob"
+    },
+    "arguments": [],
+    "step_budget": 131072
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_effects": [
+    {
+     "kind": "host_read",
+     "target": "blob_read",
+     "capability": "arch_reader"
+    }
+   ],
+   "prohibit_unexpected_effects": true
+  }
+ ]
+}

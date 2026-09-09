@@ -1,0 +1,55 @@
+mncs 0.10;
+
+// Fabric P-007 pressure reproducer, language-owned: deterministic
+// membership/preference verdicts over bounded capability-token sets.
+//
+// Tokens are small host-assigned codes; the host maps spellings to codes
+// at the boundary and MNCS decides only over codes. A worker is eligible
+// when it holds every required token and no forbidden token; eligibility
+// is separate from preference so callers can distinguish "excluded" from
+// "eligible but unpreferred". Ranking composes `token_set.top_index`
+// (maximum hits, ties to the lowest index) with lexicographic id order
+// (`text_scan.compare`) for residual ties at the host.
+module examples.fleet_tokens;
+
+use mncs.std.token_set.v1 as tokens;
+
+// Policy vocabulary, owned here so every verdict shares one definition:
+// required codes 1 and 2, forbidden code 9, preferred codes 3, 4, 5.
+fn required_tokens() -> (result: [byte; 2]) {
+    return [(1) as byte, (2) as byte];
+}
+
+fn forbidden_tokens() -> (result: [byte; 1]) {
+    return [(9) as byte];
+}
+
+fn preferred_tokens() -> (result: [byte; 3]) {
+    return [(3) as byte, (4) as byte, (5) as byte];
+}
+
+// True when the candidate holds every required token and no forbidden one.
+fn worker_eligible(have: [byte; 8], have_count: u64) -> (result: bool) {
+    return tokens.require_all<8, 2>(have, have_count, required_tokens(), 2)
+        && tokens.forbid_any<8, 1>(have, have_count, forbidden_tokens(), 1);
+}
+
+// Preference-hit count over the candidate's tokens. Meaningful only when
+// `worker_eligible` holds; kept separate so exclusion never masquerades
+// as a zero-preference verdict.
+fn worker_preference(have: [byte; 8], have_count: u64) -> (result: u64) {
+    return tokens.prefer_hits<8, 3>(have, have_count, preferred_tokens(), 3);
+}
+
+// Fleet ranking over per-worker scores (eligible workers' preference hits,
+// in candidate order): index of the best worker, ties to the lowest
+// index, -1 when no worker is ranked.
+fn rank_best(scores: [u64; 8], count: u64) -> (result: i64) {
+    return tokens.top_index<8>(scores, count);
+}
+
+// Deduplication probe: distinct-token count over a candidate's raw token
+// window, including duplicates the host has not yet folded.
+fn dedup_probe(have: [byte; 8], have_count: u64) -> (result: u64) {
+    return tokens.dedup_count<8>(have, have_count);
+}

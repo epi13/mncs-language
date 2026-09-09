@@ -450,7 +450,16 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                                 &operation_identity,
                             ))
                         }
+                        crate::BodyOperationKind::Float { .. }
+                        | crate::BodyOperationKind::FloatCompare { .. }
+                        | crate::BodyOperationKind::FloatIntrinsic { .. } => {
+                            Some(crate::obligations::body_obligation_id(
+                                "float-finite",
+                                &operation_identity,
+                            ))
+                        }
                         crate::BodyOperationKind::IntegerCompare { .. }
+                        | crate::BodyOperationKind::FloatConstant { .. }
                         | crate::BodyOperationKind::BooleanOp { .. }
                         | crate::BodyOperationKind::FiniteConstruct { .. }
                         | crate::BodyOperationKind::FinitePayloadProject { .. }
@@ -525,6 +534,12 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                             ))
                         }
                         crate::BodyOperationKind::Effect { .. } => {
+                            Some(crate::obligations::body_obligation_id(
+                                "effect-authorized",
+                                &operation_identity,
+                            ))
+                        }
+                        crate::BodyOperationKind::HostCall { .. } => {
                             Some(crate::obligations::body_obligation_id(
                                 "effect-authorized",
                                 &operation_identity,

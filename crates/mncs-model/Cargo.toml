@@ -12,3 +12,6 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 sha2.workspace = true
+# Verify-only Ed25519 (HARNESS-PRESSURE-006). Only verification entry
+# points are used; no signing API is imported anywhere in this crate.
+ed25519-dalek.workspace = true

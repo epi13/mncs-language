@@ -67,22 +67,26 @@ pub fn prepare_stateful_session<'a>(
 impl C11StatefulSession<'_> {
     pub fn execute(&mut self, request: &ExecutionRequest) -> BackendExecutionResult {
         let mut result = empty_execution(self.artifact, request);
-        let Some(contract) = self
-            .artifact
-            .function_value_contracts
-            .get(&request.target.function)
-        else {
+        let Some(contract) = crate::support::entry_value_contract(
+            &self.artifact.function_value_contracts,
+            &request.target.module,
+            &request.target.function,
+        ) else {
             return execution_failure(
                 result,
                 ExecutionStatus::InvalidRequest,
                 "C11 execution requires a language-owned function value contract",
             );
         };
-        let driver = c_driver(
+        // Entry symbols are module-qualified (`mncs_<module>__<name>`), so
+        // same-named functions from distinct modules lower and execute as
+        // distinct natives (ENG-PRESSURE-0017).
+        let entry = crate::support::entry_native_symbol(
+            &self.artifact.exports,
+            &request.target.module,
             &request.target.function,
-            &contract.inputs,
-            contract.outputs.first(),
         );
+        let driver = c_driver(&entry, &contract.inputs, contract.outputs.first());
         let call_blob = match crate::support::build_call_file(
             &request.arguments,
             &contract.inputs,
@@ -109,7 +113,11 @@ impl C11StatefulSession<'_> {
                 }
             },
         };
-        if !self.executables.contains_key(&request.target.function) {
+        // The driver names its entry symbol, so the cache key is the
+        // canonical entry identity: two modules may export the same short
+        // name with different drivers.
+        let cache_key = crate::support::entry_key(&request.target.module, &request.target.function);
+        if !self.executables.contains_key(&cache_key) {
             let executable = match NativeExecutable::compile_or_reuse(
                 &[
                     ("module.c", self.source.as_str()),
@@ -122,15 +130,14 @@ impl C11StatefulSession<'_> {
                 Err(error) => return execution_failure(result, error.status(), error.reason()),
             };
             let compiled = executable.was_compiled();
-            self.executables
-                .insert(request.target.function.clone(), executable);
+            self.executables.insert(cache_key.clone(), executable);
             if compiled {
                 mncs_model::record_counter("backend_compile");
             }
         }
         let executable = self
             .executables
-            .get(&request.target.function)
+            .get(&cache_key)
             .expect("C11 executable inserted above");
         match executable.run(&argv, call_path.as_deref()) {
             Ok(run) => {
@@ -179,6 +186,7 @@ pub fn c11_configuration() -> BackendConfiguration {
             "generated C is a realization, not MNCS semantics".to_owned(),
             "signed overflow is never performed; wrapping uses unsigned modular arithmetic"
                 .to_owned(),
+            "float conversions use libm trunc behind explicit range traps".to_owned(),
             "the C compiler is outside the MNCS semantic trust boundary".to_owned(),
             "C struct layout is not a language-owned record representation".to_owned(),
         ],
@@ -442,7 +450,7 @@ pub fn lower_c11(
 
 fn emit_module(module: &ScalarModule) -> String {
     let mut out = String::from(
-        "/* MNCS C11 realization 0.2. Not MNCS semantics. No C undefined behavior for integers. */\n#include <stdint.h>\n#include <stdbool.h>\n#include <string.h>\n\n",
+        "/* MNCS C11 realization 0.2. Not MNCS semantics. No C undefined behavior for integers. */\n#include <stdint.h>\n#include <stdbool.h>\n#include <string.h>\n#include <math.h>\n\n",
     );
     if crate::support::scalar_module_needs_arena_symbols(module) {
         // Shared canonical capacity; the driver declares the same
@@ -478,6 +486,24 @@ fn emit_prototype(out: &mut String, function: &ScalarFunction) {
         .collect::<Vec<_>>()
         .join(", ");
     let _ = writeln!(out, "void {}({params});", function.export_name);
+}
+
+/// Exact float-domain bounds `[lo, hi)` for a guarded float-to-integer
+/// conversion (Profile 0.12), as C decimal spellings. Every bound is a
+/// power of two (or zero), hence exactly representable in binary64, and
+/// the half-open shape matches the reference domain check.
+fn c_float_domain_bounds(bits: u16, signed: bool) -> (String, String) {
+    let hi: u128 = if signed {
+        1_u128 << (bits - 1)
+    } else {
+        1_u128 << bits
+    };
+    let lo = if signed {
+        format!("-{}.0", 1_u128 << (bits - 1))
+    } else {
+        "0.0".to_owned()
+    };
+    (lo, format!("{hi}.0"))
 }
 
 fn emit_function(out: &mut String, function: &ScalarFunction) {
@@ -524,7 +550,19 @@ fn emit_function(out: &mut String, function: &ScalarFunction) {
         match &block.term {
             ScalarTerm::Return { value } => {
                 out.push_str("      *mncs_status = 0;\n");
-                let _ = writeln!(out, "      *mncs_value = (int64_t){};", names.value(value));
+                // Float results cross as bit-carried words: a converting
+                // store would truncate (and overflow undefined behavior),
+                // so doubles memcpy their payload into the i64 cell.
+                if matches!(function.result.ty, crate::scalar::ScalarTy::Float) {
+                    let _ = writeln!(
+                        out,
+                        "      memcpy(mncs_value, &{}, sizeof({}));",
+                        names.value(value),
+                        names.value(value)
+                    );
+                } else {
+                    let _ = writeln!(out, "      *mncs_value = (int64_t){};", names.value(value));
+                }
                 out.push_str("      return;\n");
             }
             ScalarTerm::Jump { target, args } => {
@@ -659,9 +697,14 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                         c_type(dest.ty)
                     );
                 } else {
+                    // Mask to the declared width BEFORE shifting: the C
+                    // variable is signed, so an unmasked cast sign-extends
+                    // (a u32 with bit 31 set becomes 0xFFFF_FFFF_xxxxxxxx
+                    // and the shift-then-narrow keeps ones the logical
+                    // shift must clear).
                     let _ = writeln!(
                         out,
-                        "      {dest_n} = ({})((uint64_t){lhs_n} >> {count});",
+                        "      {dest_n} = ({})(((uint64_t){lhs_n} & {mask}) >> {count});",
                         c_type(dest.ty)
                     );
                 }
@@ -676,12 +719,19 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 // Division by zero is undefined behavior in C, so every
                 // intent guards it explicitly and fails exactly like the
                 // reference executors; checked division also guards MIN/-1.
-                // Unsigned operands divide in their own modular domain, not
-                // through the signed C variable type.
+                // MNCS pins `MIN % -1 == 0` without trapping (only `MIN / -1`
+                // traps), so signed remainder guards the same edge into a
+                // total zero instead of a SIGFPE. Unsigned operands divide in
+                // their own modular domain, not through the signed C type.
                 let slash = if operator == "div" { "/" } else { "%" };
                 let overflow_guard = if operator == "div" && signed {
                     format!(
                         "if ({lhs_n} == INT{bits}_MIN && {rhs_n} == -1) {{ *mncs_status = 1; *mncs_value = 0; return; }} "
+                    )
+                } else if operator == "mod" && signed {
+                    format!(
+                        "if ({lhs_n} == INT{bits}_MIN && {rhs_n} == -1) {{ {dest_n} = ({})0; }} else ",
+                        c_type(dest.ty)
                     )
                 } else {
                     String::new()
@@ -737,29 +787,51 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 // still exactly detectable; narrower operands cannot overflow
                 // an int128/uint128 intermediate at all, but the guard stays
                 // uniform so failure semantics are identical at every width.
+                // Unsigned MNCS values ride in signed `int64_t` C cells, so
+                // the widening must zero-extend through `(uint64_t)` first:
+                // a direct `(unsigned __int128)` of the signed cell would
+                // sign-extend and mistrap every operand >= 2^63.
                 let wide_ty = if signed {
                     "__int128"
                 } else {
                     "unsigned __int128"
                 };
+                let (lhs_w, rhs_w) = if signed {
+                    (format!("({wide_ty}){lhs_n}"), format!("({wide_ty}){rhs_n}"))
+                } else {
+                    (
+                        format!("({wide_ty})(uint64_t){lhs_n}"),
+                        format!("({wide_ty})(uint64_t){rhs_n}"),
+                    )
+                };
                 let _ = writeln!(
                     out,
-                    "      {{ {wide_ty} mncs_wide = ({wide_ty}){lhs_n} {op} ({wide_ty}){rhs_n}; if (mncs_wide > {max} || mncs_wide < {min}) {{ *mncs_status = 1; *mncs_value = 0; return; }} {dest_n} = ({})mncs_wide; }}",
+                    "      {{ {wide_ty} mncs_wide = {lhs_w} {op} {rhs_w}; if (mncs_wide > {max} || mncs_wide < {min}) {{ *mncs_status = 1; *mncs_value = 0; return; }} {dest_n} = ({})mncs_wide; }}",
                     c_type(dest.ty),
                     max = max_text,
                     min = min_text,
                 );
             } else if matches!(intent, ArithmeticIntent::Saturating) {
                 // Total by definition: compute in the wide domain, then clamp
-                // into the declared representable range.
+                // into the declared representable range. Unsigned cells
+                // zero-extend through `(uint64_t)` for the same reason as
+                // the checked path above.
                 let wide_ty = if signed {
                     "__int128"
                 } else {
                     "unsigned __int128"
                 };
+                let (lhs_w, rhs_w) = if signed {
+                    (format!("({wide_ty}){lhs_n}"), format!("({wide_ty}){rhs_n}"))
+                } else {
+                    (
+                        format!("({wide_ty})(uint64_t){lhs_n}"),
+                        format!("({wide_ty})(uint64_t){rhs_n}"),
+                    )
+                };
                 let _ = writeln!(
                     out,
-                    "      {{ {wide_ty} mncs_wide = ({wide_ty}){lhs_n} {op} ({wide_ty}){rhs_n}; if (mncs_wide > {max}) {{ mncs_wide = {max}; }} if (mncs_wide < {min}) {{ mncs_wide = {min}; }} {dest_n} = ({})mncs_wide; }}",
+                    "      {{ {wide_ty} mncs_wide = {lhs_w} {op} {rhs_w}; if (mncs_wide > {max}) {{ mncs_wide = {max}; }} if (mncs_wide < {min}) {{ mncs_wide = {min}; }} {dest_n} = ({})mncs_wide; }}",
                     c_type(dest.ty),
                     max = max_text,
                     min = min_text,
@@ -830,6 +902,87 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 c_type(dest.ty)
             );
         }
+        ScalarInst::FloatConst { dest, bits } => {
+            // Bit-exact materialization: memcpy the payload, never a
+            // decimal spelling (which would still round correctly, but
+            // bits leave no room for doubt).
+            let _ = writeln!(
+                out,
+                "      {{ uint64_t mncs_bits = {bits}ULL; memcpy(&{0}, &mncs_bits, sizeof({0})); }}",
+                names.value(&dest.id),
+            );
+        }
+        ScalarInst::Float {
+            dest,
+            operator,
+            lhs,
+            rhs,
+        } => {
+            let op = match operator.as_str() {
+                "add" => "+",
+                "sub" => "-",
+                "mul" => "*",
+                "div" => "/",
+                _ => {
+                    let _ = writeln!(out, "      *mncs_status = 2; *mncs_value = 0; return;");
+                    return;
+                }
+            };
+            let dest_n = names.value(&dest.id);
+            let lhs_n = names.value(lhs);
+            let rhs_n = names.value(rhs);
+            // The non-finite trap rule without libm: `x - x == 0` holds
+            // exactly for finite values (same operand, no rounding) and is
+            // NaN otherwise. Guard both inputs and the result.
+            let _ = writeln!(
+                out,
+                "      {dest_n} = {lhs_n} {op} {rhs_n};\n      if (!(({lhs_n} - {lhs_n}) == 0.0) || !(({rhs_n} - {rhs_n}) == 0.0) || !(({dest_n} - {dest_n}) == 0.0)) {{ *mncs_status = 1; *mncs_value = 0; return; }}"
+            );
+        }
+        ScalarInst::FloatIntrinsic {
+            dest,
+            function,
+            src,
+        } => {
+            // Same-process libm, guarded like arithmetic: `sin`/`cos` of
+            // a finite binary64 is finite, and the guards trap otherwise.
+            let call = match function.as_str() {
+                "sin" => "sin",
+                "cos" => "cos",
+                _ => {
+                    let _ = writeln!(out, "      *mncs_status = 2; *mncs_value = 0; return;");
+                    return;
+                }
+            };
+            let dest_n = names.value(&dest.id);
+            let src_n = names.value(src);
+            let _ = writeln!(
+                out,
+                "      {dest_n} = {call}({src_n});\n      if (!(({src_n} - {src_n}) == 0.0) || !(({dest_n} - {dest_n}) == 0.0)) {{ *mncs_status = 1; *mncs_value = 0; return; }}"
+            );
+        }
+        ScalarInst::FloatCompare {
+            dest,
+            predicate,
+            lhs,
+            rhs,
+        } => {
+            let pred = match predicate.as_str() {
+                "eq" => "==",
+                "ne" => "!=",
+                "lt" => "<",
+                "le" => "<=",
+                "gt" => ">",
+                _ => ">=",
+            };
+            let _ = writeln!(
+                out,
+                "      if (!(({0} - {0}) == 0.0) || !(({1} - {1}) == 0.0)) {{ *mncs_status = 1; *mncs_value = 0; return; }}\n      {2} = {0} {pred} {1};",
+                names.value(lhs),
+                names.value(rhs),
+                names.value(&dest.id),
+            );
+        }
         ScalarInst::FiniteConstruct { dest, discriminant } => {
             let _ = writeln!(out, "      {} = {};", names.value(&dest.id), discriminant);
         }
@@ -863,12 +1016,23 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 );
             }
             SlotWidth::W64 => {
-                let _ = writeln!(
-                    out,
-                    "      mncs_slot_store64(mncs_arena, {} + {byte_offset}, (uint64_t){});",
-                    names.value(cell),
-                    names.value(value)
-                );
+                // Floats ride bit-carried: a numeric `(uint64_t)double`
+                // conversion would truncate. Copy the 64-bit pattern.
+                if matches!(names.ty(value), ScalarTy::Float) {
+                    let _ = writeln!(
+                        out,
+                        "      {{ uint64_t mncs_bits; memcpy(&mncs_bits, &{}, sizeof(mncs_bits)); mncs_slot_store64(mncs_arena, {} + {byte_offset}, mncs_bits); }}",
+                        names.value(value),
+                        names.value(cell),
+                    );
+                } else {
+                    let _ = writeln!(
+                        out,
+                        "      mncs_slot_store64(mncs_arena, {} + {byte_offset}, (uint64_t){});",
+                        names.value(cell),
+                        names.value(value)
+                    );
+                }
             }
         },
         ScalarInst::CellLoad {
@@ -887,13 +1051,24 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 );
             }
             SlotWidth::W64 => {
-                let _ = writeln!(
-                    out,
-                    "      {} = ({})mncs_slot_load64(mncs_arena, {} + {byte_offset});",
-                    names.value(&dest.id),
-                    c_type(dest.ty),
-                    names.value(cell)
-                );
+                // Floats ride bit-carried: a numeric `(double)bits`
+                // conversion would reinterpret magnitude. Copy the pattern.
+                if matches!(dest.ty, ScalarTy::Float) {
+                    let _ = writeln!(
+                        out,
+                        "      {{ uint64_t mncs_bits = mncs_slot_load64(mncs_arena, {} + {byte_offset}); memcpy(&{}, &mncs_bits, sizeof(mncs_bits)); }}",
+                        names.value(cell),
+                        names.value(&dest.id),
+                    );
+                } else {
+                    let _ = writeln!(
+                        out,
+                        "      {} = ({})mncs_slot_load64(mncs_arena, {} + {byte_offset});",
+                        names.value(&dest.id),
+                        c_type(dest.ty),
+                        names.value(cell)
+                    );
+                }
             }
         },
         ScalarInst::ByteBitwise {
@@ -943,17 +1118,91 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 c_type(dest.ty)
             );
         }
-        ScalarInst::Convert { dest, src, .. } => {
+        ScalarInst::Convert {
+            dest,
+            from,
+            to,
+            src,
+        } => {
             // C casts implement exactly the declared total conversion:
             // narrowing truncates high bits, widening extends by the source
             // signedness (`byte` is unsigned).
-            let _ = writeln!(
-                out,
-                "      {} = ({}){};",
-                names.value(&dest.id),
-                c_type(dest.ty),
-                names.value(src)
-            );
+            if matches!(to, crate::scalar::ScalarTy::Float) {
+                // Integer, byte, and boolean domains convert to binary64
+                // exactly rounded by hardware. The ABI carries every
+                // 64-bit integer in an `int64_t` cell, so an unsigned
+                // 64-bit source must reinterpret through `uint64_t`
+                // first: a plain `(double)` cast would convert the cell
+                // as signed.
+                let source = names.value(src);
+                if matches!(
+                    from,
+                    crate::scalar::ScalarTy::Int(integer) if !integer.signed && integer.bits == 64
+                ) {
+                    let _ = writeln!(
+                        out,
+                        "      {} = (double)(uint64_t){};",
+                        names.value(&dest.id),
+                        source
+                    );
+                } else {
+                    let _ = writeln!(out, "      {} = (double){};", names.value(&dest.id), source);
+                }
+            } else if matches!(from, crate::scalar::ScalarTy::Float) {
+                // Float to integer truncates toward zero and traps on
+                // non-finite or out-of-range inputs (the float trap rule).
+                // The bounds below are powers of two, hence exact; the
+                // half-open shape matches the reference domain check, and
+                // ordered comparisons reject NaN. `trunc` needs math.h
+                // (linked from the host toolchain).
+                let (bits, signed, c_target) = match to {
+                    crate::scalar::ScalarTy::Int(integer) => (
+                        integer.bits,
+                        integer.signed,
+                        match (integer.bits, integer.signed) {
+                            (64, true) => "int64_t",
+                            (64, false) => "uint64_t",
+                            (32, true) => "int32_t",
+                            (32, false) => "uint32_t",
+                            (16, true) => "int16_t",
+                            (16, false) => "uint16_t",
+                            (8, true) => "int8_t",
+                            (8, false) => "uint8_t",
+                            _ => {
+                                let _ = writeln!(
+                                    out,
+                                    "      *mncs_status = 2; *mncs_value = 0; return;"
+                                );
+                                return;
+                            }
+                        },
+                    ),
+                    crate::scalar::ScalarTy::Byte => (8, false, "uint8_t"),
+                    _ => {
+                        // No float-to-bool cast exists in the language.
+                        let _ = writeln!(out, "      *mncs_status = 2; *mncs_value = 0; return;");
+                        return;
+                    }
+                };
+                let (lo, hi) = c_float_domain_bounds(bits, signed);
+                let _ = writeln!(
+                    out,
+                    "      {{ double mncs_v = {}; double mncs_t = trunc(mncs_v); if (!((mncs_v - mncs_v) == 0.0) || !(mncs_t >= {} && mncs_t < {})) {{ *mncs_status = 1; *mncs_value = 0; return; }} {} = ({})mncs_t; }}",
+                    names.value(src),
+                    lo,
+                    hi,
+                    names.value(&dest.id),
+                    c_target
+                );
+            } else {
+                let _ = writeln!(
+                    out,
+                    "      {} = ({}){};",
+                    names.value(&dest.id),
+                    c_type(dest.ty),
+                    names.value(src)
+                );
+            }
         }
         ScalarInst::Select {
             dest,
@@ -965,15 +1214,29 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
             // domain so the C source itself contains no conditional operator
             // or candidate-dependent control flow. Native branchlessness is
             // still an artifact-level claim, not inferred from this source.
-            let _ = writeln!(
-                out,
-                "      {{ uint64_t mncs_mask = 0u - (uint64_t){}; uint64_t mncs_t = (uint64_t){}; uint64_t mncs_f = (uint64_t){}; {} = ({})((mncs_t & mncs_mask) | (mncs_f & ~mncs_mask)); }}",
-                names.value(condition),
-                names.value(when_true),
-                names.value(when_false),
-                names.value(&dest.id),
-                c_type(dest.ty),
-            );
+            // Float arms ride bit-carried: blend the 64-bit patterns, then
+            // copy the winner into the `double` (numeric casts would trap
+            // or reinterpret the magnitude).
+            if matches!(dest.ty, ScalarTy::Float) {
+                let _ = writeln!(
+                    out,
+                    "      {{ uint64_t mncs_mask = 0u - (uint64_t){}; uint64_t mncs_t; uint64_t mncs_f; memcpy(&mncs_t, &{}, sizeof(mncs_t)); memcpy(&mncs_f, &{}, sizeof(mncs_f)); uint64_t mncs_r = (mncs_t & mncs_mask) | (mncs_f & ~mncs_mask); memcpy(&{}, &mncs_r, sizeof(mncs_r)); }}",
+                    names.value(condition),
+                    names.value(when_true),
+                    names.value(when_false),
+                    names.value(&dest.id),
+                );
+            } else {
+                let _ = writeln!(
+                    out,
+                    "      {{ uint64_t mncs_mask = 0u - (uint64_t){}; uint64_t mncs_t = (uint64_t){}; uint64_t mncs_f = (uint64_t){}; {} = ({})((mncs_t & mncs_mask) | (mncs_f & ~mncs_mask)); }}",
+                    names.value(condition),
+                    names.value(when_true),
+                    names.value(when_false),
+                    names.value(&dest.id),
+                    c_type(dest.ty),
+                );
+            }
         }
         ScalarInst::SequenceReplace {
             dest,
@@ -1021,11 +1284,20 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                     );
                 }
                 SlotWidth::W64 => {
-                    let _ = writeln!(
-                        out,
-                        "      mncs_slot_store64(mncs_arena, {dest_n} + (uint64_t){index_n} * 8u, (uint64_t){});",
-                        names.value(element)
-                    );
+                    // Float elements ride bit-carried (see CellStore).
+                    if matches!(names.ty(element), ScalarTy::Float) {
+                        let _ = writeln!(
+                            out,
+                            "      {{ uint64_t mncs_bits; memcpy(&mncs_bits, &{}, sizeof(mncs_bits)); mncs_slot_store64(mncs_arena, {dest_n} + (uint64_t){index_n} * 8u, mncs_bits); }}",
+                            names.value(element),
+                        );
+                    } else {
+                        let _ = writeln!(
+                            out,
+                            "      mncs_slot_store64(mncs_arena, {dest_n} + (uint64_t){index_n} * 8u, (uint64_t){});",
+                            names.value(element)
+                        );
+                    }
                 }
             }
         }
@@ -1183,12 +1455,24 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 .join(", ");
             let _ = writeln!(out, "      {callee}({list});");
             out.push_str("      if (*mncs_status != 0) { return; }\n");
-            let _ = writeln!(
-                out,
-                "      {} = ({})*mncs_value;",
-                names.value(&dest.id),
-                c_type(dest.ty)
-            );
+            // Float results cross as bit-carried words (see Return): a
+            // numeric `(double)*mncs_value` conversion would reinterpret
+            // the magnitude. Copy the 64-bit pattern instead.
+            if matches!(dest.ty, ScalarTy::Float) {
+                let _ = writeln!(
+                    out,
+                    "      memcpy(&{}, mncs_value, sizeof({}));",
+                    names.value(&dest.id),
+                    names.value(&dest.id),
+                );
+            } else {
+                let _ = writeln!(
+                    out,
+                    "      {} = ({})*mncs_value;",
+                    names.value(&dest.id),
+                    c_type(dest.ty)
+                );
+            }
         }
     }
 }
@@ -1196,6 +1480,10 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
 fn inst_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
     match inst {
         ScalarInst::Const { dest, .. }
+        | ScalarInst::FloatConst { dest, .. }
+        | ScalarInst::Float { dest, .. }
+        | ScalarInst::FloatCompare { dest, .. }
+        | ScalarInst::FloatIntrinsic { dest, .. }
         | ScalarInst::Integer { dest, .. }
         | ScalarInst::Boolean { dest, .. }
         | ScalarInst::Compare { dest, .. }
@@ -1219,6 +1507,9 @@ fn inst_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
 }
 
 /// Emit one slot load at a computed byte address inside the canonical arena.
+///
+/// Float destinations ride bit-carried (see CellLoad): the 64-bit arena
+/// pattern is memcopied into the `double`, never numerically converted.
 fn emit_slot_load(
     out: &mut String,
     dest_name: &str,
@@ -1235,11 +1526,18 @@ fn emit_slot_load(
             );
         }
         SlotWidth::W64 => {
-            let _ = writeln!(
-                out,
-                "      {dest_name} = ({})mncs_slot_load64(mncs_arena, {address});",
-                c_type(dest_ty)
-            );
+            if matches!(dest_ty, crate::scalar::ScalarTy::Float) {
+                let _ = writeln!(
+                    out,
+                    "      {{ uint64_t mncs_bits = mncs_slot_load64(mncs_arena, {address}); memcpy(&{dest_name}, &mncs_bits, sizeof(mncs_bits)); }}",
+                );
+            } else {
+                let _ = writeln!(
+                    out,
+                    "      {dest_name} = ({})mncs_slot_load64(mncs_arena, {address});",
+                    c_type(dest_ty)
+                );
+            }
         }
     }
 }
@@ -1338,10 +1636,11 @@ pub fn execute_c11(
         Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
         Err(reason) => return execution_failure(result, ExecutionStatus::InvalidRequest, reason),
     };
-    let Some(contract) = artifact
-        .function_value_contracts
-        .get(&request.target.function)
-    else {
+    let Some(contract) = crate::support::entry_value_contract(
+        &artifact.function_value_contracts,
+        &request.target.module,
+        &request.target.function,
+    ) else {
         return execution_failure(
             result,
             ExecutionStatus::InvalidRequest,
@@ -1350,11 +1649,13 @@ pub fn execute_c11(
     };
     // Composite arguments and results cross through the canonical call
     // file; pure scalar calls keep the historical argv-only protocol.
-    let driver = c_driver(
+    // The entry symbol is module-qualified (ENG-PRESSURE-0017).
+    let entry = crate::support::entry_native_symbol(
+        &artifact.exports,
+        &request.target.module,
         &request.target.function,
-        &contract.inputs,
-        contract.outputs.first(),
     );
+    let driver = c_driver(&entry, &contract.inputs, contract.outputs.first());
     let call_blob = match crate::support::build_call_file(
         &request.arguments,
         &contract.inputs,

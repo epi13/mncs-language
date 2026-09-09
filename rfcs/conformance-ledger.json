@@ -726,11 +726,16 @@
         }
       ],
       "evidence_artifacts": [
-        "spec/effects-and-capabilities.md"
+        "spec/effects-and-capabilities.md",
+        "examples/source/host-write-append.mncs",
+        "examples/execution/host-write-append-corpus.json",
+        "crates/mncs-embed/src/lib.rs"
       ],
       "tests": [
         "crates/mncs-cli/tests/semantic_commands.rs",
-        "examples/source/cre2-*.mncs"
+        "examples/source/cre2-*.mncs",
+        "crates/mncs-cli/tests/host_write.rs",
+        "crates/mncs-embed/tests/embedding.rs"
       ],
       "dependents": [
         "0009",
@@ -753,7 +758,7 @@
         "semantic program"
       ],
       "evidence_confidence": "medium",
-      "notes": ""
+      "notes": "Bounded append-only storage (host_write/blob_append, Profile 0.12) added alongside host_read/clock/crypto: explicit capability + --grant-write path, 64-byte-per-call bound, recorded host_write effects with appended-bytes digest, fail-closed without grants, explicit refusal on non-realizing backends. General I/O, networking, processes, and full storage semantics remain open."
     },
     {
       "number": "0009",

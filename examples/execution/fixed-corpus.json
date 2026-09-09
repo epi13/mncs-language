@@ -1,0 +1,369 @@
+{
+ "schema_version": "0.1",
+ "name": "fixed",
+ "cases": [
+  {
+   "id": "blend-basic",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.fixed.v1",
+     "function": "candidate_blend"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 350,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 120,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 470,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "blend-saturates",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.fixed.v1",
+     "function": "candidate_blend"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 9223372036854775807,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 9223372036854775807,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "margin-basic",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.fixed.v1",
+     "function": "candidate_margin"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 820,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 750,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 70,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "margin-negative",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.fixed.v1",
+     "function": "candidate_margin"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 600,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 750,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -150,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "margin-saturates",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.fixed.v1",
+     "function": "candidate_margin"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": -9223372036854775808,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -9223372036854775808,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "clamp-inside",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.fixed.v1",
+     "function": "candidate_clamp"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 600,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1000,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 600,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "clamp-lo",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.fixed.v1",
+     "function": "candidate_clamp"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": -50,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1000,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "clamp-hi",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.fixed.v1",
+     "function": "candidate_clamp"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 1500,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1000,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1000,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

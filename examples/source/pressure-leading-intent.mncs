@@ -1,0 +1,31 @@
+mncs 0.12;
+
+// ENG-PRESSURE-0003 confirmation: leading-literal intent operators resolve
+// the literal against the other operand's type and elaborate cleanly in
+// return, let, and select-arm positions. Hand-computed expectations:
+//   neg_wrap(5) = -5, neg_wrap(-7) = 7
+//   add_wrap(13) = 13, mul_wrap(99) = 0
+//   sel_wrap(true, 5) = -5, sel_wrap(false, 5) = 5
+//   let_wrap(9) = -9
+module pressure.leading_intent;
+
+fn neg_wrap(x: i64) -> (result: i64) {
+    return 0 -% x;
+}
+
+fn add_wrap(x: i64) -> (result: i64) {
+    return 0 +% x;
+}
+
+fn mul_wrap(x: i64) -> (result: i64) {
+    return 0 *% x;
+}
+
+fn sel_wrap(flag: bool, x: i64) -> (result: i64) {
+    return select(flag, 0 -% x, x);
+}
+
+fn let_wrap(x: i64) -> (result: i64) {
+    let n: i64 = 0 -% x;
+    return n;
+}

@@ -1,0 +1,39 @@
+mncs 0.10;
+
+// ENG-PRESSURE-0007 regression leaf: enum payloads over ordinary value
+// types — a cross-module record, a bare sequence, and a nested sequence —
+// with construction, projection, and argument/result flow.
+module pressure.payload.lib;
+
+record ProjMat { m: [i64; 16] }
+
+enum Proj { Ok { p: ProjMat }, BadParams }
+
+fn check(m: Proj) -> (result: i64) {
+    return match m {
+        Proj.Ok { p } => p.m[15],
+        BadParams => 0 - 1,
+    };
+}
+
+fn make_bad() -> (result: Proj) {
+    return Proj.BadParams;
+}
+
+enum SeqPay { Ok { m: [i64; 4] }, Bad }
+
+fn sum_seq(s: SeqPay) -> (result: i64) {
+    return match s {
+        SeqPay.Ok { m } => ((m[0] +% m[1]) +% m[2]) +% m[3],
+        Bad => 0 - 1,
+    };
+}
+
+enum NestPay { Ok { g: [[i64; 2]; 2] }, Bad }
+
+fn sum_nest(n: NestPay) -> (result: i64) {
+    return match n {
+        NestPay.Ok { g } => ((g[0][0] +% g[0][1]) +% g[1][0]) +% g[1][1],
+        Bad => 0 - 1,
+    };
+}

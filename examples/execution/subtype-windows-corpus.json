@@ -1,0 +1,2261 @@
+{
+ "schema_version": "0.1",
+ "name": "subtype-windows",
+ "cases": [
+  {
+   "id": "read44",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "examples.subtype.windows",
+     "function": "read44"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 1
+         }
+        },
+        {
+         "byte": {
+          "value": 2
+         }
+        },
+        {
+         "byte": {
+          "value": 3
+         }
+        },
+        {
+         "byte": {
+          "value": 4
+         }
+        },
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 11
+         }
+        },
+        {
+         "byte": {
+          "value": 12
+         }
+        },
+        {
+         "byte": {
+          "value": 13
+         }
+        },
+        {
+         "byte": {
+          "value": 14
+         }
+        },
+        {
+         "byte": {
+          "value": 15
+         }
+        },
+        {
+         "byte": {
+          "value": 16
+         }
+        },
+        {
+         "byte": {
+          "value": 17
+         }
+        },
+        {
+         "byte": {
+          "value": 18
+         }
+        },
+        {
+         "byte": {
+          "value": 19
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 21
+         }
+        },
+        {
+         "byte": {
+          "value": 22
+         }
+        },
+        {
+         "byte": {
+          "value": 23
+         }
+        },
+        {
+         "byte": {
+          "value": 24
+         }
+        },
+        {
+         "byte": {
+          "value": 25
+         }
+        },
+        {
+         "byte": {
+          "value": 26
+         }
+        },
+        {
+         "byte": {
+          "value": 27
+         }
+        },
+        {
+         "byte": {
+          "value": 28
+         }
+        },
+        {
+         "byte": {
+          "value": 29
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 31
+         }
+        },
+        {
+         "byte": {
+          "value": 32
+         }
+        },
+        {
+         "byte": {
+          "value": 33
+         }
+        },
+        {
+         "byte": {
+          "value": 34
+         }
+        },
+        {
+         "byte": {
+          "value": 35
+         }
+        },
+        {
+         "byte": {
+          "value": 36
+         }
+        },
+        {
+         "byte": {
+          "value": 37
+         }
+        },
+        {
+         "byte": {
+          "value": 38
+         }
+        },
+        {
+         "byte": {
+          "value": 39
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 41
+         }
+        },
+        {
+         "byte": {
+          "value": 42
+         }
+        },
+        {
+         "byte": {
+          "value": 43
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 5396,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "read46",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "examples.subtype.windows",
+     "function": "read46"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 1
+         }
+        },
+        {
+         "byte": {
+          "value": 2
+         }
+        },
+        {
+         "byte": {
+          "value": 3
+         }
+        },
+        {
+         "byte": {
+          "value": 4
+         }
+        },
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 11
+         }
+        },
+        {
+         "byte": {
+          "value": 12
+         }
+        },
+        {
+         "byte": {
+          "value": 13
+         }
+        },
+        {
+         "byte": {
+          "value": 14
+         }
+        },
+        {
+         "byte": {
+          "value": 15
+         }
+        },
+        {
+         "byte": {
+          "value": 16
+         }
+        },
+        {
+         "byte": {
+          "value": 17
+         }
+        },
+        {
+         "byte": {
+          "value": 18
+         }
+        },
+        {
+         "byte": {
+          "value": 19
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 21
+         }
+        },
+        {
+         "byte": {
+          "value": 22
+         }
+        },
+        {
+         "byte": {
+          "value": 23
+         }
+        },
+        {
+         "byte": {
+          "value": 24
+         }
+        },
+        {
+         "byte": {
+          "value": 25
+         }
+        },
+        {
+         "byte": {
+          "value": 26
+         }
+        },
+        {
+         "byte": {
+          "value": 27
+         }
+        },
+        {
+         "byte": {
+          "value": 28
+         }
+        },
+        {
+         "byte": {
+          "value": 29
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 31
+         }
+        },
+        {
+         "byte": {
+          "value": 32
+         }
+        },
+        {
+         "byte": {
+          "value": 33
+         }
+        },
+        {
+         "byte": {
+          "value": 34
+         }
+        },
+        {
+         "byte": {
+          "value": 35
+         }
+        },
+        {
+         "byte": {
+          "value": 36
+         }
+        },
+        {
+         "byte": {
+          "value": 37
+         }
+        },
+        {
+         "byte": {
+          "value": 38
+         }
+        },
+        {
+         "byte": {
+          "value": 39
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 41
+         }
+        },
+        {
+         "byte": {
+          "value": 42
+         }
+        },
+        {
+         "byte": {
+          "value": 43
+         }
+        },
+        {
+         "byte": {
+          "value": 44
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 5396,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "read22",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "examples.subtype.windows",
+     "function": "read22"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 1
+         }
+        },
+        {
+         "byte": {
+          "value": 2
+         }
+        },
+        {
+         "byte": {
+          "value": 3
+         }
+        },
+        {
+         "byte": {
+          "value": 4
+         }
+        },
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 11
+         }
+        },
+        {
+         "byte": {
+          "value": 12
+         }
+        },
+        {
+         "byte": {
+          "value": 13
+         }
+        },
+        {
+         "byte": {
+          "value": 14
+         }
+        },
+        {
+         "byte": {
+          "value": 15
+         }
+        },
+        {
+         "byte": {
+          "value": 16
+         }
+        },
+        {
+         "byte": {
+          "value": 17
+         }
+        },
+        {
+         "byte": {
+          "value": 18
+         }
+        },
+        {
+         "byte": {
+          "value": 19
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 21
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 2312,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "sig32",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "examples.subtype.windows",
+     "function": "sig32"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 1
+         }
+        },
+        {
+         "byte": {
+          "value": 2
+         }
+        },
+        {
+         "byte": {
+          "value": 3
+         }
+        },
+        {
+         "byte": {
+          "value": 4
+         }
+        },
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 11
+         }
+        },
+        {
+         "byte": {
+          "value": 12
+         }
+        },
+        {
+         "byte": {
+          "value": 13
+         }
+        },
+        {
+         "byte": {
+          "value": 14
+         }
+        },
+        {
+         "byte": {
+          "value": 15
+         }
+        },
+        {
+         "byte": {
+          "value": 16
+         }
+        },
+        {
+         "byte": {
+          "value": 17
+         }
+        },
+        {
+         "byte": {
+          "value": 18
+         }
+        },
+        {
+         "byte": {
+          "value": 19
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 21
+         }
+        },
+        {
+         "byte": {
+          "value": 22
+         }
+        },
+        {
+         "byte": {
+          "value": 23
+         }
+        },
+        {
+         "byte": {
+          "value": 24
+         }
+        },
+        {
+         "byte": {
+          "value": 25
+         }
+        },
+        {
+         "byte": {
+          "value": 26
+         }
+        },
+        {
+         "byte": {
+          "value": 27
+         }
+        },
+        {
+         "byte": {
+          "value": 28
+         }
+        },
+        {
+         "byte": {
+          "value": 29
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 31
+         }
+        },
+        {
+         "byte": {
+          "value": 32
+         }
+        },
+        {
+         "byte": {
+          "value": 33
+         }
+        },
+        {
+         "byte": {
+          "value": 34
+         }
+        },
+        {
+         "byte": {
+          "value": 35
+         }
+        },
+        {
+         "byte": {
+          "value": 36
+         }
+        },
+        {
+         "byte": {
+          "value": 37
+         }
+        },
+        {
+         "byte": {
+          "value": 38
+         }
+        },
+        {
+         "byte": {
+          "value": 39
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 41
+         }
+        },
+        {
+         "byte": {
+          "value": 42
+         }
+        },
+        {
+         "byte": {
+          "value": 43
+         }
+        },
+        {
+         "byte": {
+          "value": 44
+         }
+        },
+        {
+         "byte": {
+          "value": 45
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 50462976,
+      "type": {
+       "bits": 32,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "nested",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "examples.subtype.windows",
+     "function": "nested"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 1
+         }
+        },
+        {
+         "byte": {
+          "value": 2
+         }
+        },
+        {
+         "byte": {
+          "value": 3
+         }
+        },
+        {
+         "byte": {
+          "value": 4
+         }
+        },
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 11
+         }
+        },
+        {
+         "byte": {
+          "value": 12
+         }
+        },
+        {
+         "byte": {
+          "value": 13
+         }
+        },
+        {
+         "byte": {
+          "value": 14
+         }
+        },
+        {
+         "byte": {
+          "value": 15
+         }
+        },
+        {
+         "byte": {
+          "value": 16
+         }
+        },
+        {
+         "byte": {
+          "value": 17
+         }
+        },
+        {
+         "byte": {
+          "value": 18
+         }
+        },
+        {
+         "byte": {
+          "value": 19
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 21
+         }
+        },
+        {
+         "byte": {
+          "value": 22
+         }
+        },
+        {
+         "byte": {
+          "value": 23
+         }
+        },
+        {
+         "byte": {
+          "value": 24
+         }
+        },
+        {
+         "byte": {
+          "value": 25
+         }
+        },
+        {
+         "byte": {
+          "value": 26
+         }
+        },
+        {
+         "byte": {
+          "value": 27
+         }
+        },
+        {
+         "byte": {
+          "value": 28
+         }
+        },
+        {
+         "byte": {
+          "value": 29
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 31
+         }
+        },
+        {
+         "byte": {
+          "value": 32
+         }
+        },
+        {
+         "byte": {
+          "value": 33
+         }
+        },
+        {
+         "byte": {
+          "value": 34
+         }
+        },
+        {
+         "byte": {
+          "value": 35
+         }
+        },
+        {
+         "byte": {
+          "value": 36
+         }
+        },
+        {
+         "byte": {
+          "value": 37
+         }
+        },
+        {
+         "byte": {
+          "value": 38
+         }
+        },
+        {
+         "byte": {
+          "value": 39
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 41
+         }
+        },
+        {
+         "byte": {
+          "value": 42
+         }
+        },
+        {
+         "byte": {
+          "value": 43
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 9508,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "via_call",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "examples.subtype.windows",
+     "function": "via_call"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 1
+         }
+        },
+        {
+         "byte": {
+          "value": 2
+         }
+        },
+        {
+         "byte": {
+          "value": 3
+         }
+        },
+        {
+         "byte": {
+          "value": 4
+         }
+        },
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 11
+         }
+        },
+        {
+         "byte": {
+          "value": 12
+         }
+        },
+        {
+         "byte": {
+          "value": 13
+         }
+        },
+        {
+         "byte": {
+          "value": 14
+         }
+        },
+        {
+         "byte": {
+          "value": 15
+         }
+        },
+        {
+         "byte": {
+          "value": 16
+         }
+        },
+        {
+         "byte": {
+          "value": 17
+         }
+        },
+        {
+         "byte": {
+          "value": 18
+         }
+        },
+        {
+         "byte": {
+          "value": 19
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 21
+         }
+        },
+        {
+         "byte": {
+          "value": 22
+         }
+        },
+        {
+         "byte": {
+          "value": 23
+         }
+        },
+        {
+         "byte": {
+          "value": 24
+         }
+        },
+        {
+         "byte": {
+          "value": 25
+         }
+        },
+        {
+         "byte": {
+          "value": 26
+         }
+        },
+        {
+         "byte": {
+          "value": 27
+         }
+        },
+        {
+         "byte": {
+          "value": 28
+         }
+        },
+        {
+         "byte": {
+          "value": 29
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 31
+         }
+        },
+        {
+         "byte": {
+          "value": 32
+         }
+        },
+        {
+         "byte": {
+          "value": 33
+         }
+        },
+        {
+         "byte": {
+          "value": 34
+         }
+        },
+        {
+         "byte": {
+          "value": 35
+         }
+        },
+        {
+         "byte": {
+          "value": 36
+         }
+        },
+        {
+         "byte": {
+          "value": 37
+         }
+        },
+        {
+         "byte": {
+          "value": 38
+         }
+        },
+        {
+         "byte": {
+          "value": 39
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 41
+         }
+        },
+        {
+         "byte": {
+          "value": 42
+         }
+        },
+        {
+         "byte": {
+          "value": 43
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 5396,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "via_let",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "examples.subtype.windows",
+     "function": "via_let"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 1
+         }
+        },
+        {
+         "byte": {
+          "value": 2
+         }
+        },
+        {
+         "byte": {
+          "value": 3
+         }
+        },
+        {
+         "byte": {
+          "value": 4
+         }
+        },
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 11
+         }
+        },
+        {
+         "byte": {
+          "value": 12
+         }
+        },
+        {
+         "byte": {
+          "value": 13
+         }
+        },
+        {
+         "byte": {
+          "value": 14
+         }
+        },
+        {
+         "byte": {
+          "value": 15
+         }
+        },
+        {
+         "byte": {
+          "value": 16
+         }
+        },
+        {
+         "byte": {
+          "value": 17
+         }
+        },
+        {
+         "byte": {
+          "value": 18
+         }
+        },
+        {
+         "byte": {
+          "value": 19
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 21
+         }
+        },
+        {
+         "byte": {
+          "value": 22
+         }
+        },
+        {
+         "byte": {
+          "value": 23
+         }
+        },
+        {
+         "byte": {
+          "value": 24
+         }
+        },
+        {
+         "byte": {
+          "value": 25
+         }
+        },
+        {
+         "byte": {
+          "value": 26
+         }
+        },
+        {
+         "byte": {
+          "value": 27
+         }
+        },
+        {
+         "byte": {
+          "value": 28
+         }
+        },
+        {
+         "byte": {
+          "value": 29
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 31
+         }
+        },
+        {
+         "byte": {
+          "value": 32
+         }
+        },
+        {
+         "byte": {
+          "value": 33
+         }
+        },
+        {
+         "byte": {
+          "value": 34
+         }
+        },
+        {
+         "byte": {
+          "value": 35
+         }
+        },
+        {
+         "byte": {
+          "value": 36
+         }
+        },
+        {
+         "byte": {
+          "value": 37
+         }
+        },
+        {
+         "byte": {
+          "value": 38
+         }
+        },
+        {
+         "byte": {
+          "value": 39
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 41
+         }
+        },
+        {
+         "byte": {
+          "value": 42
+         }
+        },
+        {
+         "byte": {
+          "value": 43
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 256,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "via_return",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "examples.subtype.windows",
+     "function": "via_return"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 1
+         }
+        },
+        {
+         "byte": {
+          "value": 2
+         }
+        },
+        {
+         "byte": {
+          "value": 3
+         }
+        },
+        {
+         "byte": {
+          "value": 4
+         }
+        },
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 11
+         }
+        },
+        {
+         "byte": {
+          "value": 12
+         }
+        },
+        {
+         "byte": {
+          "value": 13
+         }
+        },
+        {
+         "byte": {
+          "value": 14
+         }
+        },
+        {
+         "byte": {
+          "value": 15
+         }
+        },
+        {
+         "byte": {
+          "value": 16
+         }
+        },
+        {
+         "byte": {
+          "value": 17
+         }
+        },
+        {
+         "byte": {
+          "value": 18
+         }
+        },
+        {
+         "byte": {
+          "value": 19
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 21
+         }
+        },
+        {
+         "byte": {
+          "value": 22
+         }
+        },
+        {
+         "byte": {
+          "value": 23
+         }
+        },
+        {
+         "byte": {
+          "value": 24
+         }
+        },
+        {
+         "byte": {
+          "value": 25
+         }
+        },
+        {
+         "byte": {
+          "value": 26
+         }
+        },
+        {
+         "byte": {
+          "value": 27
+         }
+        },
+        {
+         "byte": {
+          "value": 28
+         }
+        },
+        {
+         "byte": {
+          "value": 29
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 31
+         }
+        },
+        {
+         "byte": {
+          "value": 32
+         }
+        },
+        {
+         "byte": {
+          "value": 33
+         }
+        },
+        {
+         "byte": {
+          "value": 34
+         }
+        },
+        {
+         "byte": {
+          "value": 35
+         }
+        },
+        {
+         "byte": {
+          "value": 36
+         }
+        },
+        {
+         "byte": {
+          "value": 37
+         }
+        },
+        {
+         "byte": {
+          "value": 38
+         }
+        },
+        {
+         "byte": {
+          "value": 39
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 41
+         }
+        },
+        {
+         "byte": {
+          "value": 42
+         }
+        },
+        {
+         "byte": {
+          "value": 43
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 1
+        }
+       },
+       {
+        "byte": {
+         "value": 2
+        }
+       },
+       {
+        "byte": {
+         "value": 3
+        }
+       },
+       {
+        "byte": {
+         "value": 4
+        }
+       },
+       {
+        "byte": {
+         "value": 5
+        }
+       },
+       {
+        "byte": {
+         "value": 6
+        }
+       },
+       {
+        "byte": {
+         "value": 7
+        }
+       },
+       {
+        "byte": {
+         "value": 8
+        }
+       },
+       {
+        "byte": {
+         "value": 9
+        }
+       },
+       {
+        "byte": {
+         "value": 10
+        }
+       },
+       {
+        "byte": {
+         "value": 11
+        }
+       },
+       {
+        "byte": {
+         "value": 12
+        }
+       },
+       {
+        "byte": {
+         "value": 13
+        }
+       },
+       {
+        "byte": {
+         "value": 14
+        }
+       },
+       {
+        "byte": {
+         "value": 15
+        }
+       },
+       {
+        "byte": {
+         "value": 16
+        }
+       },
+       {
+        "byte": {
+         "value": 17
+        }
+       },
+       {
+        "byte": {
+         "value": 18
+        }
+       },
+       {
+        "byte": {
+         "value": 19
+        }
+       },
+       {
+        "byte": {
+         "value": 20
+        }
+       },
+       {
+        "byte": {
+         "value": 21
+        }
+       },
+       {
+        "byte": {
+         "value": 22
+        }
+       },
+       {
+        "byte": {
+         "value": 23
+        }
+       },
+       {
+        "byte": {
+         "value": 24
+        }
+       },
+       {
+        "byte": {
+         "value": 25
+        }
+       },
+       {
+        "byte": {
+         "value": 26
+        }
+       },
+       {
+        "byte": {
+         "value": 27
+        }
+       },
+       {
+        "byte": {
+         "value": 28
+        }
+       },
+       {
+        "byte": {
+         "value": 29
+        }
+       },
+       {
+        "byte": {
+         "value": 30
+        }
+       },
+       {
+        "byte": {
+         "value": 31
+        }
+       },
+       {
+        "byte": {
+         "value": 32
+        }
+       },
+       {
+        "byte": {
+         "value": 33
+        }
+       },
+       {
+        "byte": {
+         "value": 34
+        }
+       },
+       {
+        "byte": {
+         "value": 35
+        }
+       },
+       {
+        "byte": {
+         "value": 36
+        }
+       },
+       {
+        "byte": {
+         "value": 37
+        }
+       },
+       {
+        "byte": {
+         "value": 38
+        }
+       },
+       {
+        "byte": {
+         "value": 39
+        }
+       },
+       {
+        "byte": {
+         "value": 40
+        }
+       },
+       {
+        "byte": {
+         "value": 41
+        }
+       },
+       {
+        "byte": {
+         "value": 42
+        }
+       },
+       {
+        "byte": {
+         "value": 43
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "direct_u16",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "mncs.std.encoding.v1",
+     "function": "read_u16_le"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 7700,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "direct_u32",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 8192,
+    "target": {
+     "module": "mncs.std.encoding.v1",
+     "function": "read_u32_le"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 673059850,
+      "type": {
+       "bits": 32,
+       "signed": false
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

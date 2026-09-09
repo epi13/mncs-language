@@ -1,0 +1,23 @@
+mncs 0.10;
+
+// Host-fed architecture classification: bounded bytes cross the
+// capability boundary through an explicit `host_read` grant and classify
+// by their runtime length through the pure `arch.classify` decision
+// module. Authority is declared, never ambient; without a grant the call
+// fails closed and no classification is produced.
+//
+// This module is research-backend-only by construction: backend lowering
+// is whole-program, so the host call here refuses portable-WASM/C11/
+// LLVM/Cranelift explicitly. The pure classifier it imports stays
+// executable on all five backends.
+module arch.host;
+
+use arch.classify as arch;
+
+fn classify_blob() -> (result: i64)
+    capability arch_reader
+    effect host_read authorized_by arch_reader
+{
+    let blob: [byte; up_to 64] = host_read();
+    return arch.classify_arch(blob, blob.len);
+}

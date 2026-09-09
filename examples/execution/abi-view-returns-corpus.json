@@ -1,0 +1,1533 @@
+{
+ "schema_version": "0.1",
+ "name": "abi-view-returns",
+ "cases": [
+  {
+   "id": "s02",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "slice02"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 48
+        }
+       },
+       {
+        "byte": {
+         "value": 55
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "s13",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "slice13"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 55
+        }
+       },
+       {
+        "byte": {
+         "value": 46
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "s02_repeat",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "slice02"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 12,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 34,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 49
+        }
+       },
+       {
+        "byte": {
+         "value": 50
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "param_tail",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "tail2"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 6
+        }
+       },
+       {
+        "byte": {
+         "value": 7
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "param_mid_even",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "mid_even"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 7
+        }
+       },
+       {
+        "byte": {
+         "value": 8
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "param_head",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "head2"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 5
+        }
+       },
+       {
+        "byte": {
+         "value": 6
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "param_empty",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "empty_mid"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "sequence": {
+      "values": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "exact1",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "exact1"
+    },
+    "arguments": []
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 65
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "exact3",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "exact3"
+    },
+    "arguments": []
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 10
+        }
+       },
+       {
+        "byte": {
+         "value": 20
+        }
+       },
+       {
+        "byte": {
+         "value": 30
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "exact64",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "exact64"
+    },
+    "arguments": []
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 1
+        }
+       },
+       {
+        "byte": {
+         "value": 2
+        }
+       },
+       {
+        "byte": {
+         "value": 3
+        }
+       },
+       {
+        "byte": {
+         "value": 4
+        }
+       },
+       {
+        "byte": {
+         "value": 5
+        }
+       },
+       {
+        "byte": {
+         "value": 6
+        }
+       },
+       {
+        "byte": {
+         "value": 7
+        }
+       },
+       {
+        "byte": {
+         "value": 8
+        }
+       },
+       {
+        "byte": {
+         "value": 9
+        }
+       },
+       {
+        "byte": {
+         "value": 10
+        }
+       },
+       {
+        "byte": {
+         "value": 11
+        }
+       },
+       {
+        "byte": {
+         "value": 12
+        }
+       },
+       {
+        "byte": {
+         "value": 13
+        }
+       },
+       {
+        "byte": {
+         "value": 14
+        }
+       },
+       {
+        "byte": {
+         "value": 15
+        }
+       },
+       {
+        "byte": {
+         "value": 16
+        }
+       },
+       {
+        "byte": {
+         "value": 17
+        }
+       },
+       {
+        "byte": {
+         "value": 18
+        }
+       },
+       {
+        "byte": {
+         "value": 19
+        }
+       },
+       {
+        "byte": {
+         "value": 20
+        }
+       },
+       {
+        "byte": {
+         "value": 21
+        }
+       },
+       {
+        "byte": {
+         "value": 22
+        }
+       },
+       {
+        "byte": {
+         "value": 23
+        }
+       },
+       {
+        "byte": {
+         "value": 24
+        }
+       },
+       {
+        "byte": {
+         "value": 25
+        }
+       },
+       {
+        "byte": {
+         "value": 26
+        }
+       },
+       {
+        "byte": {
+         "value": 27
+        }
+       },
+       {
+        "byte": {
+         "value": 28
+        }
+       },
+       {
+        "byte": {
+         "value": 29
+        }
+       },
+       {
+        "byte": {
+         "value": 30
+        }
+       },
+       {
+        "byte": {
+         "value": 31
+        }
+       },
+       {
+        "byte": {
+         "value": 32
+        }
+       },
+       {
+        "byte": {
+         "value": 33
+        }
+       },
+       {
+        "byte": {
+         "value": 34
+        }
+       },
+       {
+        "byte": {
+         "value": 35
+        }
+       },
+       {
+        "byte": {
+         "value": 36
+        }
+       },
+       {
+        "byte": {
+         "value": 37
+        }
+       },
+       {
+        "byte": {
+         "value": 38
+        }
+       },
+       {
+        "byte": {
+         "value": 39
+        }
+       },
+       {
+        "byte": {
+         "value": 40
+        }
+       },
+       {
+        "byte": {
+         "value": 41
+        }
+       },
+       {
+        "byte": {
+         "value": 42
+        }
+       },
+       {
+        "byte": {
+         "value": 43
+        }
+       },
+       {
+        "byte": {
+         "value": 44
+        }
+       },
+       {
+        "byte": {
+         "value": 45
+        }
+       },
+       {
+        "byte": {
+         "value": 46
+        }
+       },
+       {
+        "byte": {
+         "value": 47
+        }
+       },
+       {
+        "byte": {
+         "value": 48
+        }
+       },
+       {
+        "byte": {
+         "value": 49
+        }
+       },
+       {
+        "byte": {
+         "value": 50
+        }
+       },
+       {
+        "byte": {
+         "value": 51
+        }
+       },
+       {
+        "byte": {
+         "value": 52
+        }
+       },
+       {
+        "byte": {
+         "value": 53
+        }
+       },
+       {
+        "byte": {
+         "value": 54
+        }
+       },
+       {
+        "byte": {
+         "value": 55
+        }
+       },
+       {
+        "byte": {
+         "value": 56
+        }
+       },
+       {
+        "byte": {
+         "value": 57
+        }
+       },
+       {
+        "byte": {
+         "value": 58
+        }
+       },
+       {
+        "byte": {
+         "value": 59
+        }
+       },
+       {
+        "byte": {
+         "value": 60
+        }
+       },
+       {
+        "byte": {
+         "value": 61
+        }
+       },
+       {
+        "byte": {
+         "value": 62
+        }
+       },
+       {
+        "byte": {
+         "value": 63
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "full64",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "full64"
+    },
+    "arguments": []
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 1
+        }
+       },
+       {
+        "byte": {
+         "value": 2
+        }
+       },
+       {
+        "byte": {
+         "value": 3
+        }
+       },
+       {
+        "byte": {
+         "value": 4
+        }
+       },
+       {
+        "byte": {
+         "value": 5
+        }
+       },
+       {
+        "byte": {
+         "value": 6
+        }
+       },
+       {
+        "byte": {
+         "value": 7
+        }
+       },
+       {
+        "byte": {
+         "value": 8
+        }
+       },
+       {
+        "byte": {
+         "value": 9
+        }
+       },
+       {
+        "byte": {
+         "value": 10
+        }
+       },
+       {
+        "byte": {
+         "value": 11
+        }
+       },
+       {
+        "byte": {
+         "value": 12
+        }
+       },
+       {
+        "byte": {
+         "value": 13
+        }
+       },
+       {
+        "byte": {
+         "value": 14
+        }
+       },
+       {
+        "byte": {
+         "value": 15
+        }
+       },
+       {
+        "byte": {
+         "value": 16
+        }
+       },
+       {
+        "byte": {
+         "value": 17
+        }
+       },
+       {
+        "byte": {
+         "value": 18
+        }
+       },
+       {
+        "byte": {
+         "value": 19
+        }
+       },
+       {
+        "byte": {
+         "value": 20
+        }
+       },
+       {
+        "byte": {
+         "value": 21
+        }
+       },
+       {
+        "byte": {
+         "value": 22
+        }
+       },
+       {
+        "byte": {
+         "value": 23
+        }
+       },
+       {
+        "byte": {
+         "value": 24
+        }
+       },
+       {
+        "byte": {
+         "value": 25
+        }
+       },
+       {
+        "byte": {
+         "value": 26
+        }
+       },
+       {
+        "byte": {
+         "value": 27
+        }
+       },
+       {
+        "byte": {
+         "value": 28
+        }
+       },
+       {
+        "byte": {
+         "value": 29
+        }
+       },
+       {
+        "byte": {
+         "value": 30
+        }
+       },
+       {
+        "byte": {
+         "value": 31
+        }
+       },
+       {
+        "byte": {
+         "value": 32
+        }
+       },
+       {
+        "byte": {
+         "value": 33
+        }
+       },
+       {
+        "byte": {
+         "value": 34
+        }
+       },
+       {
+        "byte": {
+         "value": 35
+        }
+       },
+       {
+        "byte": {
+         "value": 36
+        }
+       },
+       {
+        "byte": {
+         "value": 37
+        }
+       },
+       {
+        "byte": {
+         "value": 38
+        }
+       },
+       {
+        "byte": {
+         "value": 39
+        }
+       },
+       {
+        "byte": {
+         "value": 40
+        }
+       },
+       {
+        "byte": {
+         "value": 41
+        }
+       },
+       {
+        "byte": {
+         "value": 42
+        }
+       },
+       {
+        "byte": {
+         "value": 43
+        }
+       },
+       {
+        "byte": {
+         "value": 44
+        }
+       },
+       {
+        "byte": {
+         "value": 45
+        }
+       },
+       {
+        "byte": {
+         "value": 46
+        }
+       },
+       {
+        "byte": {
+         "value": 47
+        }
+       },
+       {
+        "byte": {
+         "value": 48
+        }
+       },
+       {
+        "byte": {
+         "value": 49
+        }
+       },
+       {
+        "byte": {
+         "value": 50
+        }
+       },
+       {
+        "byte": {
+         "value": 51
+        }
+       },
+       {
+        "byte": {
+         "value": 52
+        }
+       },
+       {
+        "byte": {
+         "value": 53
+        }
+       },
+       {
+        "byte": {
+         "value": 54
+        }
+       },
+       {
+        "byte": {
+         "value": 55
+        }
+       },
+       {
+        "byte": {
+         "value": 56
+        }
+       },
+       {
+        "byte": {
+         "value": 57
+        }
+       },
+       {
+        "byte": {
+         "value": 58
+        }
+       },
+       {
+        "byte": {
+         "value": 59
+        }
+       },
+       {
+        "byte": {
+         "value": 60
+        }
+       },
+       {
+        "byte": {
+         "value": 61
+        }
+       },
+       {
+        "byte": {
+         "value": 62
+        }
+       },
+       {
+        "byte": {
+         "value": 63
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "odd_cell_slice",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "odd_cell_slice"
+    },
+    "arguments": []
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "byte": {
+         "value": 6
+        }
+       },
+       {
+        "byte": {
+         "value": 7
+        }
+       },
+       {
+        "byte": {
+         "value": 8
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "index_odd",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "index_odd"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 6,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "index_odd_second",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "index_odd_second"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "index_cell_odd",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "index_cell_odd"
+    },
+    "arguments": []
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 8,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "wide_slice",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "wide_slice"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "integer": {
+          "value": 100,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 200,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 300,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 400,
+          "type": {
+           "bits": 64,
+           "signed": false
+          }
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "integer": {
+         "value": 200,
+         "type": {
+          "bits": 64,
+          "signed": false
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 300,
+         "type": {
+          "bits": 64,
+          "signed": false
+         }
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "wide_exact",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "wide_exact"
+    },
+    "arguments": []
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "integer": {
+         "value": 100,
+         "type": {
+          "bits": 64,
+          "signed": false
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 200,
+         "type": {
+          "bits": 64,
+          "signed": false
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 300,
+         "type": {
+          "bits": 64,
+          "signed": false
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 400,
+         "type": {
+          "bits": 64,
+          "signed": false
+         }
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "exact_input",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "exact_second"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 3
+         }
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "pick",
+   "request": {
+    "schema_version": "0.1",
+    "step_budget": 4096,
+    "target": {
+     "module": "examples.abi.view_returns",
+     "function": "pick"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 5
+         }
+        },
+        {
+         "byte": {
+          "value": 6
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 8
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ]
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 8,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,234 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-symbol-collision",
+ "cases": [
+  {
+   "id": "root",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.collision",
+     "function": "probe"
+    },
+    "arguments": [],
+    "step_budget": 4000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1104,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "entry-moda-helper",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.collision.moda",
+     "function": "helper"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 4000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "entry-modb-helper",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.collision.modb",
+     "function": "helper"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 4000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 101,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "entry-modc-helper",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.collision.modc",
+     "function": "helper"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 4000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1001,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "entry-moda-probe",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.collision.moda",
+     "function": "probe_a"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 4000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "entry-modb-probe",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.collision.modb",
+     "function": "probe_b"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 4000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 101,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "entry-modc-probe",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.collision.modc",
+     "function": "probe_c"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 4000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1102,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}
