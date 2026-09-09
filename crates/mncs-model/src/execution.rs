@@ -1849,6 +1849,54 @@ fn execute_operation(
                 ExecutionValue::Boolean { value },
             );
         }
+        BodyOperationKind::BooleanCompare { predicate } => {
+            let Some((left, right)) = boolean_operands(operation, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "boolean comparison operands were unavailable or not boolean".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let value = match predicate.as_str() {
+                "eq" => left == right,
+                "ne" => left != right,
+                _ => {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        Some(identity.clone()),
+                        format!("unsupported boolean comparison predicate {predicate:?}"),
+                    );
+                    return Some(result.clone());
+                }
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Boolean { value },
+            );
+        }
+        BodyOperationKind::BooleanNot => {
+            let [input] = operation.operands.as_slice() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "boolean negation requires one operand".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(ExecutionValue::Boolean { value }) = values.get(input) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "boolean negation operand was unavailable or not boolean".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Boolean { value: !value },
+            );
+        }
         BodyOperationKind::ByteBitwise { operator } => {
             let Some((left, right)) = byte_operands(operation, values) else {
                 result.fail(

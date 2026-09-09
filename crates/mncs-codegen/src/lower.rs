@@ -502,6 +502,29 @@ fn lower_instruction(
             });
             body.push(Instr::LocalSet(dest));
         }
+        SsaInstructionKind::BooleanCompare { predicate } => {
+            // Normalized 0/1 i32 locals compare exactly with integer
+            // equality; only `eq`/`ne` exist on bools by construction.
+            let dest = dest_local(layout, instruction)?;
+            let left = operand_local(layout, instruction, 0)?;
+            let right = operand_local(layout, instruction, 1)?;
+            body.push(Instr::LocalGet(left));
+            body.push(Instr::LocalGet(right));
+            body.push(match predicate {
+                p if p == "eq" => Instr::I32Eq,
+                p if p == "ne" => Instr::I32Ne,
+                other => return Err(format!("unsupported boolean comparison predicate {other}")),
+            });
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::BooleanNot => {
+            // Normalized 0/1 i32 local: logical not is test-against-zero.
+            let dest = dest_local(layout, instruction)?;
+            let src = operand_local(layout, instruction, 0)?;
+            body.push(Instr::LocalGet(src));
+            body.push(Instr::I32Eqz);
+            body.push(Instr::LocalSet(dest));
+        }
         SsaInstructionKind::ByteBitwise { operator } => {
             // Bytes ride zero-extended in i32 cells; bitwise ops are exact.
             let dest = dest_local(layout, instruction)?;

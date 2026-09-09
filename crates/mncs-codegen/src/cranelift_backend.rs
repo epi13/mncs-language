@@ -632,6 +632,37 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                 names.value(rhs)
             );
         }
+        ScalarInst::BooleanCompare {
+            dest,
+            predicate,
+            lhs,
+            rhs,
+        } => {
+            // Normalized 0/1 i32 cells compare exactly with `icmp eq/ne`,
+            // mirroring `Compare`.
+            let cond = match predicate.as_str() {
+                "eq" => "eq",
+                "ne" => "ne",
+                _ => "eq",
+            };
+            let _ = writeln!(
+                out,
+                "        {} = icmp {cond} {}, {}",
+                names.value(&dest.id),
+                names.value(lhs),
+                names.value(rhs)
+            );
+        }
+        ScalarInst::BooleanNot { dest, src } => {
+            // Normalized 0/1 cell: logical not is equality-against-zero,
+            // mirroring the proven `icmp_imm` selection-guard form.
+            let _ = writeln!(
+                out,
+                "        {} = icmp_imm eq {}, 0",
+                names.value(&dest.id),
+                names.value(src)
+            );
+        }
         ScalarInst::Integer {
             dest,
             operator,
@@ -1352,6 +1383,8 @@ fn scalar_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
         | ScalarInst::FloatCompare { dest, .. }
         | ScalarInst::Integer { dest, .. }
         | ScalarInst::Boolean { dest, .. }
+        | ScalarInst::BooleanCompare { dest, .. }
+        | ScalarInst::BooleanNot { dest, .. }
         | ScalarInst::Compare { dest, .. }
         | ScalarInst::FiniteConstruct { dest, .. }
         | ScalarInst::CellAlloc { dest, .. }
@@ -1954,6 +1987,30 @@ where
                                 "and" => builder.ins().band(left, right),
                                 _ => builder.ins().bor(left, right),
                             };
+                            values.insert(dest.id.clone(), produced);
+                        }
+                        ScalarInst::BooleanCompare {
+                            dest,
+                            predicate,
+                            lhs,
+                            rhs,
+                        } => {
+                            // Normalized 0/1 I64 cells: `icmp` plus `uextend`
+                            // exactly like `Compare`.
+                            let cc = match predicate.as_str() {
+                                "eq" => IntCC::Equal,
+                                "ne" => IntCC::NotEqual,
+                                _ => IntCC::Equal,
+                            };
+                            let flag = builder.ins().icmp(cc, values[lhs], values[rhs]);
+                            let produced = builder.ins().uextend(types::I64, flag);
+                            values.insert(dest.id.clone(), produced);
+                        }
+                        ScalarInst::BooleanNot { dest, src } => {
+                            // Normalized 0/1 I64 cell: equality-against-zero
+                            // via proven `icmp_imm`/`uextend` primitives.
+                            let flag = builder.ins().icmp_imm(IntCC::Equal, values[src], 0);
+                            let produced = builder.ins().uextend(types::I64, flag);
                             values.insert(dest.id.clone(), produced);
                         }
                         ScalarInst::FloatConst { dest, bits } => {

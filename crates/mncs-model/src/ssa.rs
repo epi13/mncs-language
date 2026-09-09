@@ -74,6 +74,12 @@ pub enum SsaInstructionKind {
     BooleanOp {
         operator: String,
     },
+    /// Boolean equality comparison (CP-0004): `eq` | `ne` over bools.
+    BooleanCompare {
+        predicate: String,
+    },
+    /// Boolean negation (CP-0004) over one bool.
+    BooleanNot,
     /// Byte bitwise op (Profile 0.7): `and` | `or` | `xor`.
     ByteBitwise {
         operator: String,
@@ -1918,6 +1924,10 @@ fn ssa_kind(kind: &IrOperationKind) -> SsaInstructionKind {
         IrOperationKind::BooleanOp { operator } => SsaInstructionKind::BooleanOp {
             operator: operator.clone(),
         },
+        IrOperationKind::BooleanCompare { predicate } => SsaInstructionKind::BooleanCompare {
+            predicate: predicate.clone(),
+        },
+        IrOperationKind::BooleanNot => SsaInstructionKind::BooleanNot,
         IrOperationKind::ByteBitwise { operator } => SsaInstructionKind::ByteBitwise {
             operator: operator.clone(),
         },
@@ -2162,6 +2172,10 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
         BodyOperationKind::BooleanOp { operator } => SsaInstructionKind::BooleanOp {
             operator: operator.clone(),
         },
+        BodyOperationKind::BooleanCompare { predicate } => SsaInstructionKind::BooleanCompare {
+            predicate: predicate.clone(),
+        },
+        BodyOperationKind::BooleanNot => SsaInstructionKind::BooleanNot,
         BodyOperationKind::ByteBitwise { operator } => SsaInstructionKind::ByteBitwise {
             operator: operator.clone(),
         },

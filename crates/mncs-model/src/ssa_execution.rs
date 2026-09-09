@@ -1059,6 +1059,55 @@ fn execute_instruction(
                 values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
             }
         }
+        SsaInstructionKind::BooleanCompare { predicate } => {
+            let Some((left, right)) = boolean_operands(instruction, values) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "boolean comparison operands were unavailable or not boolean",
+                );
+                return true;
+            };
+            let value = match predicate.as_str() {
+                "eq" => left == right,
+                "ne" => left != right,
+                _ => {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        instruction_identity(instruction),
+                        format!("unsupported boolean comparison predicate {predicate:?}"),
+                    );
+                    return true;
+                }
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(output.identity.clone(), ExecutionValue::Boolean { value });
+            }
+        }
+        SsaInstructionKind::BooleanNot => {
+            let [input] = instruction.inputs.as_slice() else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "boolean negation requires one operand",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Boolean { value }) = values.get(input) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "boolean negation operand was unavailable or not boolean",
+                );
+                return true;
+            };
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Boolean { value: !value },
+                );
+            }
+        }
         SsaInstructionKind::ByteBitwise { operator } => {
             let Some((left, right)) = byte_operands(instruction, values) else {
                 result.fail(

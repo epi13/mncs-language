@@ -208,6 +208,8 @@ impl Program {
                             | BodyOperationKind::RecordProject { .. }
                             | BodyOperationKind::FinitePayloadProject { .. }
                             | BodyOperationKind::BooleanOp { .. }
+                            | BodyOperationKind::BooleanCompare { .. }
+                            | BodyOperationKind::BooleanNot
                             // Byte bitwise/shift/compare, float constants, and
                             // explicit conversions are total by definition;
                             // sequence construction and length observations

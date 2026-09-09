@@ -117,6 +117,12 @@ pub enum IrOperationKind {
     BooleanOp {
         operator: String,
     },
+    /// Boolean equality comparison (CP-0004): `eq` | `ne` over bools.
+    BooleanCompare {
+        predicate: String,
+    },
+    /// Boolean negation (CP-0004) over one bool.
+    BooleanNot,
     /// Byte-oriented bitwise op (Profile 0.7): `and` | `or` | `xor`.
     ByteBitwise {
         operator: String,
@@ -1029,6 +1035,22 @@ fn lower_executable_body(
                     IrOperationKind::BooleanOp {
                         operator: operator.clone(),
                     },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::BooleanCompare { predicate } => (
+                    IrOperationKind::BooleanCompare {
+                        predicate: predicate.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::BooleanNot => (
+                    IrOperationKind::BooleanNot,
                     Vec::new(),
                     Vec::new(),
                     None,

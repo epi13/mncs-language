@@ -1003,6 +1003,44 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let _ = writeln!(out, "  %{tmp} = {op} {bool_ty} %{left}, %{right}");
             store_dest(out, names, dest, &tmp);
         }
+        ScalarInst::BooleanCompare {
+            dest,
+            predicate,
+            lhs,
+            rhs,
+        } => {
+            // Normalized 0/1 i32 slots compare exactly with `icmp eq/ne`;
+            // the i1 result is zero-extended into the bool slot exactly
+            // like `Compare`.
+            let left = load_value(out, names, lhs, "lhs", split);
+            let right = load_value(out, names, rhs, "rhs", split);
+            let pred = match predicate.as_str() {
+                "eq" => "eq",
+                "ne" => "ne",
+                _ => "eq",
+            };
+            let ty = llvm_type(ScalarTy::Int(mncs_model::IntegerType {
+                bits: 32,
+                signed: false,
+            }));
+            *split += 1;
+            let tmp = format!("boolcmp{split}");
+            let _ = writeln!(out, "  %{tmp} = icmp {pred} {ty} %{left}, %{right}");
+            let ztmp = format!("boolcmpz{split}");
+            let _ = writeln!(out, "  %{ztmp} = zext i1 %{tmp} to {}", llvm_type(dest.ty));
+            store_dest(out, names, dest, &ztmp);
+        }
+        ScalarInst::BooleanNot { dest, src } => {
+            let input = load_value(out, names, src, "src", split);
+            let ty = llvm_type(ScalarTy::Int(mncs_model::IntegerType {
+                bits: 32,
+                signed: false,
+            }));
+            *split += 1;
+            let tmp = format!("boolnot{split}");
+            let _ = writeln!(out, "  %{tmp} = xor {ty} %{input}, 1");
+            store_dest(out, names, dest, &tmp);
+        }
         ScalarInst::Compare {
             dest,
             predicate,
@@ -1883,6 +1921,8 @@ fn scalar_inst_dest(inst: &ScalarInst) -> Option<&ScalarValue> {
         | ScalarInst::FloatIntrinsic { dest, .. }
         | ScalarInst::Integer { dest, .. }
         | ScalarInst::Boolean { dest, .. }
+        | ScalarInst::BooleanCompare { dest, .. }
+        | ScalarInst::BooleanNot { dest, .. }
         | ScalarInst::Compare { dest, .. }
         | ScalarInst::FiniteConstruct { dest, .. }
         | ScalarInst::CellAlloc { dest, .. }

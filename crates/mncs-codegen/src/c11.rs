@@ -864,6 +864,38 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 names.value(rhs)
             );
         }
+        ScalarInst::BooleanCompare {
+            dest,
+            predicate,
+            lhs,
+            rhs,
+        } => {
+            // Normalized 0/1 slots: `==`/`!=` is exact. Unknown predicates
+            // are rejected at body validation; the fallback traps loudly
+            // rather than emitting a wrong comparison.
+            let op = match predicate.as_str() {
+                "eq" => "==",
+                "ne" => "!=",
+                _ => "!==",
+            };
+            let _ = writeln!(
+                out,
+                "      {} = ({})({} {op} {});",
+                names.value(&dest.id),
+                c_type(dest.ty),
+                names.value(lhs),
+                names.value(rhs)
+            );
+        }
+        ScalarInst::BooleanNot { dest, src } => {
+            let _ = writeln!(
+                out,
+                "      {} = ({})!{};",
+                names.value(&dest.id),
+                c_type(dest.ty),
+                names.value(src)
+            );
+        }
         ScalarInst::Compare {
             dest,
             predicate,
@@ -1486,6 +1518,8 @@ fn inst_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
         | ScalarInst::FloatIntrinsic { dest, .. }
         | ScalarInst::Integer { dest, .. }
         | ScalarInst::Boolean { dest, .. }
+        | ScalarInst::BooleanCompare { dest, .. }
+        | ScalarInst::BooleanNot { dest, .. }
         | ScalarInst::Compare { dest, .. }
         | ScalarInst::FiniteConstruct { dest, .. }
         | ScalarInst::CellAlloc { dest, .. }

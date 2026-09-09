@@ -461,6 +461,8 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                         crate::BodyOperationKind::IntegerCompare { .. }
                         | crate::BodyOperationKind::FloatConstant { .. }
                         | crate::BodyOperationKind::BooleanOp { .. }
+                        | crate::BodyOperationKind::BooleanCompare { .. }
+                        | crate::BodyOperationKind::BooleanNot
                         | crate::BodyOperationKind::FiniteConstruct { .. }
                         | crate::BodyOperationKind::FinitePayloadProject { .. }
                         | crate::BodyOperationKind::FiniteIsVariant { .. }

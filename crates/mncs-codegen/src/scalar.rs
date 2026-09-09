@@ -103,6 +103,20 @@ pub enum ScalarInst {
         lhs: SemanticId,
         rhs: SemanticId,
     },
+    /// Boolean equality comparison (CP-0004): `eq` | `ne` over normalized
+    /// 0/1 bool cells, producing a normalized bool cell.
+    BooleanCompare {
+        dest: ScalarValue,
+        predicate: String,
+        lhs: SemanticId,
+        rhs: SemanticId,
+    },
+    /// Boolean negation (CP-0004): logical `not` over one normalized bool
+    /// cell, producing a normalized bool cell.
+    BooleanNot {
+        dest: ScalarValue,
+        src: SemanticId,
+    },
     FiniteConstruct {
         dest: ScalarValue,
         discriminant: u32,
@@ -561,6 +575,16 @@ fn lower_instruction(
             operator: operator.clone(),
             lhs: operand(instruction, 0)?,
             rhs: operand(instruction, 1)?,
+        }),
+        SsaInstructionKind::BooleanCompare { predicate } => Ok(ScalarInst::BooleanCompare {
+            dest,
+            predicate: predicate.clone(),
+            lhs: operand(instruction, 0)?,
+            rhs: operand(instruction, 1)?,
+        }),
+        SsaInstructionKind::BooleanNot => Ok(ScalarInst::BooleanNot {
+            dest,
+            src: operand(instruction, 0)?,
         }),
         SsaInstructionKind::ByteBitwise { operator } => Ok(ScalarInst::ByteBitwise {
             dest,
