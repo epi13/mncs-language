@@ -22,6 +22,25 @@ fn library(name: &str) -> String {
     format!("{}/../../library/{name}", env!("CARGO_MANIFEST_DIR"))
 }
 
+fn example(name: &str) -> String {
+    format!("{}/../../examples/{name}", env!("CARGO_MANIFEST_DIR"))
+}
+
+/// Diagnostics for a committed fixture file (imports resolve relative to
+/// the fixture's own directory).
+fn file_diagnostics(path: &str) -> Vec<Value> {
+    let output = binary()
+        .args(["source-study", path])
+        .env("MNCS_LIBRARY_PATH", library(""))
+        .output()
+        .expect("run source-study");
+    let result: Value = serde_json::from_slice(&output.stdout).expect("study JSON");
+    result["diagnostics"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
 fn binary() -> Command {
     Command::new(env!("CARGO_BIN_EXE_mncs"))
 }
@@ -265,5 +284,48 @@ fn profile_013_admits_consolidated_extensions() {
     expect_clean(
         "admit-013",
         "mncs 0.13;\nmodule compat.admit;\nrecord Link { next: u64, after: u64 }\nfn id<T>(value: T) -> (result: T) {\n    return value;\n}\nfn probe(a: [u64; 4], x: u64) -> (result: u64) {\n    let flag: bool = !true;\n    let same: bool = flag == false;\n    let picked: u64 = match x { 0 => 10, _ => 0 };\n    let link: Link = Link { next: 1, after: 2 };\n    let hops: u64 = link.next;\n    let row: [i64; 3] = [7; 3];\n    let shadow: i64 = 1;\n    let shadow: i64 = shadow + row[1];\n    let negated: i64 = id(-5);\n    let ok: bool = same && (negated == 0 - 5);\n    let gate: u64 = match ok { true => 1, false => 0 };\n    let inferred: u64 = id(picked);\n    iterate i over a carrying s: u64 = picked {\n        next s = s + a[i];\n    }\n    iterate i up_to 64 carrying t: u64 = s {\n        next t = t + 1;\n    }\n    return t + picked + gate + inferred + hops;\n}\n",
+    );
+}
+
+/// Generic traversal definitions defer the admitted sequence ceiling to
+/// instantiation: a `[T; N]` traversal elaborates under older profiles
+/// against the absolute model ceiling, so profile-portable generic
+/// libraries (core status/sequence/geometry) keep elaborating.
+#[test]
+fn generic_traversal_definition_admitted_below_013() {
+    expect_clean(
+        "gentraverse-012",
+        "mncs 0.12;\nmodule compat.gentraverse;\nfn total<N: Nat>(xs: [i64; N]) -> (result: i64) {\n    iterate i over xs carrying s: i64 = 0 {\n        next s = s + xs[i];\n    }\n    return s;\n}\n",
+    );
+}
+
+/// An explicit over-ceiling Nat argument still fails closed at its call
+/// site (MNE225) under the caller's admitted ceiling.
+#[test]
+fn explicit_over_ceiling_nat_arg_refused() {
+    expect_error(
+        "genceil-012",
+        "mncs 0.12;\nmodule compat.genceil;\nfn total<N: Nat>(xs: [i64; N]) -> (result: i64) {\n    iterate i over xs carrying s: i64 = 0 {\n        next s = s + xs[i];\n    }\n    return s;\n}\nfn probe() -> (result: i64) {\n    let row: [i64; 4] = [1, 2, 3, 4];\n    return total<100>(row);\n}\n",
+        "MNE225",
+    );
+}
+
+/// A concrete substitution that exceeds the root program's admitted
+/// ceiling fails closed after specialization (MNE182): the 0.13 caller
+/// admits N=500 at its call site, but the 0.10 root refuses the
+/// 500-wide traversal substituted into the generic template.
+#[test]
+fn over_ceiling_specialization_refused_under_narrow_root() {
+    let diagnostics = file_diagnostics(&example("source/generic-ceilings/narrow_root.mncs"));
+    let messages: Vec<String> = diagnostics
+        .iter()
+        .filter(|d| d["code"] == "MNE182")
+        .filter_map(|d| d["message"].as_str().map(str::to_owned))
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("specialized traversal bound exceeds")),
+        "narrow-root: expected specialization MNE182, got {diagnostics:?}"
     );
 }

@@ -527,7 +527,29 @@ pub fn elaborate_program_with_resolver_and_modules(
             &ast.module.text,
         ) {
             Ok(program) => match mncs_model::generics::specialize_program(&program) {
-                Ok(specialized) => Ok(specialized),
+                Ok(specialized) => {
+                    // Admitted-ceiling enforcement for concrete bounds
+                    // substituted into generic specializations (RFC 0036).
+                    // Generic definitions defer the admitted check, so each
+                    // specialization's concrete traversal bounds are checked
+                    // here against the root program's admitted ceiling:
+                    // explicit Nat arguments already pass MNE225 at their
+                    // call site, and this sweep closes the remaining paths
+                    // (inference, cross-module substitution). Non-generic
+                    // functions keep exactly their definition-site behavior.
+                    let mut ceiling_errors = specialized_traversal_ceiling_errors(
+                        &specialized,
+                        mncs_syntax::max_sequence_bound_for(&ast.language_version.text)
+                            .unwrap_or(0),
+                        ast.module.span,
+                    );
+                    if ceiling_errors.is_empty() {
+                        Ok(specialized)
+                    } else {
+                        diagnostics.append(&mut ceiling_errors);
+                        Err(diagnostics)
+                    }
+                }
                 Err(diags) => {
                     let mut errors: Vec<SourceDiagnostic> = diags
                         .into_iter()
@@ -2886,6 +2908,94 @@ impl FunctionSignature {
     }
 }
 
+/// Admitted-ceiling enforcement for concrete traversal bounds substituted
+/// into generic specializations (RFC 0036). Generic definitions defer the
+/// admitted check (see the iterate-domain lowering), so this sweep checks
+/// every specialization's concrete `Exact`/`UpTo` traversal bounds against
+/// the root program's admitted ceiling. Symbolic bounds that forward to an
+/// outer caller stay deferred until that caller specializes. Only functions
+/// named by specialization records are examined, so non-generic programs
+/// keep exactly their definition-site behavior.
+fn specialized_traversal_ceiling_errors(
+    program: &Program,
+    admitted: u32,
+    span: SourceSpan,
+) -> Vec<SourceDiagnostic> {
+    fn concrete_over_ceiling(bound: &mncs_model::SequenceBound, admitted: u32) -> bool {
+        match bound {
+            mncs_model::SequenceBound::Exact(length) | mncs_model::SequenceBound::UpTo(length) => {
+                *length > admitted
+            }
+            mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => false,
+        }
+    }
+    // Keyed like `specialization_function` (see generics.rs).
+    let by_id: BTreeMap<SemanticId, &Function> = program
+        .functions
+        .iter()
+        .map(|function| (function_identity_of(program, function), function))
+        .collect();
+    let mut errors = Vec::new();
+    for record in &program.generic_specializations {
+        let Some(function) = by_id.get(&record.specialization_function) else {
+            continue;
+        };
+        let Some(body) = function.body.as_ref() else {
+            continue;
+        };
+        let mut over = false;
+        'blocks: for block in &body.blocks {
+            for operation in &block.operations {
+                let bounds_exceeded = match &operation.kind {
+                    BodyOperationKind::SequenceLength { bound }
+                    | BodyOperationKind::SequenceProject { bound, .. }
+                    | BodyOperationKind::SequenceReplace { bound, .. } => {
+                        concrete_over_ceiling(bound, admitted)
+                    }
+                    BodyOperationKind::ViewConstruct {
+                        source_bound,
+                        view_bound,
+                    } => {
+                        concrete_over_ceiling(source_bound, admitted)
+                            || concrete_over_ceiling(view_bound, admitted)
+                    }
+                    _ => false,
+                };
+                if bounds_exceeded {
+                    over = true;
+                    break 'blocks;
+                }
+            }
+        }
+        // Iteration records carry the same substituted sequence bound that
+        // drives their loop; both must agree that no instantiation exceeds
+        // the admitted ceiling, so the instantiated work product can never
+        // exceed the product admitted at definition.
+        if !over {
+            over = body.bounded_iterations.iter().any(|iteration| {
+                iteration
+                    .sequence_bound
+                    .as_ref()
+                    .is_some_and(|bound| concrete_over_ceiling(bound, admitted))
+            });
+        }
+        if over {
+            errors.push(elaboration_diagnostic(
+                "MNE182",
+                format!("specialized traversal bound exceeds the profile ceiling {admitted}"),
+                span,
+            ));
+        }
+    }
+    errors
+}
+
+/// Semantic identity of one linked function, matching the keys that
+/// generic specialization records use.
+fn function_identity_of(program: &Program, function: &Function) -> SemanticId {
+    function_id(function.identity_namespace(&program.module), &function.name)
+}
+
 fn reject_recursive_calls(
     ast: &AbstractSyntaxTree,
     signatures: &BTreeMap<String, FunctionSignature>,
@@ -3834,6 +3944,7 @@ impl<'a> BodyBuilder<'a> {
         });
         let mut traversal_length = None;
         let mut traversal_element: Option<Box<BodyType>> = None;
+        let mut traversal_generic = false;
         let bound_u32 = match &traversal {
             Some((source_span, resolved)) => {
                 let Some(resolved) = resolved else {
@@ -3848,6 +3959,7 @@ impl<'a> BodyBuilder<'a> {
                     return;
                 };
                 traversal_element = Some(element.clone());
+                traversal_generic = bound.is_generic();
                 // u64 traversal domains are a Profile 0.13 extension: the
                 // traversal index is an abstract u64 counter, and older
                 // profiles confused a u64 *element* type with that counter
@@ -3871,9 +3983,19 @@ impl<'a> BodyBuilder<'a> {
                 }
                 let ceiling = bound.ceiling();
                 // Admitted sequence ceiling comes from profile policy (RFC
-                // 0036): 64 through Profile 0.12, 1024 in 0.13.
-                let admitted_sequence =
-                    mncs_syntax::max_sequence_bound_for(&self.source_profile).unwrap_or(0);
+                // 0036): 64 through Profile 0.12, 1024 in 0.13. Generic
+                // bounds defer the admitted check to instantiation: a
+                // `[T; N]` traversal is admitted here against the absolute
+                // model ceiling (which `Param` reports by construction) and
+                // each concrete substitution is checked against the admitted
+                // ceiling after specialization, so a generic definition stays
+                // profile-portable while over-ceiling instantiations still
+                // fail closed with MNE182.
+                let admitted_sequence = if bound.is_generic() {
+                    mncs_model::MODEL_MAX_SEQUENCE_BOUND
+                } else {
+                    mncs_syntax::max_sequence_bound_for(&self.source_profile).unwrap_or(0)
+                };
                 if ceiling > admitted_sequence {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE182",
@@ -3982,7 +4104,19 @@ impl<'a> BodyBuilder<'a> {
             .iter()
             .map(|(_, enclosing)| u64::from(*enclosing))
             .product();
-        let work_product = enclosing_product.saturating_mul(u64::from(bound_u32));
+        // Generic traversal bounds contribute the admitted sequence ceiling,
+        // not the absolute model maximum, to the static work product: each
+        // concrete substitution is independently capped by the
+        // post-specialization sweep, so no instantiated product can exceed
+        // the product computed here. Doubly-nested generic traversals may
+        // fail closed here even when a small instantiation would fit;
+        // recomputing the product at instantiation time is future work.
+        let level_bound = if traversal_generic {
+            mncs_syntax::max_sequence_bound_for(&self.source_profile).unwrap_or(0)
+        } else {
+            bound_u32
+        };
+        let work_product = enclosing_product.saturating_mul(u64::from(level_bound));
         let envelope =
             mncs_syntax::max_iteration_work_product_for(&self.source_profile).unwrap_or(0);
         if work_product > envelope {
@@ -3996,7 +4130,7 @@ impl<'a> BodyBuilder<'a> {
             ));
             return;
         }
-        self.open_iterations.push((name.text.clone(), bound_u32));
+        self.open_iterations.push((name.text.clone(), level_bound));
         // Claim the hygienic recorded identity in elaboration (source)
         // order, so the mapping is deterministic. `#` never lexes inside a
         // name (MNL002), so a suffixed identity can never collide with a

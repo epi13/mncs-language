@@ -1,0 +1,8 @@
+mncs 0.10;
+// Narrow-profile root: the 500-wide traversal substituted into the generic
+// template exceeds this program's admitted ceiling and fails closed.
+module test.gceil.narrow_root;
+use test.gceil.wide_caller;
+fn probe() -> (result: i64) {
+    return test.gceil.wide_caller.probe();
+}

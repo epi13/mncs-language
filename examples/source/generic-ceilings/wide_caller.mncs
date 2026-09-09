@@ -1,0 +1,10 @@
+mncs 0.13;
+// Over-ceiling instantiation site: 500 passes this module's 0.13 call-site
+// ceiling (MNE225) so specialization runs; the narrow root's sweep must
+// refuse the substituted traversal.
+module test.gceil.wide_caller;
+use test.gceil.traverse_def;
+fn probe() -> (result: i64) {
+    let row: [i64; 500] = [0; 500];
+    return test.gceil.traverse_def.total<500>(row);
+}

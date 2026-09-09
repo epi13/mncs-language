@@ -1,0 +1,11 @@
+mncs 0.10;
+// Generic traversal definition for the instantiation-ceiling pin: admitted
+// under every profile (the bound is symbolic here); each concrete
+// substitution is ceiling-checked after specialization.
+module test.gceil.traverse_def;
+fn total<N: Nat>(xs: [i64; N]) -> (result: i64) {
+    iterate i over xs carrying s: i64 = 0 {
+        next s = s + xs[i];
+    }
+    return s;
+}
