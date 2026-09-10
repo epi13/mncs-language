@@ -50,7 +50,12 @@ fn corpus() -> String {
 }
 
 fn fixture_root() -> String {
-    example("fs-fixture")
+    let root = example("fs-fixture");
+    // The corpus pins an empty directory entry (`empty`), which git cannot
+    // track: a fresh clone lacks it, so ensure it exists before granting
+    // the root. Creating an already-present empty directory is a no-op.
+    let _ = std::fs::create_dir_all(format!("{root}/empty"));
+    root
 }
 
 fn diagnostics(path: &str) -> Vec<String> {
