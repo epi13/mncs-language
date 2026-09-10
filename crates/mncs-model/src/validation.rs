@@ -221,7 +221,12 @@ impl Program {
             let mut evidence_by_property: BTreeMap<&str, usize> = BTreeMap::new();
             for (evidence_index, evidence) in function.evidence.iter().enumerate() {
                 let evidence_path = format!("{function_path}.evidence[{evidence_index}]");
-                if !contract_ids.contains(evidence.property.as_str()) {
+                // Structural-decrease admission evidence (RFC 0047) is
+                // intrinsic: its anchor is the re-derived projection chain,
+                // not a user-declared contract, so it never needs a
+                // contract entry. Every other property keeps the linkage.
+                let intrinsic = evidence.property == crate::STRUCTURAL_DECREASE_PROPERTY;
+                if !intrinsic && !contract_ids.contains(evidence.property.as_str()) {
                     errors.push(diagnostic(
                         "MNCS012",
                         format!("{evidence_path}.property"),

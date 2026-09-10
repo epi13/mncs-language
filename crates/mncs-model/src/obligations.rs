@@ -12,6 +12,26 @@ use crate::{
 
 pub const OBLIGATION_SCHEMA_VERSION: &str = "0.2";
 
+/// Resolve one body operation to its semantic identity by searching every
+/// block of the named function. Returns `None` when the operation does
+/// not exist (sabotaged or stale evidence keeps a visible obligation
+/// anchored at the function instead).
+fn operation_subject(
+    program: &Program,
+    function: &crate::Function,
+    op: &str,
+) -> Option<SemanticId> {
+    let namespace = function.identity_namespace(&program.module);
+    let body = function.body.as_ref()?;
+    body.blocks.iter().find_map(|block| {
+        block
+            .operations
+            .iter()
+            .any(|operation| operation.id == op)
+            .then(|| crate::identity::operation_id(namespace, &function.name, &block.id, op))
+    })
+}
+
 /// Whether a body operation identity names the elaborator's bounded-loop
 /// counter decrement. Elaborator temporaries live under the unspellable
 /// `$mncs$` namespace, so no source binding can match this shape; matching
@@ -89,6 +109,69 @@ impl Program {
                     fallback: None,
                 });
                 *occurrence += 1;
+            }
+            // RFC 0047 structural decreases: one obligation per admitted
+            // call site, discharged by re-deriving the recorded projection
+            // chain from body and binding-table facts. The frontend's
+            // admission is never trusted: a missing artifact, an
+            // unparseable chain, or any broken link fails closed here.
+            for claim in function
+                .evidence
+                .iter()
+                .filter(|evidence| evidence.property == crate::STRUCTURAL_DECREASE_PROPERTY)
+            {
+                let parsed = claim
+                    .artifact
+                    .as_deref()
+                    .map(crate::parse_structural_decrease_claim)
+                    .and_then(Result::ok);
+                let status = match parsed.as_ref() {
+                    Some(parsed) => match crate::verify_structural_decrease(self, parsed) {
+                        Ok(()) => ObligationStatus::Pass,
+                        Err(_) => ObligationStatus::Fail,
+                    },
+                    None => ObligationStatus::Fail,
+                };
+                // Subjects resolve to operation identities when the named
+                // operations exist; an unparseable or bodiless claim still
+                // records a function-anchored obligation so the failure is
+                // visible rather than silent.
+                let mut subjects = Vec::new();
+                if let Some(parsed) = parsed.as_ref() {
+                    subjects.push(parsed.call_op.as_str());
+                    subjects.extend(parsed.links.iter().map(|link| link.op.as_str()));
+                }
+                let mut dependencies = vec![function_identity.clone()];
+                for op in &subjects {
+                    if let Some(subject) = operation_subject(self, function, op) {
+                        if !dependencies.contains(&subject) {
+                            dependencies.push(subject);
+                        }
+                    }
+                }
+                let subject = subjects
+                    .first()
+                    .and_then(|op| operation_subject(self, function, op))
+                    .unwrap_or_else(|| crate::identity::function_id(namespace, &function.name));
+                if !dependencies.contains(&subject) {
+                    dependencies.insert(1, subject.clone());
+                }
+                obligations.push(ObligationRecord {
+                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                    identity: body_obligation_id("structural-decrease", &subject),
+                    subject: subject.clone(),
+                    requirement: requirement_id("structural-decrease", &subject),
+                    status,
+                    method: "structural-decrease-rederivation".to_owned(),
+                    assumptions: function
+                        .assumptions
+                        .iter()
+                        .map(|assumption| assumption_id(namespace, assumption))
+                        .collect(),
+                    dependencies,
+                    freshness: EvidenceFreshness::Current,
+                    fallback: None,
+                });
             }
             for contract in &function.contracts {
                 let property = contract_id(namespace, &function.name, &contract.id);

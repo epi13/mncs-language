@@ -1532,7 +1532,14 @@ mod tests {
     #[test]
     fn source_profile_04_executes_minimum_and_maximum_accepted_bounds() {
         let compiler = ReferenceCompiler::default();
-        for bound in [1, mncs_model::SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND] {
+        // The admitted maximum comes from the profile registry (1..=32 for
+        // 0.4), not from `SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND`, which is
+        // the model-wide ceiling (1024) kept under its historical name so
+        // existing consumers keep compiling.
+        let admitted_max =
+            mncs_syntax::max_iteration_bound_for(mncs_syntax::SOURCE_PROFILE_VERSION_0_4)
+                .expect("0.4 iteration ceiling");
+        for bound in [1, admitted_max] {
             let source = format!(
                 "mncs 0.4; module profile.bounds{bound}; \
                  fn candidate(input: i64) -> (result: i64) {{ \
@@ -1575,6 +1582,7 @@ mod tests {
                 step_budget: 10_000,
                 policy: mncs_model::ExecutionPolicy::default(),
                 host_grants: Vec::new(),
+                call_depth_budget: None,
             };
             let body = mncs_model::execute_with_policy(&program, &request);
             let ssa = mncs_model::execute_ssa(&program, &request);
@@ -1627,13 +1635,15 @@ mod tests {
             .any(|diagnostic| diagnostic.code == "MNE117"));
 
         // ENG-PRESSURE-0021: a plain `let` may shadow a parameter in the
-        // same scope, so the old same-scope duplicate rejection no longer
-        // applies to value shadowing (index/state names stay `MNE110`,
-        // pinned by `pressure_rebinding::rebind_index_name_stays_reserved`).
+        // same scope, but only on Source Profile 0.13 or later (lexical
+        // shadowing is a 0.13 extension; older profiles keep the
+        // historical MNE110 refusal). Index/state names stay `MNE110` on
+        // every profile, pinned by
+        // `pressure_rebinding::rebind_index_name_stays_reserved`.
         let shadow = SourceEnvelope::inline(
             SourceArtifactKind::Program,
             "shadow.param",
-            "mncs 0.2; module shadow.param; fn ok(a: i32) -> (result: i32) { let a: i32 = 1; return a; }",
+            "mncs 0.13; module shadow.param; fn ok(a: i32) -> (result: i32) { let a: i32 = 1; return a; }",
         );
         let shadow = compiler.front_end(shadow);
         assert!(shadow.is_valid(), "{:?}", shadow.diagnostics);

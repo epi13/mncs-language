@@ -155,6 +155,15 @@ pub trait BackendAdapter {
         selected_ssa: CompilerArtifactRef,
         plan: &TargetLoweringPlan,
     ) -> BackendResult;
+    /// Execute one request against a lowered artifact.
+    ///
+    /// Effect contract: `request.policy.effects` distinguishes observation
+    /// from realization. Under `Record` (layered validation), adapters
+    /// that realize mutating effects MUST observe intents without external
+    /// mutation — validate authority, record the intent, return the
+    /// would-be value. Only `Realize` (the designated real phase) mutates.
+    /// Adapters that cannot observe (today: none realize mutating effects
+    /// except through the reference interpreters) must refuse explicitly.
     fn execute(
         &self,
         artifact: &BackendArtifact,
@@ -2245,10 +2254,12 @@ pub fn compare_body_ssa_and_backend(
     // (nested) call. Request-specific checks still run every time.
     let body_session = BodyExecutionSession::new(program);
     for case_ in &corpus.cases {
-        // Granted requests replay the same explicit host authority the
-        // experiment runner attaches, so host-effect corpora compare the
-        // realized observations instead of unanimous refusals.
-        let request = case_.request.with_host_grants(host_grants);
+        // Granted requests travel with validation authority, but validation
+        // OBSERVES rather than realizes: mutating effects validate their
+        // grants, record intents, and return would-be values without touching
+        // the external world. Only the designated real execution phase
+        // realizes, exactly once. Reads stay performed (replay is harmless).
+        let request = case_.request.with_host_grants_observed(host_grants);
         let body = body_session.execute(&request);
         trace_timing("compare-body", started);
         let ssa_result = ssa_session.as_ref().map_or_else(
@@ -2267,7 +2278,9 @@ pub fn compare_body_ssa_and_backend(
         invalid |= matches!(body.status, ExecutionStatus::InvalidRequest)
             || matches!(ssa_result.status, ExecutionStatus::InvalidRequest)
             || matches!(backend.status, ExecutionStatus::InvalidRequest);
-        if observable_agree(&body, ssa_result.status, &ssa_result.returned, &backend) {
+        if observable_agree(&body, ssa_result.status, &ssa_result.returned, &backend)
+            && effect_observations_agree(&body.effects, &ssa_result.effects, &backend.effects)
+        {
             matching += 1;
         } else {
             mismatching += 1;
@@ -2301,6 +2314,30 @@ pub fn compare_body_ssa_and_backend(
         mismatching_cases: mismatching,
         mismatches,
     }
+}
+
+/// Whether the three layers observed the same effect sequence. Compared
+/// by identity-bound triple (kind, target, capability) in execution
+/// order: provenance and layer-local operation identities legitimately
+/// differ (record-only intents carry no provenance), but the logical
+/// effect — what was requested, of which resource, under whose authority,
+/// in which order — must agree. Payload bytes are identified by the
+/// realized phase's provenance, not by validation replay.
+fn effect_observations_agree(
+    body: &[mncs_model::ExecutionEffectEvent],
+    ssa: &[mncs_model::ExecutionEffectEvent],
+    backend: &[mncs_model::ExecutionEffectEvent],
+) -> bool {
+    fn signature(effect: &mncs_model::ExecutionEffectEvent) -> (&str, &str, &str) {
+        (
+            effect.kind.as_str(),
+            effect.target.as_str(),
+            effect.capability.as_str(),
+        )
+    }
+    let body: Vec<(&str, &str, &str)> = body.iter().map(signature).collect();
+    body == ssa.iter().map(signature).collect::<Vec<_>>()
+        && body == backend.iter().map(signature).collect::<Vec<_>>()
 }
 
 fn observable_agree(
@@ -2534,6 +2571,7 @@ mod tests {
             step_budget: 64,
             policy: ExecutionPolicy::default(),
             host_grants: Vec::new(),
+            call_depth_budget: None,
         }
     }
 
@@ -2695,6 +2733,7 @@ mod tests {
             step_budget: budget,
             policy: mncs_model::ExecutionPolicy::default(),
             host_grants: Vec::new(),
+            call_depth_budget: None,
         };
         let generous = session.execute(&request(10_000));
         assert_eq!(generous.status, mncs_model::ExecutionStatus::Returned);
@@ -3068,6 +3107,7 @@ mod record_tests {
             step_budget: 256,
             policy: ExecutionPolicy::default(),
             host_grants: Vec::new(),
+            call_depth_budget: None,
         }
     }
 

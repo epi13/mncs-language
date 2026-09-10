@@ -335,6 +335,7 @@ impl Session {
             step_budget,
             policy: ExecutionPolicy::default(),
             host_grants: Vec::new(),
+            call_depth_budget: None,
         };
         if !grants.is_empty() {
             request = request.with_host_grants(&grants);

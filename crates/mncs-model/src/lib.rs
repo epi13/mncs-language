@@ -33,6 +33,7 @@ mod refinement;
 mod representation;
 mod ssa;
 mod ssa_execution;
+mod termination;
 mod translation;
 mod validation;
 mod verifier;
@@ -198,6 +199,11 @@ pub use ssa_execution::{
     LoweringDivergenceContext, LoweringExecutionComparison, LoweringExecutionMismatch,
     LoweringExecutionStatus, SsaExecutionResult, SsaExecutionSession, SsaExecutionTraceEntry,
     LOWERING_EXECUTION_COMPARISON_SCHEMA_VERSION, SSA_EXECUTION_RESULT_SCHEMA_VERSION,
+};
+pub use termination::{
+    parse_structural_decrease_claim, specialized_bounds_over_ceiling, verify_structural_decrease,
+    StructuralDecreaseClaim, StructuralDecreaseLink, MODEL_MAX_CALL_DEPTH,
+    STRUCTURAL_DECREASE_PROPERTY,
 };
 pub use translation::{
     TranslationCounterexample, TranslationJudgement, TranslationValidationResult,

@@ -495,6 +495,7 @@ fn execute_admit(
         step_budget: budget,
         policy: Default::default(),
         host_grants: Vec::new(),
+        call_depth_budget: None,
     };
     let result = BodyExecutionSession::new(program).execute(&request);
     if result.status != ExecutionStatus::Returned {

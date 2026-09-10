@@ -233,6 +233,18 @@ pub(crate) fn sha256_digest_bytes(view: &[u8]) -> [u8; 32] {
     Sha256::digest(view).into()
 }
 
+/// Whether a host operation mutates the external world (as opposed to a
+/// read or pure observation whose replay is side-effect free). This is the
+/// single predicate classifying mutating effects: validation layers may
+/// observe intents for operations named here but must never realize them;
+/// only the designated real execution phase realizes them, exactly once.
+/// Future filesystem mutation, process, network, persistent-store, and
+/// device effects join this predicate — never a per-effect special case
+/// at each interpreter.
+pub fn host_operation_mutates(operation_id: &str) -> bool {
+    matches!(operation_id, "blob_append")
+}
+
 /// Bounded append-only storage write (P-006 storage slice). Appends
 /// `bytes` (at most 64 per call, enforced by the view helpers at the call
 /// site) to the operator-granted path, creating it when absent. Returns
@@ -292,15 +304,21 @@ pub struct ExecutionRequest {
     /// default, so every existing corpus and request stays Unsupported.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub host_grants: Vec<HostGrant>,
+    /// Call-depth fuel override (RFC 0047). `None` selects the absolute
+    /// model cap; an explicit budget is honored up to that cap and
+    /// rejected above it, exactly like `step_budget` against its maximum.
+    /// Nested calls inherit the request's budget; only the depth grows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_depth_budget: Option<u64>,
 }
 
 impl ExecutionRequest {
-    /// Attach explicit host authority to one request
+    /// Attach explicit host authority to one request for REAL execution
     /// (HARNESS-PRESSURE-004). Requests without grants are returned
     /// unchanged; otherwise the effect policy switches to Realize and the
     /// grants travel with the request, still bounded and still matched by
-    /// capability name. Layered validation replays these granted requests
-    /// so body, SSA, and backend observations stay comparable.
+    /// capability name. Only the designated real execution phase uses
+    /// this: mutating effects realize exactly once here.
     pub fn with_host_grants(&self, grants: &[HostGrant]) -> Self {
         if grants.is_empty() {
             return self.clone();
@@ -309,6 +327,24 @@ impl ExecutionRequest {
         granted.policy.effects = EffectExecutionPolicy::Realize;
         granted.host_grants = grants.to_vec();
         granted
+    }
+
+    /// Attach explicit host authority to one request for VALIDATION
+    /// observation. Like [`Self::with_host_grants`] but the effect policy
+    /// switches to Record: reads and pure observations behave identically,
+    /// while mutating effects ([`host_operation_mutates`]) validate
+    /// authority, record the intent, and return the would-be value WITHOUT
+    /// performing the external mutation. Layered validation uses this so
+    /// body, SSA, and backend observations stay comparable while the
+    /// external world is mutated exactly once, by the real phase.
+    pub fn with_host_grants_observed(&self, grants: &[HostGrant]) -> Self {
+        if grants.is_empty() {
+            return self.clone();
+        }
+        let mut observed = self.clone();
+        observed.policy.effects = EffectExecutionPolicy::Record;
+        observed.host_grants = grants.to_vec();
+        observed
     }
 }
 
@@ -952,6 +988,7 @@ where
             step_budget: step.step_budget,
             policy: step.policy.clone(),
             host_grants: Vec::new(),
+            call_depth_budget: None,
         };
         let call = execute(request);
         result.calls += 1;
@@ -1342,6 +1379,7 @@ impl<'a> BodyExecutionSession<'a> {
             self,
             request,
             matches!(request.policy.effects, EffectExecutionPolicy::Record),
+            0,
         )
     }
 }
@@ -1354,6 +1392,7 @@ fn execute_inner(
     session: &BodyExecutionSession,
     request: &ExecutionRequest,
     record_effects: bool,
+    call_depth: u64,
 ) -> ExecutionResult {
     let program = session.program;
     if request.schema_version != EXECUTION_REQUEST_SCHEMA_VERSION {
@@ -1385,6 +1424,21 @@ fn execute_inner(
             format!("step_budget must be between 1 and {MAX_EXECUTION_BUDGET}"),
         );
     }
+    if request.call_depth_budget == Some(0) {
+        return ExecutionResult::invalid(
+            request,
+            "call_depth_budget must be at least 1 when present",
+        );
+    }
+    if request.call_depth_budget > Some(crate::MODEL_MAX_CALL_DEPTH) {
+        return ExecutionResult::invalid(
+            request,
+            format!(
+                "call_depth_budget must not exceed {}",
+                crate::MODEL_MAX_CALL_DEPTH
+            ),
+        );
+    }
     let Some(function) = program.functions.iter().find(|function| {
         function.name == request.target.function
             && function.identity_namespace(&program.module) == request.target.module
@@ -1398,6 +1452,25 @@ fn execute_inner(
         );
     };
     let namespace = function.identity_namespace(&program.module);
+    // RFC 0047 call-depth fuel: every nested call consumes one unit of a
+    // budget that defaults to the absolute model cap. Structural recursion
+    // is statically terminating, but native-stack recursion still needs
+    // deterministic accounting, so exhaustion is a fuel failure, never
+    // unbounded host stacking. The check lives at every function entry
+    // (including the top level, for hand-built requests) rather than only
+    // at call sites.
+    let depth_limit = request
+        .call_depth_budget
+        .unwrap_or(crate::MODEL_MAX_CALL_DEPTH);
+    if call_depth > depth_limit {
+        let mut exhausted = ExecutionResult::with_session(request, program, function, session);
+        exhausted.fail(
+            ExecutionStatus::BudgetExhausted,
+            None,
+            format!("execution call depth {call_depth} exceeded budget {depth_limit}"),
+        );
+        return exhausted;
+    }
     if let Err(reason) = validate_arguments(program, body, request) {
         return ExecutionResult::invalid(request, reason);
     }
@@ -1462,6 +1535,7 @@ fn execute_inner(
                 &mut result,
                 request,
                 record_effects,
+                call_depth,
             ) {
                 return stop;
             }
@@ -1558,6 +1632,7 @@ fn execute_inner(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_operation(
     session: &BodyExecutionSession,
     operation: &BodyOperation,
@@ -1566,6 +1641,7 @@ fn execute_operation(
     result: &mut ExecutionResult,
     request: &ExecutionRequest,
     record_effects: bool,
+    call_depth: u64,
 ) -> Option<ExecutionResult> {
     let program = session.program;
     match &operation.kind {
@@ -2792,8 +2868,11 @@ fn execute_operation(
                 // execution: nested calls inherit the request's grants,
                 // still bounded and still matched by capability name.
                 host_grants: request.host_grants.clone(),
+                // Depth fuel flows the same way: nested calls inherit the
+                // request's budget while the depth grows by one (RFC 0047).
+                call_depth_budget: request.call_depth_budget,
             };
-            let nested = execute_inner(session, &nested_request, record_effects);
+            let nested = execute_inner(session, &nested_request, record_effects, call_depth + 1);
             let trace_offset = result.steps;
             result.steps = result.steps.saturating_add(nested.steps);
             result.effects.extend(nested.effects.clone());
@@ -2861,7 +2940,18 @@ fn execute_operation(
                 );
                 return Some(result.clone());
             }
-            if !matches!(request.policy.effects, EffectExecutionPolicy::Realize) {
+            // Observation versus realization (effect-replay discipline):
+            // `Realize` performs mutating effects; `Record` observes them.
+            // Under `Record` with a matching grant, reads and pure
+            // observations behave exactly as under `Realize` (replay is
+            // side-effect free), while mutating operations validate
+            // authority, record the intent, and return the would-be value
+            // WITHOUT performing the external mutation. Only the
+            // designated real execution phase uses `Realize`, so one
+            // logical mutating effect realizes exactly once no matter how
+            // many validation layers observe it.
+            let observing = matches!(request.policy.effects, EffectExecutionPolicy::Record);
+            if !observing && !matches!(request.policy.effects, EffectExecutionPolicy::Realize) {
                 result.fail(
                     ExecutionStatus::Unsupported,
                     Some(identity.clone()),
@@ -3066,15 +3156,27 @@ fn execute_operation(
                     );
                     return Some(result.clone());
                 };
-                let appended = match append_grant_bytes(&grant.locator, &view) {
-                    Ok(count) => count,
-                    Err(reason) => {
-                        result.fail(
-                            ExecutionStatus::RuntimeFailure,
-                            Some(identity.clone()),
-                            reason,
-                        );
-                        return Some(result.clone());
+                // Mutating effects observe intent without realizing under
+                // `Record`: the grant, view bounds, and ordering are all
+                // validated, the would-be count is returned, and the intent
+                // is recorded with absent provenance — but the file is not
+                // touched. `host_operation_mutates` is the single predicate
+                // classifying mutating operations, so future
+                // filesystem/process/network mutations join this path.
+                debug_assert!(host_operation_mutates(operation_id));
+                let (appended, intent_only) = if observing {
+                    (view.len() as u64, true)
+                } else {
+                    match append_grant_bytes(&grant.locator, &view) {
+                        Ok(count) => (count, false),
+                        Err(reason) => {
+                            result.fail(
+                                ExecutionStatus::RuntimeFailure,
+                                Some(identity.clone()),
+                                reason,
+                            );
+                            return Some(result.clone());
+                        }
                     }
                 };
                 values.insert(
@@ -3092,11 +3194,8 @@ fn execute_operation(
                     kind: "host_write".to_owned(),
                     target: operation_id.clone(),
                     capability: capability.clone(),
-                    provenance: Some(format!(
-                        "grant:{} sha256:{}",
-                        grant.locator,
-                        sha256_hex(&view)
-                    )),
+                    provenance: (!intent_only)
+                        .then(|| format!("grant:{} sha256:{}", grant.locator, sha256_hex(&view))),
                 });
             } else {
                 let delivered: Vec<ExecutionValue> = grant
@@ -4606,6 +4705,7 @@ mod tests {
             step_budget: 1,
             policy: ExecutionPolicy::default(),
             host_grants: Vec::new(),
+            call_depth_budget: None,
         });
         result.trace = (0..MAX_TRACE_ENTRIES)
             .map(|step| ExecutionTraceEntry {

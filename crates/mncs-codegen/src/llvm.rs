@@ -590,6 +590,11 @@ fn emit_function(out: &mut String, function: &ScalarFunction, kernel_entry: bool
         .collect::<Vec<_>>();
     params.push("ptr %mncs_status".to_owned());
     params.push("ptr %mncs_value".to_owned());
+    // RFC 0047 call-depth fuel rides a hidden trailing parameter: every
+    // nested call passes one more than it received, so the counter is
+    // per-activation (no global to reset, no decrement to balance, exact
+    // interpreter equivalence). Drivers pass 0 at top level.
+    params.push("i64 %mncs_depth".to_owned());
     // The PTX kernel calling convention makes llc emit a launchable
     // `.entry` instead of a callable `.func`. It is only ever applied to
     // explicitly selected entries on the NVPTX triple.
@@ -602,9 +607,26 @@ fn emit_function(out: &mut String, function: &ScalarFunction, kernel_entry: bool
         params.join(", ")
     );
     out.push_str("entry:\n");
+    // Entry-block allocas stay ahead of every branch: LLVM treats `alloca`
+    // outside the entry block as a dynamic stack allocation, which
+    // restricted targets (notably BPF) reject. The depth check therefore
+    // runs after the static frame is formed, still before any user code.
     for value in names.all_values() {
         let _ = writeln!(out, "  %{}_slot = alloca {}", value.0, llvm_type(value.1));
     }
+    // RFC 0047 call-depth fuel, checked against the incoming depth so the
+    // boundary matches the reference interpreter exactly (incoming depth
+    // above the cap fails; depth grows by one per nested call).
+    let _ = writeln!(
+        out,
+        "  %mncs_depth_over = icmp ugt i64 %mncs_depth, {}",
+        mncs_model::MODEL_MAX_CALL_DEPTH
+    );
+    let _ = writeln!(
+        out,
+        "  br i1 %mncs_depth_over, label %mncs_fail, label %mncs_depth_ok"
+    );
+    out.push_str("mncs_depth_ok:\n");
     for (index, param) in function.params.iter().enumerate() {
         let _ = writeln!(
             out,
@@ -1726,6 +1748,8 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             loaded.push("ptr %mncs_value".to_owned());
             *split += 1;
             let tmp = format!("call{split}");
+            let _ = writeln!(out, "  %{tmp}_depth = add i64 %mncs_depth, 1");
+            loaded.push(format!("i64 %{tmp}_depth"));
             let _ = writeln!(out, "  call void @{callee}({})", loaded.join(", "));
             let _ = writeln!(out, "  %{tmp}_st = load i32, ptr %mncs_status");
             let _ = writeln!(out, "  %{tmp}_fail = icmp ne i32 %{tmp}_st, 0");

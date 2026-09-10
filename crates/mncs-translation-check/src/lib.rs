@@ -631,6 +631,7 @@ mod tests {
             step_budget: 64,
             policy: ExecutionPolicy::default(),
             host_grants: Vec::new(),
+            call_depth_budget: None,
         }
     }
 

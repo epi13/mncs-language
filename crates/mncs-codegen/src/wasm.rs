@@ -5,7 +5,9 @@
 
 use std::collections::BTreeMap;
 
-use mncs_model::{ExecutionStatus, ExecutionValue, FloatType, IntegerType, SemanticId};
+use mncs_model::{
+    ExecutionStatus, ExecutionValue, FloatType, IntegerType, SemanticId, MODEL_MAX_CALL_DEPTH,
+};
 
 pub const WASM_MAGIC: [u8; 4] = [0x00, 0x61, 0x73, 0x6d];
 pub const WASM_VERSION: [u8; 4] = [0x01, 0x00, 0x00, 0x00];
@@ -619,10 +621,14 @@ fn execute_raw(
     steps: &mut u64,
     depth: usize,
 ) -> Result<Vec<i64>, WasmTrap> {
-    if depth > module.functions.len() {
+    // RFC 0047 call-depth fuel: admitted structural recursion nests
+    // deeper than the module's function count, so the old acyclic bound
+    // is replaced by the absolute model cap. Exhaustion is deterministic
+    // fuel failure, matching the reference interpreter.
+    if depth as u64 > MODEL_MAX_CALL_DEPTH {
         return Err(trap(
-            ExecutionStatus::RuntimeFailure,
-            "backend call depth exceeded the acyclic module bound",
+            ExecutionStatus::BudgetExhausted,
+            "backend call depth exceeded the model call-depth cap",
         ));
     }
     let function = module.functions.get(function_index).ok_or_else(|| {

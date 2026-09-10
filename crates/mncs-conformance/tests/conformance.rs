@@ -318,6 +318,7 @@ fn nested_calls_reuse_execution_identity() {
             step_budget: 16384,
             policy: Default::default(),
             host_grants: Vec::new(),
+            call_depth_budget: None,
         },
     );
     assert_eq!(result.status, ExecutionStatus::Returned);

@@ -63,11 +63,12 @@ fn host_write_authority_gaps_are_rejected() {
 /// its appended count, and every realized effect is recorded with
 /// kind/target/capability while unexpected effects are prohibited.
 ///
-/// `experiment run` replays realized effects once per validation layer
-/// (body, SSA, backend), so the ledger holds each case's bytes once per
-/// layer; the test pins the trailing single-execution order instead of
-/// the absolute file length. Frozen `experiment execute` runs each case
-/// exactly once (see the evidence record).
+/// Effect-replay discipline: layered validation (body, SSA, backend)
+/// OBSERVES mutating intents without touching the file; only the real
+/// execution phase realizes, exactly once. The ledger therefore holds
+/// each case's bytes exactly once — one logical append is one external
+/// append. Frozen `experiment execute` runs each case exactly once (see
+/// the evidence record).
 #[test]
 fn granted_appends_land_in_order_with_effects_recorded() {
     let dir = std::env::temp_dir().join(format!(
@@ -113,15 +114,61 @@ fn granted_appends_land_in_order_with_effects_recorded() {
         .collect();
     assert_eq!(counts, vec![2, 2, 4]);
     let bytes = std::fs::read(&ledger).expect("read ledger");
-    assert!(
-        bytes.len() >= 8,
-        "layered replay must retain at least one full pass: {bytes:?}"
-    );
     assert_eq!(
-        &bytes[bytes.len() - 8..],
-        b"abcdefgh",
-        "appends land in corpus order: {bytes:?}"
+        &bytes, b"abcdefgh",
+        "one logical append is exactly one external append, in corpus order: {bytes:?}"
     );
+}
+
+/// Layered validation observes without realizing: body, SSA, and backend
+/// validation agree on the effect observations (kind/target/capability in
+/// order) while the destination file gains exactly the real phase's
+/// bytes — validation contributes zero bytes.
+#[test]
+fn validation_observes_without_realizing() {
+    let dir = std::env::temp_dir().join(format!(
+        "mncs-host-write-observe-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create workspace");
+    let ledger = dir.join("ledger.bin");
+    let output = binary()
+        .env("MNCS_LIBRARY_PATH", library_dir())
+        .args([
+            "experiment",
+            "run",
+            &source(),
+            "--backend",
+            "mncs-research-bytecode",
+            "--corpus",
+            &corpus(),
+            "--grant-write",
+            &format!("ledger_writer={}", ledger.to_string_lossy()),
+        ])
+        .output()
+        .expect("run experiment");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&output.stdout).expect("result JSON");
+    // The layered backend-lowering validation must PASS: body, SSA, and
+    // backend effect observations (including intents) agree.
+    let validations = result["translation_validations"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        validations
+            .iter()
+            .any(|validation| validation["judgement"] == "PASS"),
+        "layered validation must pass on observed intents: {validations:?}"
+    );
+    // And still exactly one external pass: validation mutated nothing.
+    let bytes = std::fs::read(&ledger).expect("read ledger");
+    assert_eq!(&bytes, b"abcdefgh", "validation must not append: {bytes:?}");
 }
 
 /// Without a grant the call fails closed: Unsupported, never a value, no

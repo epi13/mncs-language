@@ -509,12 +509,14 @@ pub fn elaborate_program_with_resolver_and_modules(
     let mut elaborated = BTreeMap::new();
     let mut declaration_spans = BTreeMap::new();
     let mut visiting = BTreeSet::new();
+    let mut module_ceilings = BTreeMap::new();
     let result = if let Err(mut errors) = elaborate_import_closure(
         ast,
         &recording_resolver,
         &mut elaborated,
         &mut declaration_spans,
         &mut visiting,
+        &mut module_ceilings,
     ) {
         diagnostics.append(&mut errors);
         Err(diagnostics)
@@ -532,13 +534,17 @@ pub fn elaborate_program_with_resolver_and_modules(
                     // substituted into generic specializations (RFC 0036).
                     // Generic definitions defer the admitted check, so each
                     // specialization's concrete traversal bounds are checked
-                    // here against the root program's admitted ceiling:
-                    // explicit Nat arguments already pass MNE225 at their
-                    // call site, and this sweep closes the remaining paths
-                    // (inference, cross-module substitution). Non-generic
-                    // functions keep exactly their definition-site behavior.
+                    // here against the admitted ceiling of the module that
+                    // defines the traversal: explicit Nat arguments already
+                    // pass MNE225 at their call site, and this sweep closes
+                    // the remaining paths (inference, cross-module
+                    // substitution). A narrow root never un-admits library
+                    // internals admitted under the library's own profile.
+                    // Non-generic functions keep exactly their
+                    // definition-site behavior.
                     let mut ceiling_errors = specialized_traversal_ceiling_errors(
                         &specialized,
+                        &module_ceilings,
                         mncs_syntax::max_sequence_bound_for(&ast.language_version.text)
                             .unwrap_or(0),
                         ast.module.span,
@@ -666,11 +672,23 @@ fn elaborate_import_closure(
     elaborated: &mut BTreeMap<String, Program>,
     declaration_spans: &mut BTreeMap<String, DeclarationSpans>,
     visiting: &mut BTreeSet<String>,
+    module_ceilings: &mut BTreeMap<String, u32>,
 ) -> Result<(), Vec<SourceDiagnostic>> {
     let name = ast.module.text.clone();
     if elaborated.contains_key(&name) {
         return Ok(());
     }
+    // RFC 0036: each module's admitted sequence ceiling travels with the
+    // closure so the post-specialization sweep can check every substituted
+    // traversal bound against the ceiling of the module that defines the
+    // traversal — not the root's. A narrow root never un-admits library
+    // internals admitted under the library's own profile, and a wide
+    // caller never smuggles an over-ceiling instantiation past the
+    // defining module's ceiling.
+    module_ceilings.insert(
+        name.clone(),
+        mncs_syntax::max_sequence_bound_for(&ast.language_version.text).unwrap_or(0),
+    );
     declaration_spans.insert(name.clone(), DeclarationSpans::from_ast(ast));
     if !visiting.insert(name.clone()) {
         return Err(vec![elaboration_diagnostic(
@@ -741,6 +759,7 @@ fn elaborate_import_closure(
             elaborated,
             declaration_spans,
             visiting,
+            module_ceilings,
         )?;
         let dependency_program = link_module_with_closure(
             &dependency_ast,
@@ -1963,6 +1982,7 @@ fn build_binding_table(
             scope: module_scope,
             declaration: identity,
             kind: SemanticBindingKind::Function,
+            projected_from: None,
         });
     }
     for finite_type in &program.finite_types {
@@ -1976,6 +1996,7 @@ fn build_binding_table(
             scope: module_scope.clone(),
             declaration: finite_type.identity.clone(),
             kind: SemanticBindingKind::FiniteType,
+            projected_from: None,
         });
         for variant in &finite_type.variants {
             bindings.push(SemanticBinding {
@@ -1985,6 +2006,7 @@ fn build_binding_table(
                 scope: module_scope.clone(),
                 declaration: variant.identity.clone(),
                 kind: SemanticBindingKind::FiniteVariant,
+                projected_from: None,
             });
         }
     }
@@ -1999,6 +2021,7 @@ fn build_binding_table(
             scope: module_scope.clone(),
             declaration: record_type.identity.clone(),
             kind: SemanticBindingKind::RecordType,
+            projected_from: None,
         });
         for field in &record_type.fields {
             let identity = record_field_id(&namespace_name, &record_type.name, &field.name);
@@ -2009,6 +2032,7 @@ fn build_binding_table(
                 scope: module_scope.clone(),
                 declaration: identity,
                 kind: SemanticBindingKind::RecordField,
+                projected_from: None,
             });
         }
     }
@@ -2038,6 +2062,7 @@ fn build_binding_table(
             scope: scope.clone(),
             declaration: declaration.clone(),
             kind,
+            projected_from: resolution.projected_from.clone(),
         });
     }
     for table in imported_tables {
@@ -2680,8 +2705,12 @@ fn elaborate_function(
         .map(|clause| clause.name.text.clone())
         .collect::<Vec<_>>();
     let mut env = BindingEnv::new(&ast.module.text, &function.name.text);
-    for (input, parameter) in function.inputs.iter().zip(&parameters) {
-        env.bind(
+    // RFC 0047 designated measure: the first parameter's binding (with its
+    // body value, which is the parameter name) seeds descendant provenance.
+    // A refused binding designates nothing, failing self-calls closed.
+    let mut measure_binding: Option<SemanticId> = None;
+    for (index, (input, parameter)) in function.inputs.iter().zip(&parameters).enumerate() {
+        let bound = env.bind(
             input.name.text.clone(),
             input.name.text.clone(),
             parameter.ty.clone(),
@@ -2689,7 +2718,20 @@ fn elaborate_function(
             BoundNameKind::Parameter,
             &mut diagnostics,
         );
+        if index == 0 {
+            measure_binding = bound;
+        }
     }
+    let measure = measure_binding.map(|binding| {
+        (
+            binding,
+            function
+                .inputs
+                .first()
+                .map(|input| input.name.text.clone())
+                .unwrap_or_default(),
+        )
+    });
     // A bodyless tail `return name;` whose type differs from the declared output
     // only by the exact-to-bounded-view borrow takes the general path, which
     // elaborates the returned expression against the output type and
@@ -2709,7 +2751,7 @@ fn elaborate_function(
                     && exact_view_borrow_dimensions(&returned.ty, &output_type).is_some()
             })
     });
-    let (blocks, bounded_iterations, builder_resolutions) =
+    let (blocks, bounded_iterations, builder_resolutions, structural_evidence) =
         if function.body.statements.is_empty() && tail_name.is_some() && !tail_borrows {
             let AstExpr::Name(returned_name) = &function.body.returned_value else {
                 unreachable!("guarded above")
@@ -2735,6 +2777,7 @@ fn elaborate_function(
                 }],
                 Vec::new(),
                 Vec::new(),
+                Vec::new(),
             )
         } else {
             let mut builder = BodyBuilder::new(
@@ -2749,6 +2792,7 @@ fn elaborate_function(
                 direct_imports,
                 generic_map.clone(),
                 ast.language_version.text.clone(),
+                measure.clone(),
             );
             builder.elaborate_statements(&function.body.statements, &mut env, &mut diagnostics);
             if let Some(returned) = builder.elaborate_expr(
@@ -2764,10 +2808,12 @@ fn elaborate_function(
                 );
             }
             let builder_resolutions = std::mem::take(&mut builder.resolutions);
+            let structural_evidence = std::mem::take(&mut builder.structural_evidence);
             (
                 builder.blocks,
                 builder.bounded_iterations,
                 builder_resolutions,
+                structural_evidence,
             )
         };
     resolutions.extend(env.take_resolutions());
@@ -2792,7 +2838,15 @@ fn elaborate_function(
             .filter(|clause| clause.kind.text == "assumes")
             .map(|clause| clause.name.text.clone())
             .collect(),
-        evidence: Vec::new(),
+        evidence: structural_evidence
+            .into_iter()
+            .map(|claim| mncs_model::EvidenceClaim {
+                property: mncs_model::STRUCTURAL_DECREASE_PROPERTY.to_owned(),
+                verifier: "structural-decrease-rederivation".to_owned(),
+                status: mncs_model::EvidenceStatus::Claimed,
+                artifact: serde_json::to_string(&claim).ok(),
+            })
+            .collect(),
         failure: FailureMode::Isolated,
         body: Some(FunctionBody {
             schema_version: EXECUTABLE_BODY_SCHEMA_VERSION.to_owned(),
@@ -2912,23 +2966,21 @@ impl FunctionSignature {
 /// into generic specializations (RFC 0036). Generic definitions defer the
 /// admitted check (see the iterate-domain lowering), so this sweep checks
 /// every specialization's concrete `Exact`/`UpTo` traversal bounds against
-/// the root program's admitted ceiling. Symbolic bounds that forward to an
-/// outer caller stay deferred until that caller specializes. Only functions
-/// named by specialization records are examined, so non-generic programs
-/// keep exactly their definition-site behavior.
+/// the admitted ceiling of the module that defines the traversal.
+/// `module_ceilings` carries each closure member's ceiling; `fallback` (the
+/// root program's ceiling) covers defining modules the closure did not
+/// record. Symbolic bounds that forward to an outer caller stay deferred
+/// until that caller specializes. Only functions named by specialization
+/// records are examined, so non-generic programs keep exactly their
+/// definition-site behavior.
 fn specialized_traversal_ceiling_errors(
     program: &Program,
-    admitted: u32,
+    module_ceilings: &BTreeMap<String, u32>,
+    fallback: u32,
     span: SourceSpan,
 ) -> Vec<SourceDiagnostic> {
-    fn concrete_over_ceiling(bound: &mncs_model::SequenceBound, admitted: u32) -> bool {
-        match bound {
-            mncs_model::SequenceBound::Exact(length) | mncs_model::SequenceBound::UpTo(length) => {
-                *length > admitted
-            }
-            mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => false,
-        }
-    }
+    // One shared implementation with the model so the
+    // definition/instantiation contract cannot drift between layers.
     // Keyed like `specialization_function` (see generics.rs).
     let by_id: BTreeMap<SemanticId, &Function> = program
         .functions
@@ -2943,43 +2995,13 @@ fn specialized_traversal_ceiling_errors(
         let Some(body) = function.body.as_ref() else {
             continue;
         };
-        let mut over = false;
-        'blocks: for block in &body.blocks {
-            for operation in &block.operations {
-                let bounds_exceeded = match &operation.kind {
-                    BodyOperationKind::SequenceLength { bound }
-                    | BodyOperationKind::SequenceProject { bound, .. }
-                    | BodyOperationKind::SequenceReplace { bound, .. } => {
-                        concrete_over_ceiling(bound, admitted)
-                    }
-                    BodyOperationKind::ViewConstruct {
-                        source_bound,
-                        view_bound,
-                    } => {
-                        concrete_over_ceiling(source_bound, admitted)
-                            || concrete_over_ceiling(view_bound, admitted)
-                    }
-                    _ => false,
-                };
-                if bounds_exceeded {
-                    over = true;
-                    break 'blocks;
-                }
-            }
-        }
-        // Iteration records carry the same substituted sequence bound that
-        // drives their loop; both must agree that no instantiation exceeds
-        // the admitted ceiling, so the instantiated work product can never
-        // exceed the product admitted at definition.
-        if !over {
-            over = body.bounded_iterations.iter().any(|iteration| {
-                iteration
-                    .sequence_bound
-                    .as_ref()
-                    .is_some_and(|bound| concrete_over_ceiling(bound, admitted))
-            });
-        }
-        if over {
+        // The traversal text lives in the defining module, so its profile
+        // governs the substituted bound: a narrow root never un-admits
+        // library internals, and a wide caller never smuggles an
+        // over-ceiling instantiation past the definition site.
+        let home = function.identity_namespace(&program.module);
+        let admitted = module_ceilings.get(home).copied().unwrap_or(fallback);
+        if !mncs_model::specialized_bounds_over_ceiling(body, admitted).is_empty() {
             errors.push(elaboration_diagnostic(
                 "MNE182",
                 format!("specialized traversal bound exceeds the profile ceiling {admitted}"),
@@ -3001,6 +3023,15 @@ fn reject_recursive_calls(
     signatures: &BTreeMap<String, FunctionSignature>,
     diagnostics: &mut Vec<SourceDiagnostic>,
 ) {
+    // RFC 0047 (Source Profile 0.13+): direct self-calls leave the
+    // syntactic graph here and reach the elaboration-time structural check,
+    // which decides over resolved bindings. Mutual and indirect cycles
+    // stay syntactic rejections on every profile, and older profiles keep
+    // the historical behavior of rejecting every self-cycle up front.
+    let structural_recursion = mncs_syntax::profile_at_least(
+        &ast.language_version.text,
+        mncs_syntax::SOURCE_PROFILE_VERSION_0_13,
+    );
     let graph = ast
         .functions
         .iter()
@@ -3011,6 +3042,9 @@ fn reject_recursive_calls(
                 calls_in_statement(statement, &mut calls);
             }
             calls.retain(|callee| signatures.contains_key(callee));
+            if structural_recursion {
+                calls.remove(&function.name.text);
+            }
             (function.name.text.clone(), calls)
         })
         .collect::<BTreeMap<_, _>>();
@@ -3231,6 +3265,22 @@ impl ResolvedBinding {
     }
 }
 
+/// Structural-recursion descendant provenance (RFC 0047) for one resolved
+/// binding: either the designated measure itself or a match-payload
+/// projection from a parent binding through one projection operation.
+/// Bindings with no entry here (`let` aliases, call results, rebuilt
+/// values, arithmetic, iteration state) are opaque and never count as
+/// structural descendants, even when the spelling coincides.
+#[derive(Debug, Clone)]
+enum RecursionProvenance {
+    Measure,
+    Projected {
+        parent_binding: SemanticId,
+        parent_value: String,
+        op: String,
+    },
+}
+
 /// Lexical role of a bound name; recorded so tools can distinguish parameter,
 /// local binding, carried iteration-state, and traversal-index declarations.
 #[derive(Debug, Clone, Copy)]
@@ -3285,6 +3335,9 @@ impl BindingEnv {
         }
     }
 
+    /// Bind one name, returning the fresh binding identity (or `None` when
+    /// the binding was refused with `MNE110`). Callers that do not track
+    /// descendant provenance ignore the return.
     fn bind(
         &mut self,
         name: String,
@@ -3293,7 +3346,45 @@ impl BindingEnv {
         declaration: SourceSpan,
         kind: BoundNameKind,
         diagnostics: &mut Vec<SourceDiagnostic>,
-    ) {
+    ) -> Option<SemanticId> {
+        self.bind_inner(name, id, ty, declaration, kind, None, diagnostics)
+    }
+
+    /// Bind one match-payload name projected from `subject` (RFC 0047): the
+    /// declaration resolution records the subject binding so the kernel can
+    /// re-derive the descendant chain. A subject without a resolved binding
+    /// (call results, rebuilt values) binds exactly like an opaque `let`.
+    fn bind_projection(
+        &mut self,
+        name: String,
+        id: String,
+        ty: BodyType,
+        declaration: SourceSpan,
+        subject: Option<SemanticId>,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<SemanticId> {
+        self.bind_inner(
+            name,
+            id,
+            ty,
+            declaration,
+            BoundNameKind::Binding,
+            subject,
+            diagnostics,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn bind_inner(
+        &mut self,
+        name: String,
+        id: String,
+        ty: BodyType,
+        declaration: SourceSpan,
+        kind: BoundNameKind,
+        projection_subject: Option<SemanticId>,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<SemanticId> {
         let scope_index = self.scopes.len() - 1;
         // ENG-PRESSURE-0021: a plain `let` may rebind a name already bound
         // to a plain value (a `let` or a parameter) in the same scope. The
@@ -3319,7 +3410,7 @@ impl BindingEnv {
                     "binding is ambiguous in this lexical scope",
                     declaration,
                 ));
-                return;
+                return None;
             }
         }
         let slot = self.scope_slots[scope_index];
@@ -3330,7 +3421,7 @@ impl BindingEnv {
             .expect("scope stack is non-empty");
         let scope_identity = self.scope_ids[scope_index].clone();
         let binding = binding_id(&scope_identity, kind.binding_kind(), slot);
-        let resolution = NameResolution::new(declaration, declaration, kind.resolved_kind())
+        let mut resolution = NameResolution::new(declaration, declaration, kind.resolved_kind())
             .with_binding_metadata(
                 binding.clone(),
                 self.namespace.clone(),
@@ -3339,6 +3430,9 @@ impl BindingEnv {
                 ResolutionProvenance::Local,
                 binding.clone(),
             );
+        if let Some(subject) = projection_subject {
+            resolution = resolution.with_projection_subject(subject);
+        }
         self.resolutions.push(resolution);
         scope.insert(
             name.clone(),
@@ -3346,7 +3440,7 @@ impl BindingEnv {
                 ResolvedBinding {
                     id,
                     ty,
-                    binding: Some(binding),
+                    binding: Some(binding.clone()),
                     namespace: Some(self.namespace.clone()),
                     scope: Some(scope_identity),
                     path: vec![name],
@@ -3356,6 +3450,7 @@ impl BindingEnv {
                 kind,
             ),
         );
+        Some(binding)
     }
 
     fn resolve(
@@ -3512,6 +3607,15 @@ struct BodyBuilder<'a> {
     /// feature gates. Older profiles keep their historical refusals and
     /// fingerprints; gates query through `profile_at_least`.
     source_profile: String,
+    /// RFC 0047 descendant provenance over resolved bindings, seeded with
+    /// the recursive parameter (`Measure`) when one is designated.
+    recursion_provenance: BTreeMap<SemanticId, RecursionProvenance>,
+    /// The designated structural measure: first-parameter binding and its
+    /// body value, when the function declares at least one parameter.
+    measure: Option<(SemanticId, String)>,
+    /// Admitted structural-decrease records for this function (R5), drained
+    /// into `Function.evidence` when elaboration succeeds.
+    structural_evidence: Vec<mncs_model::StructuralDecreaseClaim>,
 }
 
 /// Admissible literal range of an integer type as `(min, max)` (CP-0010).
@@ -3594,8 +3698,13 @@ impl<'a> BodyBuilder<'a> {
         direct_imports: &'a BTreeSet<String>,
         generic_map: BTreeMap<String, mncs_model::GenericParamKind>,
         source_profile: String,
+        measure: Option<(SemanticId, String)>,
     ) -> Self {
         let owner = function_id(&namespace, &function);
+        let mut recursion_provenance = BTreeMap::new();
+        if let Some((binding, _)) = &measure {
+            recursion_provenance.insert(binding.clone(), RecursionProvenance::Measure);
+        }
         Self {
             blocks: vec![BodyBlock {
                 id: "entry".to_owned(),
@@ -3623,6 +3732,9 @@ impl<'a> BodyBuilder<'a> {
             iteration_name_uses: BTreeMap::new(),
             iteration_depth: 0,
             source_profile,
+            recursion_provenance,
+            measure,
+            structural_evidence: Vec::new(),
         }
     }
 
@@ -3651,6 +3763,107 @@ impl<'a> BodyBuilder<'a> {
     /// Admitted sequence/view length ceiling for the active profile.
     fn admitted_sequence_ceiling(&self) -> u32 {
         mncs_syntax::max_sequence_bound_for(&self.source_profile).unwrap_or(0)
+    }
+
+    /// RFC 0047 direct-self-call admission (Source Profile 0.13+ only).
+    /// On success the call site's structural-decrease record joins
+    /// `structural_evidence` (R5), carrying the param-first projection
+    /// chain the kernel re-derives. On failure the historical MNE130 fires
+    /// with wording that names the narrow exception. Older profiles never
+    /// decide here: their pre-elaboration check owns every self-cycle
+    /// exactly as before, so no diagnostic can double-report.
+    fn check_self_call_structure(
+        &mut self,
+        signature: &FunctionSignature,
+        first_argument: Option<&ResolvedBinding>,
+        call_op: &str,
+        span: SourceSpan,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) {
+        if !self.profile_0_13() {
+            return;
+        }
+        // R1: the recursive parameter (first) has finite type. Generic
+        // parameters are never finite here; generic recursion stays
+        // rejected until a design for it exists.
+        let finite_first = matches!(signature.inputs.first(), Some(BodyType::Finite { .. }));
+        let argument =
+            first_argument.map(|resolved| (resolved.binding.clone(), resolved.id.clone()));
+        let admitted = match (finite_first, self.measure.clone(), argument) {
+            (
+                true,
+                Some((measure_binding, measure_value)),
+                Some((Some(arg_binding), arg_value)),
+            ) => self
+                .descendant_chain(&measure_binding, &arg_binding, &arg_value)
+                .map(|links| (measure_binding, measure_value, arg_binding, links)),
+            _ => None,
+        };
+        match admitted {
+            Some((param_binding, param_value, arg_binding, links)) => {
+                self.structural_evidence
+                    .push(mncs_model::StructuralDecreaseClaim {
+                        call_op: call_op.to_owned(),
+                        function: self.owner.clone(),
+                        param_binding,
+                        param_value,
+                        arg_binding,
+                        links,
+                    });
+            }
+            None => diagnostics.push(elaboration_diagnostic(
+                "MNE130",
+                "recursive call cycles are rejected; only a direct self-call that consumes a match-bound structural descendant of a finite first parameter is admitted on Source Profile 0.13 or later (RFC 0047)",
+                span,
+            )),
+        }
+    }
+
+    /// Walk resolved-binding provenance from the argument back to the
+    /// measure (R2/R3), collecting param-first projection links. Returns
+    /// `None` for a root call, an opaque argument (aliases, call results,
+    /// rebuilt values, arithmetic, iteration state), a chain that leaves
+    /// the measure's descent, or a chain that cannot close within the map
+    /// (defensive fuel: provenance strictly descends binding-creation
+    /// order, so honest chains always close).
+    fn descendant_chain(
+        &self,
+        measure_binding: &SemanticId,
+        arg_binding: &SemanticId,
+        arg_value: &str,
+    ) -> Option<Vec<mncs_model::StructuralDecreaseLink>> {
+        let mut links = Vec::new();
+        let mut current_binding = arg_binding.clone();
+        let mut current_value = arg_value.to_owned();
+        for _ in 0..self.recursion_provenance.len() + 1 {
+            let provenance = self.recursion_provenance.get(&current_binding)?;
+            match provenance {
+                RecursionProvenance::Measure => {
+                    if current_binding == *measure_binding && !links.is_empty() {
+                        links.reverse();
+                        return Some(links);
+                    }
+                    return None;
+                }
+                RecursionProvenance::Projected {
+                    parent_binding,
+                    parent_value,
+                    op,
+                    ..
+                } => {
+                    links.push(mncs_model::StructuralDecreaseLink {
+                        op: op.clone(),
+                        parent_binding: parent_binding.clone(),
+                        child_binding: current_binding.clone(),
+                        parent_value: parent_value.clone(),
+                        child_value: current_value.clone(),
+                    });
+                    current_binding = parent_binding.clone();
+                    current_value = parent_value.clone();
+                }
+            }
+        }
+        None
     }
 
     fn elaborate_statements(
@@ -6191,7 +6404,16 @@ impl<'a> BodyBuilder<'a> {
                     return None;
                 }
                 let mut operands = Vec::new();
-                for (source_argument, parameter_type) in arguments.iter().zip(&concrete_inputs) {
+                // The elaborated first argument (RFC 0047): a direct
+                // self-call is admitted only when this value resolves to a
+                // strict structural descendant of the recursive parameter.
+                // A borrowed operand carries the borrow's own binding, which
+                // is never a match descendant, so borrowed first arguments
+                // stay rejected exactly like any other opaque shape.
+                let mut first_argument: Option<ResolvedBinding> = None;
+                for (index, (source_argument, parameter_type)) in
+                    arguments.iter().zip(&concrete_inputs).enumerate()
+                {
                     let argument = self.elaborate_expr(
                         source_argument,
                         Some(parameter_type),
@@ -6206,7 +6428,10 @@ impl<'a> BodyBuilder<'a> {
                         if let Some(borrowed) =
                             self.borrow_view_for_expected(&argument, parameter_type)
                         {
-                            operands.push(borrowed.id);
+                            operands.push(borrowed.id.clone());
+                            if index == 0 {
+                                first_argument = Some(borrowed);
+                            }
                             continue;
                         }
                         diagnostics.push(elaboration_diagnostic(
@@ -6214,6 +6439,9 @@ impl<'a> BodyBuilder<'a> {
                             "call argument type does not match the callee parameter",
                             source_argument.span(),
                         ));
+                    }
+                    if index == 0 {
+                        first_argument = Some(argument.clone());
                     }
                     operands.push(argument.id);
                 }
@@ -6288,6 +6516,20 @@ impl<'a> BodyBuilder<'a> {
                     lowering: None,
                     portability: None,
                 });
+                // Direct self-calls reach the cycle check here, with resolved
+                // bindings available (RFC 0047). Older profiles stay silent:
+                // their pre-elaboration check owns every self-cycle exactly
+                // as before. On 0.13+ a self-call is admitted only with a
+                // re-derivable structural decrease; anything else is MNE130.
+                if signature.identity == self.owner {
+                    self.check_self_call_structure(
+                        &signature,
+                        first_argument.as_ref(),
+                        &id,
+                        *span,
+                        diagnostics,
+                    );
+                }
                 let binding = ResolvedBinding::plain(id, concrete_output.clone());
                 if let Some(expected_ty) = expected {
                     if expected_ty != &binding.ty {
@@ -6642,14 +6884,31 @@ impl<'a> BodyBuilder<'a> {
                             lowering: None,
                             portability: None,
                         });
-                        env.bind(
+                        let child_binding = env.bind_projection(
                             binding_name.text.clone(),
-                            projected,
+                            projected.clone(),
                             expected_field.clone(),
                             binding_name.span,
-                            BoundNameKind::Binding,
+                            subject.binding.clone(),
                             diagnostics,
                         );
+                        // RFC 0047 descendant provenance over resolved
+                        // bindings: a payload of a name carrying provenance
+                        // extends the chain; a payload of an opaque subject
+                        // (call results, aliases, rebuilt values) records
+                        // nothing and can never justify a recursive call.
+                        if let (Some(child), Some(parent)) =
+                            (child_binding, subject.binding.clone())
+                        {
+                            self.recursion_provenance.insert(
+                                child,
+                                RecursionProvenance::Projected {
+                                    parent_binding: parent,
+                                    parent_value: subject.id.clone(),
+                                    op: projected.clone(),
+                                },
+                            );
+                        }
                     }
                     if let Some(value) =
                         self.elaborate_expr(arm_expr, Some(&result_type), env, diagnostics)

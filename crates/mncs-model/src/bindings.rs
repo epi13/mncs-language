@@ -59,6 +59,11 @@ pub struct SemanticBinding {
     pub scope: SemanticId,
     pub declaration: SemanticId,
     pub kind: SemanticBindingKind,
+    /// For match-payload bindings (RFC 0047): the resolved binding the
+    /// payload was projected from. Absent for every other binding kind, so
+    /// existing tables canonicalize identically with or without this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projected_from: Option<SemanticId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

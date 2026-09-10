@@ -11,7 +11,8 @@ use mncs_model::{
     ArithmeticIntent, BackendCapabilityManifest, BackendConfiguration, BackendEvidence,
     BackendIdentity, BackendResult, CompilerArtifactRef, CompilerDiagnostic,
     CompilerDiagnosticKind, ExecutionRequest, ExecutionStatus, Program, SsaModule,
-    TargetContractRef, TargetLoweringPlan, TransformationStatus, SSA_SCHEMA_VERSION,
+    TargetContractRef, TargetLoweringPlan, TransformationStatus, MODEL_MAX_CALL_DEPTH,
+    SSA_SCHEMA_VERSION,
 };
 use serde::{Deserialize, Serialize};
 
@@ -389,6 +390,8 @@ fn emit_clif_function(out: &mut String, function: &ScalarFunction) {
         .collect::<Vec<_>>();
     sig.push("i64".to_owned());
     sig.push("i64".to_owned());
+    // RFC 0047 §5: trailing call-depth fuel (machine ABI).
+    sig.push("i64".to_owned());
     let _ = writeln!(
         out,
         "function %{}({}) {{",
@@ -405,6 +408,7 @@ fn emit_clif_function(out: &mut String, function: &ScalarFunction) {
                 .collect::<Vec<_>>();
             list.push("st: i64".to_owned());
             list.push("val: i64".to_owned());
+            list.push("depth: i64".to_owned());
             list.join(", ")
         } else {
             block
@@ -1211,7 +1215,7 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
             let list = args
                 .iter()
                 .map(|arg| names.value(arg).to_owned())
-                .chain(["st".to_owned(), "val".to_owned()])
+                .chain(["st".to_owned(), "val".to_owned(), "depth_next".to_owned()])
                 .collect::<Vec<_>>()
                 .join(", ");
             let _ = writeln!(out, "        call %{callee}({list})");
@@ -1885,6 +1889,9 @@ where
         }
         sig.params.push(AbiParam::new(types::I64));
         sig.params.push(AbiParam::new(types::I64));
+        // RFC 0047 §5: trailing call-depth fuel actually consumed by the
+        // machine prologue below.
+        sig.params.push(AbiParam::new(types::I64));
         let id = module
             .declare_function(&function.export_name, Linkage::Export, &sig)
             .map_err(|error| error.to_string())?;
@@ -1898,6 +1905,8 @@ where
             ctx.func.signature.params.push(AbiParam::new(types::I64));
         }
         ctx.func.signature.params.push(AbiParam::new(types::I64));
+        ctx.func.signature.params.push(AbiParam::new(types::I64));
+        // RFC 0047 §5: trailing call-depth fuel; mirrors the declare pass.
         ctx.func.signature.params.push(AbiParam::new(types::I64));
         {
             let mut builder = FunctionBuilder::new(&mut ctx.func, &mut fn_ctx);
@@ -1955,6 +1964,29 @@ where
             }
             let status_ptr = fn_params[function.params.len()];
             let value_ptr = fn_params[function.params.len() + 1];
+            let depth = fn_params[function.params.len() + 2];
+            // RFC 0047 §5: static call-depth fuel. The host trampoline seeds
+            // depth 0 and every same-module call passes depth + 1, so
+            // unbounded self-recursion fails closed with RuntimeFailure via
+            // the shared `fail` block instead of overflowing the native
+            // stack. The check sits in the entry block ahead of the body, so
+            // a depth over MODEL_MAX_CALL_DEPTH never executes user code.
+            let depth_limit = builder
+                .ins()
+                .iconst(types::I64, MODEL_MAX_CALL_DEPTH as i64);
+            let over_depth = builder
+                .ins()
+                .icmp(IntCC::UnsignedGreaterThan, depth, depth_limit);
+            let depth_ok = builder.create_block();
+            builder.ins().brif(
+                over_depth,
+                fail,
+                &[] as &[BlockArg],
+                depth_ok,
+                &[] as &[BlockArg],
+            );
+            builder.switch_to_block(depth_ok);
+            builder.seal_block(depth_ok);
             for block in function.blocks.iter().skip(1) {
                 let clif_block = blocks[&block.id];
                 for param in &block.params {
@@ -2928,6 +2960,10 @@ where
                                 args.iter().map(|arg| values[arg]).collect();
                             call_args.push(status_ptr);
                             call_args.push(value_ptr);
+                            // RFC 0047 §5: thread depth + 1 into the callee;
+                            // the callee prologue enforces the ceiling.
+                            let depth_next = builder.ins().iadd_imm(depth, 1);
+                            call_args.push(depth_next);
                             builder.ins().call(callee_ref, &call_args);
                             let status =
                                 builder
@@ -3308,20 +3344,24 @@ impl JitSession {
         let mut value: i64 = 0;
         unsafe {
             match raw_args.len() {
+                // RFC 0047 §5: every direct host entry seeds call-depth fuel
+                // at zero via the trailing hidden parameter; the callee
+                // prologue enforces MODEL_MAX_CALL_DEPTH from there.
                 0 => {
-                    let f: extern "C" fn(*mut i32, *mut i64) = std::mem::transmute(ptr);
-                    f(&mut status, &mut value);
+                    let f: extern "C" fn(*mut i32, *mut i64, i64) = std::mem::transmute(ptr);
+                    f(&mut status, &mut value, 0);
                 }
                 1 => {
-                    let f: extern "C" fn(i64, *mut i32, *mut i64) = std::mem::transmute(ptr);
-                    f(raw_args[0], &mut status, &mut value);
+                    let f: extern "C" fn(i64, *mut i32, *mut i64, i64) = std::mem::transmute(ptr);
+                    f(raw_args[0], &mut status, &mut value, 0);
                 }
                 2 => {
-                    let f: extern "C" fn(i64, i64, *mut i32, *mut i64) = std::mem::transmute(ptr);
-                    f(raw_args[0], raw_args[1], &mut status, &mut value);
+                    let f: extern "C" fn(i64, i64, *mut i32, *mut i64, i64) =
+                        std::mem::transmute(ptr);
+                    f(raw_args[0], raw_args[1], &mut status, &mut value, 0);
                 }
                 3 => {
-                    let f: extern "C" fn(i64, i64, i64, *mut i32, *mut i64) =
+                    let f: extern "C" fn(i64, i64, i64, *mut i32, *mut i64, i64) =
                         std::mem::transmute(ptr);
                     f(
                         raw_args[0],
@@ -3329,10 +3369,11 @@ impl JitSession {
                         raw_args[2],
                         &mut status,
                         &mut value,
+                        0,
                     );
                 }
                 4 => {
-                    let f: extern "C" fn(i64, i64, i64, i64, *mut i32, *mut i64) =
+                    let f: extern "C" fn(i64, i64, i64, i64, *mut i32, *mut i64, i64) =
                         std::mem::transmute(ptr);
                     f(
                         raw_args[0],
@@ -3341,10 +3382,11 @@ impl JitSession {
                         raw_args[3],
                         &mut status,
                         &mut value,
+                        0,
                     );
                 }
                 5 => {
-                    let f: extern "C" fn(i64, i64, i64, i64, i64, *mut i32, *mut i64) =
+                    let f: extern "C" fn(i64, i64, i64, i64, i64, *mut i32, *mut i64, i64) =
                         std::mem::transmute(ptr);
                     f(
                         raw_args[0],
@@ -3354,10 +3396,11 @@ impl JitSession {
                         raw_args[4],
                         &mut status,
                         &mut value,
+                        0,
                     );
                 }
                 6 => {
-                    let f: extern "C" fn(i64, i64, i64, i64, i64, i64, *mut i32, *mut i64) =
+                    let f: extern "C" fn(i64, i64, i64, i64, i64, i64, *mut i32, *mut i64, i64) =
                         std::mem::transmute(ptr);
                     f(
                         raw_args[0],
@@ -3368,6 +3411,7 @@ impl JitSession {
                         raw_args[5],
                         &mut status,
                         &mut value,
+                        0,
                     );
                 }
                 _ => {
@@ -3454,6 +3498,10 @@ where
             }
             arguments.push(status_ptr);
             arguments.push(value_ptr);
+            // RFC 0047 §5: host entry seeds call-depth fuel at zero; every
+            // same-module call adds one from there.
+            let entry_depth = builder.ins().iconst(types::I64, 0);
+            arguments.push(entry_depth);
             builder.ins().call(target, &arguments);
             builder.ins().return_(&[]);
             builder.seal_all_blocks();

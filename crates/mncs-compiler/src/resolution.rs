@@ -61,6 +61,11 @@ pub struct NameResolution {
     /// link that lets tooling inspect a binding without decoding source text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub declaration_identity: Option<SemanticId>,
+    /// For match-payload bindings (RFC 0047): the resolved binding the
+    /// payload was projected from. Absent everywhere else, so existing
+    /// indexes serialize identically with or without this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projected_from: Option<SemanticId>,
 }
 
 impl NameResolution {
@@ -76,6 +81,7 @@ impl NameResolution {
             provenance: None,
             reference: None,
             declaration_identity: None,
+            projected_from: None,
         }
     }
 
@@ -112,6 +118,14 @@ impl NameResolution {
         self.path = path;
         self.provenance = Some(provenance);
         self.declaration_identity = Some(declaration_identity);
+        self
+    }
+
+    /// Record the match-subject binding a payload binding projects from
+    /// (RFC 0047 descendant provenance). Used only for match-payload
+    /// declarations; every other resolution leaves this absent.
+    pub fn with_projection_subject(mut self, subject: SemanticId) -> Self {
+        self.projected_from = Some(subject);
         self
     }
 }

@@ -790,29 +790,42 @@ pub(crate) fn process_driver_cell_runtime(
         "extern unsigned char mncs_arena[{NATIVE_ARENA_BYTES}];\nextern uint64_t mncs_bump;"
     );
     let prefix = format!(
-        "static unsigned char mncs_arena[{NATIVE_ARENA_BYTES}];\nstatic uint64_t mncs_bump = 0;"
+        "static unsigned char mncs_arena[{NATIVE_ARENA_BYTES}];\nstatic uint64_t mncs_bump = 0;\nstatic uint64_t mncs_failed = 0;"
     );
     let replacement = format!(
         "{prefix}\n\
          uint64_t mncs_cell_alloc(uint64_t bytes) {{\n  \
-           uint64_t base = (mncs_bump + 7u) & ~(uint64_t)7u;\n  \
+           uint64_t base;\n  \
+           if (mncs_failed) return 0;\n  \
+           if (bytes > {NATIVE_ARENA_BYTES}u) {{ mncs_failed = 1; return 0; }}\n  \
+           if (mncs_bump > {NATIVE_ARENA_BYTES}u) {{ mncs_failed = 1; return 0; }}\n  \
+           base = (mncs_bump + 7u) & ~(uint64_t)7u;\n  \
+           if (base > {NATIVE_ARENA_BYTES}u - bytes) {{ mncs_failed = 1; return 0; }}\n  \
            mncs_bump = base + bytes;\n  \
            return base;\n\
          }}\n\
          void mncs_slot_store32(uint64_t at, uint64_t v) {{\n  \
            uint32_t x = (uint32_t)v;\n  \
+           if (mncs_failed) return;\n  \
+           if (at > {NATIVE_ARENA_BYTES}u - 4u) {{ mncs_failed = 1; return; }}\n  \
            memcpy(mncs_arena + at, &x, sizeof x);\n\
          }}\n\
          void mncs_slot_store64(uint64_t at, uint64_t v) {{\n  \
+           if (mncs_failed) return;\n  \
+           if (at > {NATIVE_ARENA_BYTES}u - 8u) {{ mncs_failed = 1; return; }}\n  \
            memcpy(mncs_arena + at, &v, sizeof v);\n\
          }}\n\
          uint64_t mncs_slot_load32(uint64_t at) {{\n  \
-           uint32_t x;\n  \
+           uint32_t x = 0;\n  \
+           if (mncs_failed) return 0;\n  \
+           if (at > {NATIVE_ARENA_BYTES}u - 4u) {{ mncs_failed = 1; return 0; }}\n  \
            memcpy(&x, mncs_arena + at, sizeof x);\n  \
            return x;\n\
          }}\n\
          uint64_t mncs_slot_load64(uint64_t at) {{\n  \
-           uint64_t x;\n  \
+           uint64_t x = 0;\n  \
+           if (mncs_failed) return 0;\n  \
+           if (at > {NATIVE_ARENA_BYTES}u - 8u) {{ mncs_failed = 1; return 0; }}\n  \
            memcpy(&x, mncs_arena + at, sizeof x);\n  \
            return x;\n\
          }}"
@@ -973,7 +986,13 @@ fn process_driver_scalar_only(
         .map(|contract| scalar_c_type(contract).to_owned())
         .collect::<Vec<_>>()
         .into_iter()
-        .chain(["int32_t*".to_owned(), "int64_t*".to_owned()])
+        .chain([
+            "int32_t*".to_owned(),
+            "int64_t*".to_owned(),
+            // RFC 0047 call-depth fuel: hidden trailing parameter, 0 at
+            // top-level entry.
+            "uint64_t".to_owned(),
+        ])
         .collect::<Vec<_>>()
         .join(", ");
     let mut call_parts = parse_and_args
@@ -982,6 +1001,7 @@ fn process_driver_scalar_only(
         .collect::<Vec<_>>();
     call_parts.push("&status".to_owned());
     call_parts.push("&value".to_owned());
+    call_parts.push("0".to_owned());
     let call = call_parts.join(", ");
     format!(
         r#"#include <stdint.h>
@@ -1084,7 +1104,13 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
         .map(|contract| arg_c_type(contract).to_owned())
         .collect::<Vec<_>>()
         .into_iter()
-        .chain(["int32_t*".to_owned(), "int64_t*".to_owned()])
+        .chain([
+            "int32_t*".to_owned(),
+            "int64_t*".to_owned(),
+            // RFC 0047 call-depth fuel: hidden trailing parameter, 0 at
+            // top-level entry.
+            "uint64_t".to_owned(),
+        ])
         .collect::<Vec<_>>()
         .join(", ");
     let call_args = (0..inputs.len())
@@ -1096,6 +1122,7 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
     let mut call_parts = call_args;
     call_parts.push("&status".to_owned());
     call_parts.push("&value".to_owned());
+    call_parts.push("0".to_owned());
     let call = call_parts.join(", ");
     let n = inputs.len();
     format!(

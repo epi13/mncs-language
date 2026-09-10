@@ -194,7 +194,7 @@ pub fn execute_ssa_module(
     module: &SsaModule,
     request: &crate::ExecutionRequest,
 ) -> SsaExecutionResult {
-    execute_ssa_module_with_validation(program, module, request, true, None, None, None)
+    execute_ssa_module_with_validation(program, module, request, true, None, None, None, 0)
 }
 
 /// Interpret an SSA module after its immutable program/module validation has
@@ -207,7 +207,7 @@ pub fn execute_ssa_module_prevalidated(
     module: &SsaModule,
     request: &crate::ExecutionRequest,
 ) -> SsaExecutionResult {
-    execute_ssa_module_with_validation(program, module, request, false, None, None, None)
+    execute_ssa_module_with_validation(program, module, request, false, None, None, None, 0)
 }
 
 /// Reusable immutable execution preparation for a bounded stateful session.
@@ -326,6 +326,7 @@ impl SsaExecutionSession {
                 &self.module_fingerprint,
             )),
             None,
+            0,
         )
     }
 
@@ -341,6 +342,7 @@ impl SsaExecutionSession {
             step_budget,
             policy,
             host_grants,
+            call_depth_budget,
         } = request;
         let request = crate::ExecutionRequest {
             schema_version,
@@ -349,6 +351,7 @@ impl SsaExecutionSession {
             step_budget,
             policy,
             host_grants,
+            call_depth_budget,
         };
         execute_ssa_module_with_validation(
             &self.program,
@@ -362,10 +365,12 @@ impl SsaExecutionSession {
                 &self.module_fingerprint,
             )),
             Some(arguments),
+            0,
         )
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn execute_ssa_module_with_validation(
     program: &Program,
     module: &SsaModule,
@@ -374,6 +379,7 @@ fn execute_ssa_module_with_validation(
     block_cache: Option<&BTreeMap<SemanticId, BTreeMap<SemanticId, usize>>>,
     cached_identity: Option<(&SemanticId, &String, &String)>,
     owned_arguments: Option<Vec<ExecutionValue>>,
+    call_depth: u64,
 ) -> SsaExecutionResult {
     if request.schema_version != crate::EXECUTION_REQUEST_SCHEMA_VERSION {
         return SsaExecutionResult::invalid(
@@ -410,6 +416,37 @@ fn execute_ssa_module_with_validation(
             request,
             format!("step_budget must be between 1 and {MAX_EXECUTION_BUDGET}"),
         );
+    }
+    if request.call_depth_budget == Some(0) {
+        return SsaExecutionResult::invalid(
+            request,
+            "call_depth_budget must be at least 1 when present",
+        );
+    }
+    if request.call_depth_budget > Some(crate::MODEL_MAX_CALL_DEPTH) {
+        return SsaExecutionResult::invalid(
+            request,
+            format!(
+                "call_depth_budget must not exceed {}",
+                crate::MODEL_MAX_CALL_DEPTH
+            ),
+        );
+    }
+    // RFC 0047 call-depth fuel, mirroring the body reference executor:
+    // every nested module call consumes one unit of a budget defaulting
+    // to the absolute model cap, so exhaustion is deterministic fuel
+    // failure rather than unbounded host stacking.
+    let depth_limit = request
+        .call_depth_budget
+        .unwrap_or(crate::MODEL_MAX_CALL_DEPTH);
+    if call_depth > depth_limit {
+        let mut exhausted = SsaExecutionResult::empty(request);
+        exhausted.fail(
+            ExecutionStatus::BudgetExhausted,
+            None,
+            format!("execution call depth {call_depth} exceeded budget {depth_limit}"),
+        );
+        return exhausted;
     }
     if validate_artifact {
         let validation = program.validate();
@@ -537,6 +574,7 @@ fn execute_ssa_module_with_validation(
                 request,
                 block_cache,
                 resolved_cache,
+                call_depth,
             ) {
                 return result;
             }
@@ -748,6 +786,7 @@ fn execute_instruction(
     request: &crate::ExecutionRequest,
     block_cache: Option<&BTreeMap<SemanticId, BTreeMap<SemanticId, usize>>>,
     cached_identity: Option<(&SemanticId, &String, &String)>,
+    call_depth: u64,
 ) -> bool {
     match &instruction.kind {
         SsaInstructionKind::Constant { value, ty } => {
@@ -2043,6 +2082,8 @@ fn execute_instruction(
                 // execution: nested calls inherit the request's grants,
                 // still bounded and still matched by capability name.
                 host_grants: request.host_grants.clone(),
+                // Depth fuel flows the same way (RFC 0047).
+                call_depth_budget: request.call_depth_budget,
             };
             // Re-share the caller-resolved identity (cheap clone) so the
             // nested call never re-fingerprints the module. Resolved here,
@@ -2062,6 +2103,7 @@ fn execute_instruction(
                 block_cache,
                 nested_cache,
                 None,
+                call_depth + 1,
             );
             let trace_offset = result.steps;
             result.steps = result.steps.saturating_add(nested.steps);
@@ -2141,10 +2183,16 @@ fn execute_instruction(
                 );
                 return true;
             }
-            if !matches!(
-                request.policy.effects,
-                crate::EffectExecutionPolicy::Realize
-            ) {
+            // Observation versus realization, mirroring the body
+            // reference executor: `Record` observes mutating intents
+            // without performing them; only `Realize` mutates.
+            let observing = matches!(request.policy.effects, crate::EffectExecutionPolicy::Record);
+            if !observing
+                && !matches!(
+                    request.policy.effects,
+                    crate::EffectExecutionPolicy::Realize
+                )
+            {
                 result.fail(ExecutionStatus::Unsupported, instruction_identity(instruction), "host call requires the explicit realize policy with a matching grant; no external access was performed");
                 return true;
             }
@@ -2361,15 +2409,24 @@ fn execute_instruction(
                     );
                     return true;
                 };
-                let appended = match crate::execution::append_grant_bytes(&grant.locator, &view) {
-                    Ok(count) => count,
-                    Err(reason) => {
-                        result.fail(
-                            ExecutionStatus::RuntimeFailure,
-                            instruction_identity(instruction),
-                            reason,
-                        );
-                        return true;
+                // Mutating intent observed without realizing under
+                // `Record` (mirrors the body executor): authority and view
+                // validated, would-be count returned, intent recorded with
+                // absent provenance, file untouched.
+                debug_assert!(crate::execution::host_operation_mutates(operation));
+                let (appended, intent_only) = if observing {
+                    (view.len() as u64, true)
+                } else {
+                    match crate::execution::append_grant_bytes(&grant.locator, &view) {
+                        Ok(count) => (count, false),
+                        Err(reason) => {
+                            result.fail(
+                                ExecutionStatus::RuntimeFailure,
+                                instruction_identity(instruction),
+                                reason,
+                            );
+                            return true;
+                        }
                     }
                 };
                 if let Some(output) = instruction.outputs.first() {
@@ -2391,11 +2448,13 @@ fn execute_instruction(
                     kind: "host_write".to_owned(),
                     target: operation.clone(),
                     capability: capability.clone(),
-                    provenance: Some(format!(
-                        "grant:{} sha256:{}",
-                        grant.locator,
-                        crate::canonical::sha256_hex(&view)
-                    )),
+                    provenance: (!intent_only).then(|| {
+                        format!(
+                            "grant:{} sha256:{}",
+                            grant.locator,
+                            crate::canonical::sha256_hex(&view)
+                        )
+                    }),
                 });
             } else {
                 if let Some(output) = instruction.outputs.first() {
@@ -3215,6 +3274,7 @@ mod tests {
             step_budget: 64,
             policy: crate::ExecutionPolicy::default(),
             host_grants: Vec::new(),
+            call_depth_budget: None,
         }
     }
 

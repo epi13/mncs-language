@@ -111,9 +111,13 @@ fn next_reservation_edges_stay_closed() {
             "mncs 0.10;\nmodule test.nextfield.neg_step;\nfn probe() -> (result: u64) {\n    iterate i up_to 4 carrying acc: u64 = 0 {\n        let z: u64 = acc;\n    }\n    return acc;\n}\n",
             "MNP101",
         ),
+        // The missing colon diagnoses precisely (MNP125) on 0.13, where
+        // `next` is a field name. Below 0.13 `next` is not a field name
+        // at all, so the same shape refuses with the historical MNP127
+        // (pinned by `profile_compat::older_profiles_reject_contextual_next_fields`).
         (
             "missing-colon",
-            "mncs 0.10;\nmodule test.nextfield.neg_colon;\nrecord R { next u64 }\nfn probe(v: R) -> (result: u64) {\n    return v.next;\n}\n",
+            "mncs 0.13;\nmodule test.nextfield.neg_colon;\nrecord R { next u64 }\nfn probe(v: R) -> (result: u64) {\n    return v.next;\n}\n",
             "MNP125",
         ),
     ];
