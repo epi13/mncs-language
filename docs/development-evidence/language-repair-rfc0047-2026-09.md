@@ -63,6 +63,10 @@ proof-identity, and backend-capability models are unchanged.
   takes ~26 minutes in debug builds; each fuzz case runs ~17–50s per
   backend, so the suite is slow, not stuck (an early stall report was
   a too-short observer timeout, identical at HEAD).
+- `fs_effects` is hermetic again: the corpus pins an empty-directory
+  entry (`examples/fs-fixture/empty`) that git cannot track, so fresh
+  clones failed enumeration. The test now ensures the directory before
+  granting the root; verified by deleting it and re-running 12/12.
 - Ledger entry 0047 `NONE` → `PARTIAL` (C1–C3 satisfied, C4 partial, C5
   open), `docs/rfc-conformance.md` regenerated, and a structural
   recursion section added to `docs/source-profile-0.13.md`.
