@@ -150,3 +150,7 @@ tests), `rfcs/conformance-ledger.json`, `docs/rfc-conformance.md`.
   final tree state, including every repair above (`collections`, `pressure_checked_division`,
   `pressure_enum_payloads`, `pressure_next_field`, `sha256_pure`, `store_contracts`, `token_sets`,
   `proof_kernel` curated + 120-case fuzz × 5 backends).
+- Post-merge (`origin/main` integration) full suite: 91 result lines with the single known `fs_effects`
+  fixture failure (missing untracked `empty/` dir on the fresh worktree); `fs_effects` re-verified 12/12 on
+  the final merged tree after the hermetic fix. `fmt --check` and `clippy --workspace --all-targets --
+  -D warnings` clean on the merged tree.
