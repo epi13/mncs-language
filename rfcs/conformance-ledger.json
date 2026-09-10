@@ -175,7 +175,7 @@
       "file": "rfcs/0003-verified-ir.md",
       "design_status": "DRAFT",
       "implementation_status": "PARTIAL",
-      "implementation_scope": "HIR, SSA, selected SSA, translation validators, proof-obligation survival into SSA; proof-preserving lowering is partial.",
+      "implementation_scope": "HIR, SSA, selected SSA, translation validators, proof-obligation survival into SSA; proof-preserving lowering is partial (backend artifacts now carry versioned tranche-0.3 proof refs bound to obligation/kernel/dependency/SSA identities; execution-time re-validation and discharge remain open).",
       "normativity": "experimental",
       "acceptance_criteria": [
         {
@@ -207,8 +207,11 @@
         {
           "id": "0003-C4",
           "text": "Proof-preserving lowering with explicit proof transport",
-          "state": "unsatisfied",
-          "evidence": []
+          "state": "partial",
+          "evidence": [
+            "crates/mncs-model/src/proof_transport.rs",
+            "crates/mncs-cli/tests/proof_dep_admission.rs"
+          ]
         }
       ],
       "evidence_artifacts": [
@@ -227,7 +230,7 @@
         "0002"
       ],
       "gaps": [
-        "Proof objects do not yet travel through HIR/SSA as first-class artifacts; obligations and certificates travel, kernel proofs attach at the SSA boundary (elision) and lowering boundary (certificate binding)."
+        "Proof objects do not yet travel through HIR/SSA as first-class artifacts; obligations and certificates travel, kernel proofs attach at the SSA boundary (elision) and lowering boundary (certificate binding). Tranche-0.3 backend-artifact proof refs (proof_bindings) transport admitted-proof identities to artifacts, but backend execution does not yet re-validate them and erasure/discharge stay unimplemented (0007-G4/G6)."
       ],
       "pressure_sources": [
         "RFC 0007 tranche"
@@ -667,7 +670,7 @@
         "0027"
       ],
       "gaps": [
-        "0007-G4 proof transport through backend/codegen stages and proof-discharge unresolved (minimum HIR/SSA/lowering path exists)",
+        "0007-G4 proof transport through backend/codegen stages partially implemented (tranche-0.3 artifact proof_bindings: versioned refs bound to obligation/kernel/dependency/SSA identities, covered by artifact identity; backend execution does not yet re-validate refs and proof-discharge remains unresolved; minimum HIR/SSA/lowering path exists)",
         "0007-G6 proof erasure semantics unimplemented"
       ],
       "pressure_sources": [
@@ -2840,7 +2843,7 @@
       "file": "rfcs/0047-machine-native-structural-recursion-finite-values.md",
       "design_status": "DRAFT",
       "implementation_status": "PARTIAL",
-      "implementation_scope": "Admission on Source Profile 0.13 (R1-R5 descendant provenance, kernel re-derivation discharge), static call-depth fuel in both reference interpreters and all four native realizations (C11/LLVM/Cranelift/WASM), ten-fixture study corpus plus eight-case five-backend execution corpus. Fuel exhaustion unreachable via admitted paths; native fuel failure reports RuntimeFailure where interpreters report BudgetExhausted (open gap).",
+      "implementation_scope": "Admission on Source Profile 0.13 (R1-R5 descendant provenance, kernel re-derivation discharge), static call-depth fuel in both reference interpreters and all native realizations (C11/LLVM/Cranelift/WASM), ten-fixture study corpus plus eight-case five-backend execution corpus. Fuel exhaustion is execution-tested on two axes: explicit per-request budgets exhaust identically (budget_exhausted) on all five backends via uniform fuel seeding, and over-cap activation (1025-deep runtime tree) reports budget_exhausted on C11/LLVM/Cranelift via a dedicated status code that callers propagate without collapsing into RuntimeFailure; malformed budgets are invalid_request everywhere. Parser nesting is deterministically bounded (MNP206 at 256 shared levels).",
       "normativity": "experimental",
       "acceptance_criteria": [
         {
@@ -2879,7 +2882,10 @@
             "crates/mncs-codegen/src/cranelift_backend.rs",
             "crates/mncs-codegen/src/c11.rs",
             "crates/mncs-codegen/src/llvm.rs",
-            "crates/mncs-codegen/src/wasm.rs"
+            "crates/mncs-codegen/src/wasm.rs",
+            "examples/source/recursion-rfc/exhaustion.mncs",
+            "examples/execution/recursion-fuel-budget-corpus.json",
+            "examples/execution/recursion-fuel-cap-corpus.json"
           ]
         },
         {
@@ -2893,7 +2899,10 @@
         "rfcs/0047-machine-native-structural-recursion-finite-values.md",
         "crates/mncs-cli/tests/pressure_structural_recursion.rs",
         "examples/source/recursion-rfc/recursion-probe.mncs",
-        "examples/execution/recursion-rfc-corpus.json"
+        "examples/execution/recursion-rfc-corpus.json",
+        "examples/source/recursion-rfc/exhaustion.mncs",
+        "examples/execution/recursion-fuel-budget-corpus.json",
+        "examples/execution/recursion-fuel-cap-corpus.json"
       ],
       "tests": [
         "crates/mncs-cli/tests/pressure_structural_recursion.rs"
@@ -2907,9 +2916,9 @@
         "0041"
       ],
       "gaps": [
-        "Fuel-exhaustion behavior is implemented but not execution-tested: source ceilings (1024) and corpus JSON nesting limits keep over-ceiling activation out of reach of admitted paths.",
-        "Native fuel failure reports RuntimeFailure while reference interpreters report BudgetExhausted; the native observation protocol has no budget-exhausted code.",
-        "Cross-module and higher-order recursion stay rejected; only direct self-calls on match-bound descendants admit."
+        "Cross-module and higher-order recursion stay rejected; only direct self-calls on match-bound descendants admit.",
+        "Reference interpreters recurse on the host stack: 1025-deep activation overflows debug builds, so the over-cap case is excluded from the reference backends by construction (budgeted exhaustion covers them deterministically).",
+        "Assumption-bit linkage between MNCS JIT orchestration (library/jit assumption_bits) and the proof-kernel DepAssumptionSet is by-era convention only; no cryptographic binding exists."
       ],
       "pressure_sources": [
         "CP-0011 (mncs-compiler acyclic-call machines)"
@@ -2919,7 +2928,7 @@
       "stdlib": [],
       "stages": [],
       "evidence_confidence": "medium",
-      "notes": "Admission plus five-backend execution landed and pinned; exhaustion agreement and capability declarations remain open."
+      "notes": "Admission plus five-backend execution landed and pinned; fuel-exhaustion agreement landed with uniform seeding plus a dedicated exhaustion code (native RuntimeFailure collapse closed). Remaining open: reference debug host-stack depth limit at extreme depths; cross-module/higher-order recursion."
     },
     {
       "number": "0048",
@@ -2927,7 +2936,7 @@
       "file": "rfcs/0048-mncs-native-jit-execution-architecture.md",
       "design_status": "ACCEPTED",
       "implementation_status": "IMPLEMENTED_EXPERIMENTALLY",
-      "implementation_scope": "MNCS-owned JIT/execution orchestration (sessions, generations, bindings, invalidation, planning, profiling, proof metadata, lifecycle) in library/jit/ with Cranelift as the first native provider; Rust bootstrap acts only as the compiler.",
+      "implementation_scope": "MNCS-owned JIT/execution orchestration (sessions, generations, bindings, invalidation, planning, profiling, proof metadata, lifecycle) in library/jit/ with Cranelift as the first native provider; Rust bootstrap acts only as the compiler. Batch execution retains native provider sessions (C11/LLVM/Cranelift JIT) behind the unchanged MNCS orchestration interface \u2014 one preparation per artifact, then reuse across cases \u2014 with explicit one-shot fallback where preparation fails (no toolchain, denied executable memory, tampered identity).",
       "normativity": "experimental",
       "acceptance_criteria": [
         {
@@ -2979,7 +2988,8 @@
         "0041"
       ],
       "gaps": [
-        "Provider set beyond Cranelift/reference, persistent cross-process sessions, and full proof-linkage admission are future work."
+        "Provider set beyond Cranelift/reference, persistent cross-process sessions, and full proof-linkage admission are future work.",
+        "Provider-side publication remains whole-program per generation (JIT-PRESSURE-0009 open); retained sessions amortize repeat execution but do not yet publish definitions incrementally."
       ],
       "pressure_sources": [],
       "last_validated_revision": "unvalidated",

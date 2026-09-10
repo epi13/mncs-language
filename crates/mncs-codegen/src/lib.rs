@@ -719,6 +719,7 @@ pub fn lower_selected_ssa(
         outcome.exports,
         assumptions.clone(),
         Vec::new(),
+        ssa.proof_binding_refs(),
         vec![
             "embedded mncs-portable-wasm-mvp interpreter".to_owned(),
             "no host CLI".to_owned(),
@@ -842,6 +843,7 @@ pub fn lower_research_bytecode(
             .collect(),
         assumptions.clone(),
         Vec::new(),
+        ssa.proof_binding_refs(),
         vec![
             "bounded MNCS SSA interpreter".to_owned(),
             "no host process execution".to_owned(),
@@ -1013,6 +1015,20 @@ fn execute_portable_wasm_decoded(
     } else {
         request.target.function.clone()
     };
+    // RFC 0047 §5 uniform fuel: seed the interpreter entry depth from
+    // the request budget so an explicit budget means the same fuel here
+    // as on the reference interpreters (zero seed is the historical full
+    // cap). Invalid budgets fail closed, exactly like the reference.
+    let entry_depth = match support::depth_seed_for_request(request) {
+        Ok(seed) => seed as usize,
+        Err(reason) => {
+            result.failure = Some(ExecutionFailure {
+                identity: Some(artifact.identity.clone()),
+                reason,
+            });
+            return result;
+        }
+    };
     match execute_function_typed(
         module,
         &entry,
@@ -1020,6 +1036,7 @@ fn execute_portable_wasm_decoded(
         &param_tys,
         &result_tys,
         request.step_budget,
+        entry_depth,
     ) {
         Ok(outcome) => {
             result.steps = outcome.steps;
@@ -1893,15 +1910,24 @@ impl<'a> BackendStatefulSession<'a> {
 /// [`execute_backend`] once per case.
 pub struct BackendExecutionSession<'a> {
     artifact: &'a BackendArtifact,
-    prepared: PreparedStatelessBackend,
+    prepared: PreparedStatelessBackend<'a>,
 }
 
-enum PreparedStatelessBackend {
+enum PreparedStatelessBackend<'a> {
     Wasm(crate::wasm::WasmModule),
     Research {
         payload: Box<ResearchBytecodePayload>,
         session: Box<SsaExecutionSession>,
     },
+    /// Retained native provider sessions (C11/LLVM/Cranelift). The cell
+    /// holds the executable/JIT cache each backend already manages for
+    /// its own stateful path; `RefCell` is call-scoped interior
+    /// mutability for single-threaded batch execution, not shared
+    /// ownership — the sessions are `!Sync` by construction (JIT module
+    /// handles) and never cross threads.
+    C11(std::cell::RefCell<c11::C11StatefulSession<'a>>),
+    Llvm(std::cell::RefCell<llvm::LlvmStatefulSession<'a>>),
+    Cranelift(Box<std::cell::RefCell<cranelift_backend::CraneliftStatefulSession<'a>>>),
     OneShot,
 }
 
@@ -1954,6 +1980,41 @@ impl<'a> BackendExecutionSession<'a> {
                         session: Box::new(session),
                     }
                 })
+        } else if identity_valid && artifact.backend.name == C11_BACKEND_NAME {
+            // Retained C11 provider session: one toolchain compile per
+            // (entry, fuel seed), then reuse. Prepare failure (no
+            // toolchain, identity drift) degrades to the explicit one-shot
+            // path — never a silent refusal.
+            c11::prepare_stateful_session(artifact).map_or(
+                PreparedStatelessBackend::OneShot,
+                |session| {
+                    mncs_model::record_counter("backend_session");
+                    mncs_model::record_counter("reused_stage");
+                    PreparedStatelessBackend::C11(std::cell::RefCell::new(session))
+                },
+            )
+        } else if identity_valid && artifact.backend.name == LLVM_BACKEND_NAME {
+            llvm::prepare_stateful_session(artifact).map_or(
+                PreparedStatelessBackend::OneShot,
+                |session| {
+                    mncs_model::record_counter("backend_session");
+                    mncs_model::record_counter("reused_stage");
+                    PreparedStatelessBackend::Llvm(std::cell::RefCell::new(session))
+                },
+            )
+        } else if identity_valid && artifact.backend.name == CRANELIFT_BACKEND_NAME {
+            // Retained Cranelift provider session: one JIT compile per
+            // artifact, then millisecond calls. Where host policy denies
+            // executable memory, preparation fails and each case falls
+            // back to the one-shot path (which tries its own AOT route).
+            cranelift_backend::prepare_stateful_session(artifact).map_or(
+                PreparedStatelessBackend::OneShot,
+                |session| {
+                    mncs_model::record_counter("backend_session");
+                    mncs_model::record_counter("reused_stage");
+                    PreparedStatelessBackend::Cranelift(Box::new(std::cell::RefCell::new(session)))
+                },
+            )
         } else {
             PreparedStatelessBackend::OneShot
         };
@@ -1980,6 +2041,18 @@ impl<'a> BackendExecutionSession<'a> {
                     false,
                     Some(session),
                 )
+            }
+            PreparedStatelessBackend::C11(session) => {
+                mncs_model::record_counter("reused_execution");
+                session.borrow_mut().execute(request)
+            }
+            PreparedStatelessBackend::Llvm(session) => {
+                mncs_model::record_counter("reused_execution");
+                session.borrow_mut().execute(request)
+            }
+            PreparedStatelessBackend::Cranelift(session) => {
+                mncs_model::record_counter("reused_execution");
+                session.borrow_mut().execute(request)
             }
             PreparedStatelessBackend::OneShot => execute_backend(self.artifact, request),
         }
@@ -2674,6 +2747,68 @@ mod tests {
             // Tamper: flip one byte of the artifact payload. Identity no
             // longer validates, so the session must decline reuse and the
             // one-shot path must fail closed rather than execute.
+            let mut tampered = artifact.clone();
+            let mut bytes = tampered.bytes().expect("artifact bytes");
+            let mid = bytes.len() / 2;
+            bytes[mid] ^= 0x01;
+            tampered.bytes_hex = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+            let tampered_session = BackendExecutionSession::new(&tampered);
+            assert!(
+                !tampered_session.reused(),
+                "{backend}: tampered artifact must not reuse preparation"
+            );
+            let tampered_result = tampered_session.execute(&request(1, 2));
+            assert_eq!(
+                tampered_result,
+                execute_backend(&tampered, &request(1, 2)),
+                "{backend}: fallback must equal one-shot"
+            );
+            assert_ne!(tampered_result.status, ExecutionStatus::Returned);
+        }
+    }
+
+    /// Native provider amortization: a retained `BackendExecutionSession`
+    /// must observe exactly what per-case one-shot execution observes on
+    /// the C11, LLVM, and Cranelift backends — one JIT/toolchain
+    /// preparation per artifact, then reuse across cases. Where the host
+    /// cannot prepare (no toolchain, denied executable memory), the
+    /// session must degrade to the one-shot path and still agree with it,
+    /// never refuse or diverge. Tampered artifacts decline reuse exactly
+    /// like the embedded backends above.
+    #[test]
+    fn native_execution_session_reuse_matches_one_shot() {
+        let program = program();
+        let ssa = program.lower_to_ssa().unwrap();
+        let selected = selected_ssa_ref(&ssa);
+        for backend in [C11_BACKEND_NAME, LLVM_BACKEND_NAME, CRANELIFT_BACKEND_NAME] {
+            let plan = plan_for_backend(backend, selected.clone()).expect("backend plan");
+            let artifact = lower_with_backend(backend, &program, &ssa, selected.clone(), &plan)
+                .artifact
+                .expect("backend artifact");
+            let session = BackendExecutionSession::new(&artifact);
+            if !session.reused() {
+                // Host cannot prepare this provider (no toolchain or no
+                // executable memory): the honest degradation is one-shot
+                // per case, and it must still equal one-shot.
+                let fallback = session.execute(&request(20, 22));
+                assert_eq!(
+                    fallback,
+                    execute_backend(&artifact, &request(20, 22)),
+                    "{backend}: unprepared fallback must equal one-shot"
+                );
+                continue;
+            }
+            for (a, b) in [(20, 22), (1, 2), (i128::from(i32::MAX), 1)] {
+                let request = request(a, b);
+                let expected = execute_backend(&artifact, &request);
+                let observed = session.execute(&request);
+                assert_eq!(observed.status, expected.status, "{backend} {a},{b}");
+                assert_eq!(observed.returned, expected.returned, "{backend} {a},{b}");
+                assert_eq!(
+                    observed.artifact_sha256, expected.artifact_sha256,
+                    "{backend} {a},{b}"
+                );
+            }
             let mut tampered = artifact.clone();
             let mut bytes = tampered.bytes().expect("artifact bytes");
             let mid = bytes.len() / 2;

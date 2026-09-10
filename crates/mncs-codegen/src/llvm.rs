@@ -97,7 +97,22 @@ impl LlvmStatefulSession<'_> {
             &request.target.module,
             &request.target.function,
         );
-        let driver = llvm_driver(&entry, &contract.inputs, contract.outputs.first());
+        // RFC 0047 §5 uniform fuel: the driver seeds the entry depth from
+        // the request budget, so an explicit budget means the same fuel
+        // here as on the reference interpreters. The seed joins the cache
+        // key because it is baked into the driver source.
+        let entry_depth = match crate::support::depth_seed_for_request(request) {
+            Ok(seed) => seed,
+            Err(reason) => {
+                return execution_failure(result, ExecutionStatus::InvalidRequest, reason)
+            }
+        };
+        let driver = llvm_driver(
+            &entry,
+            &contract.inputs,
+            contract.outputs.first(),
+            entry_depth,
+        );
         let call_blob = match crate::support::build_call_file(
             &request.arguments,
             &contract.inputs,
@@ -125,8 +140,13 @@ impl LlvmStatefulSession<'_> {
             },
         };
         // The driver names its entry symbol, so the cache key is the
-        // canonical entry identity (ENG-PRESSURE-0017).
-        let cache_key = crate::support::entry_key(&request.target.module, &request.target.function);
+        // canonical entry identity (ENG-PRESSURE-0017) plus the fuel seed,
+        // which is baked into the driver source: reusing a zero-seed
+        // executable for a budgeted request would silently grant full fuel.
+        let cache_key = format!(
+            "{}#depth{entry_depth}",
+            crate::support::entry_key(&request.target.module, &request.target.function)
+        );
         if !self.executables.contains_key(&cache_key) {
             let executable = match NativeExecutable::compile_or_reuse(
                 &[
@@ -457,6 +477,7 @@ pub fn lower_llvm(
             .collect(),
         assumptions.clone(),
         Vec::new(),
+        ssa.proof_binding_refs(),
         vec![
             "external clang compilation".to_owned(),
             "optional llc object emission".to_owned(),
@@ -616,7 +637,9 @@ fn emit_function(out: &mut String, function: &ScalarFunction, kernel_entry: bool
     }
     // RFC 0047 call-depth fuel, checked against the incoming depth so the
     // boundary matches the reference interpreter exactly (incoming depth
-    // above the cap fails; depth grows by one per nested call).
+    // above the cap fails; depth grows by one per nested call). Exhaustion
+    // branches to its own block reporting status 3 (BudgetExhausted),
+    // observably distinct from the generic failure status 1 in mncs_fail.
     let _ = writeln!(
         out,
         "  %mncs_depth_over = icmp ugt i64 %mncs_depth, {}",
@@ -624,7 +647,7 @@ fn emit_function(out: &mut String, function: &ScalarFunction, kernel_entry: bool
     );
     let _ = writeln!(
         out,
-        "  br i1 %mncs_depth_over, label %mncs_fail, label %mncs_depth_ok"
+        "  br i1 %mncs_depth_over, label %mncs_exhausted, label %mncs_depth_ok"
     );
     out.push_str("mncs_depth_ok:\n");
     for (index, param) in function.params.iter().enumerate() {
@@ -643,6 +666,13 @@ fn emit_function(out: &mut String, function: &ScalarFunction, kernel_entry: bool
     }
     out.push_str("mncs_fail:\n");
     out.push_str("  store i32 1, ptr %mncs_status\n");
+    out.push_str("  store i64 0, ptr %mncs_value\n");
+    out.push_str("  ret void\n");
+    out.push_str("mncs_exhausted:\n");
+    out.push_str("  store i32 3, ptr %mncs_status\n");
+    out.push_str("  store i64 0, ptr %mncs_value\n");
+    out.push_str("  ret void\n");
+    out.push_str("mncs_propagate:\n");
     out.push_str("  store i64 0, ptr %mncs_value\n");
     out.push_str("  ret void\n");
     out.push_str("}\n");
@@ -1753,9 +1783,13 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let _ = writeln!(out, "  call void @{callee}({})", loaded.join(", "));
             let _ = writeln!(out, "  %{tmp}_st = load i32, ptr %mncs_status");
             let _ = writeln!(out, "  %{tmp}_fail = icmp ne i32 %{tmp}_st, 0");
+            // A failed callee already stored its own status (1 for failure,
+            // 3 for fuel exhaustion) and a zero value: propagate with a bare
+            // return through `mncs_propagate`. Branching to `mncs_fail`
+            // would overwrite an exhaustion 3 with a generic failure 1.
             let _ = writeln!(
                 out,
-                "  br i1 %{tmp}_fail, label %mncs_fail, label %{tmp}_ok"
+                "  br i1 %{tmp}_fail, label %mncs_propagate, label %{tmp}_ok"
             );
             let _ = writeln!(out, "{tmp}_ok:");
             let _ = writeln!(out, "  %{tmp}_raw = load i64, ptr %mncs_value");
@@ -2266,7 +2300,17 @@ pub fn execute_llvm(
         &request.target.module,
         &request.target.function,
     );
-    let driver = llvm_driver(&entry, &contract.inputs, contract.outputs.first());
+    // RFC 0047 §5 uniform fuel (see the stateful session above).
+    let entry_depth = match crate::support::depth_seed_for_request(request) {
+        Ok(seed) => seed,
+        Err(reason) => return execution_failure(result, ExecutionStatus::InvalidRequest, reason),
+    };
+    let driver = llvm_driver(
+        &entry,
+        &contract.inputs,
+        contract.outputs.first(),
+        entry_depth,
+    );
     let call_blob = match crate::support::build_call_file(
         &request.arguments,
         &contract.inputs,
@@ -2325,11 +2369,12 @@ fn llvm_driver(
     function: &str,
     inputs: &[mncs_model::BackendValueContract],
     output: Option<&mncs_model::BackendValueContract>,
+    entry_depth: u64,
 ) -> String {
     // The shared C driver template matches the LLVM function ABI exactly:
     // typed scalar parameters, uint64_t cell offsets, and status/value
     // out-pointers. The module realizes the same arena symbols as C11.
-    crate::support::process_driver(function, inputs, output)
+    crate::support::process_driver(function, inputs, output, entry_depth)
 }
 
 pub fn llc_object_available() -> bool {

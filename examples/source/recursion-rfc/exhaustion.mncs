@@ -1,0 +1,30 @@
+mncs 0.13;
+// RFC 0047 fuel-exhaustion probe: `spine` builds a 1024-deep left spine at
+// runtime (one wrap per iteration, exactly at the 0.13 iteration ceiling),
+// one more manual wrap pushes the value to depth 1025, and `depth` then
+// nests one call per spine level. Incoming depth 1025 exceeds
+// MODEL_MAX_CALL_DEPTH, so every backend must fail closed with
+// BudgetExhausted — never RuntimeFailure, never a native stack overflow.
+module recursion.rfc.exhaustion;
+enum Tree { Leaf, Node { left: Tree, right: Tree } }
+fn depth(tree: Tree) -> (result: u64) {
+    return match tree {
+        Leaf => 0,
+        Node { left: l, right: r } => depth(l) + depth(r) + 1
+    };
+}
+fn spine(seed: Tree) -> (result: Tree) {
+    iterate step up_to 1024 carrying tree: Tree = seed {
+        next tree = Tree.Node { left: tree, right: Tree.Leaf };
+    }
+    return tree;
+}
+fn run_exhaust() -> (result: u64) {
+    return depth(Tree.Node { left: spine(Tree.Leaf), right: Tree.Leaf });
+}
+// Shallow control: a depth-2 tree that returns 2 unbudgeted, so a
+// budgeted run that exhausts proves the budget (not the tree) is what
+// fails. Keeps host stacks shallow on every backend.
+fn run_shallow() -> (result: u64) {
+    return depth(Tree.Node { left: Tree.Node { left: Tree.Leaf, right: Tree.Leaf }, right: Tree.Leaf });
+}

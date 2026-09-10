@@ -1320,6 +1320,19 @@ pub fn parse(envelope: &SourceEnvelope) -> ParseOutput {
     }
 }
 
+/// Deterministic bound on recursive parser nesting. The guarded entries
+/// (`expression`, `binary_expression`, `primary`, `statement`,
+/// `type_annotation`) share one budget, so one source level costs a few
+/// counts. Real-world modules nest single digits deep (the deepest
+/// library/source fixture nests 9 source levels); the bound sits well
+/// above that while keeping host-stack use flat even in unoptimized
+/// builds, where one nesting level spans several Rust frames. Finite
+/// malformed or adversarial input (megabyte-deep parentheses, negation
+/// or right-nested operator chains, statement or generic-argument
+/// nesting) fails closed with `MNP206` instead of overflowing the host
+/// stack.
+pub const MAX_PARSE_NESTING: usize = 256;
+
 struct Parser<'a> {
     envelope: &'a SourceEnvelope,
     tokens: &'a [SourceToken],
@@ -1331,6 +1344,8 @@ struct Parser<'a> {
     /// generic type ends immediately before its enclosing `>`, the parser
     /// consumes one closer and carries the other one here.
     pending_generic_closers: usize,
+    /// Current recursive-nesting depth; see [`MAX_PARSE_NESTING`].
+    nesting: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -1347,7 +1362,28 @@ impl<'a> Parser<'a> {
             diagnostics: Vec::new(),
             profile: SOURCE_PROFILE_VERSION.to_owned(),
             pending_generic_closers: 0,
+            nesting: 0,
         }
+    }
+
+    /// Enter one recursive-nesting level. Returns false (after recording
+    /// `MNP206`) when the bound is already reached; the caller must return
+    /// `None` (or its error shape) without recursing further.
+    fn enter_nesting(&mut self) -> bool {
+        if self.nesting >= MAX_PARSE_NESTING {
+            self.error(
+                "MNP206",
+                "source nesting exceeds the parser bound; split the expression, statement, or type",
+                Vec::new(),
+            );
+            return false;
+        }
+        self.nesting += 1;
+        true
+    }
+
+    fn exit_nesting(&mut self) {
+        self.nesting = self.nesting.saturating_sub(1);
     }
 
     fn document(&mut self) -> (ConcreteSyntaxTree, Option<AbstractSyntaxTree>) {
@@ -1916,6 +1952,21 @@ impl<'a> Parser<'a> {
 
     fn statement(&mut self) -> (CstNode, Option<AstStmt>) {
         let start = self.current_token_index();
+        if !self.enter_nesting() {
+            // Guarantee loop progress for `statements_until_return`: the
+            // refusal itself consumes one token, mirroring the MNP061 arm.
+            if self.cursor < self.significant.len() {
+                self.cursor += 1;
+            }
+            let end = self.previous_token_index(start);
+            return (self.node(CstKind::Block, start, end, Vec::new()), None);
+        }
+        let parsed = self.statement_inner(start);
+        self.exit_nesting();
+        parsed
+    }
+
+    fn statement_inner(&mut self, start: usize) -> (CstNode, Option<AstStmt>) {
         match self.current_kind() {
             Some(TokenKind::LetKeyword) => {
                 self.cursor += 1;
@@ -2225,10 +2276,24 @@ impl<'a> Parser<'a> {
     }
 
     fn expression(&mut self) -> Option<AstExpr> {
-        self.binary_expression(0)
+        if !self.enter_nesting() {
+            return None;
+        }
+        let parsed = self.binary_expression(0);
+        self.exit_nesting();
+        parsed
     }
 
     fn binary_expression(&mut self, minimum_precedence: u8) -> Option<AstExpr> {
+        if !self.enter_nesting() {
+            return None;
+        }
+        let parsed = self.binary_expression_inner(minimum_precedence);
+        self.exit_nesting();
+        parsed
+    }
+
+    fn binary_expression_inner(&mut self, minimum_precedence: u8) -> Option<AstExpr> {
         let mut left = self.primary()?;
         while let Some((op, precedence)) = binary_operator(self.current_kind()) {
             if precedence < minimum_precedence {
@@ -2269,6 +2334,15 @@ impl<'a> Parser<'a> {
     }
 
     fn primary(&mut self) -> Option<AstExpr> {
+        if !self.enter_nesting() {
+            return None;
+        }
+        let parsed = self.primary_inner();
+        self.exit_nesting();
+        parsed
+    }
+
+    fn primary_inner(&mut self) -> Option<AstExpr> {
         // Logical negation (Profile 0.13, CP-0004): a `!` prefix binds
         // tighter than any binary operator, so `!a == b` is `(!a) == b`
         // and `a == !b` works in right-operand position too (both sides
@@ -4166,6 +4240,15 @@ impl<'a> Parser<'a> {
     /// 0.7 bounded sequence, or a Profile 0.8 semantic vector/mask family.
     /// The returned text is canonical; elaboration owns its semantic identity.
     fn type_annotation(&mut self, code: &str, message: &str) -> Option<SpannedText> {
+        if !self.enter_nesting() {
+            return None;
+        }
+        let parsed = self.type_annotation_inner(code, message);
+        self.exit_nesting();
+        parsed
+    }
+
+    fn type_annotation_inner(&mut self, code: &str, message: &str) -> Option<SpannedText> {
         if self.current_kind() != Some(TokenKind::LeftBracket) {
             let mut name = self.spanned(TokenKind::Identifier, code, message)?;
             if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_9)
@@ -4837,5 +4920,69 @@ mod tests {
         assert_eq!(envelope.relationships.len(), 2);
         "mncs:model:substituted:8".clone_into(&mut envelope.relationships[0].target_identity);
         assert!(!envelope.identity_is_valid());
+    }
+
+    fn nesting_fixture(depth: usize, shape: &str) -> SourceEnvelope {
+        let body = match shape {
+            "parens" => format!("return {}1{};", "(".repeat(depth), ")".repeat(depth)),
+            "negations" => format!("return {}true;", "!".repeat(depth)),
+            _ => unreachable!(),
+        };
+        SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "nesting",
+            format!(
+                "mncs 0.13;\nmodule example.nesting;\nfn nested() -> (result: i64) {{ {body} }}\n"
+            ),
+        )
+    }
+
+    fn has_code(parsed: &ParseOutput, code: &str) -> bool {
+        parsed
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == code)
+    }
+
+    /// Pathological parenthesization must fail closed with `MNP206`,
+    /// never overflow the host stack. (Pre-guard, this input killed the
+    /// parser process via stack overflow in debug builds.)
+    #[test]
+    fn pathological_paren_nesting_fails_closed() {
+        let parsed = parse(&nesting_fixture(5_000, "parens"));
+        assert!(
+            has_code(&parsed, "MNP206"),
+            "deep parens must report MNP206, got {:#?}",
+            parsed.diagnostics
+        );
+        assert!(parsed.ast.is_none(), "refused input must not yield an AST");
+    }
+
+    /// Pathological negation chains recurse through `primary` without
+    /// re-entering `expression`, so they pin the per-entry (not just
+    /// per-expression) shape of the bound.
+    #[test]
+    fn pathological_negation_chain_fails_closed() {
+        let parsed = parse(&nesting_fixture(5_000, "negations"));
+        assert!(
+            has_code(&parsed, "MNP206"),
+            "deep negations must report MNP206, got {:#?}",
+            parsed.diagnostics
+        );
+        assert!(parsed.ast.is_none());
+    }
+
+    /// Ordinary nesting (well above the deepest real-world fixture at 9
+    /// levels) still parses cleanly: the bound has headroom for
+    /// legitimate code.
+    #[test]
+    fn ordinary_nesting_still_parses() {
+        let parsed = parse(&nesting_fixture(20, "parens"));
+        assert!(
+            !has_code(&parsed, "MNP206"),
+            "20-deep parens must not trip the bound: {:#?}",
+            parsed.diagnostics
+        );
+        assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
     }
 }

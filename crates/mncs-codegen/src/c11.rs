@@ -86,7 +86,22 @@ impl C11StatefulSession<'_> {
             &request.target.module,
             &request.target.function,
         );
-        let driver = c_driver(&entry, &contract.inputs, contract.outputs.first());
+        // RFC 0047 §5 uniform fuel: the driver seeds the entry depth from
+        // the request budget, so an explicit budget means the same fuel
+        // here as on the reference interpreters. The seed joins the cache
+        // key because it is baked into the driver source.
+        let entry_depth = match crate::support::depth_seed_for_request(request) {
+            Ok(seed) => seed,
+            Err(reason) => {
+                return execution_failure(result, ExecutionStatus::InvalidRequest, reason)
+            }
+        };
+        let driver = c_driver(
+            &entry,
+            &contract.inputs,
+            contract.outputs.first(),
+            entry_depth,
+        );
         let call_blob = match crate::support::build_call_file(
             &request.arguments,
             &contract.inputs,
@@ -115,8 +130,13 @@ impl C11StatefulSession<'_> {
         };
         // The driver names its entry symbol, so the cache key is the
         // canonical entry identity: two modules may export the same short
-        // name with different drivers.
-        let cache_key = crate::support::entry_key(&request.target.module, &request.target.function);
+        // name with different drivers. The fuel seed joins the key because
+        // it is baked into the driver source: reusing a zero-seed
+        // executable for a budgeted request would silently grant full fuel.
+        let cache_key = format!(
+            "{}#depth{entry_depth}",
+            crate::support::entry_key(&request.target.module, &request.target.function)
+        );
         if !self.executables.contains_key(&cache_key) {
             let executable = match NativeExecutable::compile_or_reuse(
                 &[
@@ -419,6 +439,7 @@ pub fn lower_c11(
             .collect(),
         assumptions.clone(),
         Vec::new(),
+        ssa.proof_binding_refs(),
         vec![
             "external C compiler".to_owned(),
             "generated C retained as a typed backend artifact".to_owned(),
@@ -554,10 +575,12 @@ fn emit_function(out: &mut String, function: &ScalarFunction, has_arena: bool) {
     }
     // RFC 0047 call-depth fuel, checked against the incoming depth so the
     // boundary matches the reference interpreter exactly (incoming depth
-    // above the cap fails; depth grows by one per nested call).
+    // above the cap fails; depth grows by one per nested call). Exhaustion
+    // reports status 3 (BudgetExhausted), observably distinct from the
+    // generic failure status 1 the body uses below.
     let _ = writeln!(
         out,
-        "  if (mncs_depth > {}u) {{ *mncs_status = 1; *mncs_value = 0; return; }}",
+        "  if (mncs_depth > {}u) {{ *mncs_status = 3; *mncs_value = 0; return; }}",
         mncs_model::MODEL_MAX_CALL_DEPTH
     );
     if has_arena {
@@ -1727,7 +1750,17 @@ pub fn execute_c11(
         &request.target.module,
         &request.target.function,
     );
-    let driver = c_driver(&entry, &contract.inputs, contract.outputs.first());
+    // RFC 0047 §5 uniform fuel (see the stateful session above).
+    let entry_depth = match crate::support::depth_seed_for_request(request) {
+        Ok(seed) => seed,
+        Err(reason) => return execution_failure(result, ExecutionStatus::InvalidRequest, reason),
+    };
+    let driver = c_driver(
+        &entry,
+        &contract.inputs,
+        contract.outputs.first(),
+        entry_depth,
+    );
     let call_blob = match crate::support::build_call_file(
         &request.arguments,
         &contract.inputs,

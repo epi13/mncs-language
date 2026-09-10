@@ -393,6 +393,11 @@ fn run_executable_full(
             value: 0,
             arena_hex: None,
         }),
+        "budget_exhausted" => Ok(NativeRun {
+            status: ExecutionStatus::BudgetExhausted,
+            value: 0,
+            arena_hex: None,
+        }),
         other => Err(NativeError::InvalidOutput(format!(
             "unknown native status {other:?}"
         ))),

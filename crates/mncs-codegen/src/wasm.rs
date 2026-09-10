@@ -1847,6 +1847,7 @@ pub fn execute_function_typed(
     param_tys: &[MarshalTy],
     result_tys: &[MarshalTy],
     step_budget: u64,
+    entry_depth: usize,
 ) -> Result<WasmExecution, WasmTrap> {
     let function_index = module
         .functions
@@ -1879,7 +1880,7 @@ pub fn execute_function_typed(
         raw_arguments,
         opcode_budget,
         &mut steps,
-        0,
+        entry_depth,
     )?;
     let mut returned = Vec::with_capacity(returned_raw.len());
     for (raw, ty) in returned_raw.iter().zip(result_tys) {
@@ -2672,6 +2673,7 @@ mod tests {
                 signed: true,
             })],
             100,
+            0,
         )
         .expect("execute max");
         assert_eq!(
@@ -2720,6 +2722,7 @@ mod tests {
                 signed: false,
             })],
             100,
+            0,
         )
         .expect("execute byte load");
         assert_eq!(
@@ -2783,6 +2786,7 @@ mod tests {
                 signed: false,
             })],
             100,
+            0,
         )
         .expect("execute host buffer ABI");
         assert_eq!(
@@ -2805,6 +2809,7 @@ mod tests {
                 signed: false,
             })],
             100,
+            0,
         )
         .expect("execute host buffer reset");
         assert_eq!(

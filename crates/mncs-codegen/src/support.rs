@@ -780,10 +780,11 @@ pub(crate) fn process_driver_cell_runtime(
     function: &str,
     inputs: &[BackendValueContract],
     _output: Option<&BackendValueContract>,
+    entry_depth: u64,
 ) -> String {
     // Same native-symbol rule as the scalar driver: module and driver
     // must agree on `mncs_main`.
-    let base = process_driver_full(&c_symbol(function), inputs);
+    let base = process_driver_full(&c_symbol(function), inputs, entry_depth);
     // Replace the extern declarations with local definitions of the same
     // names so imported cell libcalls resolve against this driver.
     let pattern = format!(
@@ -836,6 +837,30 @@ pub(crate) fn process_driver_cell_runtime(
         "cell-runtime driver must carry the canonical arena declarations"
     );
     replaced
+}
+
+/// RFC 0047 §5 uniform fuel: translate an execution request's optional
+/// call-depth budget into the native entry-depth seed. The reference
+/// interpreters fail the activation whose incoming depth exceeds the
+/// budget; native code fails the activation whose incoming depth exceeds
+/// `MODEL_MAX_CALL_DEPTH`. Seeding the top-level depth at
+/// `MAX - budget` makes exactly `budget + 1` activations fit in both
+/// worlds, so an explicit budget means the same fuel on every backend.
+/// A missing budget seeds zero (historical behavior, full cap). Budgets
+/// of zero or above the cap are caller errors, rejected exactly like the
+/// reference executors reject them — never silently clamped.
+pub(crate) fn depth_seed_for_request(
+    request: &mncs_model::ExecutionRequest,
+) -> Result<u64, String> {
+    match request.call_depth_budget {
+        None => Ok(0),
+        Some(0) => Err("call_depth_budget must be at least 1 when present".to_owned()),
+        Some(budget) if budget > mncs_model::MODEL_MAX_CALL_DEPTH => Err(format!(
+            "call_depth_budget must not exceed {}",
+            mncs_model::MODEL_MAX_CALL_DEPTH
+        )),
+        Some(budget) => Ok(mncs_model::MODEL_MAX_CALL_DEPTH - budget),
+    }
 }
 
 /// Whether the native process driver will need `mncs_arena` / `mncs_bump`.
@@ -903,6 +928,7 @@ pub(crate) fn process_driver(
     function: &str,
     inputs: &[mncs_model::BackendValueContract],
     output: Option<&mncs_model::BackendValueContract>,
+    entry_depth: u64,
 ) -> String {
     // The driver declares and calls the module symbol, so it maps through
     // the same native-symbol rule as lowering (notably `main`).
@@ -910,9 +936,9 @@ pub(crate) fn process_driver(
     let uses_call_file =
         inputs.iter().any(contract_uses_call_file) || output.is_some_and(contract_uses_call_file);
     if !uses_call_file {
-        return process_driver_scalar_only(&symbol, inputs);
+        return process_driver_scalar_only(&symbol, inputs, entry_depth);
     }
-    process_driver_full(&symbol, inputs)
+    process_driver_full(&symbol, inputs, entry_depth)
 }
 
 fn uses_uint64_abi(contract: &mncs_model::BackendValueContract) -> bool {
@@ -928,6 +954,7 @@ fn uses_uint64_abi(contract: &mncs_model::BackendValueContract) -> bool {
 fn process_driver_scalar_only(
     function: &str,
     inputs: &[mncs_model::BackendValueContract],
+    entry_depth: u64,
 ) -> String {
     fn scalar_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
         match contract {
@@ -989,8 +1016,8 @@ fn process_driver_scalar_only(
         .chain([
             "int32_t*".to_owned(),
             "int64_t*".to_owned(),
-            // RFC 0047 call-depth fuel: hidden trailing parameter, 0 at
-            // top-level entry.
+            // RFC 0047 call-depth fuel: hidden trailing parameter, seeded
+            // from the request budget (zero when the caller sets none).
             "uint64_t".to_owned(),
         ])
         .collect::<Vec<_>>()
@@ -1001,7 +1028,7 @@ fn process_driver_scalar_only(
         .collect::<Vec<_>>();
     call_parts.push("&status".to_owned());
     call_parts.push("&value".to_owned());
-    call_parts.push("0".to_owned());
+    call_parts.push(entry_depth.to_string());
     let call = call_parts.join(", ");
     format!(
         r#"#include <stdint.h>
@@ -1015,6 +1042,7 @@ int main(int argc, char **argv) {{
   int64_t value = 0;
   {function}({call});
   if (status == 0) printf("{{\"status\":\"returned\",\"value\":%lld}}\n", (long long)value);
+  else if (status == 3) printf("{{\"status\":\"budget_exhausted\"}}\n");
   else printf("{{\"status\":\"runtime_failure\"}}\n");
   return 0;
 }}
@@ -1022,7 +1050,11 @@ int main(int argc, char **argv) {{
     )
 }
 
-fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContract]) -> String {
+fn process_driver_full(
+    function: &str,
+    inputs: &[mncs_model::BackendValueContract],
+    entry_depth: u64,
+) -> String {
     // Parameter types follow each declared contract so the generated
     // prototype matches the module definition exactly (an int32/int64
     // mismatch would be C undefined behavior at every call boundary).
@@ -1107,8 +1139,8 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
         .chain([
             "int32_t*".to_owned(),
             "int64_t*".to_owned(),
-            // RFC 0047 call-depth fuel: hidden trailing parameter, 0 at
-            // top-level entry.
+            // RFC 0047 call-depth fuel: hidden trailing parameter, seeded
+            // from the request budget (zero when the caller sets none).
             "uint64_t".to_owned(),
         ])
         .collect::<Vec<_>>()
@@ -1122,7 +1154,7 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
     let mut call_parts = call_args;
     call_parts.push("&status".to_owned());
     call_parts.push("&value".to_owned());
-    call_parts.push("0".to_owned());
+    call_parts.push(entry_depth.to_string());
     let call = call_parts.join(", ");
     let n = inputs.len();
     format!(
@@ -1194,6 +1226,10 @@ int main(int argc, char **argv) {{
     (void)argv;
     {parse}
     {function}({call});
+    if (status == 3) {{
+      printf("{{\"status\":\"budget_exhausted\"}}\n");
+      return 0;
+    }}
     if (status != 0) {{
       printf("{{\"status\":\"runtime_failure\"}}\n");
       return 0;
@@ -1214,6 +1250,7 @@ int main(int argc, char **argv) {{
 {prepare_legacy}
   {function}({call});
   if (status == 0) printf("{{\"status\":\"returned\",\"value\":%lld}}\n", (long long)value);
+  else if (status == 3) printf("{{\"status\":\"budget_exhausted\"}}\n");
   else printf("{{\"status\":\"runtime_failure\"}}\n");
   return 0;
 }}
@@ -1266,7 +1303,7 @@ mod driver_tests {
             name: "Pair".to_owned(),
             fields: vec![],
         };
-        let driver = process_driver_cell_runtime("f", &[record], None);
+        let driver = process_driver_cell_runtime("f", &[record], None, 0);
         assert!(
             driver.contains("uint64_t mncs_cell_alloc"),
             "alloc symbol defined"
@@ -1292,12 +1329,12 @@ mod driver_tests {
             !contract_needs_arena(&mask),
             "masks do not occupy arena cells"
         );
-        let driver = process_driver("any_of", std::slice::from_ref(&mask), None);
+        let driver = process_driver("any_of", std::slice::from_ref(&mask), None, 0);
         assert!(
             driver.contains("MNCS_CALL_FILE"),
             "mask-only inputs must not fall back to argv"
         );
-        let out_driver = process_driver("bits", &[], Some(&mask));
+        let out_driver = process_driver("bits", &[], Some(&mask), 0);
         assert!(
             out_driver.contains("MNCS_CALL_FILE"),
             "mask-only results must not fall back to argv"

@@ -171,8 +171,9 @@ pub use proof_kernel::{
     PROOF_BUFFER_CAPACITY, PROOF_KERNEL_ID, PROOF_MAX_UNIVERSE,
 };
 pub use proof_transport::{
-    validate_relationship_for_use, ProofAdmissionEvidence, ProofRelationship, TransportMismatch,
-    PROOF_DEPENDENCY_SLOTS, PROOF_EVIDENCE_RULE, PROOF_RELATIONSHIP_SCHEMA_VERSION,
+    validate_relationship_for_use, ProofAdmissionEvidence, ProofBindingRef, ProofRelationship,
+    TransportMismatch, PROOF_DEPENDENCY_SLOTS, PROOF_EVIDENCE_RULE,
+    PROOF_RELATIONSHIP_SCHEMA_VERSION,
 };
 pub use provenance::{
     evidence_is_current, Realization, RealizationError, RealizationSelection, TargetIdentity,

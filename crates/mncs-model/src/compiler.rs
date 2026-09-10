@@ -15,7 +15,7 @@ use crate::{CanonicalForm, HighLevelIr, ObligationRecord, SemanticId, SsaModule}
 pub const PORTABLE_WASM_MVP_TARGET: &str = "mncs:target:portable-wasm-mvp-0.1";
 pub const PORTABLE_WASM_MVP_BACKEND_NAME: &str = "mncs-portable-wasm-mvp";
 pub const PORTABLE_WASM_MVP_BACKEND_VERSION: &str = "0.1";
-pub const BACKEND_ARTIFACT_SCHEMA_VERSION: &str = "0.2";
+pub const BACKEND_ARTIFACT_SCHEMA_VERSION: &str = "0.3";
 pub const BACKEND_CAPABILITY_SCHEMA_VERSION: &str = "0.1";
 pub const REALIZATION_REQUEST_SCHEMA_VERSION: &str = "0.1";
 pub const LAYERED_EXECUTION_COMPARISON_INTERPRETATION: &str =
@@ -1104,6 +1104,13 @@ pub struct BackendArtifact {
     pub composite_value_contracts: BTreeMap<String, BackendValueContract>,
     pub assumptions: Vec<String>,
     pub obligations_generated: Vec<SemanticId>,
+    /// Tranche-0.3 proof transport: versioned references to the admitted
+    /// proofs the backend lowered, bound to obligation, kernel,
+    /// dependency, and SSA identities. Empty for proof-free SSA. Part of
+    /// the artifact identity, so proof-bearing and proof-free
+    /// compilations of the same bytes never share an identity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub proof_bindings: Vec<crate::ProofBindingRef>,
     pub execution_applicability: Vec<String>,
     pub evidence_dependencies: Vec<SemanticId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1123,6 +1130,7 @@ impl BackendArtifact {
         exports: Vec<String>,
         assumptions: Vec<String>,
         obligations_generated: Vec<SemanticId>,
+        proof_bindings: Vec<crate::ProofBindingRef>,
         execution_applicability: Vec<String>,
         evidence_dependencies: Vec<SemanticId>,
         unsupported: Vec<String>,
@@ -1138,6 +1146,7 @@ impl BackendArtifact {
             exports,
             assumptions,
             obligations_generated,
+            proof_bindings,
             execution_applicability,
             evidence_dependencies,
             unsupported,
@@ -1156,6 +1165,7 @@ impl BackendArtifact {
         mut exports: Vec<String>,
         mut assumptions: Vec<String>,
         mut obligations_generated: Vec<SemanticId>,
+        mut proof_bindings: Vec<crate::ProofBindingRef>,
         mut execution_applicability: Vec<String>,
         mut evidence_dependencies: Vec<SemanticId>,
         mut unsupported: Vec<String>,
@@ -1166,6 +1176,23 @@ impl BackendArtifact {
         sort_dedup(&mut assumptions);
         obligations_generated.sort();
         obligations_generated.dedup();
+        proof_bindings.sort_by(|left, right| {
+            (
+                &left.proof_identity,
+                &left.obligation,
+                &left.kernel,
+                &left.dependencies,
+                &left.ssa_fingerprint,
+            )
+                .cmp(&(
+                    &right.proof_identity,
+                    &right.obligation,
+                    &right.kernel,
+                    &right.dependencies,
+                    &right.ssa_fingerprint,
+                ))
+        });
+        proof_bindings.dedup();
         sort_dedup(&mut execution_applicability);
         evidence_dependencies.sort();
         evidence_dependencies.dedup();
@@ -1187,6 +1214,7 @@ impl BackendArtifact {
             composite_value_contracts: BTreeMap::new(),
             assumptions,
             obligations_generated,
+            proof_bindings,
             execution_applicability,
             evidence_dependencies,
             promise_decisions: Vec::new(),
@@ -1269,6 +1297,7 @@ impl BackendArtifact {
             function_value_contracts: &self.function_value_contracts,
             assumptions: &self.assumptions,
             obligations_generated: &self.obligations_generated,
+            proof_bindings: &self.proof_bindings,
             execution_applicability: &self.execution_applicability,
             evidence_dependencies: &self.evidence_dependencies,
             promise_decisions: &self.promise_decisions,
@@ -1292,6 +1321,7 @@ struct BackendArtifactMaterial<'a> {
     function_value_contracts: &'a BTreeMap<String, BackendFunctionValueContract>,
     assumptions: &'a [String],
     obligations_generated: &'a [SemanticId],
+    proof_bindings: &'a [crate::ProofBindingRef],
     execution_applicability: &'a [String],
     evidence_dependencies: &'a [SemanticId],
     promise_decisions: &'a [crate::BackendPromiseDecision],
@@ -2179,6 +2209,80 @@ mod tests {
         let mut laundered = plan;
         laundered.assumptions_introduced.clear();
         assert!(!laundered.identity_is_valid());
+    }
+
+    fn test_artifact(proof_bindings: Vec<crate::ProofBindingRef>) -> BackendArtifact {
+        BackendArtifact::new_with_kind(
+            BackendIdentity::new("test-backend", "1"),
+            CompilerArtifactRef::new(ArtifactRepresentation::SelectedSsa, "0.4", "c".repeat(64)),
+            TargetContractRef::new("test-target", BTreeMap::new(), Vec::new(), Vec::new()),
+            "test-kind",
+            "test-format",
+            b"bytes",
+            vec!["export".to_owned()],
+            Vec::new(),
+            Vec::new(),
+            proof_bindings,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            TransformationStatus::Pass,
+        )
+    }
+
+    fn test_binding(identity: &str) -> crate::ProofBindingRef {
+        crate::ProofBindingRef {
+            schema_version: crate::PROOF_RELATIONSHIP_SCHEMA_VERSION.to_owned(),
+            proof_identity: identity.to_owned(),
+            obligation: "mncs:obligation:test".to_owned(),
+            kernel: "mncs:proof-kernel:0.2".to_owned(),
+            dependencies: vec!["aa".to_owned(), "bb".to_owned()],
+            ssa_fingerprint: "cc".repeat(32),
+        }
+    }
+
+    #[test]
+    fn proof_bindings_change_artifact_identity_and_roundtrip() {
+        let plain = test_artifact(Vec::new());
+        assert!(plain.identity_is_valid());
+        assert!(plain.proof_bindings.is_empty());
+        let bearing = test_artifact(vec![test_binding("mncs:proof-dep:test")]);
+        assert!(bearing.identity_is_valid());
+        assert_ne!(
+            plain.identity, bearing.identity,
+            "proof-bearing and proof-free artifacts must never share an identity"
+        );
+        let json = serde_json::to_string(&bearing).expect("artifact serializes");
+        let decoded: BackendArtifact = serde_json::from_str(&json).expect("roundtrip");
+        assert_eq!(decoded, bearing);
+        assert!(decoded.identity_is_valid());
+    }
+
+    #[test]
+    fn legacy_artifact_json_without_proof_bindings_stays_valid() {
+        let plain = test_artifact(Vec::new());
+        let mut json = serde_json::to_value(&plain).expect("artifact serializes");
+        assert!(json.get("proof_bindings").is_none());
+        let decoded: BackendArtifact =
+            serde_json::from_value(json.clone()).expect("legacy shape parses");
+        assert!(decoded.proof_bindings.is_empty());
+        assert!(decoded.identity_is_valid());
+        // A tampered binding (wrong SSA fingerprint) must not validate
+        // against the sealed identity: identity covers the bindings.
+        if let Some(bindings) = json
+            .get_mut("proof_bindings")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            bindings.push(serde_json::to_value(test_binding("mncs:proof-dep:late")).unwrap());
+        } else {
+            json["proof_bindings"] = serde_json::json!([test_binding("mncs:proof-dep:late")]);
+        }
+        let tampered: BackendArtifact =
+            serde_json::from_value(json).expect("tampered shape parses");
+        assert!(
+            !tampered.identity_is_valid(),
+            "appending a binding without resealing must invalidate the identity"
+        );
     }
 
     #[test]

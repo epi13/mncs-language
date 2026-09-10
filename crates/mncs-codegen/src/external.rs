@@ -672,6 +672,7 @@ pub fn lower_external(
         export_names,
         assumptions.clone(),
         Vec::new(),
+        ssa.proof_binding_refs(),
         execution_applicability,
         plan.target.evidence.clone(),
         Vec::new(),

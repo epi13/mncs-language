@@ -3,7 +3,7 @@
 > Generated from `rfcs/conformance-ledger.json` by
 > `scripts/gen_rfc_ledger_docs.py`. Do not edit by hand.
 
-Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 satisfied, 30 partially satisfied, 37 unsatisfied criteria.
+Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 satisfied, 31 partially satisfied, 36 unsatisfied criteria.
 
 ## Reading this document
 
@@ -108,7 +108,7 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 
 ### RFC 0003 — Verified Intermediate Representation
 
 - Design: **DRAFT**; implementation: **PARTIAL** (experimental; confidence high).
-- Scope: HIR, SSA, selected SSA, translation validators, proof-obligation survival into SSA; proof-preserving lowering is partial.
+- Scope: HIR, SSA, selected SSA, translation validators, proof-obligation survival into SSA; proof-preserving lowering is partial (backend artifacts now carry versioned tranche-0.3 proof refs bound to obligation/kernel/dependency/SSA identities; execution-time re-validation and discharge remain open).
 - Stages: HIR, SSA, selected SSA.
 - Depends on: RFC 0001, RFC 0002.
 - Required by: RFC 0007, RFC 0038.
@@ -117,9 +117,9 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 
   - [x] 0003-C1: HIR and verified SSA with validation — evidence: `crates/mncs-model/src/ir.rs`, `crates/mncs-model/src/ssa.rs`
   - [x] 0003-C2: Translation validation over finite corpora — evidence: `crates/mncs-translation-check/src/lib.rs`
   - [~] 0003-C3: Proof obligations survive lowering without accidental loss — evidence: `crates/mncs-model/src/ssa.rs`, `crates/mncs-codegen/src/promises.rs`
-  - [ ] 0003-C4: Proof-preserving lowering with explicit proof transport
+  - [~] 0003-C4: Proof-preserving lowering with explicit proof transport — evidence: `crates/mncs-model/src/proof_transport.rs`, `crates/mncs-cli/tests/proof_dep_admission.rs`
 - Known gaps:
-  - Proof objects do not yet travel through HIR/SSA as first-class artifacts; obligations and certificates travel, kernel proofs attach at the SSA boundary (elision) and lowering boundary (certificate binding).
+  - Proof objects do not yet travel through HIR/SSA as first-class artifacts; obligations and certificates travel, kernel proofs attach at the SSA boundary (elision) and lowering boundary (certificate binding). Tranche-0.3 backend-artifact proof refs (proof_bindings) transport admitted-proof identities to artifacts, but backend execution does not yet re-validate them and erasure/discharge stay unimplemented (0007-G4/G6).
 - Pressure sources: RFC 0007 tranche.
 
 ### RFC 0004 — Recursive Introspection and Refinement
@@ -199,7 +199,7 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 
   - [x] 0007-C19: Proof-core stratification: total kernel versus effectful execution — evidence: `library/core/proof_term.mncs`, `docs/rfc-0007-evidence.md`
   - [ ] 0007-C20: Proof erasure semantics — evidence: `0007-G6`
 - Known gaps:
-  - 0007-G4 proof transport through backend/codegen stages and proof-discharge unresolved (minimum HIR/SSA/lowering path exists)
+  - 0007-G4 proof transport through backend/codegen stages partially implemented (tranche-0.3 artifact proof_bindings: versioned refs bound to obligation/kernel/dependency/SSA identities, covered by artifact identity; backend execution does not yet re-validate refs and proof-discharge remains unresolved; minimum HIR/SSA/lowering path exists)
   - 0007-G6 proof erasure semantics unimplemented
 - Pressure sources: mncs-actions proof-kernel conformance, Fabric heterogeneous validation.
 - Note: Design stays DRAFT (unresolved calculus choices per the RFC); implementation is a bounded experimental tranche, not the full RFC vision. C14 is satisfied for the minimum HIR/SSA/lowering integration scope plus file-based ingestion; full proof-discharge and backend-stage transport remain open. C16 stays partial: one remote Fabric worker verdict plus same-host mediation, no Windows verdict.
@@ -778,26 +778,26 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 
 ### RFC 0047 — Provably Terminating Structural Recursion over Finite Values
 
 - Design: **DRAFT**; implementation: **PARTIAL** (experimental; confidence medium).
-- Scope: Admission on Source Profile 0.13 (R1-R5 descendant provenance, kernel re-derivation discharge), static call-depth fuel in both reference interpreters and all four native realizations (C11/LLVM/Cranelift/WASM), ten-fixture study corpus plus eight-case five-backend execution corpus. Fuel exhaustion unreachable via admitted paths; native fuel failure reports RuntimeFailure where interpreters report BudgetExhausted (open gap).
+- Scope: Admission on Source Profile 0.13 (R1-R5 descendant provenance, kernel re-derivation discharge), static call-depth fuel in both reference interpreters and all native realizations (C11/LLVM/Cranelift/WASM), ten-fixture study corpus plus eight-case five-backend execution corpus. Fuel exhaustion is execution-tested on two axes: explicit per-request budgets exhaust identically (budget_exhausted) on all five backends via uniform fuel seeding, and over-cap activation (1025-deep runtime tree) reports budget_exhausted on C11/LLVM/Cranelift via a dedicated status code that callers propagate without collapsing into RuntimeFailure; malformed budgets are invalid_request everywhere. Parser nesting is deterministically bounded (MNP206 at 256 shared levels).
 - Depends on: RFC 0004, RFC 0007, RFC 0019, RFC 0022, RFC 0041.
 - Tests: `crates/mncs-cli/tests/pressure_structural_recursion.rs`.
 - Acceptance criteria:
   - [x] 0047-C1: Positive fixtures elaborate and execute identically on all five executable backends with kernel-discharged structural-decrease obligations — evidence: `crates/mncs-cli/tests/pressure_structural_recursion.rs`, `examples/source/recursion-rfc/recursion-probe.mncs`, `examples/execution/recursion-rfc-corpus.json`
   - [x] 0047-C2: Negative fixtures stay rejected in every tranche — evidence: `crates/mncs-cli/tests/pressure_structural_recursion.rs`
   - [x] 0047-C3: MNE130 still rejects every non-structural cycle — evidence: `crates/mncs-cli/tests/pressure_structural_recursion.rs`
-  - [~] 0047-C4: Interpreter call-depth exhaustion is deterministic (no host stack overflow) — evidence: `crates/mncs-model/src/execution.rs`, `crates/mncs-model/src/ssa_execution.rs`, `crates/mncs-codegen/src/cranelift_backend.rs`, `crates/mncs-codegen/src/c11.rs`, `crates/mncs-codegen/src/llvm.rs`, `crates/mncs-codegen/src/wasm.rs`
+  - [~] 0047-C4: Interpreter call-depth exhaustion is deterministic (no host stack overflow) — evidence: `crates/mncs-model/src/execution.rs`, `crates/mncs-model/src/ssa_execution.rs`, `crates/mncs-codegen/src/cranelift_backend.rs`, `crates/mncs-codegen/src/c11.rs`, `crates/mncs-codegen/src/llvm.rs`, `crates/mncs-codegen/src/wasm.rs`, `examples/source/recursion-rfc/exhaustion.mncs`, `examples/execution/recursion-fuel-budget-corpus.json`, `examples/execution/recursion-fuel-cap-corpus.json`
   - [ ] 0047-C5: External targets declare recursion capability honestly
 - Known gaps:
-  - Fuel-exhaustion behavior is implemented but not execution-tested: source ceilings (1024) and corpus JSON nesting limits keep over-ceiling activation out of reach of admitted paths.
-  - Native fuel failure reports RuntimeFailure while reference interpreters report BudgetExhausted; the native observation protocol has no budget-exhausted code.
   - Cross-module and higher-order recursion stay rejected; only direct self-calls on match-bound descendants admit.
+  - Reference interpreters recurse on the host stack: 1025-deep activation overflows debug builds, so the over-cap case is excluded from the reference backends by construction (budgeted exhaustion covers them deterministically).
+  - Assumption-bit linkage between MNCS JIT orchestration (library/jit assumption_bits) and the proof-kernel DepAssumptionSet is by-era convention only; no cryptographic binding exists.
 - Pressure sources: CP-0011 (mncs-compiler acyclic-call machines).
-- Note: Admission plus five-backend execution landed and pinned; exhaustion agreement and capability declarations remain open.
+- Note: Admission plus five-backend execution landed and pinned; fuel-exhaustion agreement landed with uniform seeding plus a dedicated exhaustion code (native RuntimeFailure collapse closed). Remaining open: reference debug host-stack depth limit at extreme depths; cross-module/higher-order recursion.
 
 ### RFC 0048 — MNCS-native JIT / execution orchestration architecture
 
 - Design: **ACCEPTED**; implementation: **IMPLEMENTED_EXPERIMENTALLY** (experimental; confidence medium).
-- Scope: MNCS-owned JIT/execution orchestration (sessions, generations, bindings, invalidation, planning, profiling, proof metadata, lifecycle) in library/jit/ with Cranelift as the first native provider; Rust bootstrap acts only as the compiler.
+- Scope: MNCS-owned JIT/execution orchestration (sessions, generations, bindings, invalidation, planning, profiling, proof metadata, lifecycle) in library/jit/ with Cranelift as the first native provider; Rust bootstrap acts only as the compiler. Batch execution retains native provider sessions (C11/LLVM/Cranelift JIT) behind the unchanged MNCS orchestration interface — one preparation per artifact, then reuse across cases — with explicit one-shot fallback where preparation fails (no toolchain, denied executable memory, tampered identity).
 - Stdlib: mncs.jit.session.v1.
 - Depends on: RFC 0016, RFC 0017, RFC 0038, RFC 0041.
 - Tests: `crates/mncs-cli/tests/jit_orchestration.rs`.
@@ -808,4 +808,5 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 
   - [~] 0048-C4: Definition retirement and redefinition/invalidation across generations — evidence: `library/jit/lifecycle.mncs`
 - Known gaps:
   - Provider set beyond Cranelift/reference, persistent cross-process sessions, and full proof-linkage admission are future work.
+  - Provider-side publication remains whole-program per generation (JIT-PRESSURE-0009 open); retained sessions amortize repeat execution but do not yet publish definitions incrementally.
 - Note: RFC header reads 'Implemented (experimental)'. Landed on feat/mncs-native-jit.
