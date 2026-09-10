@@ -3,7 +3,7 @@
 > Generated from `rfcs/conformance-ledger.json` by
 > `scripts/gen_rfc_ledger_docs.py`. Do not edit by hand.
 
-Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 72 satisfied, 31 partially satisfied, 39 unsatisfied criteria.
+Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 75 satisfied, 30 partially satisfied, 37 unsatisfied criteria.
 
 ## Reading this document
 
@@ -65,7 +65,7 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 72 
 | 0044 | Machine-Native Bounded Sequence, Byte, and View Semantics | ACCEPTED | IMPLEMENTED_EXPERIMENTALLY |
 | 0045 | Machine-Native Bounded Stateful Execution Traces | ACCEPTED | IMPLEMENTED_EXPERIMENTALLY |
 | 0046 | Machine-Native Cost, Reuse, and Evidence-Efficiency Tranche | ACCEPTED | IMPLEMENTED_EXPERIMENTALLY |
-| 0047 | Provably Terminating Structural Recursion over Finite Values | DRAFT | NONE |
+| 0047 | Provably Terminating Structural Recursion over Finite Values | DRAFT | PARTIAL |
 | 0048 | MNCS-native JIT / execution orchestration architecture | ACCEPTED | IMPLEMENTED_EXPERIMENTALLY |
 
 ## Entries
@@ -777,20 +777,22 @@ Ledger revision `bfa455a5453ee36edfa3987de12b136bed95356c` covering 48 RFCs: 72 
 
 ### RFC 0047 — Provably Terminating Structural Recursion over Finite Values
 
-- Design: **DRAFT**; implementation: **NONE** (experimental; confidence low).
-- Scope: Design only: descendant-provenance rule (R1-R5), kernel re-derivation design, runtime call-depth fuel design, ten-fixture conformance corpus. No admission implemented; MNE130 stays fail-closed.
+- Design: **DRAFT**; implementation: **PARTIAL** (experimental; confidence medium).
+- Scope: Admission on Source Profile 0.13 (R1-R5 descendant provenance, kernel re-derivation discharge), static call-depth fuel in both reference interpreters and all four native realizations (C11/LLVM/Cranelift/WASM), ten-fixture study corpus plus eight-case five-backend execution corpus. Fuel exhaustion unreachable via admitted paths; native fuel failure reports RuntimeFailure where interpreters report BudgetExhausted (open gap).
 - Depends on: RFC 0004, RFC 0007, RFC 0019, RFC 0022, RFC 0041.
 - Tests: `crates/mncs-cli/tests/pressure_structural_recursion.rs`.
 - Acceptance criteria:
-  - [ ] 0047-C1: Positive fixtures elaborate and execute identically on all five executable backends with kernel-discharged structural-decrease obligations
-  - [~] 0047-C2: Negative fixtures stay rejected in every tranche — evidence: `crates/mncs-cli/tests/pressure_structural_recursion.rs`
-  - [~] 0047-C3: MNE130 still rejects every non-structural cycle — evidence: `crates/mncs-cli/tests/pressure_structural_recursion.rs`
-  - [ ] 0047-C4: Interpreter call-depth exhaustion is deterministic (no host stack overflow)
+  - [x] 0047-C1: Positive fixtures elaborate and execute identically on all five executable backends with kernel-discharged structural-decrease obligations — evidence: `crates/mncs-cli/tests/pressure_structural_recursion.rs`, `examples/source/recursion-rfc/recursion-probe.mncs`, `examples/execution/recursion-rfc-corpus.json`
+  - [x] 0047-C2: Negative fixtures stay rejected in every tranche — evidence: `crates/mncs-cli/tests/pressure_structural_recursion.rs`
+  - [x] 0047-C3: MNE130 still rejects every non-structural cycle — evidence: `crates/mncs-cli/tests/pressure_structural_recursion.rs`
+  - [~] 0047-C4: Interpreter call-depth exhaustion is deterministic (no host stack overflow) — evidence: `crates/mncs-model/src/execution.rs`, `crates/mncs-model/src/ssa_execution.rs`, `crates/mncs-codegen/src/cranelift_backend.rs`, `crates/mncs-codegen/src/c11.rs`, `crates/mncs-codegen/src/llvm.rs`, `crates/mncs-codegen/src/wasm.rs`
   - [ ] 0047-C5: External targets declare recursion capability honestly
 - Known gaps:
-  - Checker needs resolved-binding provenance (post-elaboration); kernel needs match-chain re-derivation; runtime needs call-depth fuel in interpreter and all backends.
+  - Fuel-exhaustion behavior is implemented but not execution-tested: source ceilings (1024) and corpus JSON nesting limits keep over-ceiling activation out of reach of admitted paths.
+  - Native fuel failure reports RuntimeFailure while reference interpreters report BudgetExhausted; the native observation protocol has no budget-exhausted code.
+  - Cross-module and higher-order recursion stay rejected; only direct self-calls on match-bound descendants admit.
 - Pressure sources: CP-0011 (mncs-compiler acyclic-call machines).
-- Note: Draft design from the compiler-pressure tranche. Fail-closed pins pass; no admission implemented.
+- Note: Admission plus five-backend execution landed and pinned; exhaustion agreement and capability declarations remain open.
 
 ### RFC 0048 — MNCS-native JIT / execution orchestration architecture
 

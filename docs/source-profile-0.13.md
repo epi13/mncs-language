@@ -179,11 +179,37 @@ Evidence: `examples/source/pressure-bounds.mncs`,
 five backends), `crates/mncs-cli/tests/pressure_raised_bounds.rs`,
 `crates/mncs-cli/tests/pressure_ceilings.rs`.
 
+## Structural recursion (RFC 0047, partial)
+
+A direct self-call is admitted when its first argument is a match-bound
+structural descendant of a finite first parameter (R1–R5 descendant
+provenance). Each admitted call site records a `structural-decrease`
+claim the kernel re-derives from body and binding-table facts — the
+frontend's admission is never trusted — and every backend enforces the
+same static call-depth fuel (incoming depth above
+`MODEL_MAX_CALL_DEPTH` fails closed instead of overflowing the native
+stack). Generic definitions defer the admitted-ceiling check to
+instantiation, and each substituted traversal bound is checked against
+the admitted ceiling of the module that defines the traversal: a narrow
+root never un-admits library internals admitted under the library's own
+profile, and a wide caller never smuggles an over-ceiling instantiation
+past the definition site (`MNE182`). Fuel exhaustion is implemented but
+not execution-tested (source ceilings and corpus nesting limits keep
+over-ceiling activation out of reach), and native fuel failure reports
+`RuntimeFailure` where the reference interpreters report
+`BudgetExhausted`.
+
+Evidence: `examples/source/recursion-rfc/` (ten study fixtures),
+`examples/source/recursion-rfc/recursion-probe.mncs` with
+`examples/execution/recursion-rfc-corpus.json` (eight cases, all five
+backends), `crates/mncs-cli/tests/pressure_structural_recursion.rs`.
+
 ## Explicit non-claims
 
-- General recursion, mutual/indirect recursion, and numeric countdown
-  recursion stay rejected (`MNE130`); see RFC 0047 for the bounded
-  structural-recursion design.
+- General recursion, mutual/indirect recursion, numeric countdown
+  recursion, cross-module recursion, and higher-order recursion stay
+  rejected (`MNE130`); only the admitted structural subset above runs,
+  see RFC 0047.
 - Unrestricted `while` loops, heap allocation, traits, unrestricted
   callable values, and a conventional runtime model are all out of
   scope; boundedness, proof/evidence discipline, semantic identity, and
