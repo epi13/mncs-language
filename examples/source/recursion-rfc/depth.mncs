@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 // RFC 0047 positive: two recursive calls on direct structural descendants.
 // Must be accepted by the implementation tranche (MNE130 until then).
 module recursion.rfc.depth;

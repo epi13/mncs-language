@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.std.token_set — deterministic bounded token-set algebra.
 //

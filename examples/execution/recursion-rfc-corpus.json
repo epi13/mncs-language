@@ -1,0 +1,190 @@
+{
+ "schema_version": "0.1",
+ "name": "recursion-rfc",
+ "cases": [
+  {
+   "id": "depth-leaf",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "recursion.rfc.probe",
+     "function": "run_depth_0"
+    },
+    "arguments": [],
+    "step_budget": 10000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "depth-one",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "recursion.rfc.probe",
+     "function": "run_depth_1"
+    },
+    "arguments": [],
+    "step_budget": 10000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "depth-two",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "recursion.rfc.probe",
+     "function": "run_depth_2"
+    },
+    "arguments": [],
+    "step_budget": 10000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "depth-three",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "recursion.rfc.probe",
+     "function": "run_depth_3"
+    },
+    "arguments": [],
+    "step_budget": 10000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 3,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "leaves-acc",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "recursion.rfc.probe",
+     "function": "run_leaves"
+    },
+    "arguments": [],
+    "step_budget": 10000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 13,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "left-spine",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "recursion.rfc.probe",
+     "function": "run_left_depth"
+    },
+    "arguments": [],
+    "step_budget": 10000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 3,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "tagged-passthrough",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "recursion.rfc.probe",
+     "function": "run_tagged"
+    },
+    "arguments": [],
+    "step_budget": 10000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "tagged-off",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "recursion.rfc.probe",
+     "function": "run_tagged_off"
+    },
+    "arguments": [],
+    "step_budget": 10000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

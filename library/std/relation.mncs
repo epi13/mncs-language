@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.std.relation — bounded deterministic edge sets with transitive closure.
 //

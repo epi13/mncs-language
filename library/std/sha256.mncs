@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.std.sha256 — SHA-256 as pure bounded MNCS (index PRESS-006).
 //

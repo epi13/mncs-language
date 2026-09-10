@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // ENG-PRESSURE-0007 regression root: enums carry ordinary valid MNCS value
 // types — bare sequences, nested sequences, same-module records, and

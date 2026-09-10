@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.jit.proof — proof-aware execution metadata for the MNCS-native
 // JIT orchestration layer.

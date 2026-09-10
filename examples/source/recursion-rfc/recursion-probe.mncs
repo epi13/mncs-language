@@ -1,0 +1,64 @@
+mncs 0.13;
+// RFC 0047 execution probe: every admitted positive structural-recursion
+// shape runs here, so the execution corpus pins five-backend agreement on
+// admitted recursion — not just frontend admission. The no-argument `run_*`
+// wrappers build their own trees (qualified payload construction), keeping
+// the corpus free of hand-authored finite identities. Expected values are
+// node counts (depth), leaf counts plus accumulator (leaves), left-spine
+// depth (left_depth), and the passthrough tag observer (count_tagged).
+module recursion.rfc.probe;
+enum Tree { Leaf, Node { left: Tree, right: Tree } }
+fn depth(tree: Tree) -> (result: u64) {
+    return match tree {
+        Leaf => 0,
+        Node { left: l, right: r } => depth(l) + depth(r) + 1
+    };
+}
+fn leaves(tree: Tree, acc: u64) -> (result: u64) {
+    return match tree {
+        Leaf => acc + 1,
+        Node { left: l, right: r } => leaves(l, leaves(r, acc))
+    };
+}
+fn left_depth(tree: Tree) -> (result: u64) {
+    return match tree {
+        Leaf => 0,
+        Node { left: l, right: r } => match l {
+            Leaf => 1,
+            Node { left: l2, right: r2 } => left_depth(l2) + 2
+        }
+    };
+}
+fn count_tagged(tree: Tree, tag: bool) -> (result: u64) {
+    return match tree {
+        Leaf => 0,
+        Node { left: l, right: r } => count_tagged(l, tag) + count_tagged(r, tag) + match tag {
+            true => 1,
+            false => 0
+        }
+    };
+}
+fn run_depth_0() -> (result: u64) {
+    return depth(Tree.Leaf);
+}
+fn run_depth_1() -> (result: u64) {
+    return depth(Tree.Node { left: Tree.Leaf, right: Tree.Leaf });
+}
+fn run_depth_2() -> (result: u64) {
+    return depth(Tree.Node { left: Tree.Node { left: Tree.Leaf, right: Tree.Leaf }, right: Tree.Leaf });
+}
+fn run_depth_3() -> (result: u64) {
+    return depth(Tree.Node { left: Tree.Node { left: Tree.Node { left: Tree.Leaf, right: Tree.Leaf }, right: Tree.Leaf }, right: Tree.Leaf });
+}
+fn run_leaves() -> (result: u64) {
+    return leaves(Tree.Node { left: Tree.Node { left: Tree.Leaf, right: Tree.Leaf }, right: Tree.Leaf }, 10);
+}
+fn run_left_depth() -> (result: u64) {
+    return left_depth(Tree.Node { left: Tree.Node { left: Tree.Node { left: Tree.Leaf, right: Tree.Leaf }, right: Tree.Leaf }, right: Tree.Leaf });
+}
+fn run_tagged() -> (result: u64) {
+    return count_tagged(Tree.Node { left: Tree.Node { left: Tree.Leaf, right: Tree.Leaf }, right: Tree.Leaf }, true);
+}
+fn run_tagged_off() -> (result: u64) {
+    return count_tagged(Tree.Node { left: Tree.Node { left: Tree.Leaf, right: Tree.Leaf }, right: Tree.Leaf }, false);
+}

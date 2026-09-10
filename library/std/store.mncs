@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.std.store — durable-state transition contracts (index PRESS-013/
 // 016/017/018, RFC 0026 substrate).
