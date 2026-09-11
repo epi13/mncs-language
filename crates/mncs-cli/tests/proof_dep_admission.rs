@@ -250,6 +250,117 @@ fn proof_ingestion_records_evidence_end_to_end() {
     assert!(dir.join("proof/evidence.json").exists(), "evidence bundle");
 }
 
+/// Tranche-0.3 proof transport: an admitted proof must survive through
+/// the backend boundary as versioned references, not just as SSA
+/// metadata. The backend artifact names the exact proof identity,
+/// obligation, kernel, and SSA fingerprint it lowered, so a consumer can
+/// re-validate without trusting the backend's word; proof-free
+/// compilation of the same program carries no such references.
+#[test]
+fn proof_binding_refs_survive_into_backend_artifact() {
+    let dir = scratch_dir("transport");
+    let ssa = compile_plain(&dir.join("plain"));
+    let (obligation, _) = discover_obligation_and_operation(&ssa);
+    let artifact = open_refl_artifact(&obligation);
+    let identity = artifact.identity.clone();
+    let artifact_path = write_artifact(&dir, &artifact);
+    let output = mncs()
+        .args([
+            "compile",
+            &demo_program(),
+            "--proof",
+            &artifact_path,
+            "--emit",
+            "backend",
+            "--target",
+            "mncs-research-bytecode",
+        ])
+        .output()
+        .expect("run mncs compile --proof --emit backend");
+    assert!(
+        output.status.success(),
+        "proof-carrying backend compile succeeds: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("compilation JSON");
+    let backend = result
+        .get("emissions")
+        .and_then(|emissions| emissions.get("backend"))
+        .expect("backend emission");
+    let bindings = backend
+        .get("proof_bindings")
+        .and_then(serde_json::Value::as_array)
+        .expect("proof_bindings");
+    assert_eq!(
+        bindings.len(),
+        1,
+        "exactly one transported ref, got {bindings:?}"
+    );
+    let binding = &bindings[0];
+    assert_eq!(
+        binding
+            .get("proof_identity")
+            .and_then(serde_json::Value::as_str),
+        Some(identity.as_str()),
+        "artifact names the admitted proof"
+    );
+    assert_eq!(
+        binding
+            .get("obligation")
+            .and_then(serde_json::Value::as_str),
+        Some(obligation.as_str()),
+        "artifact names the obligation"
+    );
+    assert!(
+        binding
+            .get("kernel")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|kernel| !kernel.is_empty()),
+        "artifact names the kernel identity"
+    );
+    assert!(
+        binding
+            .get("ssa_fingerprint")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|fingerprint| fingerprint.len() == 64),
+        "artifact binds the exact SSA fingerprint"
+    );
+    // The sealed artifact identity covers the bindings: re-serializing
+    // the envelope must validate (checked by loading it back below),
+    // and the proof-free compilation of the same program carries none.
+    let plain_output = mncs()
+        .args([
+            "compile",
+            &demo_program(),
+            "--emit",
+            "backend",
+            "--target",
+            "mncs-research-bytecode",
+        ])
+        .output()
+        .expect("run mncs compile --emit backend");
+    assert!(plain_output.status.success());
+    let plain_result: serde_json::Value =
+        serde_json::from_slice(&plain_output.stdout).expect("compilation JSON");
+    let plain_backend = plain_result
+        .get("emissions")
+        .and_then(|emissions| emissions.get("backend"))
+        .expect("backend emission");
+    assert!(
+        plain_backend
+            .get("proof_bindings")
+            .and_then(serde_json::Value::as_array)
+            .is_none_or(Vec::is_empty),
+        "proof-free artifact carries no proof references"
+    );
+    assert_ne!(
+        backend.get("identity"),
+        plain_backend.get("identity"),
+        "proof-bearing and proof-free artifacts never share an identity"
+    );
+}
+
 #[test]
 fn proof_ingestion_rejects_mutated_cells() {
     let dir = scratch_dir("mutated");

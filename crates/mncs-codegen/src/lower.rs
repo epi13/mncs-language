@@ -7,6 +7,7 @@ use mncs_model::{
     SsaModule, SsaTerminator, SsaValue,
 };
 
+use crate::composite::SlotWidth;
 use crate::wasm::{Instr, ValType, WasmFunction, WasmImport, WasmModule};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,12 +26,1205 @@ struct FunctionLayout {
     functions: BTreeMap<SemanticId, u32>,
 }
 
+// ---------------------------------------------------------------------------
+// WEB-P-012 loop-region reclamation.
+//
+// Native arenas are bump-only: every functional aggregate update allocates
+// a fresh cell, so a bounded loop carrying a large value allocates
+// (trips x cell-bytes) total and exhausts any fixed arena. Loop regions
+// bound the peak instead: the first header visit of a loop activation
+// records the bump as the region mark, and each backedge copies the
+// header's live cells aside into locals (flatten), resets the bump to
+// the mark (discarding the iteration's garbage AND the previous trip's
+// rebuilt duplicates together), and rebuilds the values in the parent
+// region (unflatten). Exits deactivate the region without resetting, so
+// live-out cells stay valid where they are and the next entry pushes a
+// fresh mark.
+//
+// Soundness rests on three language-owned facts:
+//
+// * Cells are immutable values, so duplicating a cell preserves meaning.
+// * Past the backedge's argument move, the post-move locals that
+//   downstream reads can observe are exactly the header's parameters
+//   (rebound to the new cells) plus the other values live at the header
+//   entry. Copying every cell there keeps every future read valid; words
+//   ride in locals untouched. Latch argument values need no copying:
+//   dominance guarantees they are rewritten in the latch before any
+//   post-reset read.
+// * The mark is pushed once per activation (guarded by a per-region
+//   active flag set at the header, cleared on every loop exit and at
+//   function entry), and only single-entry natural loops are planned, so
+//   a reset can only ever target a mark pushed after every cell it frees
+//   was allocated: everything above the mark at a backedge is either
+//   dead or rebuilt from scratch temps first.
+//
+// A loop is skipped (status-quo bump behavior, always sound) when any of
+// this fails to establish: a non-single-entry body, unresolvable nominal
+// types, live views (a view descriptor cannot be rebased without its
+// source base, so view-carrying loops keep today's behavior), values
+// missing from the layout, or excessive static copy size. The backedge
+// sequence is additionally guarded on the host-buffer end cursor when the
+// module has one: a host reservation inside the loop means the mark no
+// longer bounds scratch, so that iteration keeps status-quo behavior
+// with all locals valid.
+
+/// Upper bound on flatten/unflatten scratch words per loop region. Larger
+/// static live sets skip reclamation (sound fallback to bump behavior);
+/// the bound keeps generated code proportional to the program.
+const REGION_TEMP_CAP_WORDS: u32 = 65_536;
+
+/// One nominal field fact for region copy-out: field name, slot width,
+/// and whether the slot holds a nested cell reference (records, boxed
+/// finites, exact sequences, vectors) rather than an inline word.
+type NominalField = (String, crate::composite::SlotWidth, bool);
+
+/// Nominal field facts for region copy-out, keyed by type identity (and
+/// discriminant for finite variants).
+#[derive(Debug, Clone, Default)]
+struct NominalRefMap {
+    records: BTreeMap<SemanticId, Vec<NominalField>>,
+    finites: BTreeMap<SemanticId, BTreeMap<u32, Vec<NominalField>>>,
+}
+
+impl NominalRefMap {
+    fn from_program(program: &mncs_model::Program, composites: &CompositeInfo) -> Self {
+        let is_ref = |field_type: &str| -> bool {
+            if program
+                .record_types
+                .iter()
+                .any(|record| record.name == field_type || record.identity.0 == field_type)
+            {
+                return true;
+            }
+            if program
+                .finite_types
+                .iter()
+                .any(|finite| finite.name == field_type || finite.identity.0 == field_type)
+            {
+                return true;
+            }
+            matches!(
+                BodyType::from_semantic_name(field_type),
+                BodyType::Sequence {
+                    bound: mncs_model::SequenceBound::Exact(_),
+                    ..
+                } | BodyType::Vector { .. }
+            )
+        };
+        let mut map = Self::default();
+        // Slot order follows the canonical composite layout (the same order
+        // lowering stores); field spellings resolve from the declaration by
+        // name, so layout/declaration order can never drift apart here.
+        for record in &program.record_types {
+            let empty = Vec::new();
+            let layout = composites.records.get(&record.identity).unwrap_or(&empty);
+            let fields = layout
+                .iter()
+                .map(|(name, width)| {
+                    let spelling = record
+                        .fields
+                        .iter()
+                        .find(|field| &field.name == name)
+                        .map(|field| field.field_type.as_str())
+                        .unwrap_or("u64");
+                    (name.clone(), *width, is_ref(spelling))
+                })
+                .collect::<Vec<_>>();
+            map.records.insert(record.identity.clone(), fields);
+        }
+        for finite in &program.finite_types {
+            // Tag-only finites are unboxed words, never cells: keep them
+            // out of the map so shape resolution agrees with lowering.
+            if !composites.is_boxed_finite(&finite.identity) {
+                continue;
+            }
+            let mut variants = BTreeMap::new();
+            for variant in &finite.variants {
+                let empty = Vec::new();
+                let layout = composites
+                    .boxed_finites
+                    .get(&finite.identity)
+                    .and_then(|variants| variants.get(&variant.discriminant))
+                    .unwrap_or(&empty);
+                let fields = layout
+                    .iter()
+                    .map(|(name, width)| {
+                        let spelling = variant
+                            .payload
+                            .iter()
+                            .find(|field| &field.name == name)
+                            .map(|field| field.field_type.as_str())
+                            .unwrap_or("u64");
+                        (name.clone(), *width, is_ref(spelling))
+                    })
+                    .collect::<Vec<_>>();
+                variants.insert(variant.discriminant, fields);
+            }
+            map.finites.insert(finite.identity.clone(), variants);
+        }
+        map
+    }
+}
+
+/// Copy shape for one carried/live-out value: words copy inline, cells
+/// copy field-by-field with nested references recursed.
+#[derive(Debug, Clone)]
+enum CopyShape {
+    /// One inline word (scalars, views, masks, unboxed tags).
+    Word(crate::composite::SlotWidth),
+    /// Canonical record cell: per-field (slot width, nested shape).
+    Record(Vec<(crate::composite::SlotWidth, CopyShape)>),
+    /// Boxed finite cell: discriminant word plus per-variant payloads.
+    Finite(Vec<(u32, Vec<(crate::composite::SlotWidth, CopyShape)>)>),
+    /// Exact sequence / vector cell: static lane count, lane stride, lane.
+    Lanes {
+        count: u32,
+        stride_bytes: u32,
+        element: Box<CopyShape>,
+    },
+}
+
+/// Whether an SSA value type needs region copying: `Cell` shapes copy,
+/// `Word` values ride in locals untouched, `View` carriers skip the loop.
+#[derive(Debug, Clone)]
+enum CopyClass {
+    Word,
+    Cell(CopyShape),
+    View,
+}
+
+fn slot_width_of(spelling: &str) -> crate::composite::SlotWidth {
+    match BodyType::from_semantic_name(spelling) {
+        BodyType::Integer(ty) if ty.bits == 64 => crate::composite::SlotWidth::W64,
+        BodyType::Float(ty) if ty.is_supported() => crate::composite::SlotWidth::W64,
+        BodyType::Sequence {
+            bound: mncs_model::SequenceBound::UpTo(_),
+            ..
+        }
+        | BodyType::Mask { .. } => crate::composite::SlotWidth::W64,
+        _ => crate::composite::SlotWidth::W32,
+    }
+}
+
+/// Resolve the copy shape of one field/element spelling: named composites
+/// recurse through the program declarations, structural spellings recurse
+/// structurally, and everything else is an inline word. `View` reports a
+/// bounded view at any depth (callers skip the loop); `Err` reports an
+/// unresolvable spelling (callers skip the loop). `visiting` tracks the
+/// in-progress declaration chain: a recursive type re-enters its own
+/// spelling, and since no static temp assignment can flatten unbounded
+/// nesting depth, that is an `Err` (skip) rather than unbounded host
+/// recursion.
+fn copy_shape_of_spelling(
+    spelling: &str,
+    program: &mncs_model::Program,
+    refmap: &NominalRefMap,
+    composites: &CompositeInfo,
+    visiting: &mut BTreeSet<String>,
+) -> Result<CopyClass, String> {
+    // Normalize onto the declaration identity when the spelling names one:
+    // the same type is reachable by name and by identity, and the guard
+    // must catch both.
+    let key = program
+        .record_types
+        .iter()
+        .find(|record| record.name == spelling || record.identity.0 == spelling)
+        .map(|record| record.identity.0.clone())
+        .or_else(|| {
+            program
+                .finite_types
+                .iter()
+                .find(|finite| finite.name == spelling || finite.identity.0 == spelling)
+                .map(|finite| finite.identity.0.clone())
+        })
+        .unwrap_or_else(|| spelling.to_owned());
+    if !visiting.insert(key.clone()) {
+        return Err(format!(
+            "recursive type {spelling:?} has no bounded copy shape"
+        ));
+    }
+    let resolved = copy_shape_of_spelling_inner(spelling, program, refmap, composites, visiting);
+    visiting.remove(&key);
+    resolved
+}
+
+fn copy_shape_of_spelling_inner(
+    spelling: &str,
+    program: &mncs_model::Program,
+    refmap: &NominalRefMap,
+    composites: &CompositeInfo,
+    visiting: &mut BTreeSet<String>,
+) -> Result<CopyClass, String> {
+    if let Some(record) = program
+        .record_types
+        .iter()
+        .find(|record| record.name == spelling || record.identity.0 == spelling)
+    {
+        let fields = refmap
+            .records
+            .get(&record.identity)
+            .ok_or_else(|| format!("record {spelling:?} has no canonical layout"))?;
+        if fields.len() != record.fields.len() {
+            return Err(format!(
+                "record {spelling:?} layout does not match its declaration"
+            ));
+        }
+        let mut shape = Vec::with_capacity(fields.len());
+        for (name, width, is_ref) in fields.iter() {
+            let spelling = record
+                .fields
+                .iter()
+                .find(|field| &field.name == name)
+                .map(|field| field.field_type.as_str())
+                .ok_or_else(|| format!("record field {name:?} missing from its declaration"))?;
+            let nested = if *is_ref {
+                match copy_shape_of_spelling(spelling, program, refmap, composites, visiting)? {
+                    CopyClass::Cell(nested) => nested,
+                    CopyClass::Word => {
+                        return Err(format!(
+                            "record field {name:?} marked as a reference but resolves to a word"
+                        ));
+                    }
+                    CopyClass::View => return Ok(CopyClass::View),
+                }
+            } else {
+                CopyShape::Word(*width)
+            };
+            shape.push((*width, nested));
+        }
+        return Ok(CopyClass::Cell(CopyShape::Record(shape)));
+    }
+    if let Some(finite) = program
+        .finite_types
+        .iter()
+        .find(|finite| finite.name == spelling || finite.identity.0 == spelling)
+    {
+        // Tag-only finites are unboxed words, exactly as the lowering
+        // realizes them (`CompositeInfo::is_boxed_finite` is the same
+        // predicate the constructor/store paths use). Treating an unboxed
+        // tag as a cell reference would flatten a discriminant as an
+        // address and rebuild garbage.
+        if !composites.is_boxed_finite(&finite.identity) {
+            return Ok(CopyClass::Word);
+        }
+        let Some(variants) = refmap.finites.get(&finite.identity) else {
+            return Err(format!("boxed finite {spelling:?} has no canonical layout"));
+        };
+        let mut shape = Vec::with_capacity(variants.len());
+        for variant in &finite.variants {
+            let layout = variants.get(&variant.discriminant).ok_or_else(|| {
+                format!(
+                    "finite variant {:?} has no canonical layout",
+                    variant.discriminant
+                )
+            })?;
+            if layout.len() != variant.payload.len() {
+                return Err(format!(
+                    "finite variant {:?} layout does not match its declaration",
+                    variant.discriminant
+                ));
+            }
+            let mut payload = Vec::with_capacity(layout.len());
+            for (name, width, is_ref) in layout.iter() {
+                let spelling = variant
+                    .payload
+                    .iter()
+                    .find(|field| &field.name == name)
+                    .map(|field| field.field_type.as_str())
+                    .ok_or_else(|| {
+                        format!("finite payload field {name:?} missing from its declaration")
+                    })?;
+                let nested = if *is_ref {
+                    match copy_shape_of_spelling(spelling, program, refmap, composites, visiting)? {
+                        CopyClass::Cell(nested) => nested,
+                        CopyClass::Word => {
+                            return Err(format!(
+                                "finite payload field {name:?} marked as a reference but resolves to a word"
+                            ));
+                        }
+                        CopyClass::View => return Ok(CopyClass::View),
+                    }
+                } else {
+                    CopyShape::Word(*width)
+                };
+                payload.push((*width, nested));
+            }
+            shape.push((variant.discriminant, payload));
+        }
+        return Ok(CopyClass::Cell(CopyShape::Finite(shape)));
+    }
+    match BodyType::from_semantic_name(spelling) {
+        BodyType::Sequence {
+            element,
+            bound: mncs_model::SequenceBound::Exact(length),
+        } => {
+            let element_spelling = element.semantic_name();
+            let element = match copy_shape_of_spelling(
+                &element_spelling,
+                program,
+                refmap,
+                composites,
+                visiting,
+            )? {
+                CopyClass::Cell(nested) => nested,
+                // Scalar lanes copy as words with the lane width.
+                CopyClass::Word => CopyShape::Word(slot_width_of(&element_spelling)),
+                CopyClass::View => return Ok(CopyClass::View),
+            };
+            Ok(CopyClass::Cell(CopyShape::Lanes {
+                count: length,
+                stride_bytes: 8,
+                element: Box::new(element),
+            }))
+        }
+        BodyType::Sequence {
+            bound: mncs_model::SequenceBound::UpTo(_),
+            ..
+        } => Ok(CopyClass::View),
+        BodyType::Vector { element, lanes } => {
+            let BodyType::Integer(integer) = *element else {
+                return Err("vector lanes must be integers".to_owned());
+            };
+            let width = if integer.bits == 64 {
+                crate::composite::SlotWidth::W64
+            } else {
+                crate::composite::SlotWidth::W32
+            };
+            Ok(CopyClass::Cell(CopyShape::Lanes {
+                count: lanes,
+                stride_bytes: if integer.bits == 64 { 8 } else { 4 },
+                element: Box::new(CopyShape::Word(width)),
+            }))
+        }
+        _ => Ok(CopyClass::Word),
+    }
+}
+
+/// Classify one SSA block-parameter type for region copying.
+fn copy_class_of_ty(
+    ty: &IrType,
+    program: &mncs_model::Program,
+    refmap: &NominalRefMap,
+    composites: &CompositeInfo,
+) -> Result<CopyClass, String> {
+    // Each classification is an independent declaration walk, so the
+    // cycle guard starts empty here and only spans one shape.
+    let mut visiting = BTreeSet::new();
+    match ty {
+        IrType::Record { name, .. } | IrType::Finite { name, .. } => {
+            copy_shape_of_spelling(name, program, refmap, composites, &mut visiting)
+        }
+        IrType::Named(spelling) => {
+            copy_shape_of_spelling(spelling, program, refmap, composites, &mut visiting)
+        }
+    }
+}
+
+/// Scratch words to flatten one shape aside (one I64 temp per word slot,
+/// including one per nested reference hop).
+fn flatten_words(shape: &CopyShape) -> u32 {
+    match shape {
+        CopyShape::Word(_) => 1,
+        CopyShape::Record(fields) => fields
+            .iter()
+            .map(|(_, nested)| match nested {
+                CopyShape::Word(_) => 1,
+                nested => 1 + flatten_words(nested),
+            })
+            .sum(),
+        CopyShape::Finite(variants) => {
+            1 + variants
+                .iter()
+                .map(|(_, payload)| {
+                    payload
+                        .iter()
+                        .map(|(_, nested)| match nested {
+                            CopyShape::Word(_) => 1,
+                            nested => 1 + flatten_words(nested),
+                        })
+                        .sum::<u32>()
+                })
+                .max()
+                .unwrap_or(0)
+        }
+        CopyShape::Lanes { count, element, .. } => count.saturating_mul(match element.as_ref() {
+            CopyShape::Word(_) => 1,
+            nested => 1 + flatten_words(nested),
+        }),
+    }
+}
+
+/// Canonical cell bytes for one shape (what unflatten allocates).
+fn cell_bytes(shape: &CopyShape) -> u32 {
+    match shape {
+        CopyShape::Word(_) => 0,
+        CopyShape::Record(fields) => fields.len() as u32 * 8,
+        CopyShape::Finite(variants) => variants
+            .iter()
+            .map(|(_, payload)| (payload.len() as u32 + 1) * 8)
+            .max()
+            .unwrap_or(8),
+        CopyShape::Lanes {
+            count,
+            stride_bytes,
+            ..
+        } => count.saturating_mul(*stride_bytes),
+    }
+}
+
+fn emit_push_slot(body: &mut Vec<Instr>, addr_local: u32, byte_offset: u32) {
+    body.push(Instr::LocalGet(addr_local));
+    if byte_offset != 0 {
+        body.push(Instr::I32Const(byte_offset as i32));
+        body.push(Instr::I32Add);
+    }
+}
+
+fn emit_load_width(body: &mut Vec<Instr>, width: crate::composite::SlotWidth) {
+    load_instr(width, body);
+}
+
+fn emit_extend_for_temp(body: &mut Vec<Instr>, width: crate::composite::SlotWidth) {
+    // Scratch temps are uniformly I64 so one temp range serves every slot.
+    if matches!(width, crate::composite::SlotWidth::W32) {
+        body.push(Instr::I64ExtendI32U);
+    }
+}
+
+/// Flatten one cell aside into `temp..`: read every slot (recursing into
+/// nested references) without writing memory. Returns temps consumed; the
+/// assignment is deterministic so unflatten reuses it exactly.
+fn emit_flatten(body: &mut Vec<Instr>, addr_local: u32, shape: &CopyShape, temp: u32) -> u32 {
+    match shape {
+        CopyShape::Word(width) => {
+            emit_push_slot(body, addr_local, 0);
+            emit_load_width(body, *width);
+            emit_extend_for_temp(body, *width);
+            body.push(Instr::LocalSet(temp));
+            1
+        }
+        CopyShape::Record(fields) => {
+            let mut used = 0;
+            for (index, (width, nested)) in fields.iter().enumerate() {
+                let offset = index as u32 * 8;
+                match nested {
+                    CopyShape::Word(_) => {
+                        emit_push_slot(body, addr_local, offset);
+                        emit_load_width(body, *width);
+                        emit_extend_for_temp(body, *width);
+                        body.push(Instr::LocalSet(temp + used));
+                        used += 1;
+                    }
+                    nested => {
+                        emit_push_slot(body, addr_local, offset);
+                        body.push(Instr::I32Load);
+                        // References ride extended in the uniform I64
+                        // scratch temps (a bare I32 into an I64 local
+                        // would fail WASM validation).
+                        body.push(Instr::I64ExtendI32U);
+                        body.push(Instr::LocalSet(temp + used));
+                        used += 1 + emit_flatten(body, temp + used, nested, temp + used + 1);
+                    }
+                }
+            }
+            used
+        }
+        CopyShape::Finite(variants) => {
+            emit_push_slot(body, addr_local, 0);
+            body.push(Instr::I32Load);
+            body.push(Instr::I64ExtendI32U);
+            body.push(Instr::LocalSet(temp));
+            let mut max = 0;
+            for (discriminant, payload) in variants {
+                // The discriminant temp holds an extended I64 (see
+                // above), so the tag compare is 64-bit.
+                body.push(Instr::LocalGet(temp));
+                body.push(Instr::I64Const(*discriminant as i64));
+                body.push(Instr::I64Eq);
+                body.push(Instr::If);
+                let mut used = 0;
+                for (index, (width, nested)) in payload.iter().enumerate() {
+                    let offset = (index as u32 + 1) * 8;
+                    match nested {
+                        CopyShape::Word(_) => {
+                            emit_push_slot(body, addr_local, offset);
+                            emit_load_width(body, *width);
+                            emit_extend_for_temp(body, *width);
+                            body.push(Instr::LocalSet(temp + 1 + used));
+                            used += 1;
+                        }
+                        nested => {
+                            emit_push_slot(body, addr_local, offset);
+                            body.push(Instr::I32Load);
+                            body.push(Instr::I64ExtendI32U);
+                            body.push(Instr::LocalSet(temp + 1 + used));
+                            used += 1 + emit_flatten(
+                                body,
+                                temp + 1 + used,
+                                nested,
+                                temp + 1 + used + 1,
+                            );
+                        }
+                    }
+                }
+                max = max.max(used);
+                body.push(Instr::End);
+            }
+            1 + max
+        }
+        CopyShape::Lanes {
+            count,
+            stride_bytes,
+            element,
+        } => {
+            let mut used = 0;
+            for lane in 0..*count {
+                let offset = lane.saturating_mul(*stride_bytes);
+                match element.as_ref() {
+                    CopyShape::Word(width) => {
+                        emit_push_slot(body, addr_local, offset);
+                        emit_load_width(body, *width);
+                        emit_extend_for_temp(body, *width);
+                        body.push(Instr::LocalSet(temp + used));
+                        used += 1;
+                    }
+                    nested => {
+                        emit_push_slot(body, addr_local, offset);
+                        body.push(Instr::I32Load);
+                        body.push(Instr::I64ExtendI32U);
+                        body.push(Instr::LocalSet(temp + used));
+                        used += 1 + emit_flatten(body, temp + used, nested, temp + used + 1);
+                    }
+                }
+            }
+            used
+        }
+    }
+}
+
+/// Deepest nested-reference depth of one shape (root cell is depth 0).
+/// Sizes the shared I32 address-temp pool: one temp per depth level.
+fn shape_depth(shape: &CopyShape) -> u32 {
+    let nested_depth = |nested: &CopyShape| match nested {
+        CopyShape::Word(_) => 0,
+        nested => 1 + shape_depth(nested),
+    };
+    match shape {
+        CopyShape::Word(_) => 0,
+        CopyShape::Record(fields) => fields
+            .iter()
+            .map(|(_, nested)| nested_depth(nested))
+            .max()
+            .unwrap_or(0),
+        CopyShape::Finite(variants) => variants
+            .iter()
+            .map(|(_, payload)| {
+                payload
+                    .iter()
+                    .map(|(_, nested)| nested_depth(nested))
+                    .max()
+                    .unwrap_or(0)
+            })
+            .max()
+            .unwrap_or(0),
+        CopyShape::Lanes { element, .. } => nested_depth(element),
+    }
+}
+
+/// Rebuild one cell from scratch temps: allocate in the parent region
+/// (post-reset bump) and write every slot, recursing into nested
+/// references. Data temps mirror `emit_flatten` exactly; child addresses
+/// ride in a SEPARATE I32 temp pool (`addr_base + depth`) because data
+/// temps are uniformly I64 and a rebuilt address is I32 sharing one
+/// local for both would fail WASM validation.
+fn emit_unflatten(
+    body: &mut Vec<Instr>,
+    addr_base: u32,
+    shape: &CopyShape,
+    depth: u32,
+    data_temp: u32,
+    dest_local: u32,
+) -> Result<(), String> {
+    match shape {
+        CopyShape::Word(_) => {
+            // Words never reach unflatten as roots (only cells are copied).
+            body.push(Instr::Unreachable);
+            Ok(())
+        }
+        CopyShape::Record(fields) => {
+            emit_alloc(body, dest_local, cell_bytes(shape))?;
+            let mut used = 0;
+            for (index, (width, nested)) in fields.iter().enumerate() {
+                let offset = index as u32 * 8;
+                match nested {
+                    CopyShape::Word(_) => {
+                        emit_push_slot(body, dest_local, offset);
+                        body.push(Instr::LocalGet(data_temp + used));
+                        emit_unwrap_temp(body, *width);
+                        store_width(*width, body);
+                        used += 1;
+                    }
+                    nested => {
+                        let addr = addr_base + depth;
+                        body.push(Instr::LocalGet(data_temp + used));
+                        body.push(Instr::I32WrapI64);
+                        body.push(Instr::LocalSet(addr));
+                        used += 1;
+                        emit_unflatten(body, addr_base, nested, depth + 1, data_temp + used, addr)?;
+                        emit_push_slot(body, dest_local, offset);
+                        body.push(Instr::LocalGet(addr));
+                        body.push(Instr::I32Store);
+                        used += flatten_words(nested);
+                    }
+                }
+            }
+            Ok(())
+        }
+        CopyShape::Finite(variants) => {
+            for (discriminant, payload) in variants {
+                body.push(Instr::LocalGet(data_temp));
+                body.push(Instr::I64Const(*discriminant as i64));
+                body.push(Instr::I64Eq);
+                body.push(Instr::If);
+                emit_alloc(body, dest_local, (payload.len() as u32 + 1) * 8)?;
+                emit_push_slot(body, dest_local, 0);
+                body.push(Instr::LocalGet(data_temp));
+                body.push(Instr::I32WrapI64);
+                body.push(Instr::I32Store);
+                let mut used = 0;
+                for (index, (width, nested)) in payload.iter().enumerate() {
+                    let offset = (index as u32 + 1) * 8;
+                    match nested {
+                        CopyShape::Word(_) => {
+                            emit_push_slot(body, dest_local, offset);
+                            body.push(Instr::LocalGet(data_temp + 1 + used));
+                            emit_unwrap_temp(body, *width);
+                            store_width(*width, body);
+                            used += 1;
+                        }
+                        nested => {
+                            let addr = addr_base + depth;
+                            body.push(Instr::LocalGet(data_temp + 1 + used));
+                            body.push(Instr::I32WrapI64);
+                            body.push(Instr::LocalSet(addr));
+                            used += 1;
+                            emit_unflatten(
+                                body,
+                                addr_base,
+                                nested,
+                                depth + 1,
+                                data_temp + 1 + used,
+                                addr,
+                            )?;
+                            emit_push_slot(body, dest_local, offset);
+                            body.push(Instr::LocalGet(addr));
+                            body.push(Instr::I32Store);
+                            used += flatten_words(nested);
+                        }
+                    }
+                }
+                body.push(Instr::End);
+            }
+            Ok(())
+        }
+        CopyShape::Lanes {
+            count,
+            stride_bytes,
+            element,
+        } => {
+            emit_alloc(body, dest_local, cell_bytes(shape))?;
+            let mut used = 0;
+            for lane in 0..*count {
+                let offset = lane.saturating_mul(*stride_bytes);
+                match element.as_ref() {
+                    CopyShape::Word(width) => {
+                        emit_push_slot(body, dest_local, offset);
+                        body.push(Instr::LocalGet(data_temp + used));
+                        emit_unwrap_temp(body, *width);
+                        store_width(*width, body);
+                        used += 1;
+                    }
+                    nested => {
+                        let addr = addr_base + depth;
+                        body.push(Instr::LocalGet(data_temp + used));
+                        body.push(Instr::I32WrapI64);
+                        body.push(Instr::LocalSet(addr));
+                        used += 1;
+                        emit_unflatten(body, addr_base, nested, depth + 1, data_temp + used, addr)?;
+                        emit_push_slot(body, dest_local, offset);
+                        body.push(Instr::LocalGet(addr));
+                        body.push(Instr::I32Store);
+                        used += flatten_words(nested);
+                    }
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Narrow one I64 scratch temp back to a slot width for storing.
+fn emit_unwrap_temp(body: &mut Vec<Instr>, width: crate::composite::SlotWidth) {
+    if matches!(width, crate::composite::SlotWidth::W32) {
+        body.push(Instr::I32WrapI64);
+    }
+}
+
+/// One planned loop-region header: the bump mark global, the activation
+/// flag global, and the cell values (WASM local + copy shape) to preserve
+/// across the backedge reset. Sorted by local for deterministic emission.
+struct HeaderPlan {
+    mark_global: u32,
+    active_global: u32,
+    copies: Vec<(u32, CopyShape)>,
+}
+
+/// Per-function loop-region plan: planned headers by emission block
+/// index, loop-exit edges by source block index (each entry names the
+/// target block and the exited region's activation flag to clear), plus
+/// the scratch pool sizes shared by all of the function's backedge
+/// sequences (sequences run one at a time, so one pool sized to the
+/// maximum serves every region).
+#[derive(Default)]
+struct RegionPlan {
+    headers: BTreeMap<u32, HeaderPlan>,
+    exits: BTreeMap<u32, Vec<(u32, u32)>>,
+    addr_pool: u32,
+    data_pool: u32,
+}
+
+/// Emission context for one function's backedge sequences.
+struct RegionEmit<'a> {
+    plan: &'a RegionPlan,
+    addr_base: u32,
+    data_base: u32,
+    /// Host-buffer end global (`mncs_host_buffer` support), when the
+    /// module materializes composites. `None` means no host reservation
+    /// can exist, so the reset needs no guard.
+    host_end: Option<u32>,
+}
+
+/// Plan loop-region reclamation for one function: find backedges (branch
+/// targets at or before the source block in emission order), keep the
+/// single-entry natural loops, compute order-sensitive backward liveness,
+/// and preserve each planned header's parameters plus its other live-in
+/// cell values across its backedge resets.
+///
+/// Soundness: after the backedge's argument move, downstream reads can
+/// observe exactly the header's parameters (rebound) and the other
+/// header-live values (untouched by the move). Copying every `Cell`
+/// among them aside and rebuilding it after the reset keeps all future
+/// reads valid because cells are immutable; words need no copying, and
+/// latch temporaries need none by dominance. A header is left unplanned
+/// (status-quo bump behavior, always sound) when its body is not
+/// single-entry, when any preserved value is a view carrier (a view
+/// descriptor cannot be rebased without its source base), has an
+/// unresolvable shape, or is missing from the layout, or when the static
+/// scratch need exceeds the temp cap.
+fn plan_loop_regions(
+    program: &mncs_model::Program,
+    function: &SsaFunction,
+    layout: &FunctionLayout,
+    composites: &CompositeInfo,
+    refmap: &NominalRefMap,
+) -> Result<RegionPlan, String> {
+    let mut plan = RegionPlan::default();
+    if !composites.uses_composites {
+        return Ok(plan);
+    }
+    let block_count = function.blocks.len();
+    // Value types for classification: every live value is an input, a
+    // block parameter, an instruction output, or the function result.
+    let mut tys: BTreeMap<SemanticId, IrType> = BTreeMap::new();
+    for input in &function.inputs {
+        tys.insert(input.identity.clone(), input.ty.clone());
+    }
+    for block in &function.blocks {
+        for parameter in &block.parameters {
+            tys.insert(parameter.identity.clone(), parameter.ty.clone());
+        }
+        for instruction in &block.instructions {
+            for output in &instruction.outputs {
+                tys.insert(output.identity.clone(), output.ty.clone());
+            }
+        }
+    }
+    for output in &function.outputs {
+        if let Some(ty) = tys.get(&output.identity).cloned() {
+            tys.insert(output.identity.clone(), ty);
+        }
+    }
+    // CFG successors with the edge's argument bindings. Failure edges
+    // are not lowered (lower_terminator traps), so they contribute no
+    // successors and no reads.
+    let mut successors: Vec<Vec<(usize, Vec<SemanticId>)>> = vec![Vec::new(); block_count];
+    for (index, block) in function.blocks.iter().enumerate() {
+        match &block.terminator {
+            SsaTerminator::Return { .. } => {}
+            SsaTerminator::Branch { target, arguments } => {
+                plan_edge(
+                    layout,
+                    block_count,
+                    &mut successors,
+                    index,
+                    target,
+                    arguments,
+                )?;
+            }
+            SsaTerminator::ConditionalBranch {
+                then_target,
+                then_arguments,
+                else_target,
+                else_arguments,
+                ..
+            } => {
+                plan_edge(
+                    layout,
+                    block_count,
+                    &mut successors,
+                    index,
+                    then_target,
+                    then_arguments,
+                )?;
+                plan_edge(
+                    layout,
+                    block_count,
+                    &mut successors,
+                    index,
+                    else_target,
+                    else_arguments,
+                )?;
+            }
+            SsaTerminator::Failure { .. } => {}
+        }
+    }
+    // Order-sensitive per-block uses (operands read before any in-block
+    // write) and defs (params bound at entry, outputs written in order).
+    // A value defined and then used inside one block is NOT live at the
+    // block's entry; ignoring intra-block order would leak dead-in-block
+    // values into every loop live set through cyclic propagation.
+    let mut uses: Vec<BTreeSet<SemanticId>> = vec![BTreeSet::new(); block_count];
+    let mut defs: Vec<BTreeSet<SemanticId>> = vec![BTreeSet::new(); block_count];
+    for (index, block) in function.blocks.iter().enumerate() {
+        let mut defined = BTreeSet::new();
+        for parameter in &block.parameters {
+            defined.insert(parameter.identity.clone());
+        }
+        let mut read_before_write = BTreeSet::new();
+        for instruction in &block.instructions {
+            for input in &instruction.inputs {
+                if !defined.contains(input) {
+                    read_before_write.insert(input.clone());
+                }
+            }
+            for output in &instruction.outputs {
+                defined.insert(output.identity.clone());
+            }
+        }
+        let mut terminator_reads = Vec::new();
+        match &block.terminator {
+            SsaTerminator::Return { values } => {
+                terminator_reads.extend(values.iter().cloned());
+            }
+            SsaTerminator::Branch { arguments, .. } => {
+                terminator_reads.extend(arguments.iter().cloned());
+            }
+            SsaTerminator::ConditionalBranch {
+                condition,
+                then_arguments,
+                else_arguments,
+                ..
+            } => {
+                terminator_reads.push(condition.clone());
+                terminator_reads.extend(then_arguments.iter().cloned());
+                terminator_reads.extend(else_arguments.iter().cloned());
+            }
+            SsaTerminator::Failure { .. } => {}
+        }
+        for value in terminator_reads {
+            if !defined.contains(&value) {
+                read_before_write.insert(value);
+            }
+        }
+        uses[index] = read_before_write;
+        defs[index] = defined;
+    }
+    // Backward liveness to a fixpoint. The transfer function models
+    // block-parameter rebinding: successor params are killed (rebound at
+    // the edge) while the edge arguments are read in the source block.
+    let mut live_in: Vec<BTreeSet<SemanticId>> = vec![BTreeSet::new(); block_count];
+    loop {
+        let mut changed = false;
+        for index in (0..block_count).rev() {
+            let mut live_out = BTreeSet::new();
+            for (target, arguments) in &successors[index] {
+                let params: BTreeSet<&SemanticId> = function.blocks[*target]
+                    .parameters
+                    .iter()
+                    .map(|parameter| &parameter.identity)
+                    .collect();
+                for value in &live_in[*target] {
+                    if !params.contains(value) {
+                        live_out.insert(value.clone());
+                    }
+                }
+                for argument in arguments {
+                    live_out.insert(argument.clone());
+                }
+            }
+            live_out.retain(|value| !defs[index].contains(value));
+            live_out.extend(uses[index].iter().cloned());
+            if live_out != live_in[index] {
+                live_in[index] = live_out;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    // Backedges target an already-emitted block; group latches by header.
+    let mut header_latches: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for (index, edges) in successors.iter().enumerate() {
+        for (target, _) in edges {
+            if *target <= index {
+                header_latches.entry(*target).or_default().push(index);
+            }
+        }
+    }
+    // Reverse CFG for natural-loop body computation.
+    let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); block_count];
+    for (index, edges) in successors.iter().enumerate() {
+        for (target, _) in edges {
+            predecessors[*target].push(index);
+        }
+    }
+    // Dominators: dom(entry) = {entry}; dom[B] = {B} ∪ ⋂ dom[preds].
+    // A planned header must dominate every latch: otherwise the
+    // "backedge" is a forward join to an earlier-emitted block (match
+    // epilogues, shared exits), not a loop, and resetting there would
+    // free cells that are still live on the fallthrough path.
+    let mut dominators: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); block_count];
+    if block_count > 0 {
+        dominators[0].insert(0);
+        for dominator in dominators.iter_mut().skip(1) {
+            *dominator = (0..block_count).collect();
+        }
+        loop {
+            let mut changed = false;
+            let snapshot = dominators.clone();
+            for (index, dominator) in dominators.iter_mut().enumerate().skip(1) {
+                let mut dom: Option<BTreeSet<usize>> = None;
+                for predecessor in &predecessors[index] {
+                    dom = Some(match dom {
+                        None => snapshot[*predecessor].clone(),
+                        Some(intersection) => intersection
+                            .intersection(&snapshot[*predecessor])
+                            .copied()
+                            .collect(),
+                    });
+                }
+                let mut dom = dom.unwrap_or_default();
+                dom.insert(index);
+                if dom != *dominator {
+                    *dominator = dom;
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+    for (header, latches) in &header_latches {
+        let header = *header;
+        // The header must dominate every latch; otherwise this is not a
+        // natural loop at all.
+        if latches
+            .iter()
+            .any(|latch| !dominators[*latch].contains(&header))
+        {
+            continue;
+        }
+        // Natural-loop body: the header plus every block that can reach a
+        // latch without passing through the header.
+        let mut body = vec![false; block_count];
+        body[header] = true;
+        let mut stack: Vec<usize> = latches.clone();
+        while let Some(node) = stack.pop() {
+            if body[node] {
+                continue;
+            }
+            body[node] = true;
+            stack.extend(predecessors[node].iter().copied());
+        }
+        // Single-entry check: every non-header body block's predecessors
+        // must be inside the body. Without it, control could enter
+        // mid-body with a cleared flag and reach a backedge before the
+        // header re-pushes the mark, resetting to a stale mark.
+        let mut single_entry = true;
+        for (node, inside) in body.iter().enumerate() {
+            if *inside && node != header {
+                for predecessor in &predecessors[node] {
+                    if !body[*predecessor] {
+                        single_entry = false;
+                        break;
+                    }
+                }
+            }
+            if !single_entry {
+                break;
+            }
+        }
+        if !single_entry {
+            continue;
+        }
+        // The copy set preserves exactly the post-move locals that
+        // downstream reads can observe: every cell-typed header parameter
+        // (the argument move just rebound them to the new cells) plus
+        // every other cell-typed value live at the header entry. Latch
+        // argument values need no copying: dominance guarantees they are
+        // rewritten in the latch before any post-reset read.
+        let mut live = live_in[header].clone();
+        for parameter in &function.blocks[header].parameters {
+            live.insert(parameter.identity.clone());
+        }
+        let mut copies = Vec::new();
+        let mut skip = false;
+        for value in &live {
+            let Some(ty) = tys.get(value) else {
+                skip = true;
+                break;
+            };
+            match copy_class_of_ty(ty, program, refmap, composites) {
+                Ok(CopyClass::Cell(shape)) => {
+                    copies.push((local(layout, value)?, shape));
+                }
+                Ok(CopyClass::Word) => {}
+                Ok(CopyClass::View) | Err(_) => {
+                    skip = true;
+                    break;
+                }
+            }
+        }
+        if skip {
+            continue;
+        }
+        copies.sort_by_key(|(slot, _)| *slot);
+        copies.dedup_by_key(|(slot, _)| *slot);
+        let words = copies
+            .iter()
+            .map(|(_, shape)| flatten_words(shape))
+            .fold(0u32, |acc, words| acc.saturating_add(words));
+        if words > REGION_TEMP_CAP_WORDS {
+            continue;
+        }
+        let depth = copies
+            .iter()
+            .map(|(_, shape)| shape_depth(shape).saturating_add(1))
+            .max()
+            .unwrap_or(0);
+        plan.addr_pool = plan.addr_pool.max(depth);
+        plan.data_pool = plan.data_pool.max(words);
+        plan.headers.insert(
+            header as u32,
+            HeaderPlan {
+                mark_global: 0,
+                active_global: 0,
+                copies,
+            },
+        );
+        // Exit edges leave the body: taking one deactivates the region so
+        // the next entry re-pushes the mark. Backedges target the header
+        // itself and are never exits.
+        for (source, inside) in body.iter().enumerate() {
+            if !inside {
+                continue;
+            }
+            for (target, _) in &successors[source] {
+                if !body[*target] {
+                    plan.exits
+                        .entry(source as u32)
+                        .or_default()
+                        .push((*target as u32, header as u32));
+                }
+            }
+        }
+    }
+    // Exit entries name their region by header index; the caller rewrites
+    // them to activation globals when it assigns mark/active indices.
+    Ok(plan)
+}
+
+/// Record one CFG edge for region planning: resolve the target block and
+/// append the successor with its argument bindings. Reads are accounted
+/// separately by the order-sensitive use pass.
+fn plan_edge(
+    layout: &FunctionLayout,
+    block_count: usize,
+    successors: &mut [Vec<(usize, Vec<SemanticId>)>],
+    index: usize,
+    target: &SemanticId,
+    arguments: &[SemanticId],
+) -> Result<(), String> {
+    let target_index = *layout
+        .blocks
+        .get(target)
+        .ok_or_else(|| "branch target is missing from the function layout".to_owned())?
+        as usize;
+    if target_index >= block_count {
+        return Err("branch target is outside the function blocks".to_owned());
+    }
+    successors[index].push((target_index, arguments.to_vec()));
+    Ok(())
+}
+
+/// Emit one backedge's region sequence after its argument move: flatten
+/// every live cell aside, reset the bump to the header mark (discarding
+/// exactly this iteration's garbage), and rebuild the cells in the
+/// parent region. Guarded on the host-buffer end cursor when one exists:
+/// a host reservation inside the loop means the mark no longer bounds
+/// scratch, so that iteration keeps status-quo behavior (locals stay
+/// valid, nothing is freed).
+fn emit_backedge_region(
+    body: &mut Vec<Instr>,
+    emit: &RegionEmit<'_>,
+    header: &HeaderPlan,
+) -> Result<(), String> {
+    let mut sequence = Vec::new();
+    let mut temp = emit.data_base;
+    for (slot, shape) in &header.copies {
+        emit_flatten(&mut sequence, *slot, shape, temp);
+        temp = temp.saturating_add(flatten_words(shape));
+    }
+    sequence.push(Instr::GlobalGet(header.mark_global));
+    sequence.push(Instr::GlobalSet(0));
+    let mut temp = emit.data_base;
+    for (slot, shape) in &header.copies {
+        emit_unflatten(&mut sequence, emit.addr_base, shape, 0, temp, *slot)?;
+        temp = temp.saturating_add(flatten_words(shape));
+    }
+    match emit.host_end {
+        Some(host_end) => {
+            body.push(Instr::GlobalGet(header.mark_global));
+            body.push(Instr::GlobalGet(host_end));
+            body.push(Instr::I32GeU);
+            body.push(Instr::If);
+            body.extend(sequence);
+            body.push(Instr::End);
+        }
+        None => body.extend(sequence),
+    }
+    Ok(())
+}
+
 pub fn lower_module(
     program: &mncs_model::Program,
     ssa: &SsaModule,
     names: &[String],
 ) -> LoweringOutcome {
     let composites = CompositeInfo::from_program(program);
+    let refmap = NominalRefMap::from_program(program, &composites);
     let mut functions = Vec::new();
     let mut exports = Vec::new();
     let mut unsupported = Vec::new();
@@ -51,18 +1245,70 @@ pub fn lower_module(
             )
         })
         .collect::<BTreeMap<_, _>>();
+    // Region pre-pass: mark-global indices are module-wide and must be
+    // fixed before any function body is emitted. A function whose layout
+    // or plan fails reuses the same error in the main loop below, so the
+    // pre-pass never changes which functions lower.
+    let mut prepared = Vec::with_capacity(ssa.functions.len());
+    for function in &ssa.functions {
+        prepared.push(
+            layout_function(function, &function_indices, &composites).and_then(|layout| {
+                plan_loop_regions(program, function, &layout, &composites, &refmap)
+                    .map(|plan| (layout, plan))
+            }),
+        );
+    }
+    // Marks take globals 1..=region_count, activation flags take the next
+    // region_count. `emit_alloc_helpers` appends the host-buffer end
+    // cursor after both, so its index is one past the last flag whenever
+    // the module materializes composites (and no host reservation can
+    // exist otherwise, leaving backedge resets unguarded).
+    let mut region_count = 0u32;
+    for prepared_one in prepared.iter_mut().flatten() {
+        for header in prepared_one.1.headers.values_mut() {
+            region_count += 1;
+            header.mark_global = region_count;
+            header.active_global = region_count;
+        }
+    }
+    for prepared_one in prepared.iter_mut().flatten() {
+        let plan = &mut prepared_one.1;
+        for header in plan.headers.values_mut() {
+            header.active_global += region_count;
+        }
+        for edges in plan.exits.values_mut() {
+            for (_, header_index) in edges.iter_mut() {
+                // Exits only ever name headers planned in the same pass;
+                // anything else is an internal defect, never a silent
+                // global-0 clear.
+                let active = plan
+                    .headers
+                    .get(&*header_index)
+                    .expect("region exit references a planned header")
+                    .active_global;
+                *header_index = active;
+            }
+        }
+    }
+    let host_end = composites.uses_composites.then_some(1 + 2 * region_count);
     for (index, function) in ssa.functions.iter().enumerate() {
         let name = names
             .get(index)
             .cloned()
             .unwrap_or_else(|| export_name(&function.semantic_identity));
-        match lower_function(
-            function,
-            name,
-            &function_indices,
-            &trig_imports,
-            &composites,
-        ) {
+        let lowered = match &prepared[index] {
+            Ok((layout, plan)) => lower_function(
+                function,
+                name,
+                &trig_imports,
+                &composites,
+                layout,
+                plan,
+                host_end,
+            ),
+            Err(reason) => Err(reason.clone()),
+        };
+        match lowered {
             Ok(wasm) => {
                 exports.push(wasm.name.clone());
                 functions.push(wasm);
@@ -81,13 +1327,24 @@ pub fn lower_module(
         .collect::<Vec<_>>();
     let module = if unsupported.is_empty() && !functions.is_empty() {
         Some(if composites.uses_composites {
+            // Global 0 is the bump cursor; the next region_count globals
+            // are loop-region marks and the region_count after those are
+            // the matching activation flags (index 0 is never either).
+            // `emit_alloc_helpers` appends the host-buffer end cursor
+            // after them.
+            let mut globals = vec![crate::wasm::WasmGlobal {
+                valtype: ValType::I32,
+                mutable: true,
+                init: 8,
+            }];
+            globals.extend((0..2 * region_count).map(|_| crate::wasm::WasmGlobal {
+                valtype: ValType::I32,
+                mutable: true,
+                init: 0,
+            }));
             WasmModule {
                 imports: imports.clone(),
-                globals: vec![crate::wasm::WasmGlobal {
-                    valtype: ValType::I32,
-                    mutable: true,
-                    init: 8,
-                }],
+                globals,
                 // Composite values are immutable cells. A bounded streaming
                 // consumer may retain one state cell per input step, so the
                 // old 1 MiB arena was too small for realistic byte streams
@@ -131,13 +1388,6 @@ fn trig_import_list(ssa: &SsaModule) -> Vec<String> {
         }
     }
     names.into_iter().collect()
-}
-
-/// Logical slot width of one composite field cell in linear memory.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SlotWidth {
-    W32,
-    W64,
 }
 
 /// Per-type realization facts derived from the language-owned program.
@@ -269,14 +1519,15 @@ fn program_uses_sequences(program: &mncs_model::Program) -> bool {
 fn lower_function(
     function: &SsaFunction,
     name: String,
-    function_indices: &BTreeMap<SemanticId, u32>,
     trig_imports: &[String],
     composites: &CompositeInfo,
+    layout: &FunctionLayout,
+    plan: &RegionPlan,
+    host_end: Option<u32>,
 ) -> Result<WasmFunction, String> {
     if function.outputs.len() != 1 {
         return Err("portable WASM MVP requires exactly one result".to_owned());
     }
-    let layout = layout_function(function, function_indices, composites)?;
     let result_ty = *layout
         .types
         .get(&function.outputs[0].identity)
@@ -302,16 +1553,62 @@ fn lower_function(
     if layout.pc as usize >= params.len() {
         locals[layout.pc as usize - params.len()] = ValType::I32;
     }
-    let mut body = vec![Instr::I32Const(0), Instr::LocalSet(layout.pc), Instr::Loop];
+    // Region scratch pools: I32 address temps then I64 data temps, shared
+    // by every backedge sequence in the function.
+    let addr_base = local_count as u32;
+    locals.extend(std::iter::repeat_n(ValType::I32, plan.addr_pool as usize));
+    let data_base = addr_base + plan.addr_pool;
+    locals.extend(std::iter::repeat_n(ValType::I64, plan.data_pool as usize));
+    let regions = RegionEmit {
+        plan,
+        addr_base,
+        data_base,
+        host_end,
+    };
+    let mut body = Vec::new();
+    // Deactivate every region at function entry: a previous call may have
+    // returned from inside a loop (leaving its flag set), and recursion
+    // re-enters with stale marks. Clearing first makes each activation
+    // push a fresh mark at its first header visit.
+    let mut entry_regions: Vec<&HeaderPlan> = plan.headers.values().collect();
+    entry_regions.sort_by_key(|header| header.active_global);
+    for header in entry_regions {
+        body.push(Instr::I32Const(0));
+        body.push(Instr::GlobalSet(header.active_global));
+    }
+    body.push(Instr::I32Const(0));
+    body.push(Instr::LocalSet(layout.pc));
+    body.push(Instr::Loop);
     for (block_index, block) in function.blocks.iter().enumerate() {
         body.push(Instr::LocalGet(layout.pc));
         body.push(Instr::I32Const(block_index as i32));
         body.push(Instr::I32Eq);
         body.push(Instr::If);
-        for instruction in &block.instructions {
-            lower_instruction(&layout, instruction, &mut body, trig_imports, composites)?;
+        // Loop-region activation: on the first header visit of an
+        // activation, record the bump as the mark bounding the whole
+        // activation's garbage. Backedges do not re-push (the flag stays
+        // set), so each backedge reset frees the previous trip's garbage
+        // AND the previous trip's rebuilt duplicates together.
+        if let Some(header) = plan.headers.get(&(block_index as u32)) {
+            body.push(Instr::GlobalGet(header.active_global));
+            body.push(Instr::I32Eqz);
+            body.push(Instr::If);
+            body.push(Instr::GlobalGet(0));
+            body.push(Instr::GlobalSet(header.mark_global));
+            body.push(Instr::I32Const(1));
+            body.push(Instr::GlobalSet(header.active_global));
+            body.push(Instr::End);
         }
-        lower_terminator(&layout, &block.terminator, &mut body)?;
+        for instruction in &block.instructions {
+            lower_instruction(layout, instruction, &mut body, trig_imports, composites)?;
+        }
+        lower_terminator(
+            layout,
+            &block.terminator,
+            &mut body,
+            &regions,
+            block_index as u32,
+        )?;
         body.push(Instr::End);
     }
     // Close the dispatcher loop before the terminal fallback. Keeping the
@@ -1401,6 +2698,8 @@ fn lower_terminator(
     layout: &FunctionLayout,
     terminator: &SsaTerminator,
     body: &mut Vec<Instr>,
+    regions: &RegionEmit<'_>,
+    source_index: u32,
 ) -> Result<(), String> {
     match terminator {
         SsaTerminator::Return { values } => {
@@ -1412,6 +2711,8 @@ fn lower_terminator(
         }
         SsaTerminator::Branch { target, arguments } => {
             emit_block_args(layout, target, arguments, body)?;
+            emit_backedge_if_planned(layout, regions, source_index, target, body)?;
+            emit_exits_if_planned(layout, regions, source_index, target, body)?;
             emit_goto(layout, target, body)?;
             body.push(Instr::Br(1));
         }
@@ -1425,9 +2726,13 @@ fn lower_terminator(
             body.push(Instr::LocalGet(local(layout, condition)?));
             body.push(Instr::If);
             emit_block_args(layout, then_target, then_arguments, body)?;
+            emit_backedge_if_planned(layout, regions, source_index, then_target, body)?;
+            emit_exits_if_planned(layout, regions, source_index, then_target, body)?;
             emit_goto(layout, then_target, body)?;
             body.push(Instr::Else);
             emit_block_args(layout, else_target, else_arguments, body)?;
+            emit_backedge_if_planned(layout, regions, source_index, else_target, body)?;
+            emit_exits_if_planned(layout, regions, source_index, else_target, body)?;
             emit_goto(layout, else_target, body)?;
             body.push(Instr::End);
             body.push(Instr::Br(1));
@@ -1435,6 +2740,54 @@ fn lower_terminator(
         SsaTerminator::Failure { mode } => {
             let _ = mode;
             body.push(Instr::Unreachable);
+        }
+    }
+    Ok(())
+}
+
+/// Deactivate every region this edge exits (its target lies outside the
+/// region body). The next entry re-pushes a fresh mark. Backedges and
+/// intra-body edges take no action here.
+fn emit_exits_if_planned(
+    layout: &FunctionLayout,
+    regions: &RegionEmit<'_>,
+    source_index: u32,
+    target: &SemanticId,
+    body: &mut Vec<Instr>,
+) -> Result<(), String> {
+    let target_index = *layout
+        .blocks
+        .get(target)
+        .ok_or_else(|| "branch target is missing".to_owned())?;
+    if let Some(edges) = regions.plan.exits.get(&source_index) {
+        for (exit_target, active_global) in edges {
+            if *exit_target == target_index {
+                body.push(Instr::I32Const(0));
+                body.push(Instr::GlobalSet(*active_global));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Emit the loop-region sequence when this edge is a planned backedge
+/// (its target was already emitted and carries a region plan). The
+/// argument move has already run, so the header's live-in cells sit in
+/// their downstream locals; forward edges take no action.
+fn emit_backedge_if_planned(
+    layout: &FunctionLayout,
+    regions: &RegionEmit<'_>,
+    source_index: u32,
+    target: &SemanticId,
+    body: &mut Vec<Instr>,
+) -> Result<(), String> {
+    let target_index = *layout
+        .blocks
+        .get(target)
+        .ok_or_else(|| "branch target is missing".to_owned())?;
+    if target_index <= source_index {
+        if let Some(header) = regions.plan.headers.get(&target_index) {
+            emit_backedge_region(body, regions, header)?;
         }
     }
     Ok(())
@@ -2322,7 +3675,7 @@ fn local(layout: &FunctionLayout, identity: &SemanticId) -> Result<u32, String> 
 
 /// Emit `$mncs_alloc(bytes) -> ptr` into every module that materializes
 /// composites, plus the bump-pointer global it uses (global 0).
-const ALLOC_FUNCTION_NAME: &str = "mncs_alloc";
+pub(crate) const ALLOC_FUNCTION_NAME: &str = "mncs_alloc";
 /// Export a stable byte-buffer reservation ABI alongside the allocator.
 /// The returned i64 packs the byte capacity in the high half and the linear
 /// memory offset in the low half.

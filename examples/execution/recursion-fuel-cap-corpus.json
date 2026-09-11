@@ -1,0 +1,16 @@
+{
+ "schema_version": "0.1",
+ "name": "recursion-fuel-cap",
+ "cases": [
+  {
+   "id": "cap-exhaustion",
+   "request": {
+    "schema_version": "0.1",
+    "target": {"module": "recursion.rfc.exhaustion", "function": "run_exhaust"},
+    "arguments": [],
+    "step_budget": 7000000
+   },
+   "expected_status": "budget_exhausted"
+  }
+ ]
+}

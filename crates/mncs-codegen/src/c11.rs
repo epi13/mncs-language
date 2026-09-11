@@ -86,7 +86,22 @@ impl C11StatefulSession<'_> {
             &request.target.module,
             &request.target.function,
         );
-        let driver = c_driver(&entry, &contract.inputs, contract.outputs.first());
+        // RFC 0047 §5 uniform fuel: the driver seeds the entry depth from
+        // the request budget, so an explicit budget means the same fuel
+        // here as on the reference interpreters. The seed joins the cache
+        // key because it is baked into the driver source.
+        let entry_depth = match crate::support::depth_seed_for_request(request) {
+            Ok(seed) => seed,
+            Err(reason) => {
+                return execution_failure(result, ExecutionStatus::InvalidRequest, reason)
+            }
+        };
+        let driver = c_driver(
+            &entry,
+            &contract.inputs,
+            contract.outputs.first(),
+            entry_depth,
+        );
         let call_blob = match crate::support::build_call_file(
             &request.arguments,
             &contract.inputs,
@@ -115,8 +130,13 @@ impl C11StatefulSession<'_> {
         };
         // The driver names its entry symbol, so the cache key is the
         // canonical entry identity: two modules may export the same short
-        // name with different drivers.
-        let cache_key = crate::support::entry_key(&request.target.module, &request.target.function);
+        // name with different drivers. The fuel seed joins the key because
+        // it is baked into the driver source: reusing a zero-seed
+        // executable for a budgeted request would silently grant full fuel.
+        let cache_key = format!(
+            "{}#depth{entry_depth}",
+            crate::support::entry_key(&request.target.module, &request.target.function)
+        );
         if !self.executables.contains_key(&cache_key) {
             let executable = match NativeExecutable::compile_or_reuse(
                 &[
@@ -141,6 +161,17 @@ impl C11StatefulSession<'_> {
             .expect("C11 executable inserted above");
         match executable.run(&argv, call_path.as_deref()) {
             Ok(run) => {
+                // WEB-P-012: attribute non-returned observations; never a
+                // silent null reason.
+                if run.status != ExecutionStatus::Returned {
+                    let reason = run.reason.unwrap_or_else(|| {
+                        format!(
+                            "native execution ended with status {:?} and no attributed reason",
+                            run.status
+                        )
+                    });
+                    return execution_failure(result, run.status, reason);
+                }
                 result.status = run.status;
                 result.steps = 1;
                 match crate::support::decode_native_observation(
@@ -419,6 +450,7 @@ pub fn lower_c11(
             .collect(),
         assumptions.clone(),
         Vec::new(),
+        ssa.proof_binding_refs(),
         vec![
             "external C compiler".to_owned(),
             "generated C retained as a typed backend artifact".to_owned(),
@@ -457,11 +489,11 @@ fn emit_module(module: &ScalarModule) -> String {
         // `NATIVE_ARENA_BYTES`, so module and driver always agree.
         let arena = crate::support::NATIVE_ARENA_BYTES;
         out.push_str(&format!(
-            "/* Canonical composite cell arena (MNCS cell layout v0.1). Defined\n   whenever the call-file driver may copy an arena image, including\n   mask-only modules that never allocate cells. */\n#define MNCS_ARENA_BYTES ({arena}u)\nunsigned char mncs_arena[MNCS_ARENA_BYTES];\nuint64_t mncs_bump = 0;\n/* Sticky arena-exhaustion flag: allocation arithmetic cannot wrap\n   (every addition is range-checked before it happens), loads and stores\n   bounds-check their address (corrupted or externally restored offsets\n   fail closed instead of touching out-of-bounds memory), and each\n   function converts a set flag into status=1 at its return points.\n   Never SIGSEGV/SIGBUS/poison: exhaustion is a deterministic language\n   runtime failure. Reset at every function entry. */\nuint64_t mncs_failed = 0;\n",
+            "/* Canonical composite cell arena (MNCS cell layout v0.1). Defined\n   whenever the call-file driver may copy an arena image, including\n   mask-only modules that never allocate cells. */\n#define MNCS_ARENA_BYTES ({arena}u)\nunsigned char mncs_arena[MNCS_ARENA_BYTES];\nuint64_t mncs_bump = 0;\n/* Sticky arena-exhaustion flag: allocation arithmetic cannot wrap\n   (every addition is range-checked before it happens), loads and stores\n   bounds-check their address (corrupted or externally restored offsets\n   fail closed instead of touching out-of-bounds memory), and each\n   function converts a set flag into status=1 at its return points.\n   Never SIGSEGV/SIGBUS/poison: exhaustion is a deterministic language\n   runtime failure. Reset at every function entry. */\nuint64_t mncs_failed = 0;\n/* Allocation-cap exhaustion reports distinctly: alloc sites set\n   mncs_exhausted alongside mncs_failed so return points surface status=3\n   (budget_exhausted) with an attributed resource reason instead of a bare\n   status=1. Reset at every function entry alongside mncs_failed. */\nuint64_t mncs_exhausted = 0;\n",
         ));
         if crate::support::scalar_module_uses_cells(module) {
             out.push_str(
-                "uint64_t mncs_cell_alloc(uint64_t bytes) {\n  uint64_t base;\n  if (mncs_failed) return 0;\n  if (bytes > MNCS_ARENA_BYTES) { mncs_failed = 1; return 0; }\n  if (mncs_bump > MNCS_ARENA_BYTES) { mncs_failed = 1; return 0; }\n  base = (mncs_bump + 7u) & ~(uint64_t)7u;\n  if (base > MNCS_ARENA_BYTES - bytes) { mncs_failed = 1; return 0; }\n  mncs_bump = base + bytes;\n  return base;\n}\nvoid mncs_slot_store32(unsigned char *a, uint64_t at, uint32_t v) {\n  if (mncs_failed) return;\n  if (at > MNCS_ARENA_BYTES - 4u) { mncs_failed = 1; return; }\n  memcpy(a + at, &v, sizeof v);\n}\nvoid mncs_slot_store64(unsigned char *a, uint64_t at, uint64_t v) {\n  if (mncs_failed) return;\n  if (at > MNCS_ARENA_BYTES - 8u) { mncs_failed = 1; return; }\n  memcpy(a + at, &v, sizeof v);\n}\nuint32_t mncs_slot_load32(const unsigned char *a, uint64_t at) {\n  uint32_t v = 0;\n  if (mncs_failed) return 0;\n  if (at > MNCS_ARENA_BYTES - 4u) { mncs_failed = 1; return 0; }\n  memcpy(&v, a + at, sizeof v);\n  return v;\n}\nuint64_t mncs_slot_load64(const unsigned char *a, uint64_t at) {\n  uint64_t v = 0;\n  if (mncs_failed) return 0;\n  if (at > MNCS_ARENA_BYTES - 8u) { mncs_failed = 1; return 0; }\n  memcpy(&v, a + at, sizeof v);\n  return v;\n}\n",
+                "uint64_t mncs_cell_alloc(uint64_t bytes) {\n  uint64_t base;\n  if (mncs_failed) return 0;\n  if (bytes > MNCS_ARENA_BYTES) { mncs_failed = 1; mncs_exhausted = 1; return 0; }\n  if (mncs_bump > MNCS_ARENA_BYTES) { mncs_failed = 1; mncs_exhausted = 1; return 0; }\n  base = (mncs_bump + 7u) & ~(uint64_t)7u;\n  if (base > MNCS_ARENA_BYTES - bytes) { mncs_failed = 1; mncs_exhausted = 1; return 0; }\n  mncs_bump = base + bytes;\n  return base;\n}\nvoid mncs_slot_store32(unsigned char *a, uint64_t at, uint32_t v) {\n  if (mncs_failed) return;\n  if (at > MNCS_ARENA_BYTES - 4u) { mncs_failed = 1; return; }\n  memcpy(a + at, &v, sizeof v);\n}\nvoid mncs_slot_store64(unsigned char *a, uint64_t at, uint64_t v) {\n  if (mncs_failed) return;\n  if (at > MNCS_ARENA_BYTES - 8u) { mncs_failed = 1; return; }\n  memcpy(a + at, &v, sizeof v);\n}\nuint32_t mncs_slot_load32(const unsigned char *a, uint64_t at) {\n  uint32_t v = 0;\n  if (mncs_failed) return 0;\n  if (at > MNCS_ARENA_BYTES - 4u) { mncs_failed = 1; return 0; }\n  memcpy(&v, a + at, sizeof v);\n  return v;\n}\nuint64_t mncs_slot_load64(const unsigned char *a, uint64_t at) {\n  uint64_t v = 0;\n  if (mncs_failed) return 0;\n  if (at > MNCS_ARENA_BYTES - 8u) { mncs_failed = 1; return 0; }\n  memcpy(&v, a + at, sizeof v);\n  return v;\n}\n",
             );
         }
         out.push('\n');
@@ -554,10 +586,12 @@ fn emit_function(out: &mut String, function: &ScalarFunction, has_arena: bool) {
     }
     // RFC 0047 call-depth fuel, checked against the incoming depth so the
     // boundary matches the reference interpreter exactly (incoming depth
-    // above the cap fails; depth grows by one per nested call).
+    // above the cap fails; depth grows by one per nested call). Exhaustion
+    // reports status 3 (BudgetExhausted), observably distinct from the
+    // generic failure status 1 the body uses below.
     let _ = writeln!(
         out,
-        "  if (mncs_depth > {}u) {{ *mncs_status = 1; *mncs_value = 0; return; }}",
+        "  if (mncs_depth > {}u) {{ *mncs_status = 3; *mncs_value = 0; return; }}",
         mncs_model::MODEL_MAX_CALL_DEPTH
     );
     if has_arena {
@@ -565,7 +599,7 @@ fn emit_function(out: &mut String, function: &ScalarFunction, has_arena: bool) {
         // not poison the next call in a reused process or stateful
         // session, but a recursive entry must never clear a flag set by
         // an outer activation (RFC 0047 structural recursion).
-        out.push_str("  if (mncs_depth == 0) { mncs_failed = 0; }\n");
+        out.push_str("  if (mncs_depth == 0) { mncs_failed = 0; mncs_exhausted = 0; }\n");
     }
     out.push_str("  int32_t mncs_pc = 0;\n");
     out.push_str("  for (;;) {\n    switch (mncs_pc) {\n");
@@ -580,7 +614,7 @@ fn emit_function(out: &mut String, function: &ScalarFunction, has_arena: bool) {
                     // Sticky exhaustion becomes a deterministic language
                     // runtime failure here; a poisoned value never escapes.
                     out.push_str(
-                        "      if (mncs_failed) { *mncs_status = 1; *mncs_value = 0; return; }\n",
+                        "      if (mncs_failed) { *mncs_status = mncs_exhausted ? 3 : 1; *mncs_value = 0; return; }\n",
                     );
                 }
                 out.push_str("      *mncs_status = 0;\n");
@@ -1727,7 +1761,17 @@ pub fn execute_c11(
         &request.target.module,
         &request.target.function,
     );
-    let driver = c_driver(&entry, &contract.inputs, contract.outputs.first());
+    // RFC 0047 §5 uniform fuel (see the stateful session above).
+    let entry_depth = match crate::support::depth_seed_for_request(request) {
+        Ok(seed) => seed,
+        Err(reason) => return execution_failure(result, ExecutionStatus::InvalidRequest, reason),
+    };
+    let driver = c_driver(
+        &entry,
+        &contract.inputs,
+        contract.outputs.first(),
+        entry_depth,
+    );
     let call_blob = match crate::support::build_call_file(
         &request.arguments,
         &contract.inputs,
@@ -1761,6 +1805,18 @@ pub fn execute_c11(
         call_path.as_deref(),
     ) {
         Ok((run, _)) => {
+            // A non-returned native observation carries the driver's
+            // attributed reason when one exists; a missing reason is a
+            // backend defect, never a silent null (WEB-P-012).
+            if run.status != ExecutionStatus::Returned {
+                let reason = run.reason.unwrap_or_else(|| {
+                    format!(
+                        "native execution ended with status {:?} and no attributed reason",
+                        run.status
+                    )
+                });
+                return execution_failure(result, run.status, reason);
+            }
             result.status = run.status;
             result.steps = 1;
             match crate::support::decode_native_observation(

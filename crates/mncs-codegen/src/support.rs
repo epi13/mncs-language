@@ -483,6 +483,355 @@ pub(crate) fn exports_contain(exports: &[String], module: &str, function: &str) 
     exports.iter().any(|export| export == &qualified)
 }
 
+/// Language-owned aggregate value validation (WEB-P-011).
+///
+/// Records (and payload-bearing finite variants) are nominal and
+/// name-matched: external fields resolve **by name** against the canonical
+/// declaration at every nesting level, then normalize into canonical order
+/// for lowering. Duplicate, unknown, or missing fields fail with a
+/// diagnostic naming the expected-vs-received field lists; a malformed
+/// value is never bound positionally.
+pub(crate) fn check_contract_value(
+    contract: &BackendValueContract,
+    value: &ExecutionValue,
+    composites: &BTreeMap<String, BackendValueContract>,
+    path: &str,
+) -> Result<(), String> {
+    match (contract, value) {
+        (BackendValueContract::Scalar { semantic_type }, value) => {
+            check_scalar_value(semantic_type, value, path)
+        }
+        (
+            BackendValueContract::Finite {
+                type_identity,
+                variants,
+                payloads,
+            },
+            ExecutionValue::Finite {
+                type_identity: actual_type,
+                variant_identity,
+                discriminant,
+                payload,
+            },
+        ) => {
+            if type_identity != actual_type || variants.get(discriminant) != Some(variant_identity)
+            {
+                return Err(format!(
+                    "MNCS_VALUE_CONTRACT {path}: finite value identity mismatch: expected {type_identity:?}, received {actual_type:?}"
+                ));
+            }
+            let empty = Vec::new();
+            let declared = payloads.get(discriminant).unwrap_or(&empty);
+            let declared_names: Vec<String> =
+                declared.iter().map(|(name, _)| name.clone()).collect();
+            let context = format!("finite payload {variant_identity:?} at {path}");
+            let order = mncs_model::order_fields_by_name(&context, &declared_names, payload)
+                .map_err(|error| error.describe())?;
+            for (declared_index, received_index) in order.iter().enumerate() {
+                let (declared_name, declared_type) = &declared[declared_index];
+                check_declared_type(
+                    declared_type,
+                    &payload[*received_index].1,
+                    composites,
+                    &format!("{path}.{declared_name}"),
+                )?;
+            }
+            Ok(())
+        }
+        (
+            BackendValueContract::Record {
+                type_identity,
+                name,
+                fields,
+            },
+            ExecutionValue::Record {
+                type_identity: actual_type,
+                fields: values,
+                ..
+            },
+        ) => {
+            if type_identity != actual_type {
+                return Err(format!(
+                    "MNCS_VALUE_CONTRACT {path}: record identity mismatch: expected {type_identity:?} ({name}), received {actual_type:?}"
+                ));
+            }
+            let declared_names: Vec<String> = fields.iter().map(|(name, _)| name.clone()).collect();
+            let context = format!("record {name:?} at {path}");
+            let order = mncs_model::order_fields_by_name(&context, &declared_names, values)
+                .map_err(|error| error.describe())?;
+            for (declared_index, received_index) in order.iter().enumerate() {
+                let (declared_name, declared_type) = &fields[declared_index];
+                check_declared_type(
+                    declared_type,
+                    &values[*received_index].1,
+                    composites,
+                    &format!("{path}.{declared_name}"),
+                )?;
+            }
+            Ok(())
+        }
+        (
+            BackendValueContract::Sequence {
+                element, length, ..
+            },
+            ExecutionValue::Sequence { values },
+        ) => {
+            if values.len() != *length as usize {
+                return Err(format!(
+                    "MNCS_VALUE_CONTRACT {path}: sequence length mismatch: expected {length} element(s), received {}",
+                    values.len()
+                ));
+            }
+            for (index, value) in values.iter().enumerate() {
+                check_declared_type(element, value, composites, &format!("{path}[{index}]"))?;
+            }
+            Ok(())
+        }
+        (
+            BackendValueContract::View {
+                element, capacity, ..
+            },
+            ExecutionValue::Sequence { values },
+        ) => {
+            if values.len() > *capacity as usize {
+                return Err(format!(
+                    "MNCS_VALUE_CONTRACT {path}: view length exceeds capacity: capacity {capacity}, received {}",
+                    values.len()
+                ));
+            }
+            for (index, value) in values.iter().enumerate() {
+                check_declared_type(element, value, composites, &format!("{path}[{index}]"))?;
+            }
+            Ok(())
+        }
+        (
+            BackendValueContract::Vector { element, lanes, .. },
+            ExecutionValue::Vector { values },
+        ) => {
+            if values.len() != *lanes as usize {
+                return Err(format!(
+                    "MNCS_VALUE_CONTRACT {path}: vector lane mismatch: expected {lanes} lane(s), received {}",
+                    values.len()
+                ));
+            }
+            for (index, value) in values.iter().enumerate() {
+                check_declared_type(element, value, composites, &format!("{path}[{index}]"))?;
+            }
+            Ok(())
+        }
+        (BackendValueContract::Mask { lanes, .. }, ExecutionValue::Mask { lanes: bits }) => {
+            if bits.len() != *lanes as usize {
+                return Err(format!(
+                    "MNCS_VALUE_CONTRACT {path}: mask lane mismatch: expected {lanes} lane(s), received {}",
+                    bits.len()
+                ));
+            }
+            Ok(())
+        }
+        (contract, value) => Err(format!(
+            "MNCS_VALUE_CONTRACT {path}: value shape mismatch: expected {}, received {}",
+            contract_shape(contract),
+            value_shape(value)
+        )),
+    }
+}
+
+/// Resolve one declared field/element semantic type: named composites
+/// recurse through the artifact registry; structural spellings (exact
+/// sequences, views, vectors, masks) recurse structurally; anything else is
+/// a scalar domain check.
+fn check_declared_type(
+    semantic_type: &str,
+    value: &ExecutionValue,
+    composites: &BTreeMap<String, BackendValueContract>,
+    path: &str,
+) -> Result<(), String> {
+    if let Some(contract) = composites.get(semantic_type) {
+        return check_contract_value(contract, value, composites, path);
+    }
+    match BodyType::from_semantic_name(semantic_type) {
+        BodyType::Sequence {
+            element,
+            bound: SequenceBound::Exact(length),
+        } => {
+            let ExecutionValue::Sequence { values } = value else {
+                return Err(format!(
+                    "MNCS_VALUE_CONTRACT {path}: value shape mismatch: expected {semantic_type}, received {}",
+                    value_shape(value)
+                ));
+            };
+            if values.len() != length as usize {
+                return Err(format!(
+                    "MNCS_VALUE_CONTRACT {path}: sequence length mismatch: expected {length} element(s), received {}",
+                    values.len()
+                ));
+            }
+            let element_name = element.semantic_name();
+            for (index, element_value) in values.iter().enumerate() {
+                check_declared_type(
+                    &element_name,
+                    element_value,
+                    composites,
+                    &format!("{path}[{index}]"),
+                )?;
+            }
+            Ok(())
+        }
+        BodyType::Sequence {
+            element,
+            bound: SequenceBound::UpTo(capacity),
+        } => {
+            let ExecutionValue::Sequence { values } = value else {
+                return Err(format!(
+                    "MNCS_VALUE_CONTRACT {path}: value shape mismatch: expected {semantic_type}, received {}",
+                    value_shape(value)
+                ));
+            };
+            if values.len() > capacity as usize {
+                return Err(format!(
+                    "MNCS_VALUE_CONTRACT {path}: view length exceeds capacity: capacity {capacity}, received {}",
+                    values.len()
+                ));
+            }
+            let element_name = element.semantic_name();
+            for (index, element_value) in values.iter().enumerate() {
+                check_declared_type(
+                    &element_name,
+                    element_value,
+                    composites,
+                    &format!("{path}[{index}]"),
+                )?;
+            }
+            Ok(())
+        }
+        BodyType::Vector { element, lanes } => {
+            let ExecutionValue::Vector { values } = value else {
+                return Err(format!(
+                    "MNCS_VALUE_CONTRACT {path}: value shape mismatch: expected {semantic_type}, received {}",
+                    value_shape(value)
+                ));
+            };
+            if values.len() != lanes as usize {
+                return Err(format!(
+                    "MNCS_VALUE_CONTRACT {path}: vector lane mismatch: expected {lanes} lane(s), received {}",
+                    values.len()
+                ));
+            }
+            let element_name = element.semantic_name();
+            for (index, lane) in values.iter().enumerate() {
+                check_declared_type(&element_name, lane, composites, &format!("{path}[{index}]"))?;
+            }
+            Ok(())
+        }
+        BodyType::Mask { lanes } => {
+            let ExecutionValue::Mask { lanes: bits } = value else {
+                return Err(format!(
+                    "MNCS_VALUE_CONTRACT {path}: value shape mismatch: expected {semantic_type}, received {}",
+                    value_shape(value)
+                ));
+            };
+            if bits.len() != lanes as usize {
+                return Err(format!(
+                    "MNCS_VALUE_CONTRACT {path}: mask lane mismatch: expected {lanes} lane(s), received {}",
+                    bits.len()
+                ));
+            }
+            Ok(())
+        }
+        _ => check_scalar_value(semantic_type, value, path),
+    }
+}
+
+/// Exact scalar domain check shared by top-level and nested validation:
+/// booleans by name, integers by type and range, bytes by domain, binary64
+/// by supported type (finiteness stays a runtime trap, not a rejection).
+fn check_scalar_value(
+    semantic_type: &str,
+    value: &ExecutionValue,
+    path: &str,
+) -> Result<(), String> {
+    let matches = match (BodyType::from_semantic_name(semantic_type), value) {
+        (BodyType::Named(name), ExecutionValue::Boolean { .. }) => name == "bool",
+        (BodyType::Integer(expected), ExecutionValue::Integer { value, ty }) => {
+            expected == *ty && integer_fits(*value, expected)
+        }
+        (BodyType::Byte, ExecutionValue::Byte { value }) => (0..=255).contains(value),
+        (BodyType::Float(expected), ExecutionValue::Float { ty: actual, .. }) => {
+            expected.is_supported() && actual.is_supported() && expected == *actual
+        }
+        _ => false,
+    };
+    if matches {
+        Ok(())
+    } else {
+        Err(format!(
+            "MNCS_VALUE_CONTRACT {path}: scalar mismatch: expected {semantic_type}, received {}",
+            value_shape(value)
+        ))
+    }
+}
+
+/// One-line expected-shape summary for value-contract diagnostics.
+fn contract_shape(contract: &BackendValueContract) -> String {
+    match contract {
+        BackendValueContract::Scalar { semantic_type } => semantic_type.clone(),
+        BackendValueContract::Finite { type_identity, .. } => format!("finite {type_identity:?}"),
+        BackendValueContract::Record {
+            type_identity,
+            name,
+            ..
+        } => format!("record {name} ({type_identity:?})"),
+        BackendValueContract::Sequence { semantic_type, .. } => semantic_type.clone(),
+        BackendValueContract::View { semantic_type, .. } => semantic_type.clone(),
+        BackendValueContract::Vector { semantic_type, .. } => semantic_type.clone(),
+        BackendValueContract::Mask { lanes, .. } => format!("mask<{lanes}>"),
+    }
+}
+
+/// One-line received-shape summary for value-contract diagnostics. Records
+/// spell their as-written field order so a rejected producer can see it.
+fn value_shape(value: &ExecutionValue) -> String {
+    match value {
+        ExecutionValue::Integer { value, ty } => {
+            format!(
+                "integer {value} ({}{})",
+                if ty.signed { "i" } else { "u" },
+                ty.bits
+            )
+        }
+        ExecutionValue::Float { ty, .. } => format!("float f{}", ty.bits),
+        ExecutionValue::Boolean { value } => format!("boolean {value}"),
+        ExecutionValue::Byte { value } => format!("byte {value}"),
+        ExecutionValue::Finite {
+            type_identity,
+            discriminant,
+            payload,
+            ..
+        } => format!(
+            "finite {type_identity:?} discriminant {discriminant} ({} payload field(s))",
+            payload.len()
+        ),
+        ExecutionValue::Record {
+            type_identity,
+            fields,
+            ..
+        } => {
+            let names: Vec<&str> = fields.iter().map(|(name, _)| name.as_str()).collect();
+            format!("record {type_identity:?} fields [{}]", names.join(", "))
+        }
+        ExecutionValue::Sequence { values } => format!("sequence ({} element(s))", values.len()),
+        ExecutionValue::Vector { values } => format!("vector ({} lane(s))", values.len()),
+        ExecutionValue::Mask { lanes } => format!("mask ({} lane(s))", lanes.len()),
+    }
+}
+
+/// Language-owned resource-exhaustion reason printed by the native process
+/// drivers when a module reports status 3 (budget_exhausted): either the
+/// canonical cell arena or the call-depth fuel ran out (WEB-P-012). The
+/// stable `MNCS_RSRC_EXHAUSTED` token lets agents distinguish backend
+/// resource caps from step-budget exhaustion and from semantic failures.
+pub(crate) const NATIVE_RSRC_REASON: &str = "MNCS_RSRC_EXHAUSTED bounded native resource exhausted (canonical cell arena or call-depth fuel); bounded loops over large aggregate values allocate one fresh cell per functional update, so total allocation scales with iteration count, not live data";
+
 pub(crate) fn artifact_ref(artifact: &BackendArtifact) -> CompilerArtifactRef {
     CompilerArtifactRef::new(
         ArtifactRepresentation::BackendArtifact,
@@ -686,6 +1035,20 @@ pub(crate) fn build_call_file(
         // Pure scalar calls keep the historical argv-only protocol.
         return Ok(None);
     }
+    // Every entry argument validates recursively against its declared
+    // contract before any byte is written (WEB-P-011): name-based field
+    // resolution at every nesting level, with expected-vs-received detail.
+    // Lowering below may therefore assume shape-correct values.
+    for (index, value) in arguments.iter().enumerate() {
+        if let Some(contract) = input_contracts.get(index) {
+            check_contract_value(
+                contract,
+                value,
+                composite_contracts,
+                &format!("argument {index}"),
+            )?;
+        }
+    }
     let mut writer = crate::composite::ArenaWriter::new(composite_contracts.clone());
     let mut entries: Vec<(u64, u64)> = Vec::new();
     for (index, value) in arguments.iter().enumerate() {
@@ -771,6 +1134,8 @@ pub struct NativeRunView {
     pub status: ExecutionStatus,
     pub value: i128,
     pub arena_hex: Option<String>,
+    /// Driver-attributed failure detail, when the observation carried one.
+    pub reason: Option<String>,
 }
 
 /// Driver variant for realizations whose code calls the canonical-cell
@@ -780,10 +1145,11 @@ pub(crate) fn process_driver_cell_runtime(
     function: &str,
     inputs: &[BackendValueContract],
     _output: Option<&BackendValueContract>,
+    entry_depth: u64,
 ) -> String {
     // Same native-symbol rule as the scalar driver: module and driver
     // must agree on `mncs_main`.
-    let base = process_driver_full(&c_symbol(function), inputs);
+    let base = process_driver_full(&c_symbol(function), inputs, entry_depth);
     // Replace the extern declarations with local definitions of the same
     // names so imported cell libcalls resolve against this driver.
     let pattern = format!(
@@ -835,7 +1201,43 @@ pub(crate) fn process_driver_cell_runtime(
         replaced.len() != base.len(),
         "cell-runtime driver must carry the canonical arena declarations"
     );
-    replaced
+    // Fail closed for realizations that observe cell failure only through
+    // the driver statics (Cranelift AOT objects link these symbols but
+    // cannot see the flag): any driver-observed cell fault with a clean
+    // status promotes to budget_exhausted with the arena reason instead of
+    // returning possibly-zeroed cells as a success (WEB-P-012).
+    let status_mark = "if (status == 3) {";
+    let guarded = "if (status == 0 && mncs_failed) status = 3;\n    if (status == 3) {";
+    debug_assert_eq!(
+        replaced.matches(status_mark).count(),
+        2,
+        "both driver branches (call-file and legacy) must promote cell faults"
+    );
+    replaced.replace(status_mark, guarded)
+}
+
+/// RFC 0047 §5 uniform fuel: translate an execution request's optional
+/// call-depth budget into the native entry-depth seed. The reference
+/// interpreters fail the activation whose incoming depth exceeds the
+/// budget; native code fails the activation whose incoming depth exceeds
+/// `MODEL_MAX_CALL_DEPTH`. Seeding the top-level depth at
+/// `MAX - budget` makes exactly `budget + 1` activations fit in both
+/// worlds, so an explicit budget means the same fuel on every backend.
+/// A missing budget seeds zero (historical behavior, full cap). Budgets
+/// of zero or above the cap are caller errors, rejected exactly like the
+/// reference executors reject them — never silently clamped.
+pub(crate) fn depth_seed_for_request(
+    request: &mncs_model::ExecutionRequest,
+) -> Result<u64, String> {
+    match request.call_depth_budget {
+        None => Ok(0),
+        Some(0) => Err("call_depth_budget must be at least 1 when present".to_owned()),
+        Some(budget) if budget > mncs_model::MODEL_MAX_CALL_DEPTH => Err(format!(
+            "call_depth_budget must not exceed {}",
+            mncs_model::MODEL_MAX_CALL_DEPTH
+        )),
+        Some(budget) => Ok(mncs_model::MODEL_MAX_CALL_DEPTH - budget),
+    }
 }
 
 /// Whether the native process driver will need `mncs_arena` / `mncs_bump`.
@@ -903,6 +1305,7 @@ pub(crate) fn process_driver(
     function: &str,
     inputs: &[mncs_model::BackendValueContract],
     output: Option<&mncs_model::BackendValueContract>,
+    entry_depth: u64,
 ) -> String {
     // The driver declares and calls the module symbol, so it maps through
     // the same native-symbol rule as lowering (notably `main`).
@@ -910,9 +1313,9 @@ pub(crate) fn process_driver(
     let uses_call_file =
         inputs.iter().any(contract_uses_call_file) || output.is_some_and(contract_uses_call_file);
     if !uses_call_file {
-        return process_driver_scalar_only(&symbol, inputs);
+        return process_driver_scalar_only(&symbol, inputs, entry_depth);
     }
-    process_driver_full(&symbol, inputs)
+    process_driver_full(&symbol, inputs, entry_depth)
 }
 
 fn uses_uint64_abi(contract: &mncs_model::BackendValueContract) -> bool {
@@ -928,6 +1331,7 @@ fn uses_uint64_abi(contract: &mncs_model::BackendValueContract) -> bool {
 fn process_driver_scalar_only(
     function: &str,
     inputs: &[mncs_model::BackendValueContract],
+    entry_depth: u64,
 ) -> String {
     fn scalar_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
         match contract {
@@ -989,8 +1393,8 @@ fn process_driver_scalar_only(
         .chain([
             "int32_t*".to_owned(),
             "int64_t*".to_owned(),
-            // RFC 0047 call-depth fuel: hidden trailing parameter, 0 at
-            // top-level entry.
+            // RFC 0047 call-depth fuel: hidden trailing parameter, seeded
+            // from the request budget (zero when the caller sets none).
             "uint64_t".to_owned(),
         ])
         .collect::<Vec<_>>()
@@ -1001,8 +1405,9 @@ fn process_driver_scalar_only(
         .collect::<Vec<_>>();
     call_parts.push("&status".to_owned());
     call_parts.push("&value".to_owned());
-    call_parts.push("0".to_owned());
+    call_parts.push(entry_depth.to_string());
     let call = call_parts.join(", ");
+    let rsrc = NATIVE_RSRC_REASON;
     format!(
         r#"#include <stdint.h>
 #include <stdio.h>
@@ -1015,6 +1420,7 @@ int main(int argc, char **argv) {{
   int64_t value = 0;
   {function}({call});
   if (status == 0) printf("{{\"status\":\"returned\",\"value\":%lld}}\n", (long long)value);
+  else if (status == 3) printf("{{\"status\":\"budget_exhausted\",\"reason\":\"{rsrc}\"}}\n");
   else printf("{{\"status\":\"runtime_failure\"}}\n");
   return 0;
 }}
@@ -1022,7 +1428,11 @@ int main(int argc, char **argv) {{
     )
 }
 
-fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContract]) -> String {
+fn process_driver_full(
+    function: &str,
+    inputs: &[mncs_model::BackendValueContract],
+    entry_depth: u64,
+) -> String {
     // Parameter types follow each declared contract so the generated
     // prototype matches the module definition exactly (an int32/int64
     // mismatch would be C undefined behavior at every call boundary).
@@ -1107,8 +1517,8 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
         .chain([
             "int32_t*".to_owned(),
             "int64_t*".to_owned(),
-            // RFC 0047 call-depth fuel: hidden trailing parameter, 0 at
-            // top-level entry.
+            // RFC 0047 call-depth fuel: hidden trailing parameter, seeded
+            // from the request budget (zero when the caller sets none).
             "uint64_t".to_owned(),
         ])
         .collect::<Vec<_>>()
@@ -1122,8 +1532,9 @@ fn process_driver_full(function: &str, inputs: &[mncs_model::BackendValueContrac
     let mut call_parts = call_args;
     call_parts.push("&status".to_owned());
     call_parts.push("&value".to_owned());
-    call_parts.push("0".to_owned());
+    call_parts.push(entry_depth.to_string());
     let call = call_parts.join(", ");
+    let rsrc = NATIVE_RSRC_REASON;
     let n = inputs.len();
     format!(
         r#"#include <stdint.h>
@@ -1194,6 +1605,10 @@ int main(int argc, char **argv) {{
     (void)argv;
     {parse}
     {function}({call});
+    if (status == 3) {{
+      printf("{{\"status\":\"budget_exhausted\",\"reason\":\"{rsrc}\"}}\n");
+      return 0;
+    }}
     if (status != 0) {{
       printf("{{\"status\":\"runtime_failure\"}}\n");
       return 0;
@@ -1213,7 +1628,11 @@ int main(int argc, char **argv) {{
   (void)scalar_argc;
 {prepare_legacy}
   {function}({call});
-  if (status == 0) printf("{{\"status\":\"returned\",\"value\":%lld}}\n", (long long)value);
+  if (status == 3) {{
+    printf("{{\"status\":\"budget_exhausted\",\"reason\":\"{rsrc}\"}}\n");
+  }} else if (status == 0) {{
+    printf("{{\"status\":\"returned\",\"value\":%lld}}\n", (long long)value);
+  }}
   else printf("{{\"status\":\"runtime_failure\"}}\n");
   return 0;
 }}
@@ -1266,7 +1685,7 @@ mod driver_tests {
             name: "Pair".to_owned(),
             fields: vec![],
         };
-        let driver = process_driver_cell_runtime("f", &[record], None);
+        let driver = process_driver_cell_runtime("f", &[record], None, 0);
         assert!(
             driver.contains("uint64_t mncs_cell_alloc"),
             "alloc symbol defined"
@@ -1292,12 +1711,12 @@ mod driver_tests {
             !contract_needs_arena(&mask),
             "masks do not occupy arena cells"
         );
-        let driver = process_driver("any_of", std::slice::from_ref(&mask), None);
+        let driver = process_driver("any_of", std::slice::from_ref(&mask), None, 0);
         assert!(
             driver.contains("MNCS_CALL_FILE"),
             "mask-only inputs must not fall back to argv"
         );
-        let out_driver = process_driver("bits", &[], Some(&mask));
+        let out_driver = process_driver("bits", &[], Some(&mask), 0);
         assert!(
             out_driver.contains("MNCS_CALL_FILE"),
             "mask-only results must not fall back to argv"

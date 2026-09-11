@@ -3424,7 +3424,7 @@ fn validate_arguments(
     for (index, (parameter, argument)) in body.parameters.iter().zip(&request.arguments).enumerate()
     {
         if !value_matches_type(program, argument, &parameter.ty) {
-            return Err(format!(
+            let mut message = format!(
                 "argument does not match parameter {:?} (function {}::{}, argument index {index}): expected {} ({}) but received {}",
                 parameter.name,
                 request.target.module,
@@ -3432,10 +3432,34 @@ fn validate_arguments(
                 parameter.ty.semantic_name(),
                 parameter.ty.canonical_identity(),
                 execution_value_summary(argument)
-            ));
+            );
+            // Name-based field mismatches carry the actionable detail:
+            // which field disagrees and the expected-vs-received lists.
+            if let Some(note) = aggregate_shape_note(
+                program,
+                argument,
+                &parameter.ty,
+                &format!("argument {index}"),
+            ) {
+                message.push_str("; ");
+                message.push_str(&note);
+            }
+            return Err(message);
         }
     }
     Ok(())
+}
+
+/// Field-identity detail for a rejected aggregate argument, shared with the
+/// SSA interpreter so both paths diagnose identically: the deepest field,
+/// length, or capacity disagreement with expected-vs-received detail.
+fn aggregate_shape_note(
+    program: &Program,
+    value: &ExecutionValue,
+    ty: &BodyType,
+    path: &str,
+) -> Option<String> {
+    crate::value_contract::first_aggregate_mismatch(program, value, ty, path)
 }
 
 fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) -> bool {
@@ -3509,9 +3533,11 @@ fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) 
     }
 }
 
-/// A logical record value matches its declaration when the field sets agree
-/// exactly (both sides keep fields sorted by name) and every field value
-/// matches its declared semantic type.
+/// A logical record value matches its declaration when every received field
+/// resolves by name against the canonical declaration (external field order
+/// is insignificant) and every field value matches its declared semantic
+/// type. Duplicate, unknown, or missing fields never match: a malformed
+/// value is rejected rather than bound positionally (WEB-P-011).
 fn record_fields_match(
     program: &Program,
     record_identity: &SemanticId,
@@ -3524,22 +3550,29 @@ fn record_fields_match(
     else {
         return false;
     };
-    if declaration.fields.len() != fields.len() {
-        return false;
-    }
-    declaration
+    let declared_names: Vec<String> = declaration
         .fields
         .iter()
-        .zip(fields.iter())
-        .all(|(declared, (field_name, field_value))| {
-            field_name == &declared.name
-                && value_matches_named_type(program, field_value, &declared.field_type)
+        .map(|field| field.name.clone())
+        .collect();
+    let context = format!("record {:?}", declaration.name);
+    let Ok(order) = crate::value_contract::order_fields_by_name(&context, &declared_names, fields)
+    else {
+        return false;
+    };
+    order
+        .iter()
+        .enumerate()
+        .all(|(declared_index, received_index)| {
+            let declared = &declaration.fields[declared_index];
+            value_matches_named_type(program, &fields[*received_index].1, &declared.field_type)
         })
 }
 
-/// A finite value's payload matches its declared variant when the field sets
-/// agree exactly (both sides keep fields sorted by name) and every payload
-/// value matches its declared semantic type.
+/// A finite value's payload matches its declared variant when every received
+/// payload field resolves by name against the canonical variant declaration
+/// (external field order is insignificant) and every payload value matches
+/// its declared semantic type (WEB-P-011).
 fn finite_payload_matches(
     program: &Program,
     type_identity: &SemanticId,
@@ -3560,15 +3593,21 @@ fn finite_payload_matches(
     else {
         return payload.is_empty();
     };
-    if declared_payload.len() != payload.len() {
-        return false;
-    }
-    declared_payload
+    let declared_names: Vec<String> = declared_payload
         .iter()
-        .zip(payload.iter())
-        .all(|(declared, (field_name, field_value))| {
-            field_name == &declared.name
-                && value_matches_named_type(program, field_value, &declared.field_type)
+        .map(|field| field.name.clone())
+        .collect();
+    let context = format!("finite payload {variant_identity:?}");
+    let Ok(order) = crate::value_contract::order_fields_by_name(&context, &declared_names, payload)
+    else {
+        return false;
+    };
+    order
+        .iter()
+        .enumerate()
+        .all(|(declared_index, received_index)| {
+            let declared = &declared_payload[declared_index];
+            value_matches_named_type(program, &payload[*received_index].1, &declared.field_type)
         })
 }
 

@@ -1,0 +1,82 @@
+mncs 0.13;
+
+// WEB-P-012 regression: bounded loops rebuilding large aggregate cells
+// every trip. Total allocation (trips x cell bytes, ~50 MiB here) exceeds
+// every fixed backend arena (32 MiB WASM, 16 MiB native); only
+// per-iteration loop-region reclamation keeps the peak bounded, so the
+// reclamation backends return while the bump-only native backends report
+// structured MNCS_RSRC_EXHAUSTED exhaustion instead of trapping.
+// carry_wide pins a carried record with exact-sequence fields, carry_nested
+// pins a carried doubly-nested cell, invariant_big pins a pre-loop
+// composite read inside the loop (it must survive the backedge reset even
+// though it is never carried through a header parameter), and nested_loops
+// pins nested regions (the inner mark must be re-pushed on every outer
+// trip via the exit/entry activation discipline).
+module pressure.loop_region;
+
+record Big2 { a: [u64; 1024], b: [u64; 1024], tag: u64 }
+
+record Wrap2 { n: u64, inner: Big2 }
+
+fn carry_wide() -> (result: u64) {
+    iterate k up_to 1024 carrying acc: Big2 = Big2 { a: [0; 1024], b: [0; 1024], tag: 0 } {
+        let extra1: [u64; 1024] = [acc.tag; 1024];
+        let extra2: [u64; 1024] = [acc.tag; 1024];
+        let dead1: [u64; 1024] = [acc.tag; 1024];
+        let dead2: [u64; 1024] = [acc.tag; 1024];
+        let dead3: [u64; 1024] = [acc.tag; 1024];
+        let dead4: [u64; 1024] = [acc.tag; 1024];
+        next acc = Big2 {
+            a: extra1,
+            b: extra2,
+            tag: acc.tag + 1 + dead1[0] - dead1[0] + dead2[0] - dead2[0] + dead3[0] - dead3[0] + dead4[0] - dead4[0]
+        };
+    }
+    return acc.tag;
+}
+
+fn carry_nested() -> (result: u64) {
+    iterate k up_to 1024 carrying acc: Wrap2 = Wrap2 { n: 0, inner: Big2 { a: [0; 1024], b: [0; 1024], tag: 0 } } {
+        let dead1: [u64; 1024] = [acc.n; 1024];
+        let dead2: [u64; 1024] = [acc.n; 1024];
+        let dead3: [u64; 1024] = [acc.n; 1024];
+        let dead4: [u64; 1024] = [acc.n; 1024];
+        next acc = Wrap2 {
+            n: acc.n + 1 + dead1[0] - dead1[0] + dead2[0] - dead2[0] + dead3[0] - dead3[0] + dead4[0] - dead4[0],
+            inner: Big2 { a: [acc.n; 1024], b: [acc.n; 1024], tag: acc.n }
+        };
+    }
+    return acc.n + acc.inner.tag;
+}
+
+fn invariant_big() -> (result: u64) {
+    let base: Big2 = Big2 { a: [7; 1024], b: [7; 1024], tag: 100 };
+    iterate k up_to 1024 carrying acc: u64 = 0 {
+        next acc = acc + base.tag + base.a[0] + base.b[0];
+    }
+    return acc;
+}
+
+fn nested_loops() -> (result: u64) {
+    iterate i up_to 32 carrying outer: Big2 = Big2 { a: [0; 1024], b: [0; 1024], tag: 0 } {
+        iterate j up_to 32 carrying inner: Big2 = Big2 { a: [outer.tag; 1024], b: [0; 1024], tag: 0 } {
+            next inner = Big2 { a: [inner.tag; 1024], b: [inner.tag; 1024], tag: inner.tag + 1 };
+        }
+        next outer = Big2 { a: inner.a, b: [outer.tag; 1024], tag: outer.tag + inner.tag };
+    }
+    return outer.tag;
+}
+
+enum Shape { Point { x: u64, y: u64 }, Label { tag: u64 } }
+
+record Acc { n: u64, shape: Shape }
+
+fn carry_boxed() -> (result: u64) {
+    iterate k up_to 4 carrying acc: Acc = Acc { n: 0, shape: Shape.Point { x: 1, y: 2 } } {
+        next acc = match acc.shape {
+            Shape.Point { x, y } => Acc { n: acc.n + x + y, shape: Shape.Label { tag: acc.n } },
+            Shape.Label { tag } => Acc { n: acc.n + tag, shape: Shape.Point { x: tag, y: 1 } }
+        };
+    }
+    return acc.n;
+}

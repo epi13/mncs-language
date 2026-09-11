@@ -193,11 +193,19 @@ instantiation, and each substituted traversal bound is checked against
 the admitted ceiling of the module that defines the traversal: a narrow
 root never un-admits library internals admitted under the library's own
 profile, and a wide caller never smuggles an over-ceiling instantiation
-past the definition site (`MNE182`). Fuel exhaustion is implemented but
-not execution-tested (source ceilings and corpus nesting limits keep
-over-ceiling activation out of reach), and native fuel failure reports
-`RuntimeFailure` where the reference interpreters report
-`BudgetExhausted`.
+past the definition site (`MNE182`). Fuel exhaustion is execution-tested
+on two axes: explicit per-request budgets exhaust identically on all five
+executable backends (uniform fuel seeding — a budgeted entry depth of
+`MODEL_MAX_CALL_DEPTH - budget` fits exactly `budget + 1` activations in
+both the reference interpreters and native code), and over-cap activation
+(a 1025-deep runtime tree, no explicit budget) reports `BudgetExhausted`
+on the C11, LLVM, and Cranelift backends via a dedicated status code that
+callers propagate without collapsing into generic `RuntimeFailure`.
+Malformed budgets (zero, above the cap) are `InvalidRequest` on all five
+backends, exactly like the reference. The reference interpreters recurse
+on the host stack, so the over-cap case is excluded from them in debug
+builds by construction (1025 activations overflow an 8 MiB debug stack);
+native frames are small enough that the same tree runs natively.
 
 Evidence: `examples/source/recursion-rfc/` (ten study fixtures),
 `examples/source/recursion-rfc/recursion-probe.mncs` with

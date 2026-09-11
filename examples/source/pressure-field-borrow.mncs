@@ -1,0 +1,29 @@
+mncs 0.13;
+
+// WEB-P-002 regression: an exact-array record field borrows as a bounded
+// view exactly like a named value of the same type does (same N <= M,
+// same-element rule, same borrow machinery, no copy). `via_direct`
+// always worked; `via_field` used to fail with MNE163; `via_chained`
+// pins that nested projections borrow through the outer projection.
+module pressure.field_borrow;
+
+record Wrap { data: [byte; 1024], len: u64 }
+
+record Outer { inner: Wrap, tag: u64 }
+
+fn take_view(buf: [byte; up_to 1024], len: u64) -> (result: u64) {
+    return buf.len;
+}
+
+fn via_direct(data: [byte; 1024], len: u64) -> (result: u64) {
+    return take_view(data, len);
+}
+
+fn via_field(wrap: Wrap) -> (result: u64) {
+    return take_view(wrap.data, wrap.len);
+}
+
+fn via_chained(wrap: Wrap, tag: u64) -> (result: u64) {
+    let outer: Outer = Outer { inner: wrap, tag: tag };
+    return take_view(outer.inner.data, outer.inner.len);
+}

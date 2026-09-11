@@ -1,0 +1,2321 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-record-field-identity",
+ "cases": [
+  {
+   "id": "pair-canon",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "get_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+       "name": "Pair",
+       "fields": [
+        [
+         "alpha",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "zeta",
+         {
+          "integer": {
+           "value": 100,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "pair-decl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "get_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+       "name": "Pair",
+       "fields": [
+        [
+         "zeta",
+         {
+          "integer": {
+           "value": 100,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "alpha",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "pair-zeta-decl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "get_zeta"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+       "name": "Pair",
+       "fields": [
+        [
+         "zeta",
+         {
+          "integer": {
+           "value": 100,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "alpha",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 100,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "pair-zeta-canon",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "get_zeta"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+       "name": "Pair",
+       "fields": [
+        [
+         "alpha",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "zeta",
+         {
+          "integer": {
+           "value": 100,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 100,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "sliders-high-decl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "get_high"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Sliders::high%3Au64%3Blow%3Au64%3Bmark%3Abyte%3Btag%3Abool%3B",
+       "name": "Sliders",
+       "fields": [
+        [
+         "high",
+         {
+          "integer": {
+           "value": 70,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "low",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "tag",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "mark",
+         {
+          "byte": {
+           "value": 9
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 70,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "sliders-low-decl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "get_low"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Sliders::high%3Au64%3Blow%3Au64%3Bmark%3Abyte%3Btag%3Abool%3B",
+       "name": "Sliders",
+       "fields": [
+        [
+         "high",
+         {
+          "integer": {
+           "value": 70,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "low",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "tag",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "mark",
+         {
+          "byte": {
+           "value": 9
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "sliders-tag-decl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "get_tag"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Sliders::high%3Au64%3Blow%3Au64%3Bmark%3Abyte%3Btag%3Abool%3B",
+       "name": "Sliders",
+       "fields": [
+        [
+         "high",
+         {
+          "integer": {
+           "value": 70,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "low",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "tag",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "mark",
+         {
+          "byte": {
+           "value": 9
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "boolean": {
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "sliders-mark-decl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "get_mark"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Sliders::high%3Au64%3Blow%3Au64%3Bmark%3Abyte%3Btag%3Abool%3B",
+       "name": "Sliders",
+       "fields": [
+        [
+         "high",
+         {
+          "integer": {
+           "value": 70,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "low",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "tag",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "mark",
+         {
+          "byte": {
+           "value": 9
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "byte": {
+      "value": 9
+     }
+    }
+   ]
+  },
+  {
+   "id": "sliders-high-shuffled",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "get_high"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Sliders::high%3Au64%3Blow%3Au64%3Bmark%3Abyte%3Btag%3Abool%3B",
+       "name": "Sliders",
+       "fields": [
+        [
+         "mark",
+         {
+          "byte": {
+           "value": 9
+          }
+         }
+        ],
+        [
+         "tag",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "low",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "high",
+         {
+          "integer": {
+           "value": 70,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 70,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "sliders-low-shuffled",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "get_low"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Sliders::high%3Au64%3Blow%3Au64%3Bmark%3Abyte%3Btag%3Abool%3B",
+       "name": "Sliders",
+       "fields": [
+        [
+         "mark",
+         {
+          "byte": {
+           "value": 9
+          }
+         }
+        ],
+        [
+         "tag",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "low",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "high",
+         {
+          "integer": {
+           "value": 70,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "box-first-alpha-decl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "first_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Box::count%3Au64%3Bitems%3A%5BPair%3B%202%5D%3B",
+       "name": "Box",
+       "fields": [
+        [
+         "items",
+         {
+          "sequence": {
+           "values": [
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 10,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "alpha",
+                {
+                 "integer": {
+                  "value": 11,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            },
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 20,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "alpha",
+                {
+                 "integer": {
+                  "value": 22,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            }
+           ]
+          }
+         }
+        ],
+        [
+         "count",
+         {
+          "integer": {
+           "value": 2,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 11,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "box-first-zeta-decl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "first_zeta"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Box::count%3Au64%3Bitems%3A%5BPair%3B%202%5D%3B",
+       "name": "Box",
+       "fields": [
+        [
+         "items",
+         {
+          "sequence": {
+           "values": [
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 10,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "alpha",
+                {
+                 "integer": {
+                  "value": 11,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            },
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 20,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "alpha",
+                {
+                 "integer": {
+                  "value": 22,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            }
+           ]
+          }
+         }
+        ],
+        [
+         "count",
+         {
+          "integer": {
+           "value": 2,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 10,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "box-count-decl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "box_count"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Box::count%3Au64%3Bitems%3A%5BPair%3B%202%5D%3B",
+       "name": "Box",
+       "fields": [
+        [
+         "items",
+         {
+          "sequence": {
+           "values": [
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 10,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "alpha",
+                {
+                 "integer": {
+                  "value": 11,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            },
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 20,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "alpha",
+                {
+                 "integer": {
+                  "value": 22,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            }
+           ]
+          }
+         }
+        ],
+        [
+         "count",
+         {
+          "integer": {
+           "value": 2,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "box-first-alpha-canon",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "first_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Box::count%3Au64%3Bitems%3A%5BPair%3B%202%5D%3B",
+       "name": "Box",
+       "fields": [
+        [
+         "count",
+         {
+          "integer": {
+           "value": 2,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "items",
+         {
+          "sequence": {
+           "values": [
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "alpha",
+                {
+                 "integer": {
+                  "value": 11,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 10,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            },
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "alpha",
+                {
+                 "integer": {
+                  "value": 22,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 20,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            }
+           ]
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 11,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "wrap-alpha-decl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "wrap_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Wrap::inner%3APair%3Bn%3Au64%3B",
+       "name": "Wrap",
+       "fields": [
+        [
+         "n",
+         {
+          "integer": {
+           "value": 5,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "inner",
+         {
+          "record": {
+           "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+           "name": "Pair",
+           "fields": [
+            [
+             "zeta",
+             {
+              "integer": {
+               "value": 50,
+               "type": {
+                "bits": 64,
+                "signed": false
+               }
+              }
+             }
+            ],
+            [
+             "alpha",
+             {
+              "integer": {
+               "value": 51,
+               "type": {
+                "bits": 64,
+                "signed": false
+               }
+              }
+             }
+            ]
+           ]
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 51,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "wrap-alpha-canon",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "wrap_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Wrap::inner%3APair%3Bn%3Au64%3B",
+       "name": "Wrap",
+       "fields": [
+        [
+         "inner",
+         {
+          "record": {
+           "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+           "name": "Pair",
+           "fields": [
+            [
+             "alpha",
+             {
+              "integer": {
+               "value": 51,
+               "type": {
+                "bits": 64,
+                "signed": false
+               }
+              }
+             }
+            ],
+            [
+             "zeta",
+             {
+              "integer": {
+               "value": 50,
+               "type": {
+                "bits": 64,
+                "signed": false
+               }
+              }
+             }
+            ]
+           ]
+          }
+         }
+        ],
+        [
+         "n",
+         {
+          "integer": {
+           "value": 5,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 51,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "deep-alpha-decl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "deep_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Deep::tag%3Au64%3Bwrap%3AWrap%3B",
+       "name": "Deep",
+       "fields": [
+        [
+         "wrap",
+         {
+          "record": {
+           "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Wrap::inner%3APair%3Bn%3Au64%3B",
+           "name": "Wrap",
+           "fields": [
+            [
+             "n",
+             {
+              "integer": {
+               "value": 5,
+               "type": {
+                "bits": 64,
+                "signed": false
+               }
+              }
+             }
+            ],
+            [
+             "inner",
+             {
+              "record": {
+               "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+               "name": "Pair",
+               "fields": [
+                [
+                 "zeta",
+                 {
+                  "integer": {
+                   "value": 50,
+                   "type": {
+                    "bits": 64,
+                    "signed": false
+                   }
+                  }
+                 }
+                ],
+                [
+                 "alpha",
+                 {
+                  "integer": {
+                   "value": 51,
+                   "type": {
+                    "bits": 64,
+                    "signed": false
+                   }
+                  }
+                 }
+                ]
+               ]
+              }
+             }
+            ]
+           ]
+          }
+         }
+        ],
+        [
+         "tag",
+         {
+          "integer": {
+           "value": 9,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 51,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "deep-tag-decl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "deep_tag"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Deep::tag%3Au64%3Bwrap%3AWrap%3B",
+       "name": "Deep",
+       "fields": [
+        [
+         "wrap",
+         {
+          "record": {
+           "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Wrap::inner%3APair%3Bn%3Au64%3B",
+           "name": "Wrap",
+           "fields": [
+            [
+             "n",
+             {
+              "integer": {
+               "value": 5,
+               "type": {
+                "bits": 64,
+                "signed": false
+               }
+              }
+             }
+            ],
+            [
+             "inner",
+             {
+              "record": {
+               "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+               "name": "Pair",
+               "fields": [
+                [
+                 "zeta",
+                 {
+                  "integer": {
+                   "value": 50,
+                   "type": {
+                    "bits": 64,
+                    "signed": false
+                   }
+                  }
+                 }
+                ],
+                [
+                 "alpha",
+                 {
+                  "integer": {
+                   "value": 51,
+                   "type": {
+                    "bits": 64,
+                    "signed": false
+                   }
+                  }
+                 }
+                ]
+               ]
+              }
+             }
+            ]
+           ]
+          }
+         }
+        ],
+        [
+         "tag",
+         {
+          "integer": {
+           "value": 9,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 9,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "finite-pick-decl",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "pick_alpha"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:pressure.record_field_identity::Choice",
+       "variant_identity": "mncs:0.2:finite-variant:pressure.record_field_identity::Choice::Pick",
+       "discriminant": 0,
+       "payload": [
+        [
+         "zeta",
+         {
+          "integer": {
+           "value": 100,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "alpha",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "finite-pick-canon",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "pick_alpha"
+    },
+    "arguments": [
+     {
+      "finite": {
+       "type_identity": "mncs:0.2:finite-type:pressure.record_field_identity::Choice",
+       "variant_identity": "mncs:0.2:finite-variant:pressure.record_field_identity::Choice::Pick",
+       "discriminant": 0,
+       "payload": [
+        [
+         "alpha",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "zeta",
+         {
+          "integer": {
+           "value": 100,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "returned",
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "pair-missing",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "get_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+       "name": "Pair",
+       "fields": [
+        [
+         "alpha",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "invalid_request"
+  },
+  {
+   "id": "pair-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "get_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+       "name": "Pair",
+       "fields": [
+        [
+         "alpha",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "zeta",
+         {
+          "integer": {
+           "value": 100,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "bogus",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "invalid_request"
+  },
+  {
+   "id": "pair-duplicate",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "get_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+       "name": "Pair",
+       "fields": [
+        [
+         "zeta",
+         {
+          "integer": {
+           "value": 100,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "alpha",
+         {
+          "integer": {
+           "value": 7,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "alpha",
+         {
+          "integer": {
+           "value": 8,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "invalid_request"
+  },
+  {
+   "id": "pair-wrongtype",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "get_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+       "name": "Pair",
+       "fields": [
+        [
+         "alpha",
+         {
+          "boolean": {
+           "value": true
+          }
+         }
+        ],
+        [
+         "zeta",
+         {
+          "integer": {
+           "value": 100,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "invalid_request"
+  },
+  {
+   "id": "nested-missing",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "first_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Box::count%3Au64%3Bitems%3A%5BPair%3B%202%5D%3B",
+       "name": "Box",
+       "fields": [
+        [
+         "count",
+         {
+          "integer": {
+           "value": 2,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "items",
+         {
+          "sequence": {
+           "values": [
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 10,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            },
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "alpha",
+                {
+                 "integer": {
+                  "value": 22,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 20,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            }
+           ]
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "invalid_request"
+  },
+  {
+   "id": "nested-unknown",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "first_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Box::count%3Au64%3Bitems%3A%5BPair%3B%202%5D%3B",
+       "name": "Box",
+       "fields": [
+        [
+         "count",
+         {
+          "integer": {
+           "value": 2,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "items",
+         {
+          "sequence": {
+           "values": [
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "alpha",
+                {
+                 "integer": {
+                  "value": 11,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 10,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            },
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "alpha",
+                {
+                 "integer": {
+                  "value": 22,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 20,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "bogus",
+                {
+                 "integer": {
+                  "value": 1,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            }
+           ]
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "invalid_request"
+  },
+  {
+   "id": "nested-duplicate",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "first_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Box::count%3Au64%3Bitems%3A%5BPair%3B%202%5D%3B",
+       "name": "Box",
+       "fields": [
+        [
+         "count",
+         {
+          "integer": {
+           "value": 2,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "items",
+         {
+          "sequence": {
+           "values": [
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 10,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "alpha",
+                {
+                 "integer": {
+                  "value": 11,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 12,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            },
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "alpha",
+                {
+                 "integer": {
+                  "value": 22,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 20,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            }
+           ]
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "invalid_request"
+  },
+  {
+   "id": "nested-short-sequence",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "first_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Box::count%3Au64%3Bitems%3A%5BPair%3B%202%5D%3B",
+       "name": "Box",
+       "fields": [
+        [
+         "count",
+         {
+          "integer": {
+           "value": 1,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "items",
+         {
+          "sequence": {
+           "values": [
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "alpha",
+                {
+                 "integer": {
+                  "value": 11,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 10,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            }
+           ]
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "invalid_request"
+  },
+  {
+   "id": "nested-wrongtype",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.record_field_identity",
+     "function": "first_alpha"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Box::count%3Au64%3Bitems%3A%5BPair%3B%202%5D%3B",
+       "name": "Box",
+       "fields": [
+        [
+         "count",
+         {
+          "integer": {
+           "value": 2,
+           "type": {
+            "bits": 64,
+            "signed": false
+           }
+          }
+         }
+        ],
+        [
+         "items",
+         {
+          "sequence": {
+           "values": [
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "alpha",
+                {
+                 "boolean": {
+                  "value": false
+                 }
+                }
+               ],
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 10,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            },
+            {
+             "record": {
+              "type_identity": "mncs:0.2:record-type:pressure.record_field_identity::Pair::alpha%3Au64%3Bzeta%3Au64%3B",
+              "name": "Pair",
+              "fields": [
+               [
+                "alpha",
+                {
+                 "integer": {
+                  "value": 22,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ],
+               [
+                "zeta",
+                {
+                 "integer": {
+                  "value": 20,
+                  "type": {
+                   "bits": 64,
+                   "signed": false
+                  }
+                 }
+                }
+               ]
+              ]
+             }
+            }
+           ]
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "invalid_request"
+  }
+ ]
+}

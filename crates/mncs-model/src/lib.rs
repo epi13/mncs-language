@@ -36,6 +36,7 @@ mod ssa_execution;
 mod termination;
 mod translation;
 mod validation;
+pub mod value_contract;
 mod verifier;
 
 pub use authority::{
@@ -171,8 +172,9 @@ pub use proof_kernel::{
     PROOF_BUFFER_CAPACITY, PROOF_KERNEL_ID, PROOF_MAX_UNIVERSE,
 };
 pub use proof_transport::{
-    validate_relationship_for_use, ProofAdmissionEvidence, ProofRelationship, TransportMismatch,
-    PROOF_DEPENDENCY_SLOTS, PROOF_EVIDENCE_RULE, PROOF_RELATIONSHIP_SCHEMA_VERSION,
+    validate_relationship_for_use, ProofAdmissionEvidence, ProofBindingRef, ProofRelationship,
+    TransportMismatch, PROOF_DEPENDENCY_SLOTS, PROOF_EVIDENCE_RULE,
+    PROOF_RELATIONSHIP_SCHEMA_VERSION,
 };
 pub use provenance::{
     evidence_is_current, Realization, RealizationError, RealizationSelection, TargetIdentity,
@@ -210,6 +212,9 @@ pub use translation::{
     TRANSLATION_VALIDATION_CONTRACT_ID, TRANSLATION_VALIDATION_SCHEMA_VERSION,
 };
 pub use validation::{Diagnostic, ValidationReport, ValidationSummary};
+pub use value_contract::{
+    first_aggregate_mismatch, order_fields_by_name, FieldOrderError, FieldOrderProblem,
+};
 pub use verifier::{
     AlignmentVerifierInput, CapabilityVerifierInput, DeterministicVerifier, EvidenceAuthorityClass,
     IntegerVerifierInput, MicroVerifier, VerifierArtifactError, VerifierIdentity,

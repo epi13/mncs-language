@@ -1,0 +1,57 @@
+{
+ "schema_version": "0.1",
+ "name": "recursion-fuel-budget",
+ "cases": [
+  {
+   "id": "shallow-control",
+   "request": {
+    "schema_version": "0.1",
+    "target": {"module": "recursion.rfc.exhaustion", "function": "run_shallow"},
+    "arguments": [],
+    "step_budget": 100000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {"bits": 64, "signed": false}
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "budget-exhaustion",
+   "request": {
+    "schema_version": "0.1",
+    "target": {"module": "recursion.rfc.exhaustion", "function": "run_shallow"},
+    "arguments": [],
+    "step_budget": 100000,
+    "call_depth_budget": 1
+   },
+   "expected_status": "budget_exhausted"
+  },
+  {
+   "id": "budget-zero-rejected",
+   "request": {
+    "schema_version": "0.1",
+    "target": {"module": "recursion.rfc.exhaustion", "function": "run_shallow"},
+    "arguments": [],
+    "step_budget": 100000,
+    "call_depth_budget": 0
+   },
+   "expected_status": "invalid_request"
+  },
+  {
+   "id": "budget-over-cap-rejected",
+   "request": {
+    "schema_version": "0.1",
+    "target": {"module": "recursion.rfc.exhaustion", "function": "run_shallow"},
+    "arguments": [],
+    "step_budget": 100000,
+    "call_depth_budget": 1025
+   },
+   "expected_status": "invalid_request"
+  }
+ ]
+}

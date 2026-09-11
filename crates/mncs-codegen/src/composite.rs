@@ -410,25 +410,32 @@ impl ArenaWriter {
         match value {
             Value::Record { fields, .. } => {
                 let Some(Contract::Record {
-                    fields: declared, ..
+                    fields: declared,
+                    name,
+                    ..
                 }) = value_record_contract(value, &self.registry)
                 else {
                     return Err("record value has no declared canonical layout".to_owned());
                 };
                 let declared = declared.clone();
-                if declared.len() != fields.len() {
-                    return Err("record field count does not match the declared layout".to_owned());
-                }
+                let name = name.clone();
+                // Fields resolve by name against the canonical declaration
+                // (WEB-P-011): external order is insignificant, and a
+                // malformed record is rejected with expected-vs-received
+                // detail instead of being bound positionally.
+                let declared_names: Vec<String> =
+                    declared.iter().map(|(name, _)| name.clone()).collect();
+                let context = format!("record {name:?}");
+                let order = mncs_model::order_fields_by_name(&context, &declared_names, fields)
+                    .map_err(|error| error.describe())?;
                 self.image.resize(base as usize + declared.len() * 8, 0);
-                for (index, ((name, declared_type), (field_name, field_value))) in
-                    declared.iter().zip(fields.iter()).enumerate()
-                {
-                    if name != field_name {
-                        return Err(format!(
-                            "record field {field_name:?} does not match the canonical layout {name:?}"
-                        ));
-                    }
-                    self.store_field(base + index as u64 * 8, field_value, declared_type)?;
+                for (index, received_index) in order.iter().enumerate() {
+                    let declared_type = &declared[index].1;
+                    self.store_field(
+                        base + index as u64 * 8,
+                        &fields[*received_index].1,
+                        declared_type,
+                    )?;
                 }
                 Ok(base)
             }
@@ -449,21 +456,25 @@ impl ArenaWriter {
                     return Err("finite value has no boxed layout in this program".to_owned());
                 };
                 let variant_fields = variant_fields.clone();
-                if variant_fields.len() != payload.len() {
-                    return Err("payload field count does not match the declared layout".to_owned());
-                }
+                // Payload fields resolve by name (WEB-P-011), exactly like
+                // record fields above.
+                let declared_names: Vec<String> = variant_fields
+                    .iter()
+                    .map(|(name, _)| name.clone())
+                    .collect();
+                let order =
+                    mncs_model::order_fields_by_name("finite payload", &declared_names, payload)
+                        .map_err(|error| error.describe())?;
                 self.image
                     .resize(base as usize + (variant_fields.len() + 1) * 8, 0);
                 self.put32(base, *discriminant);
-                for (index, ((name, declared_type), (field_name, field_value))) in
-                    variant_fields.iter().zip(payload.iter()).enumerate()
-                {
-                    if name != field_name {
-                        return Err(format!(
-                            "payload field {field_name:?} does not match the canonical layout {name:?}"
-                        ));
-                    }
-                    self.store_field(base + (index as u64 + 1) * 8, field_value, declared_type)?;
+                for (index, received_index) in order.iter().enumerate() {
+                    let declared_type = &variant_fields[index].1;
+                    self.store_field(
+                        base + (index as u64 + 1) * 8,
+                        &payload[*received_index].1,
+                        declared_type,
+                    )?;
                 }
                 Ok(base)
             }
@@ -508,7 +519,25 @@ impl ArenaWriter {
                     Ok(())
                 }
             }
-            Value::Integer { value, .. } => {
+            Value::Integer { value, ty } => {
+                // Backstop scalar check (WEB-P-011): entry validation above
+                // already established the shape, but any future caller
+                // reaching this writer directly must still fail closed
+                // instead of truncating a mistyped scalar into a slot.
+                match mncs_model::BodyType::from_semantic_name(declared_type) {
+                    mncs_model::BodyType::Integer(expected) if expected == *ty => {
+                        if !crate::support::integer_fits(*value, expected) {
+                            return Err(format!(
+                                "integer field value {value} is outside the declared {declared_type} domain"
+                            ));
+                        }
+                    }
+                    _ => {
+                        return Err(format!(
+                            "integer value does not match the declared field type {declared_type:?}"
+                        ));
+                    }
+                }
                 match width {
                     SlotWidth::W32 => self.put32(offset, *value as i32 as u32),
                     SlotWidth::W64 => self.put64(offset, *value as u64),
@@ -516,14 +545,36 @@ impl ArenaWriter {
                 Ok(())
             }
             Value::Boolean { value } => {
+                match mncs_model::BodyType::from_semantic_name(declared_type) {
+                    mncs_model::BodyType::Named(name) if name == "bool" => {}
+                    _ => {
+                        return Err(format!(
+                            "boolean value does not match the declared field type {declared_type:?}"
+                        ));
+                    }
+                }
                 self.put32(offset, u32::from(*value));
                 Ok(())
             }
             Value::Byte { value } => {
+                if declared_type != "byte" || !(0..=255).contains(value) {
+                    return Err(format!(
+                        "byte value {value} does not match the declared field type {declared_type:?}"
+                    ));
+                }
                 self.put32(offset, *value as u32);
                 Ok(())
             }
-            Value::Float { bits, .. } => {
+            Value::Float { bits, ty } => {
+                match mncs_model::BodyType::from_semantic_name(declared_type) {
+                    mncs_model::BodyType::Float(expected)
+                        if expected.is_supported() && ty.is_supported() && expected == *ty => {}
+                    _ => {
+                        return Err(format!(
+                            "float value does not match the declared field type {declared_type:?}"
+                        ));
+                    }
+                }
                 self.put64(offset, *bits);
                 Ok(())
             }

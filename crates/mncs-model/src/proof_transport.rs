@@ -82,6 +82,74 @@ pub enum TransportMismatch {
     ObligationAbsent,
 }
 
+/// Versioned proof reference carried into backend artifacts (tranche-0.3
+/// proof transport). This is DATA, not authority: it names the exact
+/// admitted proof, the obligation and kernel it was sealed under, the
+/// slot-ordered dependency fingerprints, and the SSA fingerprint the
+/// backend lowered, so any consumer can re-fetch the full relationship
+/// and proof-bearing evidence record from the artifact's SSA input and
+/// re-validate them without trusting the backend's word. A backend that
+/// cannot preserve these references must refuse proof-bearing SSA
+/// instead of emitting a proof-silent artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProofBindingRef {
+    pub schema_version: String,
+    pub proof_identity: String,
+    pub obligation: String,
+    pub kernel: String,
+    /// Hex fingerprints in slot order (see the slot convention above).
+    pub dependencies: Vec<String>,
+    /// Full SSA fingerprint the backend lowered when sealing this ref.
+    pub ssa_fingerprint: String,
+}
+
+impl ProofRelationship {
+    /// Project this relationship to its artifact-carried reference form,
+    /// bound to the exact SSA fingerprint the backend lowered.
+    pub fn binding_ref(&self, ssa_fingerprint: &str) -> ProofBindingRef {
+        ProofBindingRef {
+            schema_version: self.schema_version.clone(),
+            proof_identity: self.proof_identity.clone(),
+            obligation: self.obligation.clone(),
+            kernel: self.kernel.clone(),
+            dependencies: self.dependencies.clone(),
+            ssa_fingerprint: ssa_fingerprint.to_owned(),
+        }
+    }
+}
+
+impl crate::SsaModule {
+    /// Deterministic (sorted, deduplicated) proof references for every
+    /// relationship attached to this SSA, bound to this SSA's fingerprint.
+    /// Empty for proof-free SSA, so proof-free artifacts are untouched.
+    pub fn proof_binding_refs(&self) -> Vec<ProofBindingRef> {
+        let fingerprint = self.fingerprint().unwrap_or_default();
+        let mut refs: Vec<ProofBindingRef> = self
+            .proof_relationships
+            .iter()
+            .map(|relationship| relationship.binding_ref(&fingerprint))
+            .collect();
+        refs.sort_by(|left, right| {
+            (
+                &left.proof_identity,
+                &left.obligation,
+                &left.kernel,
+                &left.dependencies,
+                &left.ssa_fingerprint,
+            )
+                .cmp(&(
+                    &right.proof_identity,
+                    &right.obligation,
+                    &right.kernel,
+                    &right.dependencies,
+                    &right.ssa_fingerprint,
+                ))
+        });
+        refs.dedup();
+        refs
+    }
+}
+
 impl std::fmt::Display for TransportMismatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -357,6 +425,50 @@ mod tests {
         let mut invalid_set = base.clone();
         invalid_set.assumptions.valid = false;
         assert!(!invalid_set.consumable());
+    }
+
+    fn ssa_with_relationships(relationships: Vec<ProofRelationship>) -> crate::SsaModule {
+        crate::SsaModule {
+            schema_version: crate::SSA_SCHEMA_VERSION.to_owned(),
+            identity: crate::SemanticId("mncs:test:ssa".to_owned()),
+            semantic_identity: crate::SemanticId("mncs:test:semantic".to_owned()),
+            hir_fingerprint: "00".repeat(32),
+            binding_table: None,
+            record_types: Vec::new(),
+            functions: Vec::new(),
+            obligations: Vec::new(),
+            trace: crate::SsaTraceMap {
+                entries: Vec::new(),
+            },
+            transformations: Vec::new(),
+            generic_specializations: Vec::new(),
+            proof_relationships: relationships,
+        }
+    }
+
+    #[test]
+    fn binding_refs_are_sorted_deduped_and_ssa_bound() {
+        let mut second = synthetic_relationship();
+        second.proof_identity = "mncs:proof-dep:b".to_owned();
+        let mut first = synthetic_relationship();
+        first.proof_identity = "mncs:proof-dep:a".to_owned();
+        // Out of order with a duplicate: the refs must canonicalize.
+        let ssa = ssa_with_relationships(vec![second.clone(), first.clone(), second.clone()]);
+        let refs = ssa.proof_binding_refs();
+        assert_eq!(refs.len(), 2, "duplicate refs collapse");
+        assert_eq!(refs[0].proof_identity, "mncs:proof-dep:a");
+        assert_eq!(refs[1].proof_identity, "mncs:proof-dep:b");
+        let fingerprint = ssa.fingerprint().expect("SSA is serializable");
+        for reference in &refs {
+            assert_eq!(reference.schema_version, PROOF_RELATIONSHIP_SCHEMA_VERSION);
+            assert_eq!(reference.ssa_fingerprint, fingerprint);
+            assert_eq!(reference.obligation, "mncs:obligation:test");
+            assert_eq!(reference.kernel, "mncs:proof-kernel:0.2");
+        }
+        // Proof-free SSA yields no refs, so proof-free artifacts are untouched.
+        assert!(ssa_with_relationships(Vec::new())
+            .proof_binding_refs()
+            .is_empty());
     }
 
     #[test]

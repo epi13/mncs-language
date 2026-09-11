@@ -317,6 +317,7 @@ pub fn lower_cranelift(
         payload.exports.clone(),
         assumptions.clone(),
         Vec::new(),
+        ssa.proof_binding_refs(),
         vec![
             "cranelift host JIT".to_owned(),
             "inspectable CLIF text".to_owned(),
@@ -1514,7 +1515,16 @@ pub fn execute_cranelift(
             arena.extend_from_slice(image);
         });
     }
-    JIT_OOB.store(false, std::sync::atomic::Ordering::Relaxed);
+    clear_jit_failure_state();
+    // RFC 0047 §5 uniform fuel: seed the entry depth from the request
+    // budget so an explicit budget means the same fuel here as on the
+    // reference interpreters (zero seed is the historical full cap).
+    let entry_depth = match crate::support::depth_seed_for_request(request) {
+        Ok(seed) => seed as i64,
+        Err(reason) => {
+            return execution_failure(result, ExecutionStatus::InvalidRequest, reason);
+        }
+    };
     // The JIT trampoline table is keyed by module-qualified native symbol
     // (ENG-PRESSURE-0017); resolve the entry the same way here.
     let entry = crate::support::entry_native_symbol(
@@ -1522,17 +1532,40 @@ pub fn execute_cranelift(
         &request.target.module,
         &request.target.function,
     );
-    match jit_execute_with_arguments(&payload, &entry, &raw_args) {
+    match jit_execute_with_arguments(&payload, &entry, &raw_args, entry_depth) {
         Ok((status, value)) => {
             if JIT_OOB.load(std::sync::atomic::Ordering::Relaxed) {
-                // A host slot access escaped the installed arena image
-                // (allocation cap or wild address). The computed value is
-                // untrustworthy, so the observation fails closed here
-                // instead of decoding possibly-zeroed cells.
+                // A host slot access escaped the installed arena image.
+                // Allocation-cap exhaustion is a bounded resource failure
+                // with the attributed request/arena detail; anything else
+                // (wild address) fails closed as a runtime failure instead
+                // of decoding possibly-zeroed cells (WEB-P-012).
+                let diagnosis = take_jit_diagnosis();
+                if JIT_EXHAUSTED.load(std::sync::atomic::Ordering::Relaxed) {
+                    return execution_failure(
+                        result,
+                        ExecutionStatus::BudgetExhausted,
+                        diagnosis.unwrap_or_else(|| {
+                            "MNCS_RSRC_EXHAUSTED cranelift JIT canonical arena exhausted".to_owned()
+                        }),
+                    );
+                }
                 return execution_failure(
                     result,
                     ExecutionStatus::RuntimeFailure,
-                    "cranelift JIT cell access exceeded the arena image; failing closed",
+                    diagnosis.unwrap_or_else(|| {
+                        "cranelift JIT cell access exceeded the arena image; failing closed"
+                            .to_owned()
+                    }),
+                );
+            }
+            // WEB-P-012: a non-returned JIT status carries an attributed
+            // reason instead of a silent null.
+            if status != ExecutionStatus::Returned {
+                return execution_failure(
+                    result,
+                    status,
+                    format!("cranelift JIT execution ended with status {status:?}"),
                 );
             }
             result.status = status;
@@ -1559,6 +1592,17 @@ pub fn execute_cranelift(
             if reason.contains("readable+executable") || reason.contains("executable memory") {
                 match aot_fallback_execute(artifact, &payload, request, &raw_args, &arena_image) {
                     Ok(run) => {
+                        // WEB-P-012: attribute non-returned observations;
+                        // never a silent null reason.
+                        if run.status != ExecutionStatus::Returned {
+                            let reason = run.reason.unwrap_or_else(|| {
+                                format!(
+                                    "native execution ended with status {:?} and no attributed reason",
+                                    run.status
+                                )
+                            });
+                            return execution_failure(result, run.status, reason);
+                        }
                         result.status = run.status;
                         result.steps = 1;
                         match crate::support::decode_native_observation(
@@ -1628,14 +1672,22 @@ fn aot_fallback_execute(
         &request.target.module,
         &request.target.function,
     );
+    // RFC 0047 §5 uniform fuel (see `execute_cranelift`).
+    let entry_depth = crate::support::depth_seed_for_request(request)?;
     let driver = if crate::support::scalar_module_needs_arena_symbols(&scalar) {
         crate::support::process_driver_cell_runtime(
             &entry,
             &contract.inputs,
             contract.outputs.first(),
+            entry_depth,
         )
     } else {
-        crate::support::process_driver(&entry, &contract.inputs, contract.outputs.first())
+        crate::support::process_driver(
+            &entry,
+            &contract.inputs,
+            contract.outputs.first(),
+            entry_depth,
+        )
     };
     // The C driver parses scalar words itself (`strtod` for floats), so
     // argv carries the decimal request spellings, not the bit-carried
@@ -1685,6 +1737,7 @@ fn jit_execute_with_arguments(
     payload: &CraneliftPayload,
     function_name: &str,
     raw_args: &[i64],
+    entry_depth: i64,
 ) -> Result<(ExecutionStatus, i128), String> {
     if payload.clif.trim().is_empty() {
         return Err("Cranelift artifact has empty CLIF".to_owned());
@@ -1696,7 +1749,7 @@ fn jit_execute_with_arguments(
             "Cranelift CLIF identity does not match the selected SSA in the payload".to_owned(),
         );
     }
-    jit_scalar(&scalar, function_name, raw_args)
+    jit_scalar(&scalar, function_name, raw_args, entry_depth)
 }
 
 fn integer_bounds(bits: u16, signed: bool) -> (i64, i64) {
@@ -1967,10 +2020,13 @@ where
             let depth = fn_params[function.params.len() + 2];
             // RFC 0047 §5: static call-depth fuel. The host trampoline seeds
             // depth 0 and every same-module call passes depth + 1, so
-            // unbounded self-recursion fails closed with RuntimeFailure via
-            // the shared `fail` block instead of overflowing the native
-            // stack. The check sits in the entry block ahead of the body, so
-            // a depth over MODEL_MAX_CALL_DEPTH never executes user code.
+            // unbounded self-recursion fails closed instead of overflowing
+            // the native stack. The check sits in the entry block ahead of
+            // the body, so a depth over MODEL_MAX_CALL_DEPTH never executes
+            // user code. Exhaustion reports the dedicated status code 3
+            // (BudgetExhausted, matching the reference interpreters), never
+            // the generic failure code 1: the dedicated `exhausted` block
+            // keeps fuel accounting observably distinct from user failure.
             let depth_limit = builder
                 .ins()
                 .iconst(types::I64, MODEL_MAX_CALL_DEPTH as i64);
@@ -1978,15 +2034,32 @@ where
                 .ins()
                 .icmp(IntCC::UnsignedGreaterThan, depth, depth_limit);
             let depth_ok = builder.create_block();
+            let exhausted = builder.create_block();
             builder.ins().brif(
                 over_depth,
-                fail,
+                exhausted,
                 &[] as &[BlockArg],
                 depth_ok,
                 &[] as &[BlockArg],
             );
             builder.switch_to_block(depth_ok);
             builder.seal_block(depth_ok);
+            builder.switch_to_block(exhausted);
+            builder.seal_block(exhausted);
+            let exhausted_status = builder.ins().iconst(types::I32, 3);
+            let exhausted_value = builder.ins().iconst(types::I64, 0);
+            builder
+                .ins()
+                .store(MemFlags::trusted(), exhausted_status, status_ptr, 0);
+            builder
+                .ins()
+                .store(MemFlags::trusted(), exhausted_value, value_ptr, 0);
+            builder.ins().return_(&[]);
+            // The body loop below emits scalar block 0 into the current
+            // block (the historical layout puts the prologue alone in the
+            // entry block and the first body in `depth_ok`); restore that
+            // position. `entry` itself is filled by the depth brif.
+            builder.switch_to_block(depth_ok);
             for block in function.blocks.iter().skip(1) {
                 let clif_block = blocks[&block.id];
                 for param in &block.params {
@@ -2971,13 +3044,23 @@ where
                                     .load(types::I32, MemFlags::trusted(), status_ptr, 0);
                             let failed = builder.ins().icmp_imm(IntCC::NotEqual, status, 0);
                             let cont = builder.create_block();
+                            // A failed callee already stored its own status
+                            // (1 for failure, 3 for fuel exhaustion) and a
+                            // zero value through the shared out-pointers, so
+                            // propagate with a bare return: branching to the
+                            // shared `fail` block would overwrite an
+                            // exhaustion 3 with a generic failure 1.
+                            let propagate = builder.create_block();
                             builder.ins().brif(
                                 failed,
-                                fail,
+                                propagate,
                                 &[] as &[BlockArg],
                                 cont,
                                 &[] as &[BlockArg],
                             );
+                            builder.switch_to_block(propagate);
+                            builder.seal_block(propagate);
+                            builder.ins().return_(&[]);
                             builder.switch_to_block(cont);
                             builder.seal_block(cont);
                             let loaded =
@@ -3110,13 +3193,55 @@ fn with_jit_arena<T>(operation: impl FnOnce(&mut Vec<u8>) -> T) -> T {
 /// `RuntimeFailure` while it is set; it is cleared on each arena install.
 static JIT_OOB: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Set by `host_cell_alloc` when the request does not fit the canonical
+/// arena cap, distinguishing bounded exhaustion (BudgetExhausted with the
+/// attributed request/arena detail) from wild accesses. Cleared on each
+/// arena install alongside [`JIT_OOB`].
+static JIT_EXHAUSTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Attributed failure detail recorded by the JIT host calls (WEB-P-012):
+/// the failed request size and arena state, so exhaustion reports bytes
+/// instead of internals. Cleared on each arena install; drained once per
+/// failed call by the execute path.
+static JIT_DIAG: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn record_jit_diagnosis(message: String) {
+    if let Ok(mut slot) = JIT_DIAG.lock() {
+        *slot = Some(message);
+    }
+}
+
+fn take_jit_diagnosis() -> Option<String> {
+    JIT_DIAG.lock().ok().and_then(|mut slot| slot.take())
+}
+
+fn clear_jit_failure_state() {
+    JIT_OOB.store(false, std::sync::atomic::Ordering::Relaxed);
+    JIT_EXHAUSTED.store(false, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut slot) = JIT_DIAG.lock() {
+        *slot = None;
+    }
+}
+
 extern "C" fn host_cell_alloc(bytes: u64) -> u64 {
     with_jit_arena(|arena| {
         let base = (arena.len() as u64 + 7) & !7u64;
         let Some(end) = base.checked_add(bytes) else {
+            JIT_EXHAUSTED.store(true, std::sync::atomic::Ordering::Relaxed);
+            record_jit_diagnosis(format!(
+                "MNCS_RSRC_EXHAUSTED cranelift JIT canonical arena exhausted: requested {bytes} byte(s), {} of {} byte(s) used; bounded loops over large aggregate values allocate one fresh cell per functional update",
+                arena.len(),
+                crate::support::NATIVE_ARENA_BYTES
+            ));
             return u64::MAX;
         };
         if end > crate::support::NATIVE_ARENA_BYTES {
+            JIT_EXHAUSTED.store(true, std::sync::atomic::Ordering::Relaxed);
+            record_jit_diagnosis(format!(
+                "MNCS_RSRC_EXHAUSTED cranelift JIT canonical arena exhausted: requested {bytes} byte(s), {} of {} byte(s) used; bounded loops over large aggregate values allocate one fresh cell per functional update",
+                arena.len(),
+                crate::support::NATIVE_ARENA_BYTES
+            ));
             return u64::MAX;
         }
         arena.resize(end as usize, 0);
@@ -3138,12 +3263,24 @@ fn slot_range(arena_len: usize, at: u64, width: usize) -> Option<std::ops::Range
     }
 }
 
+/// Flag a wild slot access with its offset/width/image detail. A preceding
+/// allocation-cap exhaustion keeps its better diagnosis: the first
+/// attributed cause wins.
+fn flag_slot_oob(arena_len: usize, at: u64, width: usize) {
+    JIT_OOB.store(true, std::sync::atomic::Ordering::Relaxed);
+    if !JIT_EXHAUSTED.load(std::sync::atomic::Ordering::Relaxed) {
+        record_jit_diagnosis(format!(
+            "cranelift JIT cell access outside the canonical arena: {width}-byte access at offset {at}, image length {arena_len} byte(s)"
+        ));
+    }
+}
+
 extern "C" fn host_slot_store32(at: u64, value: u64) {
     with_jit_arena(|arena| {
         if let Some(range) = slot_range(arena.len(), at, 4) {
             arena[range].copy_from_slice(&(value as u32).to_le_bytes());
         } else {
-            JIT_OOB.store(true, std::sync::atomic::Ordering::Relaxed);
+            flag_slot_oob(arena.len(), at, 4);
         }
     });
 }
@@ -3153,7 +3290,7 @@ extern "C" fn host_slot_store64(at: u64, value: u64) {
         if let Some(range) = slot_range(arena.len(), at, 8) {
             arena[range].copy_from_slice(&value.to_le_bytes());
         } else {
-            JIT_OOB.store(true, std::sync::atomic::Ordering::Relaxed);
+            flag_slot_oob(arena.len(), at, 8);
         }
     });
 }
@@ -3163,7 +3300,7 @@ extern "C" fn host_slot_load32(at: u64) -> u64 {
         if let Some(range) = slot_range(arena.len(), at, 4) {
             u32::from_le_bytes(arena[range].try_into().unwrap()) as u64
         } else {
-            JIT_OOB.store(true, std::sync::atomic::Ordering::Relaxed);
+            flag_slot_oob(arena.len(), at, 4);
             0
         }
     })
@@ -3174,7 +3311,7 @@ extern "C" fn host_slot_load64(at: u64) -> u64 {
         if let Some(range) = slot_range(arena.len(), at, 8) {
             u64::from_le_bytes(arena[range].try_into().unwrap())
         } else {
-            JIT_OOB.store(true, std::sync::atomic::Ordering::Relaxed);
+            flag_slot_oob(arena.len(), at, 8);
             0
         }
     })
@@ -3250,6 +3387,18 @@ fn jit_boundary_arguments_for_request(
             .collect::<Result<Vec<_>, _>>()?;
         return Ok((raw_args, None));
     }
+    // Same entry validation as the call-file path (WEB-P-011): recursive
+    // name-based resolution with expected-vs-received detail.
+    for (index, value) in request.arguments.iter().enumerate() {
+        if let Some(contract) = input_contracts.get(index) {
+            crate::support::check_contract_value(
+                contract,
+                value,
+                composite_contracts,
+                &format!("argument {index}"),
+            )?;
+        }
+    }
     let mut writer = crate::composite::ArenaWriter::new(composite_contracts.clone());
     let mut raw_args = Vec::new();
     for (index, value) in request.arguments.iter().enumerate() {
@@ -3285,9 +3434,10 @@ fn jit_scalar(
     scalar: &ScalarModule,
     function_name: &str,
     raw_args: &[i64],
+    entry_depth: i64,
 ) -> Result<(ExecutionStatus, i128), String> {
     let mut session = JitSession::new(scalar)?;
-    session.call(function_name, raw_args)
+    session.call(function_name, raw_args, entry_depth)
 }
 
 struct JitSession {
@@ -3326,10 +3476,16 @@ impl JitSession {
         })
     }
 
+    /// Call one finalized export. `entry_depth` seeds RFC 0047 call-depth
+    /// fuel: zero for the full model cap, or `MAX - budget` when the
+    /// execution request carries an explicit budget (see
+    /// `support::depth_seed_for_request`), so budgeted fuel matches the
+    /// reference interpreters activation-for-activation.
     fn call(
         &mut self,
         function_name: &str,
         raw_args: &[i64],
+        entry_depth: i64,
     ) -> Result<(ExecutionStatus, i128), String> {
         // Module symbols follow the native-symbol rule (`fn main` is
         // defined as `mncs_main`); the request carries the MNCS name.
@@ -3345,20 +3501,26 @@ impl JitSession {
         unsafe {
             match raw_args.len() {
                 // RFC 0047 §5: every direct host entry seeds call-depth fuel
-                // at zero via the trailing hidden parameter; the callee
-                // prologue enforces MODEL_MAX_CALL_DEPTH from there.
+                // via the trailing hidden parameter; the callee prologue
+                // enforces MODEL_MAX_CALL_DEPTH from there.
                 0 => {
                     let f: extern "C" fn(*mut i32, *mut i64, i64) = std::mem::transmute(ptr);
-                    f(&mut status, &mut value, 0);
+                    f(&mut status, &mut value, entry_depth);
                 }
                 1 => {
                     let f: extern "C" fn(i64, *mut i32, *mut i64, i64) = std::mem::transmute(ptr);
-                    f(raw_args[0], &mut status, &mut value, 0);
+                    f(raw_args[0], &mut status, &mut value, entry_depth);
                 }
                 2 => {
                     let f: extern "C" fn(i64, i64, *mut i32, *mut i64, i64) =
                         std::mem::transmute(ptr);
-                    f(raw_args[0], raw_args[1], &mut status, &mut value, 0);
+                    f(
+                        raw_args[0],
+                        raw_args[1],
+                        &mut status,
+                        &mut value,
+                        entry_depth,
+                    );
                 }
                 3 => {
                     let f: extern "C" fn(i64, i64, i64, *mut i32, *mut i64, i64) =
@@ -3369,7 +3531,7 @@ impl JitSession {
                         raw_args[2],
                         &mut status,
                         &mut value,
-                        0,
+                        entry_depth,
                     );
                 }
                 4 => {
@@ -3382,7 +3544,7 @@ impl JitSession {
                         raw_args[3],
                         &mut status,
                         &mut value,
-                        0,
+                        entry_depth,
                     );
                 }
                 5 => {
@@ -3396,7 +3558,7 @@ impl JitSession {
                         raw_args[4],
                         &mut status,
                         &mut value,
-                        0,
+                        entry_depth,
                     );
                 }
                 6 => {
@@ -3411,7 +3573,7 @@ impl JitSession {
                         raw_args[5],
                         &mut status,
                         &mut value,
-                        0,
+                        entry_depth,
                     );
                 }
                 _ => {
@@ -3424,16 +3586,24 @@ impl JitSession {
                     // caller-owned memory and then invokes the original typed scalar
                     // export. This keeps the host ABI bounded to three pointer-sized
                     // values without imposing an accidental six-argument language limit.
-                    let f: extern "C" fn(*const i64, *mut i32, *mut i64) =
+                    // The seed rides a fourth word so wide exports honor the same
+                    // request budget as direct calls.
+                    let f: extern "C" fn(*const i64, *mut i32, *mut i64, i64) =
                         std::mem::transmute(trampoline);
-                    f(raw_args.as_ptr(), &mut status, &mut value);
+                    f(raw_args.as_ptr(), &mut status, &mut value, entry_depth);
                 }
             }
         }
-        if status == 0 {
-            Ok((ExecutionStatus::Returned, i128::from(value)))
-        } else {
-            Ok((ExecutionStatus::RuntimeFailure, 0))
+        // Native status protocol: 0 is returned, 3 is call-depth fuel
+        // exhaustion (RFC 0047 §5, matching the reference interpreters'
+        // BudgetExhausted), and 1 (plus the 2 initializer, which the callee
+        // always overwrites) is generic runtime failure. Exhaustion must
+        // never collapse into RuntimeFailure: the codes are observably
+        // distinct by backend agreement tests.
+        match status {
+            0 => Ok((ExecutionStatus::Returned, i128::from(value))),
+            3 => Ok((ExecutionStatus::BudgetExhausted, 0)),
+            _ => Ok((ExecutionStatus::RuntimeFailure, 0)),
         }
     }
 }
@@ -3463,6 +3633,7 @@ where
         signature.params.push(AbiParam::new(types::I64)); // argument buffer
         signature.params.push(AbiParam::new(types::I64)); // status out pointer
         signature.params.push(AbiParam::new(types::I64)); // value out pointer
+        signature.params.push(AbiParam::new(types::I64)); // entry depth seed
         let id = module
             .declare_function(&name, Linkage::Local, &signature)
             .map_err(|error| error.to_string())?;
@@ -3487,6 +3658,7 @@ where
             let argument_buffer = parameters[0];
             let status_ptr = parameters[1];
             let value_ptr = parameters[2];
+            let entry_seed = parameters[3];
             let mut arguments = Vec::with_capacity(function.params.len() + 2);
             for argument_index in 0..function.params.len() {
                 arguments.push(builder.ins().load(
@@ -3498,10 +3670,10 @@ where
             }
             arguments.push(status_ptr);
             arguments.push(value_ptr);
-            // RFC 0047 §5: host entry seeds call-depth fuel at zero; every
+            // RFC 0047 §5: host entry seeds call-depth fuel from the
+            // request budget (via the fourth trampoline word); every
             // same-module call adds one from there.
-            let entry_depth = builder.ins().iconst(types::I64, 0);
-            arguments.push(entry_depth);
+            arguments.push(entry_seed);
             builder.ins().call(target, &arguments);
             builder.ins().return_(&[]);
             builder.seal_all_blocks();
@@ -3588,6 +3760,15 @@ impl CraneliftStatefulSession<'_> {
                 arena.extend_from_slice(image);
             });
         }
+        // RFC 0047 §5 uniform fuel (see `execute_cranelift`): the retained
+        // module is fuel-agnostic, so each call seeds its own entry depth.
+        let entry_depth = match crate::support::depth_seed_for_request(request) {
+            Ok(seed) => seed as i64,
+            Err(reason) => {
+                return execution_failure(result, ExecutionStatus::InvalidRequest, reason);
+            }
+        };
+        clear_jit_failure_state();
         // Trampolines are keyed by module-qualified native symbol
         // (ENG-PRESSURE-0017).
         let entry = crate::support::entry_native_symbol(
@@ -3595,8 +3776,39 @@ impl CraneliftStatefulSession<'_> {
             &request.target.module,
             &request.target.function,
         );
-        match self.jit.call(&entry, &raw_args) {
+        match self.jit.call(&entry, &raw_args, entry_depth) {
             Ok((status, value)) => {
+                // Same attribution as the one-shot path (WEB-P-012):
+                // exhaustion reports bytes with BudgetExhausted, wild
+                // accesses fail closed, and no observation goes unattributed.
+                if JIT_OOB.load(std::sync::atomic::Ordering::Relaxed) {
+                    let diagnosis = take_jit_diagnosis();
+                    if JIT_EXHAUSTED.load(std::sync::atomic::Ordering::Relaxed) {
+                        return execution_failure(
+                            result,
+                            ExecutionStatus::BudgetExhausted,
+                            diagnosis.unwrap_or_else(|| {
+                                "MNCS_RSRC_EXHAUSTED cranelift JIT canonical arena exhausted"
+                                    .to_owned()
+                            }),
+                        );
+                    }
+                    return execution_failure(
+                        result,
+                        ExecutionStatus::RuntimeFailure,
+                        diagnosis.unwrap_or_else(|| {
+                            "cranelift JIT cell access exceeded the arena image; failing closed"
+                                .to_owned()
+                        }),
+                    );
+                }
+                if status != ExecutionStatus::Returned {
+                    return execution_failure(
+                        result,
+                        status,
+                        format!("cranelift JIT execution ended with status {status:?}"),
+                    );
+                }
                 result.status = status;
                 result.steps = 1;
                 match crate::support::decode_native_observation(
@@ -3680,7 +3892,7 @@ mod guarded_division_tests {
         ];
         for (function, arguments, returns, expected) in cases {
             let raw_args: Vec<i64> = arguments.iter().map(|value| *value as i64).collect();
-            let outcome = jit_scalar(&scalar, function, &raw_args);
+            let outcome = jit_scalar(&scalar, function, &raw_args, 0);
             match outcome {
                 Err(reason)
                     if reason.contains("readable+executable")

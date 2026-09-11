@@ -535,6 +535,14 @@ fn decode_globals(payload: &[u8]) -> Result<Vec<WasmGlobal>, WasmTrap> {
 pub struct Runtime {
     memory: Vec<u8>,
     globals: Vec<i64>,
+    /// Full-index-space function index of the `$mncs_alloc` arena helper,
+    /// recognized by name and shape at construction. In-execution bump
+    /// allocations through the helper take this checked fast path instead
+    /// of executing the unchecked body, so arena exhaustion surfaces as a
+    /// structured resource error rather than an out-of-bounds trap
+    /// (WEB-P-012). The helper body stays as the portable definition for
+    /// engines that execute the artifact directly.
+    alloc_intercept: Option<u32>,
 }
 
 impl Runtime {
@@ -544,10 +552,48 @@ impl Runtime {
             .as_ref()
             .map(|memory| memory.min_pages)
             .unwrap_or(0);
+        let alloc_intercept = module
+            .functions
+            .iter()
+            .position(|function| {
+                function.name == crate::lower::ALLOC_FUNCTION_NAME
+                    && function.params == [ValType::I32]
+                    && function.results == [ValType::I32]
+            })
+            .map(|index| module.imports.len() as u32 + index as u32);
         Self {
             memory: vec![0_u8; pages as usize * 65_536],
             globals: module.globals.iter().map(|global| global.init).collect(),
+            alloc_intercept,
         }
+    }
+
+    /// Checked in-execution bump allocation: the same discipline as
+    /// [`Runtime::allocate`], with a resource error that names the request
+    /// and the arena state instead of handing out a wild pointer.
+    fn allocate_checked(&mut self, bytes: u32) -> Result<i64, WasmTrap> {
+        const BUMP_GLOBAL: u32 = 0;
+        let current = self.globals.get(BUMP_GLOBAL as usize).copied().unwrap_or(8);
+        let aligned = u64::from(bytes.div_ceil(8) * 8);
+        let next = (current as u64)
+            .checked_add(aligned)
+            .ok_or_else(|| trap(ExecutionStatus::RuntimeFailure, "arena pointer overflow"))?;
+        if next > self.memory.len() as u64 {
+            return Err(trap(
+                ExecutionStatus::BudgetExhausted,
+                format!(
+                    "MNCS_RSRC_EXHAUSTED composite arena exhausted: requested {bytes} byte(s), {} of {} byte(s) used; \
+                     bounded loops over large aggregate values allocate one fresh cell per functional update, \
+                     so total allocation scales with iteration count, not live data",
+                    current.max(0),
+                    self.memory.len()
+                ),
+            ));
+        }
+        if let Some(slot) = self.globals.get_mut(BUMP_GLOBAL as usize) {
+            *slot = next as i64;
+        }
+        Ok(current)
     }
 
     fn load(&self, address: i64, width: usize) -> Result<u64, WasmTrap> {
@@ -721,6 +767,17 @@ fn execute_raw(
                         }
                     };
                     stack.push(value.to_bits() as i64);
+                    ip += 1;
+                    continue;
+                }
+                // Arena-helper fast path (WEB-P-012): a checked bump with a
+                // structured resource error. Without this, exhaustion hands
+                // out a wild pointer and the next store traps
+                // out-of-bounds with no actionable detail.
+                if runtime.alloc_intercept == Some(*callee_index) {
+                    let raw = pop(&mut stack)?;
+                    let address = runtime.allocate_checked(raw as u32)?;
+                    stack.push(address);
                     ip += 1;
                     continue;
                 }
@@ -1411,17 +1468,26 @@ fn write_marshal(
                 ExecutionValue::Finite { payload, .. } => payload.clone(),
                 _ => Vec::new().into(),
             };
-            if variant.fields.len() != payload.len() {
-                return Err(trap(
-                    ExecutionStatus::InvalidRequest,
-                    "finite argument payload does not match the declared layout",
-                ));
-            }
+            // Payload fields resolve by name against the canonical variant
+            // layout (WEB-P-011): external order is insignificant, and a
+            // malformed payload is rejected here even if validation was
+            // bypassed, so positional misbinding is impossible.
+            let declared_names: Vec<String> = variant
+                .fields
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect();
+            let order = mncs_model::order_fields_by_name(
+                "finite payload",
+                &declared_names,
+                payload.as_slice(),
+            )
+            .map_err(|error| trap(ExecutionStatus::InvalidRequest, error.describe()))?;
             let address = runtime.allocate(((variant.fields.len() as u32) + 1) * 8)?;
             runtime.store(address, 4, u64::from(discriminant))?;
             for (index, (_, field_ty)) in variant.fields.iter().enumerate() {
                 let slot = address + ((index + 1) * 8) as i64;
-                write_slot(runtime, &payload[index].1, field_ty, slot)?;
+                write_slot(runtime, &payload[order[index]].1, field_ty, slot)?;
             }
             Ok(address)
         }
@@ -1430,16 +1496,20 @@ fn write_marshal(
                 ExecutionValue::Record { fields, .. } => fields.clone(),
                 _ => unreachable!("matched above"),
             };
-            if layout.fields.len() != fields.len() {
-                return Err(trap(
-                    ExecutionStatus::InvalidRequest,
-                    "record argument does not match the declared field count",
-                ));
-            }
+            // Record fields resolve by name against the canonical layout
+            // (WEB-P-011): external order is insignificant, and a malformed
+            // record is rejected here even if validation was bypassed, so
+            // positional misbinding is impossible.
+            let declared_names: Vec<String> =
+                layout.fields.iter().map(|(name, _)| name.clone()).collect();
+            let context = format!("record {:?}", layout.name);
+            let order =
+                mncs_model::order_fields_by_name(&context, &declared_names, fields.as_slice())
+                    .map_err(|error| trap(ExecutionStatus::InvalidRequest, error.describe()))?;
             let address = runtime.allocate((layout.fields.len() as u32) * 8)?;
             for (index, (_, field_ty)) in layout.fields.iter().enumerate() {
                 let slot = address + (index * 8) as i64;
-                write_slot(runtime, &fields[index].1, field_ty, slot)?;
+                write_slot(runtime, &fields[order[index]].1, field_ty, slot)?;
             }
             Ok(address)
         }
@@ -1847,6 +1917,7 @@ pub fn execute_function_typed(
     param_tys: &[MarshalTy],
     result_tys: &[MarshalTy],
     step_budget: u64,
+    entry_depth: usize,
 ) -> Result<WasmExecution, WasmTrap> {
     let function_index = module
         .functions
@@ -1879,7 +1950,7 @@ pub fn execute_function_typed(
         raw_arguments,
         opcode_budget,
         &mut steps,
-        0,
+        entry_depth,
     )?;
     let mut returned = Vec::with_capacity(returned_raw.len());
     for (raw, ty) in returned_raw.iter().zip(result_tys) {
@@ -2672,6 +2743,7 @@ mod tests {
                 signed: true,
             })],
             100,
+            0,
         )
         .expect("execute max");
         assert_eq!(
@@ -2720,6 +2792,7 @@ mod tests {
                 signed: false,
             })],
             100,
+            0,
         )
         .expect("execute byte load");
         assert_eq!(
@@ -2783,6 +2856,7 @@ mod tests {
                 signed: false,
             })],
             100,
+            0,
         )
         .expect("execute host buffer ABI");
         assert_eq!(
@@ -2805,6 +2879,7 @@ mod tests {
                 signed: false,
             })],
             100,
+            0,
         )
         .expect("execute host buffer reset");
         assert_eq!(
