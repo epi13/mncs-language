@@ -1,0 +1,51 @@
+mncs 0.14;
+
+// WEB-P-009 regression: checked indices with discharge. `checked_index`
+// traps unless the candidate sits below the sequence's runtime length and
+// carries the candidate unchanged; projecting through exactly that value
+// discharges the projection's bounds obligation (`CheckedBound`), while
+// every other use — raw candidates, cross-sequence uses — keeps an
+// explicit runtime check. The check itself is retained on every backend.
+module pressure.checked_index;
+
+// Exact-bound checked read: one retained check discharges the projection.
+fn read_exact(buf: [byte; 8], i: u64) -> (result: byte) {
+    let c: u64 = checked_index(buf, i);
+    return buf[c];
+}
+
+// The checked value aliases freely: same value, same sequence, so both
+// projections discharge through the one check.
+fn read_alias(buf: [byte; 8], i: u64) -> (result: u16) {
+    let c: u64 = checked_index(buf, i);
+    let d: u64 = c;
+    return ((buf[c] as u16) * 256) + (buf[d] as u16);
+}
+
+// View sources check against the live span, not the static capacity.
+fn read_view(buf: [byte; 8], n: u64, i: u64) -> (result: byte) {
+    let window: [byte; up_to 8] = buf[0..n];
+    let c: u64 = checked_index(window, i);
+    return window[c];
+}
+
+// A checked index against one sequence proves nothing about another: this
+// projection keeps its explicit runtime check.
+fn read_other(a: [byte; 8], b: [byte; 8], i: u64) -> (result: byte) {
+    let c: u64 = checked_index(a, i);
+    return b[c];
+}
+
+// In-range literal candidates flow through the check like dynamic ones.
+fn read_literal(buf: [byte; 8]) -> (result: byte) {
+    let c: u64 = checked_index(buf, 5);
+    return buf[c];
+}
+
+// Checked indices carry wider elements unchanged.
+fn read_wide(i: u64) -> (result: u64) {
+    let base: [u64; 4] = [0; 4];
+    let nums: [u64; 4] = replace(replace(replace(replace(base, 0, 1000), 1, 2000), 2, 3000), 3, 4000);
+    let c: u64 = checked_index(nums, i);
+    return nums[c];
+}

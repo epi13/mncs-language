@@ -495,21 +495,45 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                             evidence: BoundsEvidence::TraversalDomain,
                             ..
                         }
+                        | crate::BodyOperationKind::SequenceCopy {
+                            evidence: BoundsEvidence::StaticExact,
+                            ..
+                        }
                         | crate::BodyOperationKind::SequenceConstruct { .. }
-                        | crate::BodyOperationKind::SequenceLength { .. } => None,
+                        | crate::BodyOperationKind::SequenceLength { .. }
+                        | crate::BodyOperationKind::BoundCheck { .. } => None,
                         crate::BodyOperationKind::SequenceReplace {
-                            evidence: BoundsEvidence::RuntimeChecked { .. },
+                            evidence:
+                                BoundsEvidence::RuntimeChecked { .. } | BoundsEvidence::CheckedBound,
                             ..
                         } => Some(crate::obligations::body_obligation_id(
                             "sequence-replace-bounds",
                             &operation_identity,
                         )),
+                        // Traversal-domain and checked-bound claims on span
+                        // copies are never established by elaboration (two
+                        // sequences share no single traversal domain; only
+                        // projections discharge through checked indices);
+                        // keep them attached to the unresolved requirement
+                        // rather than silently discharging them.
+                        crate::BodyOperationKind::SequenceCopy {
+                            evidence:
+                                BoundsEvidence::RuntimeChecked { .. }
+                                | BoundsEvidence::TraversalDomain
+                                | BoundsEvidence::CheckedBound,
+                            ..
+                        } => Some(crate::obligations::body_obligation_id(
+                            "sequence-copy-bounds",
+                            &operation_identity,
+                        )),
                         crate::BodyOperationKind::VectorExtract {
-                            evidence: BoundsEvidence::RuntimeChecked { .. },
+                            evidence:
+                                BoundsEvidence::RuntimeChecked { .. } | BoundsEvidence::CheckedBound,
                             ..
                         }
                         | crate::BodyOperationKind::VectorReplace {
-                            evidence: BoundsEvidence::RuntimeChecked { .. },
+                            evidence:
+                                BoundsEvidence::RuntimeChecked { .. } | BoundsEvidence::CheckedBound,
                             ..
                         } => Some(crate::obligations::body_obligation_id(
                             "vector-lane-bounds",
@@ -523,7 +547,8 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
                             &operation_identity,
                         )),
                         crate::BodyOperationKind::SequenceProject { .. } => None,
-                        crate::BodyOperationKind::ViewConstruct { .. } => {
+                        crate::BodyOperationKind::ViewConstruct { .. }
+                        | crate::BodyOperationKind::ViewNarrow { .. } => {
                             Some(crate::obligations::body_obligation_id(
                                 "view-range-valid",
                                 &operation_identity,
@@ -777,5 +802,110 @@ mod tests {
         "amount >= 0".clone_into(&mut after.functions[0].contracts[0].expression);
         let report = before.invalidation_from(&after).expect("invalidation");
         assert_eq!(report.invalidated_evidence.len(), 1);
+    }
+
+    #[test]
+    fn requires_obligation_edges_resolve_to_generated_obligations() {
+        // Every proof-graph obligation edge must name an obligation the
+        // obligation pass actually generates for the same operation. The
+        // executable body fixture below carries real operations (constant
+        // and checked integer arithmetic), so a match arm that accidentally
+        // widens (for example by splitting a shared `=> None` alternation)
+        // shows up here as a dangling edge before it can mislead any
+        // consumer of the graph.
+        use std::collections::BTreeSet;
+        let mut program = crate::body::tests::executable_program();
+        // Total operations (comparison, selection, conversion) join the
+        // fixture so the invariant also covers the shared discharged arm:
+        // none of them may gain an obligation edge at all.
+        let i32_ty = crate::BodyType::Integer(crate::IntegerType {
+            bits: 32,
+            signed: true,
+        });
+        let bool_ty = crate::BodyType::Named("bool".to_owned());
+        let u64_ty = crate::BodyType::Integer(crate::IntegerType {
+            bits: 64,
+            signed: false,
+        });
+        let total_op = |id: &str,
+                        kind: crate::BodyOperationKind,
+                        operands: Vec<String>,
+                        ty: crate::BodyType| {
+            crate::BodyOperation {
+                id: id.to_owned(),
+                kind,
+                operands,
+                results: vec![crate::BodyValue {
+                    id: id.to_owned(),
+                    ty,
+                }],
+                contracts: Vec::new(),
+                assumptions: Vec::new(),
+                machine_intent: None,
+                lowering: None,
+                portability: None,
+            }
+        };
+        let body = program.functions[0].body.as_mut().expect("fixture body");
+        let block = body
+            .blocks
+            .iter_mut()
+            .find(|block| block.id == "entry")
+            .expect("entry block");
+        block.operations.push(total_op(
+            "cmp",
+            crate::BodyOperationKind::IntegerCompare {
+                predicate: "eq".to_owned(),
+                operand_type: crate::IntegerType {
+                    bits: 32,
+                    signed: true,
+                },
+            },
+            vec!["a".to_owned(), "one".to_owned()],
+            bool_ty.clone(),
+        ));
+        block.operations.push(total_op(
+            "sel",
+            crate::BodyOperationKind::Select {
+                operand_type: Box::new(i32_ty.clone()),
+            },
+            vec!["cmp".to_owned(), "a".to_owned(), "one".to_owned()],
+            i32_ty.clone(),
+        ));
+        block.operations.push(total_op(
+            "conv",
+            crate::BodyOperationKind::Convert {
+                from: i32_ty.clone(),
+                to: u64_ty.clone(),
+            },
+            vec!["sel".to_owned()],
+            u64_ty.clone(),
+        ));
+        let graph = program.semantic_graph().expect("graph");
+        let generated: BTreeSet<crate::SemanticId> = program
+            .generate_obligations()
+            .obligations
+            .iter()
+            .map(|obligation| obligation.identity.clone())
+            .collect();
+        assert!(
+            graph
+                .edges
+                .iter()
+                .any(|edge| edge.kind == EdgeKind::RequiresObligation),
+            "fixture must carry at least one obligation edge"
+        );
+        for edge in graph
+            .edges
+            .iter()
+            .filter(|edge| edge.kind == EdgeKind::RequiresObligation)
+        {
+            assert!(
+                generated.contains(&edge.to),
+                "dangling obligation edge {} -> {}",
+                edge.from,
+                edge.to
+            );
+        }
     }
 }

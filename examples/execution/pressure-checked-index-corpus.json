@@ -1,0 +1,564 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-checked-index",
+ "cases": [
+  {
+   "id": "exact_hit",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.checked_index",
+     "function": "read_exact"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {"byte": {"value": 10}},
+        {"byte": {"value": 20}},
+        {"byte": {"value": 30}},
+        {"byte": {"value": 40}},
+        {"byte": {"value": 50}},
+        {"byte": {"value": 60}},
+        {"byte": {"value": 70}},
+        {"byte": {"value": 80}}
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "byte": {
+      "value": 40
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "exact_last",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.checked_index",
+     "function": "read_exact"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {"byte": {"value": 10}},
+        {"byte": {"value": 20}},
+        {"byte": {"value": 30}},
+        {"byte": {"value": 40}},
+        {"byte": {"value": 50}},
+        {"byte": {"value": 60}},
+        {"byte": {"value": 70}},
+        {"byte": {"value": 80}}
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "byte": {
+      "value": 80
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "exact_escape",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.checked_index",
+     "function": "read_exact"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {"byte": {"value": 10}},
+        {"byte": {"value": 20}},
+        {"byte": {"value": 30}},
+        {"byte": {"value": 40}},
+        {"byte": {"value": 50}},
+        {"byte": {"value": 60}},
+        {"byte": {"value": 70}},
+        {"byte": {"value": 80}}
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   }
+  },
+  {
+   "id": "alias",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.checked_index",
+     "function": "read_alias"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {"byte": {"value": 10}},
+        {"byte": {"value": 20}},
+        {"byte": {"value": 30}},
+        {"byte": {"value": 40}},
+        {"byte": {"value": 50}},
+        {"byte": {"value": 60}},
+        {"byte": {"value": 70}},
+        {"byte": {"value": 80}}
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7710,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "view_hit",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.checked_index",
+     "function": "read_view"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {"byte": {"value": 10}},
+        {"byte": {"value": 20}},
+        {"byte": {"value": 30}},
+        {"byte": {"value": 40}},
+        {"byte": {"value": 50}},
+        {"byte": {"value": 60}},
+        {"byte": {"value": 70}},
+        {"byte": {"value": 80}}
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "byte": {
+      "value": 60
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "view_full",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.checked_index",
+     "function": "read_view"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {"byte": {"value": 10}},
+        {"byte": {"value": 20}},
+        {"byte": {"value": 30}},
+        {"byte": {"value": 40}},
+        {"byte": {"value": 50}},
+        {"byte": {"value": 60}},
+        {"byte": {"value": 70}},
+        {"byte": {"value": 80}}
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "byte": {
+      "value": 80
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "view_escape",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.checked_index",
+     "function": "read_view"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {"byte": {"value": 10}},
+        {"byte": {"value": 20}},
+        {"byte": {"value": 30}},
+        {"byte": {"value": 40}},
+        {"byte": {"value": 50}},
+        {"byte": {"value": 60}},
+        {"byte": {"value": 70}},
+        {"byte": {"value": 80}}
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   }
+  },
+  {
+   "id": "other_hit",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.checked_index",
+     "function": "read_other"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {"byte": {"value": 10}},
+        {"byte": {"value": 20}},
+        {"byte": {"value": 30}},
+        {"byte": {"value": 40}},
+        {"byte": {"value": 50}},
+        {"byte": {"value": 60}},
+        {"byte": {"value": 70}},
+        {"byte": {"value": 80}}
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {"byte": {"value": 1}},
+        {"byte": {"value": 2}},
+        {"byte": {"value": 3}},
+        {"byte": {"value": 4}},
+        {"byte": {"value": 5}},
+        {"byte": {"value": 6}},
+        {"byte": {"value": 7}},
+        {"byte": {"value": 8}}
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "byte": {
+      "value": 4
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "other_escape",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.checked_index",
+     "function": "read_other"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {"byte": {"value": 10}},
+        {"byte": {"value": 20}},
+        {"byte": {"value": 30}},
+        {"byte": {"value": 40}},
+        {"byte": {"value": 50}},
+        {"byte": {"value": 60}},
+        {"byte": {"value": 70}},
+        {"byte": {"value": 80}}
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {"byte": {"value": 1}},
+        {"byte": {"value": 2}},
+        {"byte": {"value": 3}},
+        {"byte": {"value": 4}},
+        {"byte": {"value": 5}},
+        {"byte": {"value": 6}},
+        {"byte": {"value": 7}},
+        {"byte": {"value": 8}}
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   }
+  },
+  {
+   "id": "literal",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.checked_index",
+     "function": "read_literal"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {"byte": {"value": 10}},
+        {"byte": {"value": 20}},
+        {"byte": {"value": 30}},
+        {"byte": {"value": 40}},
+        {"byte": {"value": 50}},
+        {"byte": {"value": 60}},
+        {"byte": {"value": 70}},
+        {"byte": {"value": 80}}
+       ]
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "byte": {
+      "value": 60
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "wide_hit",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.checked_index",
+     "function": "read_wide"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 20000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2000,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "wide_escape",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.checked_index",
+     "function": "read_wide"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 20000
+   }
+  }
+ ]
+}

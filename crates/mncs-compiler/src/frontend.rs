@@ -3143,6 +3143,12 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
             calls_in_expr(base, calls);
             calls_in_expr(index, calls);
         }
+        AstExpr::CheckedIndex {
+            sequence, index, ..
+        } => {
+            calls_in_expr(sequence, calls);
+            calls_in_expr(index, calls);
+        }
         AstExpr::Slice {
             base, start, end, ..
         } => {
@@ -3171,6 +3177,20 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
             calls_in_expr(sequence, calls);
             calls_in_expr(index, calls);
             calls_in_expr(element, calls);
+        }
+        AstExpr::SequenceCopy {
+            destination,
+            dst_at,
+            source,
+            src_at,
+            len,
+            ..
+        } => {
+            calls_in_expr(destination, calls);
+            calls_in_expr(dst_at, calls);
+            calls_in_expr(source, calls);
+            calls_in_expr(src_at, calls);
+            calls_in_expr(len, calls);
         }
         AstExpr::VectorIntrinsic { arguments, .. } => {
             for argument in arguments {
@@ -3603,6 +3623,12 @@ struct BodyBuilder<'a> {
     /// proof graph, obligation subjects, and MNB061 uniqueness stay
     /// per-loop even when the source name repeats.
     iteration_name_uses: BTreeMap<String, u64>,
+    /// Checked-index facts (Profile 0.14, WEB-P-009): checked value id to
+    /// the sequence value id the dominating `BoundCheck` verified it
+    /// against. Value ids are globally fresh and branch/loop scopes pop
+    /// names, so a hit means the check dominates the use; any merge or
+    /// rebinding mints a fresh id and misses back to a runtime check.
+    checked_indices: BTreeMap<String, String>,
     /// Declared source profile (`ast.language_version`), for additive
     /// feature gates. Older profiles keep their historical refusals and
     /// fingerprints; gates query through `profile_at_least`.
@@ -3730,6 +3756,7 @@ impl<'a> BodyBuilder<'a> {
             resolutions: Vec::new(),
             open_iterations: Vec::new(),
             iteration_name_uses: BTreeMap::new(),
+            checked_indices: BTreeMap::new(),
             iteration_depth: 0,
             source_profile,
             recursion_provenance,
@@ -3758,6 +3785,12 @@ impl<'a> BodyBuilder<'a> {
     /// acceptance/rejection behavior.
     fn profile_0_13(&self) -> bool {
         self.profile_at_least(mncs_syntax::SOURCE_PROFILE_VERSION_0_13)
+    }
+
+    /// Source Profile 0.14 (buffer pipelines): bulk span copy, checked
+    /// view narrowing, and the checked-index discharge form.
+    fn profile_0_14(&self) -> bool {
+        self.profile_at_least(mncs_syntax::SOURCE_PROFILE_VERSION_0_14)
     }
 
     /// Admitted sequence/view length ceiling for the active profile.
@@ -7489,6 +7522,29 @@ impl<'a> BodyBuilder<'a> {
                 });
                 Some(ResolvedBinding::plain(id, result_type))
             }
+            AstExpr::SequenceCopy {
+                destination,
+                dst_at,
+                source,
+                src_at,
+                len,
+                span,
+            } => self.elaborate_sequence_copy(
+                destination,
+                dst_at,
+                source,
+                src_at,
+                len,
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
+            AstExpr::CheckedIndex {
+                sequence,
+                index,
+                span,
+            } => self.elaborate_checked_index(sequence, index, *span, expected, env, diagnostics),
             AstExpr::VectorIntrinsic {
                 name,
                 arguments,
@@ -7763,6 +7819,17 @@ impl<'a> BodyBuilder<'a> {
                     _ if matches!(index.as_ref(), AstExpr::Name(name) if env.is_traversal_index(&name.text)) => {
                         mncs_model::BoundsEvidence::TraversalDomain
                     }
+                    // A use of the exact value a dominating BoundCheck
+                    // verified against this same sequence value discharges
+                    // through the retained check; anything else keeps an
+                    // explicit runtime check.
+                    _ if self
+                        .checked_indices
+                        .get(&index_value.id)
+                        .is_some_and(|checked| *checked == subject.id) =>
+                    {
+                        mncs_model::BoundsEvidence::CheckedBound
+                    }
                     _ => mncs_model::BoundsEvidence::RuntimeChecked {
                         failure: FailureMode::Isolated,
                     },
@@ -7828,16 +7895,6 @@ impl<'a> BodyBuilder<'a> {
                     }),
                     bound: mncs_model::SequenceBound::UpTo(view_cap),
                 };
-                if expected.is_some_and(|expected| expected != &result_ty) {
-                    diagnostics.push(elaboration_diagnostic(
-                        "MNE188",
-                        format!(
-                            "derived view has type {} which does not satisfy the required type",
-                            result_ty.semantic_name()
-                        ),
-                        *span,
-                    ));
-                }
                 let id = self.new_value("view");
                 self.blocks[self.current].operations.push(BodyOperation {
                     id: id.clone(),
@@ -7856,6 +7913,30 @@ impl<'a> BodyBuilder<'a> {
                     lowering: None,
                     portability: None,
                 });
+                if let Some(wanted) = expected {
+                    if wanted != &result_ty {
+                        // Checked view-to-view narrowing (Profile 0.14,
+                        // WEB-P-006): a derived view re-satisfies a narrower
+                        // same-element expectation through an explicit
+                        // runtime span check instead of refusing.
+                        if self.profile_0_14() {
+                            if let Some(narrowed) = self.narrow_view_for_expected(
+                                &ResolvedBinding::plain(id.clone(), result_ty.clone()),
+                                wanted,
+                            ) {
+                                return Some(narrowed);
+                            }
+                        }
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE188",
+                            format!(
+                                "derived view has type {} which does not satisfy the required type",
+                                result_ty.semantic_name()
+                            ),
+                            *span,
+                        ));
+                    }
+                }
                 Some(ResolvedBinding::plain(id, result_ty))
             }
             AstExpr::Cast {
@@ -8990,6 +9071,13 @@ impl<'a> BodyBuilder<'a> {
         if let Some((length, capacity)) = exact_view_borrow_dimensions(&binding.ty, expected) {
             return Some(self.borrow_exact_as_view(binding, length, capacity));
         }
+        // Checked view-to-view narrowing (Profile 0.14, WEB-P-006): a view
+        // already in hand re-satisfies a narrower same-element expectation
+        // through an explicit runtime span check, at every site the borrow
+        // backstop already serves.
+        if self.profile_0_14() && view_narrow_dimensions(&binding.ty, expected).is_some() {
+            return self.narrow_view_for_expected(binding, expected);
+        }
         None
     }
 
@@ -9098,6 +9186,280 @@ impl<'a> BodyBuilder<'a> {
         }
     }
 
+    /// Elaborate `checked_index(sequence, index)` (Profile 0.14, WEB-P-009):
+    /// the retained bounds check behind `CheckedBound` discharge. The
+    /// candidate must be `u64` and the sequence bounded; a literal
+    /// candidate at or beyond an exact declared bound fails closed here.
+    /// The result carries the candidate unchanged, and the value id is
+    /// recorded against the sequence value id so a later projection
+    /// through exactly this value discharges with `CheckedBound` evidence.
+    fn elaborate_checked_index(
+        &mut self,
+        sequence: &AstExpr,
+        index: &AstExpr,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        if !self.profile_0_14() {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE272",
+                "checked index requires source profile 0.14 or later",
+                span,
+            ));
+            return None;
+        }
+        let subject = self.elaborate_expr(sequence, None, env, diagnostics)?;
+        let counter_type = BodyType::Integer(IntegerType {
+            bits: 64,
+            signed: false,
+        });
+        let candidate = self.elaborate_expr(index, Some(&counter_type), env, diagnostics)?;
+        if candidate.ty != counter_type {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE274",
+                "checked index candidate must have u64 type",
+                index.span(),
+            ));
+            return None;
+        }
+        // A literal candidate against an exact bound is decided here, like
+        // an index projection: provably outside fails closed instead of
+        // deferring a guaranteed trap. In-range literals still emit the
+        // check so the recorded fact (not literal syntax) discharges uses
+        // through the bound name.
+        if let (
+            BodyType::Sequence {
+                bound: mncs_model::SequenceBound::Exact(length),
+                ..
+            },
+            AstExpr::Integer { value, .. },
+        ) = (&subject.ty, index)
+        {
+            if *value < 0 || *value >= i128::from(*length) {
+                diagnostics.push(elaboration_diagnostic(
+                    "MNE275",
+                    format!(
+                        "checked index {value} is outside the statically known domain 0..{length}"
+                    ),
+                    index.span(),
+                ));
+                return None;
+            }
+        }
+        if expected.is_some_and(|expected| expected != &counter_type) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE276",
+                "checked index does not have the required expression type",
+                span,
+            ));
+        }
+        let BodyType::Sequence { bound, .. } = subject.ty.clone() else {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE273",
+                "checked index requires a bounded-sequence value",
+                sequence.span(),
+            ));
+            return None;
+        };
+        let id = self.new_value("chk");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::BoundCheck {
+                bound: bound.clone(),
+            },
+            operands: vec![subject.id.clone(), candidate.id],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: counter_type.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        self.checked_indices.insert(id.clone(), subject.id);
+        Some(ResolvedBinding::plain(id, counter_type))
+    }
+
+    /// Elaborate `copy_span(dst, dst_at, src, src_at, len)` (Profile 0.14,
+    /// WEB-P-003): a total functional bounded span copy. The destination
+    /// must be an exact-bound sequence (views refuse, mirroring `replace`);
+    /// the source may be exact or a view so staged and parsed spans copy
+    /// without remarshal. All three positions are u64. Literal windows
+    /// inside both static bounds establish `StaticExact` evidence; a
+    /// provably out-of-range literal window fails closed here; anything
+    /// else keeps an explicit runtime-checked failure obligation.
+    #[allow(clippy::too_many_arguments)]
+    fn elaborate_sequence_copy(
+        &mut self,
+        destination: &AstExpr,
+        dst_at: &AstExpr,
+        source: &AstExpr,
+        src_at: &AstExpr,
+        len: &AstExpr,
+        span: SourceSpan,
+        _expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        if !self.profile_0_14() {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE263",
+                "span copy requires source profile 0.14 or later",
+                span,
+            ));
+            return None;
+        }
+        let dst = self.elaborate_expr(destination, None, env, diagnostics)?;
+        let BodyType::Sequence {
+            element: element_type,
+            bound: dst_bound,
+        } = dst.ty.clone()
+        else {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE264",
+                "span copy requires a bounded-sequence destination",
+                destination.span(),
+            ));
+            return None;
+        };
+        if matches!(dst_bound, mncs_model::SequenceBound::UpTo(_)) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE265",
+                "span copy requires an exact-bound destination this tranche; views refuse",
+                span,
+            ));
+            return None;
+        }
+        let counter_type = BodyType::Integer(IntegerType {
+            bits: 64,
+            signed: false,
+        });
+        let dst_at_binding = self.elaborate_expr(dst_at, Some(&counter_type), env, diagnostics)?;
+        if dst_at_binding.ty != counter_type {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE266",
+                "span copy destination offset must have u64 type",
+                dst_at.span(),
+            ));
+            return None;
+        }
+        let src = self.elaborate_expr(source, None, env, diagnostics)?;
+        let BodyType::Sequence {
+            element: src_element,
+            bound: src_bound,
+        } = src.ty.clone()
+        else {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE267",
+                "span copy requires a bounded-sequence source",
+                source.span(),
+            ));
+            return None;
+        };
+        if *src_element != *element_type {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE268",
+                "span copy source element does not match the destination element type",
+                source.span(),
+            ));
+            return None;
+        }
+        let src_at_binding = self.elaborate_expr(src_at, Some(&counter_type), env, diagnostics)?;
+        if src_at_binding.ty != counter_type {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE269",
+                "span copy source offset must have u64 type",
+                src_at.span(),
+            ));
+            return None;
+        }
+        let len_binding = self.elaborate_expr(len, Some(&counter_type), env, diagnostics)?;
+        if len_binding.ty != counter_type {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE270",
+                "span copy length must have u64 type",
+                len.span(),
+            ));
+            return None;
+        }
+        // Literal windows against static bounds are decided here: inside
+        // both bounds is static evidence, provably outside either bound
+        // fails closed rather than deferring a guaranteed runtime failure.
+        // View sources have dynamic lengths, so a literal window over a
+        // view source always stays runtime-checked.
+        let literal_window = match (dst_at, src_at, len) {
+            (
+                AstExpr::Integer { value: dst_at, .. },
+                AstExpr::Integer { value: src_at, .. },
+                AstExpr::Integer { value: len, .. },
+            ) => Some((*dst_at, *src_at, *len)),
+            _ => None,
+        };
+        let evidence = match (literal_window, &dst_bound, &src_bound) {
+            (
+                Some((dst_at, src_at, len)),
+                mncs_model::SequenceBound::Exact(dst_length),
+                mncs_model::SequenceBound::Exact(src_length),
+            ) => {
+                if dst_at >= 0
+                    && src_at >= 0
+                    && len >= 0
+                    && (dst_at as u128) + (len as u128) <= u128::from(*dst_length)
+                    && (src_at as u128) + (len as u128) <= u128::from(*src_length)
+                {
+                    mncs_model::BoundsEvidence::StaticExact
+                } else {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE271",
+                        "span copy window is outside the statically known bounds",
+                        span,
+                    ));
+                    return None;
+                }
+            }
+            // View sources have dynamic lengths, so any window over them —
+            // literal or not — stays runtime-checked.
+            _ => mncs_model::BoundsEvidence::RuntimeChecked {
+                failure: FailureMode::Isolated,
+            },
+        };
+        let result_type = BodyType::Sequence {
+            element: element_type.clone(),
+            bound: dst_bound.clone(),
+        };
+        let id = self.new_value("cpy");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::SequenceCopy {
+                element_type: element_type.clone(),
+                dst_bound: dst_bound.clone(),
+                src_bound: src_bound.clone(),
+                evidence: evidence.clone(),
+            },
+            operands: vec![
+                dst.id,
+                dst_at_binding.id,
+                src.id,
+                src_at_binding.id,
+                len_binding.id,
+            ],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_type.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_type))
+    }
+
     /// Borrow an exact sequence as a bounded view (`[E; N]` to `[E; up_to M]`
     /// with `N <= M`, same element type) by synthesizing the full-range
     /// slice. The borrow is explicit in the body and lowers through the
@@ -9166,6 +9528,46 @@ impl<'a> BodyBuilder<'a> {
         ResolvedBinding::plain(id, result_ty)
     }
 
+    /// Narrow a view already in hand (`[E; up_to A]` to `[E; up_to B]`
+    /// with `B < A`, same element type) by synthesizing the explicit
+    /// runtime span check. Callers must have established the dimensions
+    /// already; the check fails closed when the live span escapes the new
+    /// capacity, and no copy is materialized.
+    fn narrow_view_for_expected(
+        &mut self,
+        argument: &ResolvedBinding,
+        expected: &BodyType,
+    ) -> Option<ResolvedBinding> {
+        let (source_cap, new_cap) = view_narrow_dimensions(&argument.ty, expected)?;
+        let element = match &argument.ty {
+            BodyType::Sequence { element, .. } => (**element).clone(),
+            _ => BodyType::Named("invalid".to_owned()),
+        };
+        let result_ty = BodyType::Sequence {
+            element: Box::new(element),
+            bound: mncs_model::SequenceBound::UpTo(new_cap),
+        };
+        let id = self.new_value("narrow");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::ViewNarrow {
+                source_cap,
+                new_cap,
+            },
+            operands: vec![argument.id.clone()],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
     fn new_block(&mut self) -> String {
         self.next_block += 1;
         let id = format!("b{}", self.next_block);
@@ -9211,6 +9613,31 @@ fn exact_view_borrow_dimensions(actual: &BodyType, expected: &BodyType) -> Optio
     {
         if actual_element == expected_element && length <= capacity {
             return Some((*length, *capacity));
+        }
+    }
+    None
+}
+
+/// View-to-view narrowing rule (Profile 0.14): an `[E; up_to A]` value
+/// satisfies an `[E; up_to B]` expectation exactly when `B < A` with the
+/// same element type. Returns the `(source capacity, new capacity)` the
+/// synthesized span check must carry. Equal capacities need no check (the
+/// types already agree), wider targets refuse, and everything else
+/// correctly refuses.
+fn view_narrow_dimensions(actual: &BodyType, expected: &BodyType) -> Option<(u32, u32)> {
+    if let (
+        BodyType::Sequence {
+            element: actual_element,
+            bound: mncs_model::SequenceBound::UpTo(source_cap),
+        },
+        BodyType::Sequence {
+            element: expected_element,
+            bound: mncs_model::SequenceBound::UpTo(new_cap),
+        },
+    ) = (actual, expected)
+    {
+        if actual_element == expected_element && new_cap < source_cap {
+            return Some((*source_cap, *new_cap));
         }
     }
     None

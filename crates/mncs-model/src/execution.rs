@@ -2543,6 +2543,128 @@ fn execute_operation(
                 },
             );
         }
+        BodyOperationKind::BoundCheck { .. } => {
+            let Some(sequence) = sequence_operand(operation, values, 0) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "checked-index sequence was unavailable or not a sequence".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(index) = integer_operand(operation, values, 1) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "checked-index candidate was unavailable or not u64".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            // The retained check: discharge never removes it, it only moves
+            // the proof obligation into this operation's own semantics.
+            if index < 0 || index as u128 >= sequence.len() as u128 {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    format!(
+                        "checked index {index} escapes the sequence length {}",
+                        sequence.len()
+                    ),
+                );
+                return Some(result.clone());
+            }
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Integer {
+                    value: index,
+                    ty: IntegerType {
+                        bits: 64,
+                        signed: false,
+                    },
+                },
+            );
+        }
+        BodyOperationKind::SequenceCopy {
+            element_type: _,
+            dst_bound,
+            src_bound: _,
+            evidence,
+        } => {
+            let SequenceBound::Exact(dst_length) = dst_bound else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    Some(identity.clone()),
+                    "functional span copy requires an exact-bound destination".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let Some(destination) = sequence_operand(operation, values, 0) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "span copy destination was unavailable or not a sequence".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let destination = destination.to_vec();
+            let Some(source) = sequence_operand(operation, values, 2) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "span copy source was unavailable or not a sequence".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            let source = source.to_vec();
+            let (Some(dst_at), Some(src_at), Some(len)) = (
+                integer_operand(operation, values, 1),
+                integer_operand(operation, values, 3),
+                integer_operand(operation, values, 4),
+            ) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "span copy offsets or length were unavailable or not u64 values".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            // Checked u64 window arithmetic first: a wrapping offset sum is
+            // a range failure, never an address computation.
+            let windows_valid = [dst_at, src_at, len].iter().all(|v| *v >= 0)
+                && (dst_at as u128) + (len as u128) <= u128::from(*dst_length)
+                && (src_at as u128) + (len as u128) <= source.len() as u128;
+            if !windows_valid {
+                match evidence {
+                    BoundsEvidence::RuntimeChecked { .. } => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            Some(identity.clone()),
+                            format!(
+                                "span copy range (dst_at {dst_at}, src_at {src_at}, len {len}) exceeds dst bound {dst_length} or src length {}",
+                                source.len()
+                            ),
+                        );
+                    }
+                    _ => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            Some(identity.clone()),
+                            "statically established span copy range violated the declared bounds; elaboration invariant broken".to_owned(),
+                        );
+                    }
+                }
+                return Some(result.clone());
+            }
+            let mut updated = destination;
+            updated[(dst_at as usize)..((dst_at as usize) + (len as usize))]
+                .clone_from_slice(&source[(src_at as usize)..((src_at as usize) + (len as usize))]);
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Sequence {
+                    values: updated.into(),
+                },
+            );
+        }
         BodyOperationKind::SequenceProject { bound: _, evidence } => {
             let Some(sequence_value) = sequence_operand(operation, values, 0) else {
                 result.fail(
@@ -2571,10 +2693,14 @@ fn execute_operation(
             let length = sequence_value.len() as u128;
             let index = index as u128;
             match evidence {
-                BoundsEvidence::StaticExact | BoundsEvidence::TraversalDomain => {
+                BoundsEvidence::StaticExact
+                | BoundsEvidence::TraversalDomain
+                | BoundsEvidence::CheckedBound => {
                     // The evidence claims validity; a violation would be a
                     // compiler defect, so fail closed without pretending it
-                    // was a runtime check.
+                    // was a runtime check. CheckedBound joins this arm: the
+                    // retained check lives in the bound-check operation, so
+                    // a violation here means the linkage broke upstream.
                     if index >= length {
                         result.fail(
                             ExecutionStatus::InvalidRequest,
@@ -2678,6 +2804,39 @@ fn execute_operation(
                 operation.results[0].id.clone(),
                 ExecutionValue::Sequence {
                     values: source[start as usize..end as usize].to_vec().into(),
+                },
+            );
+        }
+        BodyOperationKind::ViewNarrow {
+            source_cap: _,
+            new_cap,
+        } => {
+            let Some(source) = sequence_operand(operation, values, 0) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    Some(identity.clone()),
+                    "view narrowing source was unavailable or not a sequence".to_owned(),
+                );
+                return Some(result.clone());
+            };
+            // Materialized views carry their runtime length directly: the
+            // narrow succeeds exactly when the live span fits the new
+            // capacity, and the value passes through untouched.
+            if source.len() as u128 > u128::from(*new_cap) {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    Some(identity.clone()),
+                    format!(
+                        "view span {} exceeds the narrowed capacity {new_cap}",
+                        source.len()
+                    ),
+                );
+                return Some(result.clone());
+            }
+            values.insert(
+                operation.results[0].id.clone(),
+                ExecutionValue::Sequence {
+                    values: source.to_vec().into(),
                 },
             );
         }

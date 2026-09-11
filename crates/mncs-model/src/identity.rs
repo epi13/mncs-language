@@ -306,21 +306,39 @@ impl Program {
                                 evidence: BoundsEvidence::TraversalDomain,
                                 ..
                             }
+                            | crate::BodyOperationKind::SequenceCopy {
+                                evidence: BoundsEvidence::StaticExact,
+                                ..
+                            }
                             | crate::BodyOperationKind::SequenceConstruct { .. }
-                            | crate::BodyOperationKind::SequenceLength { .. } => None,
+                            | crate::BodyOperationKind::SequenceLength { .. }
+                            | crate::BodyOperationKind::BoundCheck { .. } => None,
                             crate::BodyOperationKind::SequenceReplace {
-                                evidence: BoundsEvidence::RuntimeChecked { .. },
+                                evidence:
+                                    BoundsEvidence::RuntimeChecked { .. } | BoundsEvidence::CheckedBound,
                                 ..
                             } => Some(crate::obligations::body_obligation_id(
                                 "sequence-replace-bounds",
                                 &operation_identity,
                             )),
+                            crate::BodyOperationKind::SequenceCopy {
+                                evidence:
+                                    BoundsEvidence::RuntimeChecked { .. }
+                                    | BoundsEvidence::TraversalDomain
+                                    | BoundsEvidence::CheckedBound,
+                                ..
+                            } => Some(crate::obligations::body_obligation_id(
+                                "sequence-copy-bounds",
+                                &operation_identity,
+                            )),
                             crate::BodyOperationKind::VectorExtract {
-                                evidence: BoundsEvidence::RuntimeChecked { .. },
+                                evidence:
+                                    BoundsEvidence::RuntimeChecked { .. } | BoundsEvidence::CheckedBound,
                                 ..
                             }
                             | crate::BodyOperationKind::VectorReplace {
-                                evidence: BoundsEvidence::RuntimeChecked { .. },
+                                evidence:
+                                    BoundsEvidence::RuntimeChecked { .. } | BoundsEvidence::CheckedBound,
                                 ..
                             } => Some(crate::obligations::body_obligation_id(
                                 "vector-lane-bounds",
@@ -334,7 +352,8 @@ impl Program {
                                 &operation_identity,
                             )),
                             crate::BodyOperationKind::SequenceProject { .. } => None,
-                            crate::BodyOperationKind::ViewConstruct { .. } => {
+                            crate::BodyOperationKind::ViewConstruct { .. }
+                            | crate::BodyOperationKind::ViewNarrow { .. } => {
                                 Some(crate::obligations::body_obligation_id(
                                     "view-range-valid",
                                     &operation_identity,

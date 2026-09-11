@@ -1,0 +1,74 @@
+mncs 0.14;
+
+// WEB-P-006 regression: checked view-to-view narrowing. A view already in
+// hand re-satisfies a narrower same-element expectation through an explicit
+// runtime span check: `len(view) <= new_cap` is verified at realization and
+// fails closed otherwise. No copy is materialized and element identity is
+// untouched; only the static capacity fact changes. Widening, element
+// changes, and narrowing below profile 0.14 keep refusing exactly as
+// before.
+module pressure.view_narrow;
+
+fn read16(window: [byte; up_to 64], offset: u64) -> (result: u16) {
+    return ((window[offset] as u16) * 256) + (window[offset + 1] as u16);
+}
+
+// Literal range narrowed at the binding: the WEB-P-006 motivating shape.
+fn narrow_literal() -> (result: u16) {
+    let buf: [byte; 1024] = [0; 1024];
+    let staged: [byte; 1024] = replace(replace(buf, 0, 18), 1, 52);
+    let window: [byte; up_to 64] = staged[0..64];
+    return read16(window, 0);
+}
+
+// Dynamic range narrowed at the binding; the span check runs at
+// realization.
+fn narrow_dynamic(n: u64) -> (result: u16) {
+    let buf: [byte; 1024] = [0; 1024];
+    let window: [byte; up_to 64] = buf[0..n];
+    return read16(window, 0);
+}
+
+// A stored wide view narrows when passed where a narrow view is expected.
+fn narrow_at_call(n: u64) -> (result: u16) {
+    let buf: [byte; 1024] = [0; 1024];
+    let staged: [byte; 1024] = replace(replace(buf, 4, 1), 5, 2);
+    let wide: [byte; up_to 1024] = staged[0..n];
+    return read16(wide, 4);
+}
+
+// Chained narrowing composes: each step keeps its own span check, so a
+// span that fits one step can still fail the next one deterministically.
+fn narrow_chained(n: u64) -> (result: u16) {
+    let buf: [byte; 1024] = [0; 1024];
+    let staged: [byte; 1024] = replace(buf, 40, 7);
+    let wide: [byte; up_to 1024] = staged[0..n];
+    let mid: [byte; up_to 256] = wide;
+    let window: [byte; up_to 64] = mid;
+    return (window[40] as u16);
+}
+
+// Narrowing at a return position.
+fn narrow_return(n: u64) -> (result: [byte; up_to 64]) {
+    let buf: [byte; 1024] = [0; 1024];
+    let wide: [byte; up_to 1024] = buf[0..n];
+    return wide;
+}
+
+// A narrowed view traverses its live span, not its source capacity.
+fn narrow_traverse(n: u64) -> (result: u64) {
+    let buf: [byte; 1024] = [1; 1024];
+    let window: [byte; up_to 64] = buf[0..n];
+    iterate i over window carrying acc: u64 = 0 {
+        next acc = acc + (window[i] as u64);
+    }
+    return acc;
+}
+
+// Escaping the new capacity is a deterministic runtime failure.
+fn narrow_escape(n: u64) -> (result: u16) {
+    let buf: [byte; 1024] = [0; 1024];
+    let wide: [byte; up_to 1024] = buf[0..n];
+    let window: [byte; up_to 64] = wide;
+    return read16(window, 0);
+}

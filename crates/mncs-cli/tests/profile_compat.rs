@@ -1,11 +1,13 @@
 //! Source-profile compatibility (RFC 0036): published profiles are
-//! immutable semantic objects, and post-0.12 extensions live in Profile
-//! 0.13.
+//! immutable semantic objects, and post-0.12 extensions live in Profiles
+//! 0.13 (consolidation) and 0.14 (buffer pipelines).
 //!
 //! Every case below pins one direction of the evolution relation:
 //! - an older profile keeps its *historical* acceptance/rejection and
 //!   diagnostics for capabilities introduced later;
 //! - Profile 0.13 admits the consolidated pressure-driven extensions;
+//! - Profile 0.14 admits the buffer-pipeline tranche (span copy, checked
+//!   view narrowing, checked-index discharge);
 //! - `mncs 1.0` (no published specification) fails closed.
 //!
 //! The expected codes for the older-profile rows were reproduced against
@@ -307,6 +309,43 @@ fn explicit_over_ceiling_nat_arg_refused() {
         "genceil-012",
         "mncs 0.12;\nmodule compat.genceil;\nfn total<N: Nat>(xs: [i64; N]) -> (result: i64) {\n    iterate i over xs carrying s: i64 = 0 {\n        next s = s + xs[i];\n    }\n    return s;\n}\nfn probe() -> (result: i64) {\n    let row: [i64; 4] = [1, 2, 3, 4];\n    return total<100>(row);\n}\n",
         "MNE225",
+    );
+}
+
+/// Profiles through 0.13 refuse the buffer-pipeline intrinsics at parse:
+/// `copy_span` and `checked_index` never lexed there.
+#[test]
+fn older_profiles_refuse_buffer_pipeline_intrinsics() {
+    expect_error(
+        "copyspan-013",
+        "mncs 0.13;\nmodule compat.copyspan;\nfn probe(dst: [byte; 8], src: [byte; 8]) -> (result: [byte; 8]) {\n    return copy_span(dst, 0, src, 0, 8);\n}\n",
+        "MNP207",
+    );
+    expect_error(
+        "checkedindex-013",
+        "mncs 0.13;\nmodule compat.checkedindex;\nfn probe(buf: [byte; 8], i: u64) -> (result: byte) {\n    let c: u64 = checked_index(buf, i);\n    return buf[c];\n}\n",
+        "MNP209",
+    );
+}
+
+/// Profiles through 0.13 keep the historical view-compatibility rule: a
+/// wider view does not satisfy a narrower expectation (MNE188); only
+/// 0.14 admits the checked narrowing.
+#[test]
+fn older_profiles_refuse_view_narrowing() {
+    expect_error(
+        "narrow-013",
+        "mncs 0.13;\nmodule compat.narrow;\nfn read(window: [byte; up_to 64]) -> (result: u64) {\n    return (window[0] as u64);\n}\nfn probe(buf: [byte; up_to 1024]) -> (result: u64) {\n    let window: [byte; up_to 64] = buf[0..64];\n    return read(window);\n}\n",
+        "MNE188",
+    );
+}
+
+/// Profile 0.14 admits the buffer-pipeline tranche end to end.
+#[test]
+fn profile_014_admits_buffer_pipelines() {
+    expect_clean(
+        "admit-014",
+        "mncs 0.14;\nmodule compat.admit14;\nfn read(window: [byte; up_to 64], i: u64) -> (result: byte) {\n    let c: u64 = checked_index(window, i);\n    return window[c];\n}\nfn moved(dst: [byte; 8], src: [byte; 8]) -> (result: [byte; 8]) {\n    return copy_span(dst, 0, src, 0, 8);\n}\nfn probe(src: [byte; 1024], i: u64) -> (result: byte) {\n    let window: [byte; up_to 64] = src[0..64];\n    return read(window, i);\n}\n",
     );
 }
 

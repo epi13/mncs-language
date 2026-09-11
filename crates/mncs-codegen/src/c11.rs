@@ -1401,6 +1401,83 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 }
             }
         }
+        ScalarInst::SequenceCopy {
+            dest,
+            destination,
+            dst_at,
+            source,
+            src_at,
+            len,
+            dst_bound: _,
+            src_bound,
+            evidence,
+            dst_length,
+            element_width,
+            ..
+        } => {
+            let dest_n = names.value(&dest.id);
+            let dst_base_n = names.value(destination);
+            let dst_at_n = names.value(dst_at);
+            let src_at_n = names.value(src_at);
+            let len_n = names.value(len);
+            // Resolve the source base and runtime length: exact sources are
+            // canonical cells with a static length; views unpack their
+            // packed descriptor exactly like SequenceProject does.
+            let (src_base, src_len) = match src_bound {
+                mncs_model::SequenceBound::Exact(length) => {
+                    (names.value(source).to_owned(), format!("{length}ULL"))
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    let view = names.value(source);
+                    (
+                        format!("(uint64_t)(uint32_t)({view})"),
+                        format!("({view} >> 32)"),
+                    )
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
+                }
+            };
+            if matches!(evidence, mncs_model::BoundsEvidence::RuntimeChecked { .. }) {
+                let _ = writeln!(
+                    out,
+                    "      {{ uint64_t c_dend = (uint64_t){dst_at_n} + (uint64_t){len_n}; uint64_t c_send = (uint64_t){src_at_n} + (uint64_t){len_n}; if (c_dend < (uint64_t){dst_at_n} || c_dend > {dst_length}ULL || c_send < (uint64_t){src_at_n} || c_send > (uint64_t)({src_len})) {{ *mncs_status = 1; *mncs_value = 0; return; }} }}"
+                );
+            }
+            let _ = writeln!(
+                out,
+                "      {dest_n} = mncs_cell_alloc({}u);",
+                dst_length * 8
+            );
+            // Branchless per-lane span select over the static destination
+            // bound: lane `j` takes the source window slot exactly when it
+            // falls in `[dst_at, dst_at + len)`. The fallback source address
+            // is the lane's own destination slot, so every emitted load is
+            // in-bounds by construction even for lanes outside the window.
+            for lane in 0..*dst_length {
+                let offset = u64::from(lane) * 8;
+                let _ = writeln!(
+                    out,
+                    "      {{ uint64_t c_k = {lane}ULL - (uint64_t){dst_at_n}; uint64_t c_in = (((uint64_t){dst_at_n} <= {lane}ULL) & (c_k < (uint64_t){len_n})) ? 1u : 0u; uint64_t c_saddr = c_in ? (({src_base}) + (((uint64_t){src_at_n} + c_k) * 8u)) : ((uint64_t){dst_base_n} + {offset}u);"
+                );
+                match element_width {
+                    SlotWidth::W32 => {
+                        let _ = writeln!(
+                            out,
+                            "      uint32_t c_s = mncs_slot_load32(mncs_arena, c_saddr); uint32_t c_d = mncs_slot_load32(mncs_arena, (uint64_t){dst_base_n} + {offset}u); mncs_slot_store32(mncs_arena, {dest_n} + {offset}u, c_in ? c_s : c_d); }}"
+                        );
+                    }
+                    SlotWidth::W64 => {
+                        let _ = writeln!(
+                            out,
+                            "      uint64_t c_s = mncs_slot_load64(mncs_arena, c_saddr); uint64_t c_d = mncs_slot_load64(mncs_arena, (uint64_t){dst_base_n} + {offset}u); mncs_slot_store64(mncs_arena, {dest_n} + {offset}u, c_in ? c_s : c_d); }}"
+                        );
+                    }
+                }
+            }
+        }
         ScalarInst::SequenceProject {
             dest,
             seq,
@@ -1514,6 +1591,47 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 "      {dest_n} = (uint64_t)(uint32_t)({base} + {start_n} * 8u) | (((uint64_t)({end_n} - {start_n})) << 32);"
             );
         }
+        ScalarInst::ViewNarrow {
+            dest,
+            source,
+            new_cap,
+        } => {
+            let dest_n = names.value(&dest.id);
+            let src_n = names.value(source);
+            // The static capacity is the only thing that changes: trap
+            // unless the runtime span fits, then alias the descriptor.
+            let _ = writeln!(
+                out,
+                "      {dest_n} = {src_n}; if (({dest_n} >> 32) > {new_cap}ULL) {{ *mncs_status = 1; *mncs_value = 0; return; }}"
+            );
+        }
+        ScalarInst::BoundCheck {
+            dest,
+            seq,
+            index,
+            bound,
+        } => {
+            let dest_n = names.value(&dest.id);
+            let index_n = names.value(index);
+            // The check is always retained: trap unless the candidate sits
+            // below the runtime length, then carry it unchanged. Exact
+            // bounds fold to constants; views read the packed descriptor.
+            let length = match bound {
+                mncs_model::SequenceBound::Exact(length) => format!("{length}ULL"),
+                mncs_model::SequenceBound::UpTo(_) => {
+                    format!("({} >> 32)", names.value(seq))
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
+                }
+            };
+            let _ = writeln!(
+                out,
+                "      if ((uint64_t){index_n} >= {length}) {{ *mncs_status = 1; *mncs_value = 0; return; }} {dest_n} = {index_n};",
+            );
+        }
         ScalarInst::FiniteIsVariant {
             dest,
             src,
@@ -1602,9 +1720,12 @@ fn inst_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
         | ScalarInst::Convert { dest, .. }
         | ScalarInst::Select { dest, .. }
         | ScalarInst::SequenceReplace { dest, .. }
+        | ScalarInst::SequenceCopy { dest, .. }
         | ScalarInst::SequenceProject { dest, .. }
         | ScalarInst::SequenceLength { dest, .. }
         | ScalarInst::ViewConstruct { dest, .. }
+        | ScalarInst::ViewNarrow { dest, .. }
+        | ScalarInst::BoundCheck { dest, .. }
         | ScalarInst::Call { dest, .. } => Some(dest),
         // Cell stores produce no value; sequences declare through members.
         ScalarInst::CellStoreDiscriminant { .. } | ScalarInst::CellStore { .. } => None,

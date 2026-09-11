@@ -145,6 +145,21 @@ pub enum IrOperationKind {
         bound: crate::SequenceBound,
         evidence: crate::BoundsEvidence,
     },
+    /// Checked index against a sequence length (Profile 0.14). Operand
+    /// order matches the body operation: sequence, candidate index. The
+    /// carried bound resolves the runtime length on every backend.
+    BoundCheck {
+        bound: crate::SequenceBound,
+    },
+    /// Total functional bounded span copy (Profile 0.14). Operand order
+    /// matches the body operation: destination, dst offset, source, src
+    /// offset, length.
+    SequenceCopy {
+        element_type: Box<crate::BodyType>,
+        dst_bound: crate::SequenceBound,
+        src_bound: crate::SequenceBound,
+        evidence: crate::BoundsEvidence,
+    },
     VectorConstruct {
         element_type: Box<crate::BodyType>,
         lanes: u32,
@@ -214,6 +229,11 @@ pub enum IrOperationKind {
     ViewConstruct {
         source_bound: crate::SequenceBound,
         view_bound: crate::SequenceBound,
+    },
+    /// Narrow a bounded view to a smaller static capacity (Profile 0.14).
+    ViewNarrow {
+        source_cap: u32,
+        new_cap: u32,
     },
     FiniteConstruct {
         type_identity: SemanticId,
@@ -1107,6 +1127,32 @@ fn lower_executable_body(
                     None,
                     None,
                 ),
+                BodyOperationKind::BoundCheck { bound } => (
+                    IrOperationKind::BoundCheck {
+                        bound: bound.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::SequenceCopy {
+                    element_type,
+                    dst_bound,
+                    src_bound,
+                    evidence,
+                } => (
+                    IrOperationKind::SequenceCopy {
+                        element_type: element_type.clone(),
+                        dst_bound: dst_bound.clone(),
+                        src_bound: src_bound.clone(),
+                        evidence: evidence.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
                 BodyOperationKind::VectorConstruct {
                     element_type,
                     lanes,
@@ -1288,6 +1334,19 @@ fn lower_executable_body(
                     IrOperationKind::ViewConstruct {
                         source_bound: source_bound.clone(),
                         view_bound: view_bound.clone(),
+                    },
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
+                BodyOperationKind::ViewNarrow {
+                    source_cap,
+                    new_cap,
+                } => (
+                    IrOperationKind::ViewNarrow {
+                        source_cap: *source_cap,
+                        new_cap: *new_cap,
                     },
                     Vec::new(),
                     Vec::new(),

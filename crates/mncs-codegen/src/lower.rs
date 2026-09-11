@@ -2067,6 +2067,206 @@ fn lower_instruction(
             body.push(Instr::LocalGet(element));
             store_element_width(layout, instruction, 2, body)?;
         }
+        SsaInstructionKind::SequenceCopy {
+            element_type,
+            dst_bound,
+            src_bound,
+            evidence,
+        } => {
+            let mncs_model::SequenceBound::Exact(dst_length) = dst_bound else {
+                return Err("functional span copy requires an exact destination".to_owned());
+            };
+            let dest = dest_local(layout, instruction)?;
+            let destination = operand_local(layout, instruction, 0)?;
+            let dst_at = operand_local(layout, instruction, 1)?;
+            let source = operand_local(layout, instruction, 2)?;
+            let src_at = operand_local(layout, instruction, 3)?;
+            let len = operand_local(layout, instruction, 4)?;
+            let is_byte = matches!(element_type, mncs_model::BodyType::Byte);
+            // Source runtime length: static for exact sources, packed for
+            // views (marker bit discarded exactly like projection).
+            let push_src_len = |body: &mut Vec<Instr>| match src_bound {
+                mncs_model::SequenceBound::Exact(length) => {
+                    body.push(Instr::I64Const(i64::from(*length)));
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    body.push(Instr::LocalGet(source));
+                    body.push(Instr::I64Const(32));
+                    body.push(Instr::I64ShrU);
+                    body.push(Instr::I64Const(0x7fff_ffff));
+                    body.push(Instr::I64And);
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    body.push(Instr::Unreachable);
+                }
+            };
+            if matches!(evidence, mncs_model::BoundsEvidence::RuntimeChecked { .. }) {
+                // bad = (dend < dst_at) | (dend > N) | (send < src_at) |
+                //        (send > src_len), computed in wrapping u64.
+                let push_dend = |body: &mut Vec<Instr>| {
+                    body.push(Instr::LocalGet(dst_at));
+                    body.push(Instr::LocalGet(len));
+                    body.push(Instr::I64Add);
+                };
+                let push_send = |body: &mut Vec<Instr>| {
+                    body.push(Instr::LocalGet(src_at));
+                    body.push(Instr::LocalGet(len));
+                    body.push(Instr::I64Add);
+                };
+                push_dend(body);
+                body.push(Instr::LocalGet(dst_at));
+                body.push(Instr::I64LtU);
+                push_dend(body);
+                body.push(Instr::I64Const(i64::from(*dst_length)));
+                body.push(Instr::I64GtU);
+                body.push(Instr::I32Or);
+                push_send(body);
+                body.push(Instr::LocalGet(src_at));
+                body.push(Instr::I64LtU);
+                push_send(body);
+                push_src_len(body);
+                body.push(Instr::I64GtU);
+                body.push(Instr::I32Or);
+                body.push(Instr::I32Or);
+                body.push(Instr::If);
+                body.push(Instr::Unreachable);
+                body.push(Instr::End);
+            }
+            if matches!(
+                src_bound,
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_)
+            ) {
+                return Err(
+                    "generic SequenceBound must be specialized before backend lowering".to_owned(),
+                );
+            }
+            // Source base address (i32): the cell address for exact
+            // sources, the low 32 bits of the packed descriptor for views.
+            let push_src_base = |body: &mut Vec<Instr>| match src_bound {
+                mncs_model::SequenceBound::Exact(_) => {
+                    body.push(Instr::LocalGet(source));
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    body.push(Instr::LocalGet(source));
+                    body.push(Instr::I32WrapI64);
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    body.push(Instr::Unreachable);
+                }
+            };
+            // Zero-based source slot index sidx = src_at + (lane - dst_at)
+            // as i64.
+            let push_sidx = |body: &mut Vec<Instr>, lane: u32| {
+                body.push(Instr::I64Const(i64::from(lane)));
+                body.push(Instr::LocalGet(dst_at));
+                body.push(Instr::I64Sub);
+                body.push(Instr::LocalGet(src_at));
+                body.push(Instr::I64Add);
+            };
+            let byte_view_src = is_byte && matches!(src_bound, mncs_model::SequenceBound::UpTo(_));
+            // Allocate a fresh canonical destination cell and fill it lane
+            // by lane with a branchless span select: lane `j` takes the
+            // source window slot exactly when it falls in
+            // `[dst_at, dst_at + len)`. Stack discipline per lane is
+            // `[daddr] [sval] [dval] [in]` so one `select` plus one store
+            // finishes the lane with no scratch locals.
+            emit_alloc(body, dest, *dst_length * 8)?;
+            // Element width comes from the operation's declared element
+            // type, never from the sequence inputs (exact sequences ride
+            // i32 cell addresses, views ride i64 descriptors).
+            let element_valtype = if is_byte {
+                ValType::I32
+            } else {
+                match element_type {
+                    mncs_model::BodyType::Integer(integer) => val_type(*integer)?,
+                    mncs_model::BodyType::Named(name) if name == "bool" => ValType::I32,
+                    // Composite elements (records, boxed finites, nested
+                    // cells) ride as pointers in 8-byte slots: copy the
+                    // whole slot exactly like the W64 scalar path.
+                    _ => ValType::I64,
+                }
+            };
+            for lane in 0..*dst_length {
+                let offset = (lane * 8) as i32;
+                // [outaddr]: the fresh destination cell owns every store;
+                // the source cell is only read.
+                body.push(Instr::LocalGet(dest));
+                emit_offset(body, offset);
+                // [daddr] [base] [stride-offset...] -> [daddr] [saddr].
+                push_src_base(body);
+                if byte_view_src {
+                    // Marker set (cell-backed): stride 8; clear (packed
+                    // host bytes): stride 1. Projection order: [base]
+                    // [sidx*8] [sidx] [marker].
+                    push_sidx(body, lane);
+                    body.push(Instr::I64Const(3));
+                    body.push(Instr::I64Shl);
+                    push_sidx(body, lane);
+                    body.push(Instr::LocalGet(source));
+                    body.push(Instr::I64Const(63));
+                    body.push(Instr::I64ShrU);
+                    body.push(Instr::I32WrapI64);
+                    body.push(Instr::Select);
+                    body.push(Instr::I32WrapI64);
+                } else {
+                    push_sidx(body, lane);
+                    body.push(Instr::I64Const(3));
+                    body.push(Instr::I64Shl);
+                    body.push(Instr::I32WrapI64);
+                }
+                body.push(Instr::I32Add);
+                // [daddr] [saddr]; load the source value.
+                if is_byte {
+                    body.push(Instr::I32Load8U);
+                } else {
+                    match element_valtype {
+                        ValType::I32 => body.push(Instr::I32Load),
+                        ValType::I64 => body.push(Instr::I64Load),
+                        ValType::F64 => {
+                            return Err("float sequences are not supported".to_owned());
+                        }
+                    }
+                }
+                // [outaddr] [sval]; reload the destination lane value.
+                body.push(Instr::LocalGet(destination));
+                emit_offset(body, offset);
+                if is_byte {
+                    // Destination cells are canonical 8-byte slots; the
+                    // stored byte occupies the low byte. A 4-byte load
+                    // round-trips the slot exactly like `replace` does.
+                    body.push(Instr::I32Load);
+                } else {
+                    match element_valtype {
+                        ValType::I32 => body.push(Instr::I32Load),
+                        ValType::I64 => body.push(Instr::I64Load),
+                        ValType::F64 => body.push(Instr::F64Load),
+                    }
+                }
+                // [outaddr] [sval] [dval]; lane membership.
+                body.push(Instr::LocalGet(dst_at));
+                body.push(Instr::I64Const(i64::from(lane)));
+                body.push(Instr::I64LeU);
+                body.push(Instr::I64Const(i64::from(lane)));
+                body.push(Instr::LocalGet(dst_at));
+                body.push(Instr::I64Sub);
+                body.push(Instr::LocalGet(len));
+                body.push(Instr::I64LtU);
+                body.push(Instr::I32And);
+                // [outaddr] [sval] [dval] [in]; select and store.
+                body.push(Instr::Select);
+                if is_byte {
+                    body.push(Instr::I32Store);
+                } else {
+                    match element_valtype {
+                        ValType::I32 => body.push(Instr::I32Store),
+                        ValType::I64 => body.push(Instr::I64Store),
+                        ValType::F64 => {
+                            return Err("float sequences are not supported".to_owned());
+                        }
+                    }
+                }
+            }
+        }
         SsaInstructionKind::VectorConstruct {
             element_type,
             lanes,
@@ -2568,6 +2768,62 @@ fn lower_instruction(
             body.push(Instr::I64Const(32));
             body.push(Instr::I64Shl);
             body.push(Instr::I64Or);
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::ViewNarrow {
+            source_cap: _,
+            new_cap,
+        } => {
+            let dest = dest_local(layout, instruction)?;
+            let source = operand_local(layout, instruction, 0)?;
+            // The static capacity is the only thing that changes: trap
+            // unless the runtime span fits, then alias the descriptor. The
+            // span unpack discards the bit-63 cell marker exactly like
+            // view construction does.
+            body.push(Instr::LocalGet(source));
+            body.push(Instr::I64Const(32));
+            body.push(Instr::I64ShrU);
+            body.push(Instr::I64Const(0x7fff_ffff));
+            body.push(Instr::I64And);
+            body.push(Instr::I64Const(i64::from(*new_cap)));
+            body.push(Instr::I64GtU);
+            body.push(Instr::If);
+            body.push(Instr::Unreachable);
+            body.push(Instr::End);
+            body.push(Instr::LocalGet(source));
+            body.push(Instr::LocalSet(dest));
+        }
+        SsaInstructionKind::BoundCheck { bound } => {
+            let dest = dest_local(layout, instruction)?;
+            let seq = operand_local(layout, instruction, 0)?;
+            let index = operand_local(layout, instruction, 1)?;
+            // The check is always retained: trap unless the candidate sits
+            // below the runtime length, then carry it unchanged. View
+            // lengths discard the bit-63 cell marker exactly like checked
+            // projections do.
+            body.push(Instr::LocalGet(index));
+            match bound {
+                mncs_model::SequenceBound::Exact(length) => {
+                    body.push(Instr::I64Const(i64::from(*length)));
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    body.push(Instr::LocalGet(seq));
+                    body.push(Instr::I64Const(32));
+                    body.push(Instr::I64ShrU);
+                    body.push(Instr::I64Const(0x7fff_ffff));
+                    body.push(Instr::I64And);
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
+                }
+            }
+            body.push(Instr::I64GeU);
+            body.push(Instr::If);
+            body.push(Instr::Unreachable);
+            body.push(Instr::End);
+            body.push(Instr::LocalGet(index));
             body.push(Instr::LocalSet(dest));
         }
         SsaInstructionKind::FinitePayloadProject {

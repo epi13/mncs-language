@@ -1620,7 +1620,9 @@ fn execute_instruction(
             let length = elements.len() as u128;
             let index = index as u128;
             match evidence {
-                crate::BoundsEvidence::StaticExact | crate::BoundsEvidence::TraversalDomain => {
+                crate::BoundsEvidence::StaticExact
+                | crate::BoundsEvidence::TraversalDomain
+                | crate::BoundsEvidence::CheckedBound => {
                     if index >= length {
                         result.fail(
                             ExecutionStatus::InvalidRequest,
@@ -1811,6 +1813,135 @@ fn execute_instruction(
                 );
             }
         }
+        SsaInstructionKind::BoundCheck { .. } => {
+            let Some(ExecutionValue::Sequence { values: sequence }) =
+                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "checked-index sequence was unavailable or not a sequence",
+                );
+                return true;
+            };
+            let Some(index) = ssa_integer_operand(instruction, values, 1) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "checked-index candidate was unavailable or not u64",
+                );
+                return true;
+            };
+            if index < 0 || index as u128 >= sequence.len() as u128 {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    instruction_identity(instruction),
+                    format!(
+                        "checked index {index} escapes the sequence length {}",
+                        sequence.len()
+                    ),
+                );
+                return true;
+            }
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Integer {
+                        value: index,
+                        ty: IntegerType {
+                            bits: 64,
+                            signed: false,
+                        },
+                    },
+                );
+            }
+        }
+        SsaInstructionKind::SequenceCopy {
+            dst_bound,
+            src_bound: _,
+            evidence,
+            ..
+        } => {
+            let crate::SequenceBound::Exact(dst_length) = dst_bound else {
+                result.fail(
+                    ExecutionStatus::Unsupported,
+                    instruction_identity(instruction),
+                    "functional span copy requires an exact-bound destination",
+                );
+                return true;
+            };
+            let Some(ExecutionValue::Sequence {
+                values: destination,
+            }) = values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "span copy destination was unavailable or not a sequence",
+                );
+                return true;
+            };
+            let destination = destination.clone();
+            let Some(ExecutionValue::Sequence { values: source }) =
+                values.get(instruction.inputs.get(2).unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "span copy source was unavailable or not a sequence",
+                );
+                return true;
+            };
+            let source = source.clone();
+            let (Some(dst_at), Some(src_at), Some(len)) = (
+                ssa_integer_operand(instruction, values, 1),
+                ssa_integer_operand(instruction, values, 3),
+                ssa_integer_operand(instruction, values, 4),
+            ) else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "span copy offsets or length were unavailable or not u64",
+                );
+                return true;
+            };
+            let windows_valid = [dst_at, src_at, len].iter().all(|v| *v >= 0)
+                && (dst_at as u128) + (len as u128) <= u128::from(*dst_length)
+                && (src_at as u128) + (len as u128) <= source.len() as u128;
+            if !windows_valid {
+                match evidence {
+                    crate::BoundsEvidence::RuntimeChecked { .. } => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            instruction_identity(instruction),
+                            format!(
+                                "span copy range (dst_at {dst_at}, src_at {src_at}, len {len}) exceeds dst bound {dst_length} or src length {}",
+                                source.len()
+                            ),
+                        );
+                    }
+                    _ => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            instruction_identity(instruction),
+                            "statically established span copy range violated the declared bounds",
+                        );
+                    }
+                }
+                return true;
+            }
+            let mut updated = destination.as_ref().clone();
+            updated[(dst_at as usize)..((dst_at as usize) + (len as usize))]
+                .clone_from_slice(&source[(src_at as usize)..((src_at as usize) + (len as usize))]);
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Sequence {
+                        values: updated.into(),
+                    },
+                );
+            }
+        }
         SsaInstructionKind::SequenceLength { bound: _ } => {
             let Some(ExecutionValue::Sequence { values: elements }) =
                 values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
@@ -1897,6 +2028,40 @@ fn execute_instruction(
                     output.identity.clone(),
                     ExecutionValue::Sequence {
                         values: source[start as usize..end as usize].to_vec().into(),
+                    },
+                );
+            }
+        }
+        SsaInstructionKind::ViewNarrow {
+            source_cap: _,
+            new_cap,
+        } => {
+            let Some(ExecutionValue::Sequence { values: source }) =
+                values.get(instruction.inputs.first().unwrap_or(&output_sentinel()))
+            else {
+                result.fail(
+                    ExecutionStatus::InvalidRequest,
+                    instruction_identity(instruction),
+                    "view narrowing source was unavailable or not a sequence",
+                );
+                return true;
+            };
+            if source.len() as u128 > u128::from(*new_cap) {
+                result.fail(
+                    ExecutionStatus::RuntimeFailure,
+                    instruction_identity(instruction),
+                    format!(
+                        "view span {} exceeds the narrowed capacity {new_cap}",
+                        source.len()
+                    ),
+                );
+                return true;
+            }
+            if let Some(output) = instruction.outputs.first() {
+                values.insert(
+                    output.identity.clone(),
+                    ExecutionValue::Sequence {
+                        values: source.clone(),
                     },
                 );
             }

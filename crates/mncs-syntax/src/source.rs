@@ -12,10 +12,10 @@ pub const SOURCE_ENVELOPE_SCHEMA_VERSION: &str = "0.1";
 pub use crate::profile::{profile_at_least, source_profile_supported, SOURCE_PROFILE_VERSION_0_13};
 use crate::profile::{
     SOURCE_PROFILE_VERSION, SOURCE_PROFILE_VERSION_0_10, SOURCE_PROFILE_VERSION_0_11,
-    SOURCE_PROFILE_VERSION_0_12, SOURCE_PROFILE_VERSION_0_2, SOURCE_PROFILE_VERSION_0_3,
-    SOURCE_PROFILE_VERSION_0_4, SOURCE_PROFILE_VERSION_0_5, SOURCE_PROFILE_VERSION_0_6,
-    SOURCE_PROFILE_VERSION_0_7, SOURCE_PROFILE_VERSION_0_8, SOURCE_PROFILE_VERSION_0_9,
-    SOURCE_PROFILE_VERSION_1_0,
+    SOURCE_PROFILE_VERSION_0_12, SOURCE_PROFILE_VERSION_0_14, SOURCE_PROFILE_VERSION_0_2,
+    SOURCE_PROFILE_VERSION_0_3, SOURCE_PROFILE_VERSION_0_4, SOURCE_PROFILE_VERSION_0_5,
+    SOURCE_PROFILE_VERSION_0_6, SOURCE_PROFILE_VERSION_0_7, SOURCE_PROFILE_VERSION_0_8,
+    SOURCE_PROFILE_VERSION_0_9, SOURCE_PROFILE_VERSION_1_0,
 };
 pub const LEXICAL_SCHEMA_VERSION: &str = "0.1";
 pub const CST_SCHEMA_VERSION: &str = "0.1";
@@ -591,6 +591,30 @@ pub enum AstExpr {
         element: Box<AstExpr>,
         span: SourceSpan,
     },
+    /// Total functional bounded span copy
+    /// `copy_span(dst, dst_at, src, src_at, len)` (Profile 0.14). Produces
+    /// a new sequence equal to `dst` except the `len` elements starting at
+    /// `dst_at`, which become the `len` elements of `src` starting at
+    /// `src_at`; both inputs are unchanged.
+    SequenceCopy {
+        destination: Box<AstExpr>,
+        dst_at: Box<AstExpr>,
+        source: Box<AstExpr>,
+        src_at: Box<AstExpr>,
+        len: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Checked index `checked_index(sequence, index)` (Profile 0.14).
+    /// Produces the candidate index unchanged as a `u64`, trapping unless
+    /// it sits below the sequence's runtime length. Binding the result and
+    /// projecting through it (`sequence[checked]`) discharges the
+    /// projection's bounds obligation with `CheckedBound` evidence; every
+    /// other use of the candidate keeps an explicit runtime check.
+    CheckedIndex {
+        sequence: Box<AstExpr>,
+        index: Box<AstExpr>,
+        span: SourceSpan,
+    },
     /// Host-realized read `host_read()` (Profile 0.8). Authority comes
     /// from the enclosing function's declarations (`effect host_read`
     /// plus its capability), never from arguments: the executor realizes
@@ -737,6 +761,8 @@ impl AstExpr {
             | Self::Cast { span, .. }
             | Self::Select { span, .. }
             | Self::SequenceReplace { span, .. }
+            | Self::SequenceCopy { span, .. }
+            | Self::CheckedIndex { span, .. }
             | Self::HostRead { span, .. }
             | Self::ClockRead { span, .. }
             | Self::Sha256Digest { span, .. }
@@ -3026,6 +3052,69 @@ impl<'a> Parser<'a> {
                 );
                 None
             }
+            ("copy_span", 5) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_14) {
+                    self.error(
+                        "MNP207",
+                        "span copy requires source profile 0.14 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(destination), Some(dst_at), Some(source), Some(src_at), Some(len)) = (
+                    iter.next(),
+                    iter.next(),
+                    iter.next(),
+                    iter.next(),
+                    iter.next(),
+                ) else {
+                    return None;
+                };
+                Some(AstExpr::SequenceCopy {
+                    destination: Box::new(destination),
+                    dst_at: Box::new(dst_at),
+                    source: Box::new(source),
+                    src_at: Box::new(src_at),
+                    len: Box::new(len),
+                    span,
+                })
+            }
+            ("copy_span", _) => {
+                self.error(
+                    "MNP208",
+                    "copy_span takes exactly five arguments (destination, dst_at, source, src_at, len)",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("checked_index", 2) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_14) {
+                    self.error(
+                        "MNP209",
+                        "checked index requires source profile 0.14 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(sequence), Some(index)) = (iter.next(), iter.next()) else {
+                    return None;
+                };
+                Some(AstExpr::CheckedIndex {
+                    sequence: Box::new(sequence),
+                    index: Box::new(index),
+                    span,
+                })
+            }
+            ("checked_index", _) => {
+                self.error(
+                    "MNP210",
+                    "checked_index takes exactly two arguments (sequence, index)",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
             ("host_read", 0) => Some(AstExpr::HostRead { span }),
             ("host_read", _) => {
                 self.error(
@@ -4577,6 +4666,8 @@ fn is_profile08_intrinsic(name: &str) -> bool {
             | "splat"
             | "extract_lane"
             | "replace_lane"
+            | "copy_span"
+            | "checked_index"
             | "vec_add_wrap"
             | "vec_add_checked"
             | "vec_add_sat"
@@ -4622,6 +4713,7 @@ fn infer_source_profile(text: &str) -> &'static str {
     });
     match header {
         Some(line) if line.trim_start().starts_with("mncs 1.0") => SOURCE_PROFILE_VERSION_1_0,
+        Some(line) if line.trim_start().starts_with("mncs 0.14") => SOURCE_PROFILE_VERSION_0_14,
         Some(line) if line.trim_start().starts_with("mncs 0.13") => SOURCE_PROFILE_VERSION_0_13,
         Some(line) if line.trim_start().starts_with("mncs 0.12") => SOURCE_PROFILE_VERSION_0_12,
         Some(line) if line.trim_start().starts_with("mncs 0.11") => SOURCE_PROFILE_VERSION_0_11,
