@@ -238,11 +238,21 @@ pub(crate) fn sha256_digest_bytes(view: &[u8]) -> [u8; 32] {
 /// single predicate classifying mutating effects: validation layers may
 /// observe intents for operations named here but must never realize them;
 /// only the designated real execution phase realizes them, exactly once.
-/// Future filesystem mutation, process, network, persistent-store, and
-/// device effects join this predicate — never a per-effect special case
-/// at each interpreter.
+/// The Tranche A filesystem mutations joined here; future process,
+/// network, persistent-store, and device effects join this predicate —
+/// never a per-effect special case at each interpreter.
 pub fn host_operation_mutates(operation_id: &str) -> bool {
-    matches!(operation_id, "blob_append")
+    matches!(
+        operation_id,
+        "blob_append"
+            | "fs_create_file"
+            | "fs_write_bytes_at"
+            | "fs_append_bytes_at"
+            | "fs_mkdir"
+            | "fs_delete_at"
+            | "fs_rename_at"
+            | "fs_sync_at"
+    )
 }
 
 /// Bounded append-only storage write (P-006 storage slice). Appends
@@ -3205,6 +3215,95 @@ fn execute_operation(
                     }
                 }
             }
+            if matches!(
+                operation_id.as_str(),
+                "fs_create_file"
+                    | "fs_write_bytes_at"
+                    | "fs_append_bytes_at"
+                    | "fs_mkdir"
+                    | "fs_delete_at"
+                    | "fs_rename_at"
+                    | "fs_sync_at"
+            ) {
+                // Granted-filesystem mutations (Tranche A, effect
+                // `fs_write`): scalar operands are u64 data, view
+                // positions (names, content) carry bytes; the split rule
+                // is `fs_view_positions`, shared with the SSA executor.
+                // Under `Record` the call is intent-only — validated and
+                // valued, never realized — so replay stays side-effect
+                // free; `host_operation_mutates` names exactly these
+                // operations for that path.
+                let arity = crate::host_call_arity(operation_id).unwrap_or(0);
+                let view_positions = crate::fs_resource::fs_view_positions(operation_id);
+                let mut ints: Vec<u64> = Vec::new();
+                let mut views: Vec<Vec<u8>> = Vec::new();
+                for position in 0..arity {
+                    if view_positions.contains(&position) {
+                        let Some(view) = host_view_operand(operation, values, position) else {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                Some(identity.clone()),
+                                format!(
+                                    "{operation_id} requires byte-view operands at view positions, not a non-view value"
+                                ),
+                            );
+                            return Some(result.clone());
+                        };
+                        views.push(view);
+                    } else {
+                        let Some(arg) =
+                            crate::fs_resource::host_u64_by(&operation.operands, values, position)
+                        else {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                Some(identity.clone()),
+                                format!(
+                                    "{operation_id} requires u64 index/offset operands, not a non-u64 value"
+                                ),
+                            );
+                            return Some(result.clone());
+                        };
+                        ints.push(arg);
+                    }
+                }
+                let intent_only = observing;
+                debug_assert!(host_operation_mutates(operation_id));
+                match crate::fs_resource::fs_mutate(
+                    operation_id,
+                    grant,
+                    &ints,
+                    &views,
+                    !intent_only,
+                ) {
+                    Ok((value, effect)) => {
+                        values.insert(operation.results[0].id.clone(), value);
+                        result.effects.push(ExecutionEffectEvent {
+                            operation: identity.clone(),
+                            kind: effect.kind,
+                            target: effect.target,
+                            capability: capability.clone(),
+                            provenance: (!intent_only).then_some(effect.provenance),
+                        });
+                        return None;
+                    }
+                    Err(crate::fs_resource::FsFail::InvalidRequest(reason)) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                    Err(crate::fs_resource::FsFail::RuntimeFailure(reason)) => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                }
+            }
             if operation_id == "clock_read" {
                 let Some(millis) = host_epoch_millis() else {
                     result.fail(
@@ -3320,8 +3419,9 @@ fn execute_operation(
                 // validated, the would-be count is returned, and the intent
                 // is recorded with absent provenance — but the file is not
                 // touched. `host_operation_mutates` is the single predicate
-                // classifying mutating operations, so future
-                // filesystem/process/network mutations join this path.
+                // classifying mutating operations; the granted-filesystem
+                // mutations join the same path through their own arm below
+                // (validated and valued, never realized under `Record`).
                 debug_assert!(host_operation_mutates(operation_id));
                 let (appended, intent_only) = if observing {
                     (view.len() as u64, true)
@@ -3662,11 +3762,15 @@ fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) 
                 discriminant,
                 payload,
             },
-            BodyType::Finite { identity, .. },
+            BodyType::Finite { identity, name },
         ) => {
-            type_identity == identity
-                && valid_finite_value(program, type_identity, variant_identity, *discriminant)
-                && finite_payload_matches(program, type_identity, variant_identity, payload)
+            // The expected declaration pins (identity, name), so a
+            // name-spelled request resolves to exactly this declaration —
+            // never to a different type sharing the name. Payload and
+            // variant checks below run against the pinned identity.
+            nominal_identity_matches(identity, name, type_identity)
+                && valid_finite_value(program, identity, variant_identity, *discriminant)
+                && finite_payload_matches(program, identity, variant_identity, payload)
         }
         (
             ExecutionValue::Record {
@@ -3674,8 +3778,13 @@ fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) 
                 fields,
                 ..
             },
-            BodyType::Record { identity, .. },
-        ) => type_identity == identity && record_fields_match(program, type_identity, fields),
+            BodyType::Record { identity, name },
+        ) => {
+            // Same pinning as finite: a name-spelled request resolves to
+            // exactly the expected declaration.
+            nominal_identity_matches(identity, name, type_identity)
+                && record_fields_match(program, identity, fields)
+        }
         (ExecutionValue::Vector { values }, BodyType::Vector { element, lanes }) => {
             values.len() == *lanes as usize
                 && values
@@ -3705,7 +3814,7 @@ fn record_fields_match(
     let Some(declaration) = program
         .record_types
         .iter()
-        .find(|decl| &decl.identity == record_identity)
+        .find(|decl| nominal_identity_matches(&decl.identity, &decl.name, record_identity))
     else {
         return false;
     };
@@ -3741,12 +3850,11 @@ fn finite_payload_matches(
     let Some(declared_payload) = program
         .finite_types
         .iter()
-        .find(|decl| &decl.identity == type_identity)
+        .find(|decl| nominal_identity_matches(&decl.identity, &decl.name, type_identity))
         .and_then(|finite_type| {
-            finite_type
-                .variants
-                .iter()
-                .find(|variant| &variant.identity == variant_identity)
+            finite_type.variants.iter().find(|variant| {
+                nominal_identity_matches(&variant.identity, &variant.name, variant_identity)
+            })
         })
         .map(|variant| variant.payload.clone())
     else {
@@ -3771,11 +3879,9 @@ fn finite_payload_matches(
 }
 
 fn value_matches_named_type(program: &Program, value: &ExecutionValue, name: &str) -> bool {
-    if let Some(finite) = program
-        .finite_types
-        .iter()
-        .find(|decl| decl.identity.0 == name)
-    {
+    if let Some(finite) = program.finite_types.iter().find(|decl| {
+        nominal_identity_matches(&decl.identity, &decl.name, &SemanticId(name.to_owned()))
+    }) {
         return value_matches_type(
             program,
             value,
@@ -3785,18 +3891,16 @@ fn value_matches_named_type(program: &Program, value: &ExecutionValue, name: &st
             },
         );
     }
-    if let Some(record) = program
-        .record_types
-        .iter()
-        .find(|decl| decl.identity.0 == name)
-    {
+    if let Some(record) = program.record_types.iter().find(|decl| {
+        nominal_identity_matches(&decl.identity, &decl.name, &SemanticId(name.to_owned()))
+    }) {
         return match value {
             ExecutionValue::Record {
                 type_identity,
                 fields,
                 ..
             } => {
-                type_identity == &record.identity
+                nominal_identity_matches(&record.identity, &record.name, type_identity)
                     && record_fields_match(program, &record.identity, fields)
             }
             _ => false,
@@ -3829,7 +3933,7 @@ fn value_matches_named_type(program: &Program, value: &ExecutionValue, name: &st
                 fields,
                 ..
             } => {
-                type_identity == &record.identity
+                nominal_identity_matches(&record.identity, &record.name, type_identity)
                     && record_fields_match(program, &record.identity, fields)
             }
             _ => false,
@@ -4127,12 +4231,29 @@ pub(crate) fn valid_finite_value(
     program
         .finite_types
         .iter()
-        .find(|finite_type| &finite_type.identity == type_identity)
+        .find(|finite_type| {
+            nominal_identity_matches(&finite_type.identity, &finite_type.name, type_identity)
+        })
         .is_some_and(|finite_type| {
             finite_type.variants.iter().any(|variant| {
-                &variant.identity == variant_identity && variant.discriminant == discriminant
+                nominal_identity_matches(&variant.identity, &variant.name, variant_identity)
+                    && variant.discriminant == discriminant
             })
         })
+}
+
+/// Host-facing nominal resolution (P1-014): a request-supplied identity
+/// matches when it is the exact internal semantic identity OR the
+/// declaration's ABI-visible name. Internal interpreter values always
+/// carry exact identities, so this only ever admits more request shapes;
+/// unknown names never match (fail closed). The discriminant still has to
+/// agree — a name never aliases across variants.
+pub(crate) fn nominal_identity_matches(
+    identity: &SemanticId,
+    name: &str,
+    actual: &SemanticId,
+) -> bool {
+    actual == identity || actual.0 == name
 }
 
 fn boolean_operands(

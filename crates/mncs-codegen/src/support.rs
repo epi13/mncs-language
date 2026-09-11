@@ -301,10 +301,16 @@ pub(crate) fn composite_value_contracts(
             .collect();
         let contract = BackendValueContract::Finite {
             type_identity: finite.identity.clone(),
+            name: finite.name.clone(),
             variants: finite
                 .variants
                 .iter()
                 .map(|variant| (variant.discriminant, variant.identity.clone()))
+                .collect(),
+            variant_names: finite
+                .variants
+                .iter()
+                .map(|variant| (variant.discriminant, variant.name.clone()))
                 .collect(),
             payloads,
         };
@@ -361,10 +367,16 @@ pub(crate) fn value_contract_for(program: &Program, name: &str) -> BackendValueC
             .collect();
         return BackendValueContract::Finite {
             type_identity: finite_type.identity.clone(),
+            name: finite_type.name.clone(),
             variants: finite_type
                 .variants
                 .iter()
                 .map(|variant| (variant.discriminant, variant.identity.clone()))
+                .collect(),
+            variant_names: finite_type
+                .variants
+                .iter()
+                .map(|variant| (variant.discriminant, variant.name.clone()))
                 .collect(),
             payloads,
         };
@@ -467,20 +479,40 @@ pub(crate) fn entry_value_contract<'a>(
 /// emitted before qualified lowering, loaded from disk via
 /// `experiment execute`). The fallback keeps old artifacts executable;
 /// freshly lowered programs always take the qualified branch.
-pub(crate) fn entry_native_symbol(exports: &[String], module: &str, function: &str) -> String {
+/// Checked entry resolution for drivers (P1-B02 per-entrypoint admission).
+/// Resolves exactly like `entry_native_symbol` — qualified first, then the
+/// legacy short-name fallback for artifacts emitted before qualified
+/// lowering — but returns `None` when the entry is not realized at all.
+/// That is the refused-entrypoint case: the function was omitted from the
+/// artifact (or stubbed, on WASM) because its own closure needs a
+/// capability this backend does not realize. Drivers map `None` to
+/// `Unsupported` with the reason below instead of mislinking through the
+/// short-name fallback; the per-function WHY lives in the artifact's
+/// machine-readable `unsupported` admission report.
+pub(crate) fn resolve_entry_export(
+    exports: &[String],
+    module: &str,
+    function: &str,
+) -> Option<String> {
     let qualified = qualified_c_symbol(module, function);
     if exports.iter().any(|export| export == &qualified) {
-        qualified
-    } else {
-        c_symbol(function)
+        return Some(qualified);
     }
+    let short = c_symbol(function);
+    if exports.iter().any(|export| export == &short) {
+        return Some(short);
+    }
+    None
 }
 
-/// Whether one emitted module (WASM export list or decoded function table)
-/// carries an entry under its qualified spelling.
-pub(crate) fn exports_contain(exports: &[String], module: &str, function: &str) -> bool {
-    let qualified = qualified_c_symbol(module, function);
-    exports.iter().any(|export| export == &qualified)
+/// Fail-closed reason for an unrealized entry (see `resolve_entry_export`).
+pub(crate) fn unrealized_entry_reason(module: &str, function: &str) -> String {
+    format!(
+        "entry {module}::{function} is not realized by this artifact: \
+         the function was refused at per-entrypoint admission (see the \
+         artifact `unsupported` report); runnable entrypoints are listed \
+         in `exports`"
+    )
 }
 
 /// Language-owned aggregate value validation (WEB-P-011).
@@ -504,7 +536,9 @@ pub(crate) fn check_contract_value(
         (
             BackendValueContract::Finite {
                 type_identity,
+                name,
                 variants,
+                variant_names,
                 payloads,
             },
             ExecutionValue::Finite {
@@ -514,8 +548,18 @@ pub(crate) fn check_contract_value(
                 payload,
             },
         ) => {
-            if type_identity != actual_type || variants.get(discriminant) != Some(variant_identity)
-            {
+            // Host-facing nominal resolution (P1-014/P1-020): the type may
+            // be spelled by ABI-visible name, and the variant by name with
+            // its discriminant. The discriminant still has to agree — a
+            // name never aliases across variants — and unknown names fail
+            // closed below.
+            let type_matches =
+                type_identity == actual_type || (!name.is_empty() && name == &actual_type.0);
+            let variant_matches = variants.get(discriminant) == Some(variant_identity)
+                || variant_names
+                    .get(discriminant)
+                    .is_some_and(|expected| expected == &variant_identity.0);
+            if !type_matches || !variant_matches {
                 return Err(format!(
                     "MNCS_VALUE_CONTRACT {path}: finite value identity mismatch: expected {type_identity:?}, received {actual_type:?}"
                 ));
@@ -550,7 +594,12 @@ pub(crate) fn check_contract_value(
                 ..
             },
         ) => {
-            if type_identity != actual_type {
+            // Host-facing nominal resolution (P1-014): the type may be
+            // spelled by ABI-visible name; unknown names fail closed.
+            // The empty-name guard mirrors the finite arm: a contract
+            // that records no name never aliases, so a vacuous
+            // empty-equals-empty match cannot smuggle a value through.
+            if type_identity != actual_type && (name.is_empty() || name != &actual_type.0) {
                 return Err(format!(
                     "MNCS_VALUE_CONTRACT {path}: record identity mismatch: expected {type_identity:?} ({name}), received {actual_type:?}"
                 ));
@@ -1639,6 +1688,232 @@ int main(int argc, char **argv) {{
 }}
 "#
     )
+}
+
+#[cfg(test)]
+mod contract_tests {
+    //! P1-014/P1-020 nominal boundary contracts: hosts may spell a
+    //! record type by ABI-visible name and a finite value by
+    //! (type-name, variant-name) with its discriminant, resolved
+    //! against exactly the expected declaration. A name never aliases
+    //! across types or across variants, unknown names fail closed with
+    //! `MNCS_VALUE_CONTRACT`, and payload fields resolve by name at
+    //! every nesting level.
+    use super::*;
+    use mncs_model::SemanticId;
+    use std::sync::Arc;
+
+    fn sid(text: &str) -> SemanticId {
+        SemanticId(text.to_owned())
+    }
+
+    fn u64_value(value: i128) -> ExecutionValue {
+        ExecutionValue::Integer {
+            value,
+            ty: IntegerType {
+                bits: 64,
+                signed: false,
+            },
+        }
+    }
+
+    fn pair_contract() -> BackendValueContract {
+        BackendValueContract::Record {
+            type_identity: sid("mncs:0.2:record-type:example::WordPair"),
+            name: "WordPair".to_owned(),
+            fields: vec![
+                ("hi".to_owned(), "u64".to_owned()),
+                ("lo".to_owned(), "u64".to_owned()),
+            ],
+        }
+    }
+
+    fn status_contract() -> BackendValueContract {
+        BackendValueContract::Finite {
+            type_identity: sid("mncs:0.2:finite-type:example::Status"),
+            name: "Status".to_owned(),
+            variants: BTreeMap::from([
+                (0, sid("mncs:0.2:finite-variant:example::Status::Pass")),
+                (1, sid("mncs:0.2:finite-variant:example::Status::Fail")),
+            ]),
+            variant_names: BTreeMap::from([(0, "Pass".to_owned()), (1, "Fail".to_owned())]),
+            payloads: BTreeMap::from([
+                (0, Vec::new()),
+                (1, vec![("code".to_owned(), "u64".to_owned())]),
+            ]),
+        }
+    }
+
+    fn composites() -> BTreeMap<String, BackendValueContract> {
+        BTreeMap::from([
+            ("WordPair".to_owned(), pair_contract()),
+            ("Status".to_owned(), status_contract()),
+        ])
+    }
+
+    #[test]
+    fn record_accepts_name_spelling_with_reordered_fields() {
+        // The host spells the ABI-visible name instead of the full
+        // nominal identity, and fields arrive out of order: both
+        // resolve by name against the declaration.
+        let value = ExecutionValue::Record {
+            type_identity: sid("WordPair"),
+            name: "WordPair".to_owned(),
+            fields: Arc::new(vec![
+                ("lo".to_owned(), u64_value(2)),
+                ("hi".to_owned(), u64_value(1)),
+            ]),
+        };
+        assert!(check_contract_value(&pair_contract(), &value, &composites(), "arg").is_ok());
+    }
+
+    #[test]
+    fn record_accepts_full_identity_spelling() {
+        let value = ExecutionValue::Record {
+            type_identity: sid("mncs:0.2:record-type:example::WordPair"),
+            name: "WordPair".to_owned(),
+            fields: Arc::new(vec![
+                ("hi".to_owned(), u64_value(1)),
+                ("lo".to_owned(), u64_value(2)),
+            ]),
+        };
+        assert!(check_contract_value(&pair_contract(), &value, &composites(), "arg").is_ok());
+    }
+
+    #[test]
+    fn record_refuses_unknown_names_and_bad_fields() {
+        let wrong_type = ExecutionValue::Record {
+            type_identity: sid("OtherPair"),
+            name: "OtherPair".to_owned(),
+            fields: Arc::new(vec![
+                ("hi".to_owned(), u64_value(1)),
+                ("lo".to_owned(), u64_value(2)),
+            ]),
+        };
+        let refused =
+            check_contract_value(&pair_contract(), &wrong_type, &composites(), "arg").unwrap_err();
+        assert!(refused.contains("MNCS_VALUE_CONTRACT"), "{refused}");
+        assert!(refused.contains("record identity mismatch"), "{refused}");
+        // A known name on the WRONG contract still refuses: names pin
+        // to exactly the expected declaration.
+        let cross_type = ExecutionValue::Record {
+            type_identity: sid("Status"),
+            name: "Status".to_owned(),
+            fields: Arc::new(vec![("code".to_owned(), u64_value(7))]),
+        };
+        let refused =
+            check_contract_value(&pair_contract(), &cross_type, &composites(), "arg").unwrap_err();
+        assert!(refused.contains("MNCS_VALUE_CONTRACT"), "{refused}");
+        // Missing and unknown fields refuse with the field lists named.
+        let missing = ExecutionValue::Record {
+            type_identity: sid("WordPair"),
+            name: "WordPair".to_owned(),
+            fields: Arc::new(vec![("hi".to_owned(), u64_value(1))]),
+        };
+        let refused =
+            check_contract_value(&pair_contract(), &missing, &composites(), "arg").unwrap_err();
+        assert!(refused.contains("MNCS_VALUE_CONTRACT"), "{refused}");
+    }
+
+    #[test]
+    fn record_empty_name_never_aliases() {
+        // A contract recording no name resolves by full identity only;
+        // a vacuous empty-equals-empty match cannot smuggle a value.
+        let nameless = BackendValueContract::Record {
+            type_identity: sid("mncs:0.2:record-type:example::WordPair"),
+            name: String::new(),
+            fields: vec![
+                ("hi".to_owned(), "u64".to_owned()),
+                ("lo".to_owned(), "u64".to_owned()),
+            ],
+        };
+        let vacuous = ExecutionValue::Record {
+            type_identity: sid(""),
+            name: String::new(),
+            fields: Arc::new(vec![
+                ("hi".to_owned(), u64_value(1)),
+                ("lo".to_owned(), u64_value(2)),
+            ]),
+        };
+        let refused = check_contract_value(&nameless, &vacuous, &composites(), "arg").unwrap_err();
+        assert!(refused.contains("MNCS_VALUE_CONTRACT"), "{refused}");
+    }
+
+    #[test]
+    fn finite_accepts_name_spelling_with_discriminant() {
+        // The host spells (type-name, variant-name); the discriminant
+        // still has to agree with the declaration.
+        let value = ExecutionValue::Finite {
+            type_identity: sid("Status"),
+            variant_identity: sid("Fail"),
+            discriminant: 1,
+            payload: Arc::new(vec![("code".to_owned(), u64_value(7))]),
+        };
+        assert!(check_contract_value(&status_contract(), &value, &composites(), "arg").is_ok());
+        // Full-identity spellings keep working.
+        let full = ExecutionValue::Finite {
+            type_identity: sid("mncs:0.2:finite-type:example::Status"),
+            variant_identity: sid("mncs:0.2:finite-variant:example::Status::Pass"),
+            discriminant: 0,
+            payload: Arc::new(Vec::new()),
+        };
+        assert!(check_contract_value(&status_contract(), &full, &composites(), "arg").is_ok());
+    }
+
+    #[test]
+    fn finite_name_never_aliases_across_variants() {
+        // "Pass" spelled with discriminant 1 (Fail's slot) refuses: the
+        // name must match the discriminant's own declaration.
+        let crossed = ExecutionValue::Finite {
+            type_identity: sid("Status"),
+            variant_identity: sid("Pass"),
+            discriminant: 1,
+            payload: Arc::new(vec![("code".to_owned(), u64_value(7))]),
+        };
+        let refused =
+            check_contract_value(&status_contract(), &crossed, &composites(), "arg").unwrap_err();
+        assert!(refused.contains("MNCS_VALUE_CONTRACT"), "{refused}");
+        assert!(
+            refused.contains("finite value identity mismatch"),
+            "{refused}"
+        );
+        // Unknown type and variant names refuse.
+        let unknown_type = ExecutionValue::Finite {
+            type_identity: sid("Mood"),
+            variant_identity: sid("Fail"),
+            discriminant: 1,
+            payload: Arc::new(vec![("code".to_owned(), u64_value(7))]),
+        };
+        let refused = check_contract_value(&status_contract(), &unknown_type, &composites(), "arg")
+            .unwrap_err();
+        assert!(refused.contains("MNCS_VALUE_CONTRACT"), "{refused}");
+        let unknown_variant = ExecutionValue::Finite {
+            type_identity: sid("Status"),
+            variant_identity: sid("Maybe"),
+            discriminant: 1,
+            payload: Arc::new(vec![("code".to_owned(), u64_value(7))]),
+        };
+        let refused =
+            check_contract_value(&status_contract(), &unknown_variant, &composites(), "arg")
+                .unwrap_err();
+        assert!(refused.contains("MNCS_VALUE_CONTRACT"), "{refused}");
+    }
+
+    #[test]
+    fn finite_payload_fields_resolve_by_name() {
+        // Payload arrives with an unknown field: the by-name ordering
+        // refuses with the expected-vs-received lists, never binds
+        // positionally.
+        let bad_payload = ExecutionValue::Finite {
+            type_identity: sid("Status"),
+            variant_identity: sid("Fail"),
+            discriminant: 1,
+            payload: Arc::new(vec![("reason".to_owned(), u64_value(7))]),
+        };
+        let refused = check_contract_value(&status_contract(), &bad_payload, &composites(), "arg")
+            .unwrap_err();
+        assert!(refused.contains("MNCS_VALUE_CONTRACT"), "{refused}");
+    }
 }
 
 #[cfg(test)]

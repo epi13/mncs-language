@@ -1,0 +1,203 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-effect-partition",
+ "cases": [
+  {
+   "id": "pure-add",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.effect_partition",
+     "function": "frame_add"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 40,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 42,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "pure-caller",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.effect_partition",
+     "function": "pure_caller"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 40,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 43,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "effect-append",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.effect_partition",
+     "function": "append_word"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 4,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "effect-transitive",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.effect_partition",
+     "function": "append_and_add"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 97
+         }
+        },
+        {
+         "byte": {
+          "value": 98
+         }
+        },
+        {
+         "byte": {
+          "value": 99
+         }
+        },
+        {
+         "byte": {
+          "value": 100
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 10,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 14,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

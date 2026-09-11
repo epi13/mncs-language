@@ -1036,7 +1036,19 @@ pub enum BackendValueContract {
     },
     Finite {
         type_identity: SemanticId,
+        /// ABI-visible type name (P1-014): hosts may spell this name
+        /// wherever a finite `type_identity` is required; the checker
+        /// resolves it against exactly the expected declaration. Absent
+        /// (empty) in artifacts emitted before the name was recorded.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        name: String,
         variants: BTreeMap<u32, SemanticId>,
+        /// Variant names per discriminant (P1-020): hosts may spell the
+        /// variant name wherever a `variant_identity` is required, matched
+        /// together with the discriminant — a name never aliases across
+        /// variants. Absent (empty) in older artifacts.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        variant_names: BTreeMap<u32, String>,
         /// Payload field declarations per discriminant, canonical order
         /// (field name, declared semantic type). Empty for payload-free
         /// finite types; serialized as absent so existing artifacts parse.

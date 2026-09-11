@@ -259,17 +259,20 @@ pub fn lower_cranelift(
     }
     let names = function_names(program, ssa);
     let scalar = lower_to_scalar(program, ssa, &names);
-    if !scalar.unsupported.is_empty() || scalar.functions.is_empty() {
+    // Per-entrypoint admission (P1-B02 partial realization): the artifact
+    // realizes the admitted subset and records refusals in `unsupported`.
+    // Whole-program refusal survives only when nothing is realizable.
+    if scalar.functions.is_empty() {
         let mut diagnostics = vec![CompilerDiagnostic::new(
             "CGF301",
             CompilerDiagnosticKind::UnavailableBackendCapability,
             "selected SSA is outside the Cranelift scalar envelope",
         )];
-        for reason in scalar.unsupported {
+        for reason in &scalar.unsupported {
             diagnostics.push(CompilerDiagnostic::new(
                 "CGF302",
                 CompilerDiagnosticKind::UnavailableBackendCapability,
-                reason,
+                reason.clone(),
             ));
         }
         return unknown(diagnostics);
@@ -323,7 +326,7 @@ pub fn lower_cranelift(
             "inspectable CLIF text".to_owned(),
         ],
         plan.target.evidence.clone(),
-        Vec::new(),
+        scalar.unsupported.clone(),
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(function_value_contracts(program))
@@ -1751,12 +1754,22 @@ pub fn execute_cranelift(
         }
     };
     // The JIT trampoline table is keyed by module-qualified native symbol
-    // (ENG-PRESSURE-0017); resolve the entry the same way here.
-    let entry = crate::support::entry_native_symbol(
+    // (ENG-PRESSURE-0017); resolve the entry the same way here. Refused
+    // entrypoints (P1-B02 admission) fail closed as Unsupported.
+    let Some(entry) = crate::support::resolve_entry_export(
         &payload.exports,
         &request.target.module,
         &request.target.function,
-    );
+    ) else {
+        return execution_failure(
+            result,
+            ExecutionStatus::Unsupported,
+            crate::support::unrealized_entry_reason(
+                &request.target.module,
+                &request.target.function,
+            ),
+        );
+    };
     match jit_execute_with_arguments(&payload, &entry, &raw_args, entry_depth) {
         Ok((status, value)) => {
             if JIT_OOB.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1889,14 +1902,19 @@ fn aot_fallback_execute(
     let linker = probe_clang()
         .or_else(probe_gcc)
         .ok_or_else(|| "neither clang nor gcc is present".to_owned())?;
-    // The linked object contains every module function, so the driver must
-    // define the cell runtime whenever any function manipulates cells.
-    // The entry symbol is module-qualified (ENG-PRESSURE-0017).
-    let entry = crate::support::entry_native_symbol(
+    // The linked object contains the admitted module functions, so the
+    // driver must define the cell runtime whenever any admitted function
+    // manipulates cells. The entry symbol is module-qualified
+    // (ENG-PRESSURE-0017). Refused entrypoints (P1-B02 admission) fail
+    // closed instead of mislinking.
+    let entry = crate::support::resolve_entry_export(
         &payload.exports,
         &request.target.module,
         &request.target.function,
-    );
+    )
+    .ok_or_else(|| {
+        crate::support::unrealized_entry_reason(&request.target.module, &request.target.function)
+    })?;
     // RFC 0047 §5 uniform fuel (see `execute_cranelift`).
     let entry_depth = crate::support::depth_seed_for_request(request)?;
     let driver = if crate::support::scalar_module_needs_arena_symbols(&scalar) {
@@ -4185,12 +4203,22 @@ impl CraneliftStatefulSession<'_> {
         };
         clear_jit_failure_state();
         // Trampolines are keyed by module-qualified native symbol
-        // (ENG-PRESSURE-0017).
-        let entry = crate::support::entry_native_symbol(
+        // (ENG-PRESSURE-0017). Refused entrypoints (P1-B02 admission) fail
+        // closed as Unsupported.
+        let Some(entry) = crate::support::resolve_entry_export(
             &self.artifact.exports,
             &request.target.module,
             &request.target.function,
-        );
+        ) else {
+            return execution_failure(
+                result,
+                ExecutionStatus::Unsupported,
+                crate::support::unrealized_entry_reason(
+                    &request.target.module,
+                    &request.target.function,
+                ),
+            );
+        };
         match self.jit.call(&entry, &raw_args, entry_depth) {
             Ok((status, value)) => {
                 // Same attribution as the one-shot path (WEB-P-012):

@@ -811,6 +811,7 @@ impl<'a> ArenaReader<'a> {
                 type_identity,
                 variants,
                 payloads,
+                ..
             } => {
                 let discriminant = self.get32(root)?;
                 let Some(variant_identity) = variants.get(&discriminant) else {
@@ -982,10 +983,16 @@ mod codec_tests {
     fn status_pair_record_encodes_to_the_canonical_layout() {
         let status = BackendValueContract::Finite {
             type_identity: sid("T:Status"),
+            name: "Status".to_owned(),
             variants: BTreeMap::from([
                 (0, sid("V:PASS")),
                 (1, sid("V:FAIL")),
                 (2, sid("V:UNKNOWN")),
+            ]),
+            variant_names: BTreeMap::from([
+                (0, "PASS".to_owned()),
+                (1, "FAIL".to_owned()),
+                (2, "UNKNOWN".to_owned()),
             ]),
             payloads: BTreeMap::from([(0, Vec::new()), (1, Vec::new()), (2, Vec::new())]),
         };
@@ -1072,10 +1079,16 @@ mod codec_tests {
         assert!(reader.decode(0, &pair_contract).is_err());
         let status_c = BackendValueContract::Finite {
             type_identity: sid("T:Status"),
+            name: "Status".to_owned(),
             variants: BTreeMap::from([
                 (0, sid("V:PASS")),
                 (1, sid("V:FAIL")),
                 (2, sid("V:UNKNOWN")),
+            ]),
+            variant_names: BTreeMap::from([
+                (0, "PASS".to_owned()),
+                (1, "FAIL".to_owned()),
+                (2, "UNKNOWN".to_owned()),
             ]),
             payloads: BTreeMap::from([(0, Vec::new()), (1, Vec::new()), (2, Vec::new())]),
         };

@@ -1,0 +1,87 @@
+mncs 0.14;
+
+// P1-B01 regression: unsigned checked arithmetic must use unsigned range
+// tests on every backend. The C11 backend previously sign-extended narrow
+// unsigned cells through `(uint64_t)`, mistrapping every u32 operand or
+// intermediate >= 2^31 (e.g. 255*16777216 = 4278190080 trapped while all
+// other backends returned it). Narrow unsigned cells now reinterpret via
+// `(uint32_t)` before widening to `unsigned __int128`.
+//
+// Hand-computed expectations:
+//   decode_max(255,255,255,254) = 4294967294
+//   decode_small(0,0,0,7)       = 7
+//   u32_mul_mid(255)            = 255*16777216 = 4278190080 (exceeds INT32_MAX, fits u32)
+//   u32_mul_sq                  = 65535*65535 = 4294836225 (fits u32, exceeds INT32_MAX)
+//   u32_add_max                 = 4294967294+1 = 4294967295 (exactly max, valid)
+//   u32_add_wrap                = 4294967295 +% 1 = 0 (wrapping total)
+//   u32_add_sat                 = 4294967295 +| 1 = 4294967295 (saturating clamp)
+//   u32_mul_wrap                = 4294967295 *% 2 = 4294967294 (low 32 bits)
+//   u32_mul_sat                 = 4294967295 *| 2 = 4294967295 (clamp)
+//   i32_add_max                 = 2147483647 (valid signed max; proves the u32
+//                               2147483648-range is unsigned, not signed)
+//   u32_cross_i32max            = 2147483647+1 = 2147483648 (valid u32, would
+//                               trap under signed-32 logic)
+//   u64_add_big                 = 4294967295+1 = 4294967296 (u64 control)
+//   trap_add_overflow           = 4294967295+1 checked (traps)
+//   trap_mul_overflow           = 4294967295*2 checked (traps)
+//   trap_i32_add_overflow       = 2147483647+1 checked i32 (traps; signed stays strict)
+module pressure.checked_arith_u32;
+
+fn decode_plain(b0: byte, b1: byte, b2: byte, b3: byte) -> (result: u32) {
+    let high: u32 = ((b0 as u32) * 16777216) + ((b1 as u32) * 65536) + ((b2 as u32) * 256);
+    return high + (b3 as u32);
+}
+
+fn u32_mul_mid(x: byte) -> (result: u32) {
+    return (x as u32) * 16777216;
+}
+
+fn u32_mul_sq() -> (result: u32) {
+    let a: u32 = 65535;
+    return a * a;
+}
+
+fn u32_add_max(x: u32) -> (result: u32) {
+    return x + 1;
+}
+
+fn u32_add_wrap(x: u32) -> (result: u32) {
+    return x +% 1;
+}
+
+fn u32_add_sat(x: u32) -> (result: u32) {
+    return x +| 1;
+}
+
+fn u32_mul_wrap(x: u32) -> (result: u32) {
+    return x *% 2;
+}
+
+fn u32_mul_sat(x: u32) -> (result: u32) {
+    return x *| 2;
+}
+
+fn i32_add_max() -> (result: i32) {
+    let a: i32 = 2147483647;
+    return a + 0;
+}
+
+fn u32_cross_i32max(x: u32) -> (result: u32) {
+    return x + 1;
+}
+
+fn u64_add_big(x: u64) -> (result: u64) {
+    return x + 1;
+}
+
+fn trap_add_overflow(x: u32) -> (result: u32) {
+    return x + 1;
+}
+
+fn trap_mul_overflow(x: u32) -> (result: u32) {
+    return x * 2;
+}
+
+fn trap_i32_add_overflow(x: i32) -> (result: i32) {
+    return x + 1;
+}

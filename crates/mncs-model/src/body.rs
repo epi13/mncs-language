@@ -873,11 +873,13 @@ pub enum BodyOperationKind {
 /// (HARNESS-PRESSURE-004/005/006, P-006 storage slice, index PRESS-003
 /// filesystem slice). `blob_read` discharges `host_read` and
 /// `blob_append` discharges `host_write`; the `fs_*` operations
-/// discharge `fs_list` (enumeration/identity) or `fs_read` (chunked
-/// content). Every other known operation discharges an effect of its own
-/// name. Anything unknown maps to `host_read` so pre-validation lowering
-/// keeps today's shape; unknown operations still fail closed at
-/// validation (MNB123) and at every executor.
+/// discharge `fs_list` (enumeration/identity), `fs_read` (chunked
+/// content), or `fs_write` (Tranche A durable mutations: create, staged
+/// writes, mkdir, delete, rename, sync). Every other known operation
+/// discharges an effect of its own name. Anything unknown maps to
+/// `host_read` so pre-validation lowering keeps today's shape; unknown
+/// operations still fail closed at validation (MNB123) and at every
+/// executor.
 pub fn host_call_effect_kind(operation: &str) -> &'static str {
     match operation {
         "clock_read" => "clock_read",
@@ -886,18 +888,24 @@ pub fn host_call_effect_kind(operation: &str) -> &'static str {
         "blob_append" => "host_write",
         "fs_list_count" | "fs_entry_name_at" | "fs_entry_kind_at" | "fs_generation" => "fs_list",
         "fs_read_bytes_at" => "fs_read",
+        "fs_create_file" | "fs_write_bytes_at" | "fs_append_bytes_at" | "fs_mkdir"
+        | "fs_delete_at" | "fs_rename_at" | "fs_sync_at" => "fs_write",
         _ => "host_read",
     }
 }
 
 /// The fixed operand arity of one host-call operation id. `None` marks
 /// an unknown operation: validation reports MNB123 and skips the arity
-/// check rather than stacking a second error on it.
+/// check rather than stacking a second error on it. Mutation arities
+/// count every operand position, scalar and view alike; which positions
+/// hold views is the executors' [`fs_view_positions`](crate::fs_resource::fs_view_positions) table.
 pub fn host_call_arity(operation: &str) -> Option<usize> {
     match operation {
         "blob_read" | "clock_read" | "fs_list_count" | "fs_generation" => Some(0),
-        "sha256_digest" | "blob_append" | "fs_entry_name_at" | "fs_entry_kind_at" => Some(1),
-        "ed25519_verify" | "fs_read_bytes_at" => Some(3),
+        "sha256_digest" | "blob_append" | "fs_entry_name_at" | "fs_entry_kind_at" | "fs_mkdir"
+        | "fs_delete_at" | "fs_sync_at" => Some(1),
+        "fs_create_file" | "fs_append_bytes_at" | "fs_rename_at" => Some(2),
+        "ed25519_verify" | "fs_read_bytes_at" | "fs_write_bytes_at" => Some(3),
         _ => None,
     }
 }
@@ -1997,9 +2005,16 @@ fn validate_operation(
                     .unwrap_or_else(|| Box::new(BodyType::Named("invalid".to_owned()))),
                 bound: bound.clone(),
             };
-            if available.get(operation.operands.first().unwrap_or(&String::new()))
-                != Some(&expected_sequence)
-            {
+            // A widened view projects through its use-site capacity: the
+            // recorded bound may be wider than the operand's definition
+            // bound (Profile 0.15); the live span is identical either way
+            // and the index check reads the descriptor length.
+            let projection_matches = available
+                .get(operation.operands.first().unwrap_or(&String::new()))
+                .is_some_and(|actual| {
+                    actual == &expected_sequence || body_view_widening(actual, &expected_sequence)
+                });
+            if !projection_matches {
                 errors.push(body_diagnostic(
                     "MNB087",
                     format!("{path}.operands[0]"),
@@ -2225,9 +2240,15 @@ fn validate_operation(
                 element: element_type.clone(),
                 bound: src_bound.clone(),
             };
-            if available.get(operation.operands.get(2).unwrap_or(&String::new()))
-                != Some(&expected_source)
-            {
+            // A widened view copies through its use-site capacity like a
+            // projection does (Profile 0.15); the destination stays
+            // exact-only because widening never produces an exact bound.
+            let source_matches = available
+                .get(operation.operands.get(2).unwrap_or(&String::new()))
+                .is_some_and(|actual| {
+                    actual == &expected_source || body_view_widening(actual, &expected_source)
+                });
+            if !source_matches {
                 errors.push(body_diagnostic(
                     "MNB147",
                     format!("{path}.operands[2]"),
@@ -3145,7 +3166,10 @@ fn validate_operation(
                 operation.operands.iter().zip(&callee.inputs).enumerate()
             {
                 let expected = expected_callee_input(idx);
-                if available.get(operand) != Some(&expected) {
+                let matches = available.get(operand).is_some_and(|actual| {
+                    actual == &expected || body_view_widening(actual, &expected)
+                });
+                if !matches {
                     errors.push(body_diagnostic(
                         "MNB051",
                         format!("{path}.operands"),
@@ -3537,7 +3561,10 @@ fn validate_return_types(
     for (index, value) in values.iter().enumerate() {
         let expected =
             body_type_for_function_value(program, function, &function.outputs[index].value_type);
-        if available.get(value) != Some(&expected) {
+        let matches = available
+            .get(value)
+            .is_some_and(|actual| actual == &expected || body_view_widening(actual, &expected));
+        if !matches {
             errors.push(body_diagnostic(
                 "MNB036",
                 format!("{path}.body"),
@@ -3840,6 +3867,35 @@ fn body_diagnostic(code: &str, path: String, message: impl Into<String>) -> Diag
         path,
         message: message.into(),
     }
+}
+
+/// Static view-capacity widening at body-validation use sites (Profile 0.15
+/// elaboration gate; STORE-P-0012/P2-002).
+///
+/// A `[T; up_to M]` value satisfies a `[T; up_to N]` expectation exactly
+/// when `M <= N` with the same element type: no copy, no runtime check,
+/// the descriptor is identical. Body validation accepts the relation
+/// unconditionally because profiles live at the source layer — only
+/// 0.15+ elaboration can produce a widened use, older profiles keep
+/// refusing at elaboration (MNE117/MNE133/MNE115/MNE103/MNE135) so their
+/// bodies never contain one. Exact bounds never participate, element
+/// mismatches refuse, and symbolic generic capacities (`Param`,
+/// `UpToParam`) refuse: callers must substitute concrete bounds first.
+fn body_view_widening(actual: &BodyType, expected: &BodyType) -> bool {
+    if let (
+        BodyType::Sequence {
+            element: actual_element,
+            bound: SequenceBound::UpTo(source_cap),
+        },
+        BodyType::Sequence {
+            element: expected_element,
+            bound: SequenceBound::UpTo(target_cap),
+        },
+    ) = (actual, expected)
+    {
+        return actual_element == expected_element && source_cap <= target_cap;
+    }
+    false
 }
 
 #[cfg(test)]

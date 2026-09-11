@@ -330,8 +330,6 @@ pub struct ScalarModule {
 }
 
 pub fn lower_to_scalar(program: &Program, ssa: &SsaModule, names: &[String]) -> ScalarModule {
-    let mut functions = Vec::new();
-    let mut unsupported = Vec::new();
     let mut features = Vec::new();
     let mut promise_decisions = Vec::new();
     let layout = CompositeLayout::from_program(program);
@@ -353,20 +351,100 @@ pub fn lower_to_scalar(program: &Program, ssa: &SsaModule, names: &[String]) -> 
             )
         })
         .collect();
+    // Per-entrypoint admission (P1-B02 partial realization): every function
+    // lowers independently first; the transitive fixpoint below then keeps
+    // exactly the functions whose whole callee closure lowered. A pure
+    // function in a module that also hosts effects is no longer poisoned
+    // by its neighbors — only by its own closure. Refused entrypoints
+    // (direct or transitive) are reported per function in `unsupported`,
+    // which adapters carry into the artifact's machine-readable admission
+    // record (`exports` vs `unsupported`); drivers gate entry lookup on
+    // `exports` so a refused entrypoint fails closed as Unsupported.
+    let mut lowered: Vec<(SemanticId, ScalarFunction)> = Vec::new();
+    let mut refused: BTreeMap<SemanticId, String> = BTreeMap::new();
     for (index, function) in ssa.functions.iter().enumerate() {
         let name = names
             .get(index)
             .map(|name| crate::support::c_symbol(name))
             .unwrap_or_else(|| crate::support::export_name(&function.semantic_identity.0));
         match lower_function(ssa, function, name, &callees, &layout) {
-            Ok(lowered) => {
-                features.extend(lowered.promises.iter().cloned());
-                promise_decisions.extend(lowered.promise_decisions.iter().cloned());
-                functions.push(lowered);
+            Ok(lowered_fn) => {
+                lowered.push((function.semantic_identity.clone(), lowered_fn));
             }
-            Err(reason) => unsupported.push(format!("{}: {reason}", function.identity.0)),
+            Err(reason) => {
+                refused.insert(
+                    function.semantic_identity.clone(),
+                    format!(
+                        "{} ({}): {reason}",
+                        function.identity.0, function.semantic_identity.0
+                    ),
+                );
+            }
         }
     }
+    // Transitive closure over the SSA call graph (fixpoint; monotone
+    // shrinking so it terminates in at most N rounds even with recursive
+    // cycles). A caller of a refused function is refused with the refused
+    // callee named, so no admitted function references a missing symbol.
+    let callees_of = |identity: &SemanticId| -> Vec<SemanticId> {
+        ssa.functions
+            .iter()
+            .find(|function| &function.semantic_identity == identity)
+            .map(|function| {
+                function
+                    .blocks
+                    .iter()
+                    .flat_map(|block| block.instructions.iter())
+                    .filter_map(|instruction| match &instruction.kind {
+                        mncs_model::SsaInstructionKind::Call { function, .. } => {
+                            Some(function.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    loop {
+        let mut newly_refused: Vec<(SemanticId, String)> = Vec::new();
+        for (identity, _) in &lowered {
+            if refused.contains_key(identity) {
+                continue;
+            }
+            // Every SSA function is either lowered or refused from the
+            // start, so only refused-set membership can poison a caller
+            // here; unknown external callees keep their historical direct
+            // lowering failure.
+            if let Some(first) = callees_of(identity)
+                .into_iter()
+                .find(|callee| refused.contains_key(callee))
+            {
+                newly_refused.push((
+                    identity.clone(),
+                    format!("{}: transitively requires refused {}", identity.0, first.0),
+                ));
+            }
+        }
+        if newly_refused.is_empty() {
+            break;
+        }
+        for (identity, reason) in newly_refused {
+            refused.insert(identity, reason);
+        }
+    }
+    let mut functions: Vec<ScalarFunction> = Vec::new();
+    for (identity, lowered_fn) in lowered {
+        if refused.contains_key(&identity) {
+            continue;
+        }
+        features.extend(lowered_fn.promises.iter().cloned());
+        promise_decisions.extend(lowered_fn.promise_decisions.iter().cloned());
+        functions.push(lowered_fn);
+    }
+    let mut unsupported: Vec<String> = refused.into_values().collect();
+    // Deterministic report order (by function, then reason) so artifact
+    // identities stay stable across runs and hosts.
+    unsupported.sort();
     if (!layout.records.is_empty() || !layout.boxed_finites.is_empty())
         && functions
             .iter()

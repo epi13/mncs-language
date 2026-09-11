@@ -1291,6 +1291,19 @@ pub fn lower_module(
         }
     }
     let host_end = composites.uses_composites.then_some(1 + 2 * region_count);
+    // Per-entrypoint admission (P1-B02 partial realization): lower every
+    // function independently first. Direct failures (effects, host calls,
+    // out-of-subset instructions) refuse only their own function; the
+    // transitive fixpoint below then refuses callers of refused functions
+    // so no admitted function references a missing entry. Refused slots
+    // keep their index (a parameterless `unreachable` stub — admitted code
+    // never calls them by construction, and they are never exported), so
+    // import shifts, region globals, and call indices stay exactly as
+    // lowered. Drivers gate entry lookup on `exports`, so a refused
+    // entrypoint fails closed as Unsupported instead of trapping.
+    let mut direct: Vec<Result<crate::wasm::WasmFunction, String>> =
+        Vec::with_capacity(ssa.functions.len());
+    let mut refused: BTreeMap<SemanticId, String> = BTreeMap::new();
     for (index, function) in ssa.functions.iter().enumerate() {
         let name = names
             .get(index)
@@ -1308,14 +1321,93 @@ pub fn lower_module(
             ),
             Err(reason) => Err(reason.clone()),
         };
+        if let Err(reason) = &lowered {
+            refused.insert(
+                function.semantic_identity.clone(),
+                format!(
+                    "{} ({}): {reason}",
+                    function.identity.0, function.semantic_identity.0
+                ),
+            );
+        }
+        direct.push(lowered);
+    }
+    let callees_of = |identity: &SemanticId| -> Vec<SemanticId> {
+        ssa.functions
+            .iter()
+            .find(|function| &function.semantic_identity == identity)
+            .map(|function| {
+                function
+                    .blocks
+                    .iter()
+                    .flat_map(|block| block.instructions.iter())
+                    .filter_map(|instruction| match &instruction.kind {
+                        SsaInstructionKind::Call { function, .. } => Some(function.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    loop {
+        let mut newly_refused: Vec<(SemanticId, String)> = Vec::new();
+        for function in &ssa.functions {
+            if refused.contains_key(&function.semantic_identity) {
+                continue;
+            }
+            if let Some(first) = callees_of(&function.semantic_identity)
+                .into_iter()
+                .find(|callee| refused.contains_key(callee))
+            {
+                newly_refused.push((
+                    function.semantic_identity.clone(),
+                    format!(
+                        "{}: transitively requires refused {}",
+                        function.identity.0, first.0
+                    ),
+                ));
+            }
+        }
+        if newly_refused.is_empty() {
+            break;
+        }
+        for (identity, reason) in newly_refused {
+            refused.insert(identity, reason);
+        }
+    }
+    let mut admitted = 0usize;
+    for ((index, function), lowered) in ssa.functions.iter().enumerate().zip(direct) {
+        let name = names
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| export_name(&function.semantic_identity));
+        if refused.contains_key(&function.semantic_identity) {
+            // Index-preserving refusal stub: admitted code never calls it
+            // (fixpoint above) and it is never exported, so the dead slot
+            // keeps every other index exactly as lowered.
+            functions.push(crate::wasm::WasmFunction {
+                name,
+                params: Vec::new(),
+                locals: Vec::new(),
+                results: Vec::new(),
+                body: vec![Instr::Unreachable],
+            });
+            continue;
+        }
         match lowered {
             Ok(wasm) => {
+                admitted += 1;
                 exports.push(wasm.name.clone());
                 functions.push(wasm);
             }
-            Err(reason) => unsupported.push(format!("{}: {reason}", function.identity.0)),
+            Err(reason) => {
+                // Unreachable: every Err was recorded in `refused` above.
+                unsupported.push(format!("{}: {reason}", function.identity.0));
+            }
         }
     }
+    unsupported.extend(refused.into_values());
+    unsupported.sort();
     let imports = trig_imports
         .iter()
         .map(|name| WasmImport {
@@ -1325,7 +1417,11 @@ pub fn lower_module(
             results: vec![ValType::F64],
         })
         .collect::<Vec<_>>();
-    let module = if unsupported.is_empty() && !functions.is_empty() {
+    // Per-entrypoint admission: the module materializes whenever at least
+    // one entrypoint lowered (refused slots are dead stubs, never
+    // exported). Whole-program refusal survives only when nothing is
+    // realizable.
+    let module = if admitted > 0 {
         Some(if composites.uses_composites {
             // Global 0 is the bump cursor; the next region_count globals
             // are loop-region marks and the region_count after those are
@@ -3547,12 +3643,11 @@ fn emit_saturating(
     right: u32,
     dest: u32,
 ) -> Result<(), String> {
-    if result != operand
-        || operand.bits > 32
-        || (!operand.signed && operand.bits > 31)
-        || !matches!(operator, "add" | "sub" | "mul")
-    {
-        return Err("portable WASM saturating arithmetic requires signed 1..=32-bit or unsigned 1..=31-bit add/sub/mul in i32 cells".to_owned());
+    if result != operand || operand.bits > 32 || !matches!(operator, "add" | "sub" | "mul") {
+        return Err(
+            "portable WASM saturating arithmetic requires 1..=32-bit add/sub/mul in i32 cells"
+                .to_owned(),
+        );
     }
     let (min, max) = if operand.signed {
         let top = 1_i64 << (operand.bits - 1);
@@ -3560,22 +3655,46 @@ fn emit_saturating(
     } else {
         (0, (1_i64 << operand.bits) - 1)
     };
+    // Unsigned wide products fit exactly in 64 bits ((2^32-1)^2 < 2^64),
+    // so saturation is an unsigned range test against the same wide value
+    // the checked path (`emit_unsigned_trap_i32`) uses. Signed keeps its
+    // signed comparisons; unsigned uses unsigned comparisons so values at
+    // or above 2^31 (including the full u32 maximum) classify correctly.
+    // Saturation values that do not fit `i32` (u32 max) materialize via
+    // `I64Const` + wrap, which carries the exact bit pattern the i32 cell
+    // must hold; downstream cells interpret the pattern unsigned.
+    let gt = if operand.signed {
+        Instr::I64GtS
+    } else {
+        Instr::I64GtU
+    };
+    let lt = if operand.signed {
+        Instr::I64LtS
+    } else {
+        Instr::I64LtU
+    };
+    let push_sat_const = |body: &mut Vec<Instr>, value: i64| {
+        if operand.signed {
+            body.push(Instr::I32Const(
+                i32::try_from(value).expect("signed saturation bound fits i32"),
+            ));
+        } else {
+            body.push(Instr::I64Const(value));
+            body.push(Instr::I32WrapI64);
+        }
+    };
     emit_wide_i64_operation(body, operator, operand, left, right)?;
     body.push(Instr::I64Const(max));
-    body.push(Instr::I64GtS);
+    body.push(gt);
     body.push(Instr::If);
-    body.push(Instr::I32Const(
-        i32::try_from(max).map_err(|_| "saturation maximum is not i32")?,
-    ));
+    push_sat_const(body, max);
     body.push(Instr::LocalSet(dest));
     body.push(Instr::Else);
     emit_wide_i64_operation(body, operator, operand, left, right)?;
     body.push(Instr::I64Const(min));
-    body.push(Instr::I64LtS);
+    body.push(lt);
     body.push(Instr::If);
-    body.push(Instr::I32Const(
-        i32::try_from(min).map_err(|_| "saturation minimum is not i32")?,
-    ));
+    push_sat_const(body, min);
     body.push(Instr::LocalSet(dest));
     body.push(Instr::Else);
     emit_wide_i64_operation(body, operator, operand, left, right)?;

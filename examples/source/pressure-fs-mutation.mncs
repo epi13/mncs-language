@@ -1,0 +1,69 @@
+mncs 0.16;
+
+// Tranche A (P1-001/P1-002/P1-003, P2-005): the durable
+// filesystem-mutation family behind the granted root. Each function
+// declares its capability and exactly one `fs_write` (or `fs_read`)
+// effect; the executor realizes the calls from an explicit `--grant-fs
+// capability=root-path` for that capability. No pathname is spelled in
+// source: indices name entries in canonical byte-sorted order, and
+// names are bare single-component views (never paths). Without a grant
+// the calls fail closed; compiled backends refuse the entrypoints as
+// Unsupported (per-entrypoint admission); under `Record` the mutations
+// are intent-only, never realized.
+module pressure.fs_mutation;
+
+fn stage(name: [byte; up_to 64], content: [byte; up_to 64]) -> (result: u64)
+    capability fs_root
+    effect fs_write authorized_by fs_root
+{
+    return fs_create_file(name, content);
+}
+
+fn grow(entry: u64, chunk: [byte; up_to 64]) -> (result: u64)
+    capability fs_root
+    effect fs_write authorized_by fs_root
+{
+    return fs_append_bytes_at(entry, chunk);
+}
+
+fn patch(entry: u64, offset: u64, chunk: [byte; up_to 64]) -> (result: u64)
+    capability fs_root
+    effect fs_write authorized_by fs_root
+{
+    return fs_write_bytes_at(entry, offset, chunk);
+}
+
+fn make_dir(name: [byte; up_to 64]) -> (result: u64)
+    capability fs_root
+    effect fs_write authorized_by fs_root
+{
+    return fs_mkdir(name);
+}
+
+fn publish(entry: u64, name: [byte; up_to 64]) -> (result: u64)
+    capability fs_root
+    effect fs_write authorized_by fs_root
+{
+    return fs_rename_at(entry, name);
+}
+
+fn barrier(entry: u64) -> (result: u64)
+    capability fs_root
+    effect fs_write authorized_by fs_root
+{
+    return fs_sync_at(entry);
+}
+
+fn retire(entry: u64) -> (result: u64)
+    capability fs_root
+    effect fs_write authorized_by fs_root
+{
+    return fs_delete_at(entry);
+}
+
+fn read_back(entry: u64, offset: u64, length: u64) -> (result: [byte; up_to 64])
+    capability fs_root
+    effect fs_read authorized_by fs_root
+{
+    return fs_read_bytes_at(entry, offset, length);
+}

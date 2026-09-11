@@ -1,0 +1,117 @@
+mncs 0.15;
+
+// P2-006 regression: a 64-record generation validates in-language through
+// bounded streaming windows rather than one monolithic sequence.
+//
+// A generation is 8 + 64*8 = 520 bytes: an 8-byte header (magic "GEN1" +
+// BE u32 record count) followed by 64 8-byte records ([tag=0x47][BE u16
+// sequence id][5 zero pad bytes]). The file validates as four 128-byte
+// windows through one shared validator that takes a WIDER view
+// (`[byte; up_to 256]`) than any window (`[byte; up_to 128]`): sub-slicing
+// plus static widening compose, so no host-side count check owns the
+// verdict. The BE decoders reuse the range-discharged byte arithmetic
+// (P1-021): provably in-range products carry no overflow debt.
+//
+// Codes: 0 OK, 1 BAD_MAGIC, 2 BAD_COUNT, 3 BAD_TAG, 4 BAD_ID, 5 BAD_PAD,
+// 6 BAD_LEN, 7 BAD_WINDOW.
+//
+// Hand-computed expectations are in the corpus; the Python generator below
+// (kept next to the corpus recipe in the test) builds the 520-byte image:
+//   gen_valid   = conforming image, len 520 -> 0
+//   bad_magic   = gen[0] flipped -> 1
+//   bad_count   = header count 63 -> 2
+//   bad_tag     = record 40 tag flipped -> 3
+//   bad_id      = record 40 id low byte flipped -> 4
+//   bad_pad     = record 40 pad byte flipped -> 5
+//   bad_len     = conforming image, len 519 -> 6
+module pressure.gen_scan;
+
+fn decode_u32_be(b0: byte, b1: byte, b2: byte, b3: byte) -> (result: u64) {
+    let w0: u64 = (b0 as u64) * 16777216;
+    let w1: u64 = (b1 as u64) * 65536;
+    let w2: u64 = (b2 as u64) * 256;
+    return w0 + w1 + w2 + (b3 as u64);
+}
+
+fn window_valid(view: [byte; up_to 256], start: u64) -> (result: u64) {
+    if view.len != 128 {
+        return 7;
+    }
+    iterate r up_to 16 carrying code: u64 = 0 {
+        next code = check_rec(view, r, start, code);
+    }
+    return code;
+}
+
+fn check_rec(view: [byte; up_to 256], rec: u64, start: u64, code: u64) -> (result: u64) {
+    if code != 0 {
+        return code;
+    }
+    let base: u64 = rec *% 8;
+    if view[base] != 71 {
+        return 3;
+    }
+    let id: u64 = (view[base +% 1] as u64) * 256 +% (view[base +% 2] as u64);
+    if id != start +% rec {
+        return 4;
+    }
+    if view[base +% 3] != 0 {
+        return 5;
+    }
+    if view[base +% 4] != 0 {
+        return 5;
+    }
+    if view[base +% 5] != 0 {
+        return 5;
+    }
+    if view[base +% 6] != 0 {
+        return 5;
+    }
+    if view[base +% 7] != 0 {
+        return 5;
+    }
+    return 0;
+}
+
+fn gen_valid(gen: [byte; 1024], len: u64) -> (result: u64) {
+    if len != 520 {
+        return 6;
+    }
+    if gen[0] != 71 {
+        return 1;
+    }
+    if gen[1] != 69 {
+        return 1;
+    }
+    if gen[2] != 78 {
+        return 1;
+    }
+    if gen[3] != 49 {
+        return 1;
+    }
+    let count: u64 = decode_u32_be(gen[4], gen[5], gen[6], gen[7]);
+    if count != 64 {
+        return 2;
+    }
+    let w0: [byte; up_to 128] = gen[8..136];
+    let c0: u64 = window_valid(w0, 0);
+    if c0 != 0 {
+        return c0;
+    }
+    let w1: [byte; up_to 128] = gen[136..264];
+    let c1: u64 = window_valid(w1, 16);
+    if c1 != 0 {
+        return c1;
+    }
+    let w2: [byte; up_to 128] = gen[264..392];
+    let c2: u64 = window_valid(w2, 32);
+    if c2 != 0 {
+        return c2;
+    }
+    let w3: [byte; up_to 128] = gen[392..520];
+    let c3: u64 = window_valid(w3, 48);
+    if c3 != 0 {
+        return c3;
+    }
+    return 0;
+}

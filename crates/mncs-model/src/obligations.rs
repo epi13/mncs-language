@@ -209,6 +209,13 @@ impl Program {
                 // authority — admission of any proof claim stays in the MNCS
                 // proof-kernel path.
                 let body_constants = collect_body_constants(body);
+                // Conservative range facts for this body (P1-021): byte
+                // facts (`0 <= x <= 255`) propagate through casts and
+                // constant arithmetic, so a big-endian u32 decoder over
+                // bytes discharges instead of carrying permanent debt.
+                // Computed once per body; the per-operation arm below only
+                // reads it.
+                let body_ranges = collect_body_ranges(body);
                 for iteration in &body.bounded_iterations {
                     let subject =
                         crate::identity::iteration_id(namespace, &function.name, &iteration.id);
@@ -551,7 +558,27 @@ impl Program {
                                         | crate::ArithmeticIntent::Saturating
                                         | crate::ArithmeticIntent::Widening { .. }
                                 );
-                                let discharged = bounded_counter_step || total_by_semantics;
+                                // Conservative range discharge (P1-021):
+                                // only scalar integer operations consult the
+                                // range facts; vector lanes keep their
+                                // historical obligations.
+                                let range_discharged = match &operation.kind {
+                                    BodyOperationKind::Integer {
+                                        operator,
+                                        operand_type,
+                                        intent: op_intent,
+                                    } => range_proves_integer_operation(
+                                        operation,
+                                        operand_type,
+                                        operator,
+                                        op_intent,
+                                        &body_ranges,
+                                    ),
+                                    _ => false,
+                                };
+                                let discharged = bounded_counter_step
+                                    || total_by_semantics
+                                    || range_discharged;
                                 let requirement = requirement_id("integer-overflow", &subject);
                                 obligations.push(ObligationRecord {
                                     schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
@@ -567,6 +594,8 @@ impl Program {
                                         "language-bounded-iteration-counter-decrement".to_owned()
                                     } else if total_by_semantics {
                                         format!("language-explicit-{intent:?}-semantics")
+                                    } else if range_discharged {
+                                        "language-range-arithmetic-sound".to_owned()
                                     } else {
                                         format!("symbolic-{intent:?}")
                                     },
@@ -816,6 +845,237 @@ pub(crate) fn body_obligation_id(kind: &str, subject: &SemanticId) -> SemanticId
 /// Compiler-known integer literals by result value identity, covering one
 /// function body. Used only to route literal-operand facts (notably
 /// nonzero literal divisors) to static discharge; it decides no proof.
+/// Declared bounds of one integer type as a closed interval.
+fn integer_bounds(ty: crate::IntegerType) -> (i128, i128) {
+    if ty.signed {
+        let top = 1_i128 << ty.bits.saturating_sub(1);
+        (-top, top - 1)
+    } else {
+        (0, (1_i128 << ty.bits) - 1)
+    }
+}
+
+/// Declared bounds of a scalar value type when it is an integer or byte.
+/// `byte` is exactly `0 <= x <= 255` by definition; every other type keeps
+/// no range fact here.
+fn scalar_value_bounds(ty: &crate::BodyType) -> Option<(i128, i128)> {
+    match ty {
+        crate::BodyType::Integer(int_ty) => Some(integer_bounds(*int_ty)),
+        crate::BodyType::Byte => Some((0, 255)),
+        _ => None,
+    }
+}
+
+/// Conservative closed-interval analysis over one function body (P1-021
+/// range-aware discharge companion).
+///
+/// Every integer- or byte-typed value maps to a sound over-approximation of
+/// the values it can carry at runtime:
+/// - body parameters and integer literals carry their exact facts (`byte`
+///   parameters are `0 <= x <= 255`; literals are singletons);
+/// - `Convert` propagates the source interval when it fits the destination
+///   (`byte` zero-extends, so `byte as uN` is `[0, 255]`), and otherwise
+///   widens to the full destination (truncation lands somewhere in it);
+/// - checked `add`/`sub`/`mul` evaluate the interval in `i128` with
+///   saturation (saturation only widens, so the test stays sound) and keep
+///   the precise interval when it fits the destination, else the full
+///   destination — execution past a checked operation implies no trap fired,
+///   so the destination bound always holds downstream;
+/// - anything else with an integer/byte result (calls, selects, lengths,
+///   divisions) widens to the full destination.
+///
+/// Merge values — block parameters and value identities defined more than
+/// once (loop-carried state, shadowing) — are pinned to their full declared
+/// bounds before the forward pass and never narrowed, so a narrow first
+/// definition inside a loop can never discharge an operation that later
+/// iterations would overflow. Unknown operands likewise widen rather than
+/// discharge. The analysis never removes a runtime check: discharge records
+/// a static range fact in the obligation ledger, exactly like the literal
+/// divisor facts (ENG-PRESSURE-0008).
+fn collect_body_ranges(body: &crate::FunctionBody) -> BTreeMap<String, (i128, i128)> {
+    let mut ranges: BTreeMap<String, (i128, i128)> = BTreeMap::new();
+    let mut pinned: BTreeSet<String> = BTreeSet::new();
+    let mut def_counts: BTreeMap<String, usize> = BTreeMap::new();
+    for block in &body.blocks {
+        for operation in &block.operations {
+            for result in &operation.results {
+                *def_counts.entry(result.id.clone()).or_default() += 1;
+            }
+        }
+    }
+    for block in &body.blocks {
+        for parameter in &block.parameters {
+            pinned.insert(parameter.id.clone());
+            if let Some(bounds) = scalar_value_bounds(&parameter.ty) {
+                ranges.insert(parameter.id.clone(), bounds);
+            }
+        }
+    }
+    for parameter in &body.parameters {
+        if let Some(bounds) = scalar_value_bounds(&parameter.ty) {
+            ranges.entry(parameter.id.clone()).or_insert(bounds);
+        }
+    }
+    // Multi-defined identities are loop-carried or shadowed: pin them to
+    // their full declared bounds up front using the first occurrence type.
+    for block in &body.blocks {
+        for operation in &block.operations {
+            for result in &operation.results {
+                if def_counts.get(&result.id).copied().unwrap_or(0) > 1
+                    && !ranges.contains_key(&result.id)
+                {
+                    if let Some(bounds) = scalar_value_bounds(&result.ty) {
+                        ranges.insert(result.id.clone(), bounds);
+                    }
+                    pinned.insert(result.id.clone());
+                }
+            }
+        }
+    }
+    for block in &body.blocks {
+        for operation in &block.operations {
+            match &operation.kind {
+                crate::body::BodyOperationKind::Constant { value, ty } => {
+                    for result in &operation.results {
+                        if pinned.contains(&result.id) {
+                            continue;
+                        }
+                        if matches!(ty, crate::BodyType::Integer(_) | crate::BodyType::Byte) {
+                            ranges.insert(result.id.clone(), (*value, *value));
+                        }
+                    }
+                }
+                crate::body::BodyOperationKind::Convert { from, to } => {
+                    let Some(dest) = scalar_value_bounds(to) else {
+                        continue;
+                    };
+                    let source = operation
+                        .operands
+                        .first()
+                        .and_then(|operand| ranges.get(operand).copied())
+                        .or_else(|| match from {
+                            crate::BodyType::Integer(int_ty) => Some(integer_bounds(*int_ty)),
+                            crate::BodyType::Byte => Some((0, 255)),
+                            _ => None,
+                        })
+                        .unwrap_or(dest);
+                    let narrowed = source.0 >= dest.0 && source.1 <= dest.1;
+                    for result in &operation.results {
+                        if pinned.contains(&result.id) {
+                            continue;
+                        }
+                        if scalar_value_bounds(&result.ty).is_some() {
+                            ranges.insert(result.id.clone(), if narrowed { source } else { dest });
+                        }
+                    }
+                }
+                crate::body::BodyOperationKind::Integer {
+                    operator,
+                    operand_type,
+                    ..
+                } if matches!(operator.as_str(), "add" | "sub" | "mul") => {
+                    let dest = integer_bounds(*operand_type);
+                    let interval = range_interval(
+                        operator,
+                        operation
+                            .operands
+                            .first()
+                            .and_then(|operand| ranges.get(operand).copied()),
+                        operation
+                            .operands
+                            .get(1)
+                            .and_then(|operand| ranges.get(operand).copied()),
+                    )
+                    .filter(|(lo, hi)| *lo >= dest.0 && *hi <= dest.1);
+                    for result in &operation.results {
+                        if pinned.contains(&result.id) {
+                            continue;
+                        }
+                        if scalar_value_bounds(&result.ty).is_some() {
+                            ranges.insert(result.id.clone(), interval.unwrap_or(dest));
+                        }
+                    }
+                }
+                _ => {
+                    for result in &operation.results {
+                        if ranges.contains_key(&result.id) {
+                            continue;
+                        }
+                        if let Some(bounds) = scalar_value_bounds(&result.ty) {
+                            ranges.insert(result.id.clone(), bounds);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    ranges
+}
+
+/// Closed interval of `add`/`sub`/`mul` over operand ranges, or `None` when
+/// an operand range is unknown. Saturating `i128` arithmetic only widens,
+/// so a `Some` interval that still fits the destination is exact enough to
+/// discharge on.
+fn range_interval(
+    operator: &str,
+    lhs: Option<(i128, i128)>,
+    rhs: Option<(i128, i128)>,
+) -> Option<(i128, i128)> {
+    let (alo, ahi) = lhs?;
+    let (blo, bhi) = rhs?;
+    match operator {
+        "add" => Some((alo.saturating_add(blo), ahi.saturating_add(bhi))),
+        "sub" => Some((alo.saturating_sub(bhi), ahi.saturating_sub(blo))),
+        "mul" => {
+            let products = [
+                alo.saturating_mul(blo),
+                alo.saturating_mul(bhi),
+                ahi.saturating_mul(blo),
+                ahi.saturating_mul(bhi),
+            ];
+            Some((
+                *products.iter().min().expect("four products"),
+                *products.iter().max().expect("four products"),
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// Whether a scalar checked/trapping `add`/`sub`/`mul` is provably within
+/// its destination type from the range facts (P1-021). Vector operations
+/// keep their historical obligations; division keeps its dedicated facts.
+fn range_proves_integer_operation(
+    operation: &crate::BodyOperation,
+    operand_type: &crate::IntegerType,
+    operator: &str,
+    intent: &crate::ArithmeticIntent,
+    ranges: &BTreeMap<String, (i128, i128)>,
+) -> bool {
+    if !matches!(
+        intent,
+        crate::ArithmeticIntent::Checked | crate::ArithmeticIntent::Trapping
+    ) || !matches!(operator, "add" | "sub" | "mul")
+    {
+        return false;
+    }
+    let dest = integer_bounds(*operand_type);
+    let Some((lo, hi)) = range_interval(
+        operator,
+        operation
+            .operands
+            .first()
+            .and_then(|operand| ranges.get(operand).copied()),
+        operation
+            .operands
+            .get(1)
+            .and_then(|operand| ranges.get(operand).copied()),
+    ) else {
+        return false;
+    };
+    lo >= dest.0 && hi <= dest.1
+}
+
 fn collect_body_constants(
     body: &crate::FunctionBody,
 ) -> BTreeMap<String, (i128, crate::IntegerType)> {

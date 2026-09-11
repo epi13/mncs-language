@@ -1,6 +1,7 @@
 //! Source-profile compatibility (RFC 0036): published profiles are
 //! immutable semantic objects, and post-0.12 extensions live in Profiles
-//! 0.13 (consolidation) and 0.14 (buffer pipelines).
+//! 0.13 (consolidation), 0.14 (buffer pipelines), 0.15 (view
+//! composition), and 0.16 (durable filesystem mutation).
 //!
 //! Every case below pins one direction of the evolution relation:
 //! - an older profile keeps its *historical* acceptance/rejection and
@@ -8,6 +9,8 @@
 //! - Profile 0.13 admits the consolidated pressure-driven extensions;
 //! - Profile 0.14 admits the buffer-pipeline tranche (span copy, checked
 //!   view narrowing, checked-index discharge);
+//! - Profile 0.15 admits static view-capacity widening;
+//! - Profile 0.16 admits the `fs_write` mutation family;
 //! - `mncs 1.0` (no published specification) fails closed.
 //!
 //! The expected codes for the older-profile rows were reproduced against
@@ -346,6 +349,53 @@ fn profile_014_admits_buffer_pipelines() {
     expect_clean(
         "admit-014",
         "mncs 0.14;\nmodule compat.admit14;\nfn read(window: [byte; up_to 64], i: u64) -> (result: byte) {\n    let c: u64 = checked_index(window, i);\n    return window[c];\n}\nfn moved(dst: [byte; 8], src: [byte; 8]) -> (result: [byte; 8]) {\n    return copy_span(dst, 0, src, 0, 8);\n}\nfn probe(src: [byte; 1024], i: u64) -> (result: byte) {\n    let window: [byte; up_to 64] = src[0..64];\n    return read(window, i);\n}\n",
+    );
+}
+
+/// Profiles through 0.14 keep the historical view-invariance rule: a
+/// narrower view does not satisfy a wider expectation (MNE117 at the use,
+/// MNE133 at the call); only 0.15 admits the static widening.
+#[test]
+fn older_profiles_refuse_view_widening() {
+    expect_error(
+        "widen-014-name",
+        "mncs 0.14;\nmodule compat.widen;\nfn take(view: [byte; up_to 64]) -> (result: u64) {\n    return view.len;\n}\nfn probe(v: [byte; up_to 8]) -> (result: u64) {\n    return take(v);\n}\n",
+        "MNE117",
+    );
+    expect_error(
+        "widen-014-call",
+        "mncs 0.14;\nmodule compat.widen;\nfn take(view: [byte; up_to 64]) -> (result: u64) {\n    return view.len;\n}\nfn probe(v: [byte; up_to 8]) -> (result: u64) {\n    return take(v);\n}\n",
+        "MNE133",
+    );
+}
+
+/// Profile 0.15 admits static view-capacity widening end to end.
+#[test]
+fn profile_015_admits_view_widening() {
+    expect_clean(
+        "admit-015",
+        "mncs 0.15;\nmodule compat.admit15;\nfn take(view: [byte; up_to 64]) -> (result: u64) {\n    return view.len;\n}\nfn probe(v: [byte; up_to 8]) -> (result: u64) {\n    let w: [byte; up_to 64] = v;\n    return take(w);\n}\n",
+    );
+}
+
+/// Profiles through 0.15 refuse the filesystem-mutation spellings at
+/// the parser wall (MNP211); only 0.16 admits the `fs_write` family.
+#[test]
+fn older_profiles_refuse_fs_mutations() {
+    expect_error(
+        "fsmutate-015",
+        "mncs 0.15;\nmodule compat.fsmutate;\nfn stage(name: [byte; up_to 64], content: [byte; up_to 64]) -> (result: u64)\n    capability fs_root\n    effect fs_write authorized_by fs_root\n{\n    return fs_create_file(name, content);\n}\n",
+        "MNP211",
+    );
+}
+
+/// Profile 0.16 admits the filesystem-mutation family end to end
+/// (elaboration; execution is pinned by `pressure_fs_mutation`).
+#[test]
+fn profile_016_admits_fs_mutations() {
+    expect_clean(
+        "admit-016",
+        "mncs 0.16;\nmodule compat.admit16;\nfn lifecycle(name: [byte; up_to 64], content: [byte; up_to 64], offset: u64) -> (result: u64)\n    capability fs_root\n    effect fs_write authorized_by fs_root\n{\n    let created: u64 = fs_create_file(name, content);\n    let written: u64 = fs_write_bytes_at(created, offset, content);\n    let appended: u64 = fs_append_bytes_at(created, content);\n    let dir: u64 = fs_mkdir(name);\n    let moved: u64 = fs_rename_at(created, name);\n    let barrier: u64 = fs_sync_at(moved);\n    let total: u64 = created +% written +% appended +% dir +% moved +% barrier;\n    let removed: u64 = fs_delete_at(moved);\n    return total +% removed;\n}\n",
     );
 }
 

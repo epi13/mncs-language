@@ -1,0 +1,9 @@
+mncs 0.15;
+
+// STORE-P-0012 widening leaf: a shared validator that takes the view it
+// means. Narrow callers widen into it with no copy and no check.
+module pressure.widen.lib;
+
+fn validate(view: [byte; up_to 64]) -> (result: u64) {
+    return view.len;
+}
