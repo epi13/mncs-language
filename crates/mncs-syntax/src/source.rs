@@ -12,10 +12,11 @@ pub const SOURCE_ENVELOPE_SCHEMA_VERSION: &str = "0.1";
 pub use crate::profile::{profile_at_least, source_profile_supported, SOURCE_PROFILE_VERSION_0_13};
 use crate::profile::{
     SOURCE_PROFILE_VERSION, SOURCE_PROFILE_VERSION_0_10, SOURCE_PROFILE_VERSION_0_11,
-    SOURCE_PROFILE_VERSION_0_12, SOURCE_PROFILE_VERSION_0_14, SOURCE_PROFILE_VERSION_0_2,
-    SOURCE_PROFILE_VERSION_0_3, SOURCE_PROFILE_VERSION_0_4, SOURCE_PROFILE_VERSION_0_5,
-    SOURCE_PROFILE_VERSION_0_6, SOURCE_PROFILE_VERSION_0_7, SOURCE_PROFILE_VERSION_0_8,
-    SOURCE_PROFILE_VERSION_0_9, SOURCE_PROFILE_VERSION_1_0,
+    SOURCE_PROFILE_VERSION_0_12, SOURCE_PROFILE_VERSION_0_14, SOURCE_PROFILE_VERSION_0_15,
+    SOURCE_PROFILE_VERSION_0_16, SOURCE_PROFILE_VERSION_0_2, SOURCE_PROFILE_VERSION_0_3,
+    SOURCE_PROFILE_VERSION_0_4, SOURCE_PROFILE_VERSION_0_5, SOURCE_PROFILE_VERSION_0_6,
+    SOURCE_PROFILE_VERSION_0_7, SOURCE_PROFILE_VERSION_0_8, SOURCE_PROFILE_VERSION_0_9,
+    SOURCE_PROFILE_VERSION_1_0,
 };
 pub const LEXICAL_SCHEMA_VERSION: &str = "0.1";
 pub const CST_SCHEMA_VERSION: &str = "0.1";
@@ -729,6 +730,83 @@ pub enum AstExpr {
         length: Box<AstExpr>,
         span: SourceSpan,
     },
+    /// Granted-filesystem exclusive create
+    /// `fs_create_file(name, content)` (Profile 0.16). Creates `name` (a
+    /// bare single-component `[byte; up_to 64]` view, never a path) in
+    /// the granted root with exactly `content`'s bytes (at most 64) and
+    /// returns the new entry index. Exclusive: an existing entry of any
+    /// kind refuses (`InvalidRequest`), never overwrites. Authority is
+    /// `effect fs_write` plus its capability. Nothing fsyncs implicitly;
+    /// the commit barrier is the separate `fs_sync_at`.
+    FsCreateFile {
+        name: Box<AstExpr>,
+        content: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Granted-filesystem positioned write
+    /// `fs_write_bytes_at(entry, offset, bytes)` (Profile 0.16). Writes
+    /// the view's bytes (at most 64) into the file entry at `entry`
+    /// starting at `offset`; returns the written count. The write may
+    /// grow the file but never creates sparse gaps (`offset <= len`,
+    /// else `InvalidRequest`). Same `fs_write` authority as
+    /// `fs_create_file`.
+    FsWriteBytesAt {
+        entry: Box<AstExpr>,
+        offset: Box<AstExpr>,
+        bytes: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Granted-filesystem append `fs_append_bytes_at(entry, bytes)`
+    /// (Profile 0.16). Appends the view's bytes (at most 64) to the file
+    /// entry at `entry`; returns the appended count. Same `fs_write`
+    /// authority as `fs_create_file`.
+    FsAppendBytesAt {
+        entry: Box<AstExpr>,
+        bytes: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Granted-filesystem exclusive mkdir `fs_mkdir(name)` (Profile
+    /// 0.16). Creates the bare-component directory `name` in the granted
+    /// root and returns the new entry index. Exclusive: an existing
+    /// entry refuses. Same `fs_write` authority as `fs_create_file`.
+    FsMkdir {
+        name: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Granted-filesystem delete `fs_delete_at(entry)` (Profile 0.16).
+    /// Removes the entry at `entry` and returns its kind (0 = file,
+    /// 1 = empty directory). Non-empty directories and `other` entries
+    /// (symlinks, sockets, devices — never touched) refuse. Same
+    /// `fs_write` authority as `fs_create_file`.
+    FsDeleteAt {
+        entry: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Granted-filesystem atomic rename `fs_rename_at(entry, new_name)`
+    /// (Profile 0.16). Moves the entry at `entry` to the bare-component
+    /// `new_name` in the same parent directory and returns the new entry
+    /// index (order is path-sorted, so the index may shift). Atomically
+    /// replaces a non-directory destination where the platform provides
+    /// atomic replace; replacing a directory is always refused. This is
+    /// the atomic-publication primitive (stage, then rename). Same
+    /// `fs_write` authority as `fs_create_file`.
+    FsRenameAt {
+        entry: Box<AstExpr>,
+        new_name: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Granted-filesystem durability barrier `fs_sync_at(entry)`
+    /// (Profile 0.16). Syncs the file entry at `entry` (file bytes),
+    /// then its containing directory and the granted root (namespace
+    /// edges); returns 1 once the barrier completes. Failures are
+    /// `RuntimeFailure`, never silent success. Directory-edge sync is
+    /// POSIX-only; elsewhere the file barrier still holds and the gap is
+    /// recorded in effect provenance. Same `fs_write` authority as
+    /// `fs_create_file`.
+    FsSyncAt {
+        entry: Box<AstExpr>,
+        span: SourceSpan,
+    },
     /// Profile 0.8 semantic vector/mask intrinsic. The parser preserves the
     /// intrinsic identity and arguments; elaboration supplies lane/type facts.
     VectorIntrinsic {
@@ -773,6 +851,13 @@ impl AstExpr {
             | Self::FsEntryKindAt { span, .. }
             | Self::FsGeneration { span, .. }
             | Self::FsReadBytesAt { span, .. }
+            | Self::FsCreateFile { span, .. }
+            | Self::FsWriteBytesAt { span, .. }
+            | Self::FsAppendBytesAt { span, .. }
+            | Self::FsMkdir { span, .. }
+            | Self::FsDeleteAt { span, .. }
+            | Self::FsRenameAt { span, .. }
+            | Self::FsSyncAt { span, .. }
             | Self::VectorIntrinsic { span, .. } => *span,
         }
     }
@@ -3327,6 +3412,176 @@ impl<'a> Parser<'a> {
                 );
                 None
             }
+            ("fs_create_file", 2) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_16) {
+                    self.error(
+                        "MNP211",
+                        "filesystem mutation intrinsics require source profile 0.16 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(name), Some(content)) = (iter.next(), iter.next()) else {
+                    return None;
+                };
+                Some(AstExpr::FsCreateFile {
+                    name: Box::new(name),
+                    content: Box::new(content),
+                    span,
+                })
+            }
+            ("fs_create_file", _) => {
+                self.error(
+                    "MNP205",
+                    "fs_create_file takes exactly two byte-view arguments (name, content)",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("fs_write_bytes_at", 3) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_16) {
+                    self.error(
+                        "MNP211",
+                        "filesystem mutation intrinsics require source profile 0.16 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(entry), Some(offset), Some(bytes)) =
+                    (iter.next(), iter.next(), iter.next())
+                else {
+                    return None;
+                };
+                Some(AstExpr::FsWriteBytesAt {
+                    entry: Box::new(entry),
+                    offset: Box::new(offset),
+                    bytes: Box::new(bytes),
+                    span,
+                })
+            }
+            ("fs_write_bytes_at", _) => {
+                self.error(
+                    "MNP205",
+                    "fs_write_bytes_at takes exactly three arguments (entry u64, offset u64, bytes view)",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("fs_append_bytes_at", 2) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_16) {
+                    self.error(
+                        "MNP211",
+                        "filesystem mutation intrinsics require source profile 0.16 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(entry), Some(bytes)) = (iter.next(), iter.next()) else {
+                    return None;
+                };
+                Some(AstExpr::FsAppendBytesAt {
+                    entry: Box::new(entry),
+                    bytes: Box::new(bytes),
+                    span,
+                })
+            }
+            ("fs_append_bytes_at", _) => {
+                self.error(
+                    "MNP205",
+                    "fs_append_bytes_at takes exactly two arguments (entry u64, bytes view)",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("fs_mkdir", 1) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_16) {
+                    self.error(
+                        "MNP211",
+                        "filesystem mutation intrinsics require source profile 0.16 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(name),) = (iter.next(),) else {
+                    return None;
+                };
+                Some(AstExpr::FsMkdir {
+                    name: Box::new(name),
+                    span,
+                })
+            }
+            ("fs_mkdir", _) => {
+                self.error(
+                    "MNP205",
+                    "fs_mkdir takes exactly one byte-view argument (name)",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("fs_delete_at", 1) | ("fs_sync_at", 1) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_16) {
+                    self.error(
+                        "MNP211",
+                        "filesystem mutation intrinsics require source profile 0.16 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(entry),) = (iter.next(),) else {
+                    return None;
+                };
+                if name.text.as_str() == "fs_delete_at" {
+                    Some(AstExpr::FsDeleteAt {
+                        entry: Box::new(entry),
+                        span,
+                    })
+                } else {
+                    Some(AstExpr::FsSyncAt {
+                        entry: Box::new(entry),
+                        span,
+                    })
+                }
+            }
+            ("fs_delete_at", _) | ("fs_sync_at", _) => {
+                self.error(
+                    "MNP205",
+                    "fs_delete_at and fs_sync_at take exactly one u64 entry-index argument",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("fs_rename_at", 2) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_16) {
+                    self.error(
+                        "MNP211",
+                        "filesystem mutation intrinsics require source profile 0.16 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(entry), Some(new_name)) = (iter.next(), iter.next()) else {
+                    return None;
+                };
+                Some(AstExpr::FsRenameAt {
+                    entry: Box::new(entry),
+                    new_name: Box::new(new_name),
+                    span,
+                })
+            }
+            ("fs_rename_at", _) => {
+                self.error(
+                    "MNP205",
+                    "fs_rename_at takes exactly two arguments (entry u64, new name view)",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
             _ => Some(AstExpr::VectorIntrinsic {
                 name,
                 arguments,
@@ -4659,6 +4914,13 @@ fn is_profile08_intrinsic(name: &str) -> bool {
             | "fs_entry_kind_at"
             | "fs_generation"
             | "fs_read_bytes_at"
+            | "fs_create_file"
+            | "fs_write_bytes_at"
+            | "fs_append_bytes_at"
+            | "fs_mkdir"
+            | "fs_delete_at"
+            | "fs_rename_at"
+            | "fs_sync_at"
             | "clock_read"
             | "sha256_digest"
             | "ed25519_verify"
@@ -4713,6 +4975,8 @@ fn infer_source_profile(text: &str) -> &'static str {
     });
     match header {
         Some(line) if line.trim_start().starts_with("mncs 1.0") => SOURCE_PROFILE_VERSION_1_0,
+        Some(line) if line.trim_start().starts_with("mncs 0.16") => SOURCE_PROFILE_VERSION_0_16,
+        Some(line) if line.trim_start().starts_with("mncs 0.15") => SOURCE_PROFILE_VERSION_0_15,
         Some(line) if line.trim_start().starts_with("mncs 0.14") => SOURCE_PROFILE_VERSION_0_14,
         Some(line) if line.trim_start().starts_with("mncs 0.13") => SOURCE_PROFILE_VERSION_0_13,
         Some(line) if line.trim_start().starts_with("mncs 0.12") => SOURCE_PROFILE_VERSION_0_12,

@@ -16,7 +16,7 @@
 
 use std::collections::BTreeMap;
 
-use mncs_codegen::integer_no_overflow_promise;
+use mncs_codegen::{integer_no_overflow_promise, proof_backed_no_overflow_certificate};
 use mncs_compiler::elaborate_program;
 use mncs_model::{
     kernel_backed_range_result, parse_proof_corpus, reference_check, ArithmeticIntent,
@@ -70,6 +70,11 @@ struct Demo {
     request: VerifierRequest,
     ssa: mncs_model::SsaModule,
     instruction_index: (usize, usize, usize),
+    /// Evidence identities for the operand trace: the two Call producers
+    /// and the two Constant argument producers behind `id(2) + id(3)`.
+    /// They travel in proof-backed certificate dependencies so the
+    /// caller-witnessed operand claim stays auditable.
+    trace: Vec<SemanticId>,
 }
 
 fn setup_demo() -> Demo {
@@ -116,9 +121,15 @@ fn setup_demo() -> Demo {
         .semantic_identity
         .clone()
         .expect("semantic operation");
-    // Both operands must be exact constants 2 and 3: the proof is about this
-    // exact computation, not about addition in general.
+    // Both operands must be exactly `id(2)` and `id(3)` through the same
+    // transparent call boundary: the proof is about this exact computation
+    // (which evaluates to 2 + 3), not about addition in general. The call
+    // boundary is what keeps the obligation UNKNOWN — the compiler's range
+    // analysis discharges closed `2 + 3` statically (P1-021) but
+    // conservatively does not see through calls — so the pin traces each
+    // add input through its Call producer to an exact constant argument.
     let mut constants = Vec::new();
+    let mut callees = Vec::new();
     for input in &instruction.inputs {
         let producer = ssa
             .functions
@@ -131,13 +142,77 @@ fn setup_demo() -> Demo {
                     .iter()
                     .any(|output| &output.identity == input)
             })
-            .expect("constant producer");
-        if let SsaInstructionKind::Constant { value, .. } = &producer.kind {
+            .expect("call producer");
+        let SsaInstructionKind::Call { function, .. } = &producer.kind else {
+            panic!(
+                "demo add operands flow through calls, found {:?}",
+                producer.kind
+            );
+        };
+        callees.push(function.clone());
+        assert_eq!(
+            producer.inputs.len(),
+            1,
+            "transparent single-argument call: {producer:?}"
+        );
+        let argument = ssa
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .flat_map(|block| &block.instructions)
+            .find(|candidate| {
+                candidate
+                    .outputs
+                    .iter()
+                    .any(|output| &output.identity == &producer.inputs[0])
+            })
+            .expect("constant argument");
+        if let SsaInstructionKind::Constant { value, .. } = &argument.kind {
             constants.push(*value);
         }
     }
     constants.sort();
-    assert_eq!(constants, vec![2, 3], "demo adds exactly 2 and 3");
+    assert_eq!(constants, vec![2, 3], "demo adds exactly id(2) and id(3)");
+    assert_eq!(
+        callees.len(),
+        2,
+        "both operands flow through the call boundary"
+    );
+    assert_eq!(
+        callees[0], callees[1],
+        "both operands flow through the same transparent function"
+    );
+    // Trace identities for proof-backed certificate dependencies: each
+    // Call producer plus the Constant producer behind its argument.
+    let mut trace = Vec::new();
+    for input in &instruction.inputs {
+        let producer = ssa
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .flat_map(|block| &block.instructions)
+            .find(|candidate| {
+                candidate
+                    .outputs
+                    .iter()
+                    .any(|output| &output.identity == input)
+            })
+            .expect("call producer");
+        trace.push(producer.identity.clone());
+        let argument = ssa
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .flat_map(|block| &block.instructions)
+            .find(|candidate| {
+                candidate
+                    .outputs
+                    .iter()
+                    .any(|output| &output.identity == &producer.inputs[0])
+            })
+            .expect("constant argument");
+        trace.push(argument.identity.clone());
+    }
     let fingerprints = BTreeMap::from([
         (operation.clone(), "demo-operation".to_owned()),
         (obligation.identity.clone(), "demo-obligation".to_owned()),
@@ -161,6 +236,7 @@ fn setup_demo() -> Demo {
         request,
         ssa,
         instruction_index,
+        trace,
     }
 }
 
@@ -269,11 +345,48 @@ fn lowering_certificate_carries_the_proof_identity() {
     let instruction = &demo.ssa.functions[demo.instruction_index.0].blocks
         [demo.instruction_index.1]
         .instructions[demo.instruction_index.2];
+    // The operands arrive through calls, so no constant-range certificate
+    // exists for this instruction: the promise path withholds, and the
+    // proof-backed constructor below is the only minting route.
     let promise = integer_no_overflow_promise(&demo.ssa, instruction);
-    assert!(promise.decision.permitted, "{}", promise.decision.reason);
-    assert_eq!(promise.decision.promise, BackendPromise::NoOverflow);
-    let certificate = promise.decision.certificate.expect("certificate");
+    assert!(
+        !promise.decision.permitted,
+        "call-fed operands keep the constant path withheld"
+    );
+    let witnessed = IntegerOperation {
+        operator: "add".to_owned(),
+        operand_type: (IntegerType {
+            bits: 64,
+            signed: true,
+        }),
+        left: 2,
+        right: 3,
+        intent: ArithmeticIntent::Checked,
+    };
+    let certificate = proof_backed_no_overflow_certificate(
+        &demo.ssa,
+        instruction,
+        &demo.obligation,
+        &binding,
+        &witnessed,
+        &demo.trace,
+        &demo.fingerprints,
+    )
+    .expect("proof-backed certificate mints for the witnessed computation");
     assert!(certificate.identity_is_valid());
+    assert_eq!(certificate.proof_identity, None, "minted unbound");
+    assert!(
+        certificate
+            .dependencies
+            .iter()
+            .all(|dependency| std::iter::once(&demo.ssa.identity)
+                .chain(demo.trace.iter())
+                .chain(std::iter::once(&demo.obligation))
+                .chain(std::iter::once(&instruction.identity))
+                .any(|expected| expected == dependency)),
+        "dependencies carry only the module, instruction, obligation, and trace: {:?}",
+        certificate.dependencies
+    );
     let bound = certificate
         .with_proof_binding(&binding)
         .expect("matching binding attaches");
@@ -282,6 +395,57 @@ fn lowering_certificate_carries_the_proof_identity() {
     assert_ne!(
         bound.identity, certificate.identity,
         "proof-bound and unbound certificates never share an identity"
+    );
+    // Fail-closed minting: a foreign obligation, a mismatched operator, and
+    // an overflowing witness each mint nothing, even with a valid binding.
+    let other = SemanticId("mncs:test:other-obligation".to_owned());
+    assert!(
+        proof_backed_no_overflow_certificate(
+            &demo.ssa,
+            instruction,
+            &other,
+            &binding,
+            &witnessed,
+            &demo.trace,
+            &demo.fingerprints,
+        )
+        .is_none(),
+        "foreign obligation mints nothing"
+    );
+    let mismatched = IntegerOperation {
+        operator: "mul".to_owned(),
+        ..witnessed.clone()
+    };
+    assert!(
+        proof_backed_no_overflow_certificate(
+            &demo.ssa,
+            instruction,
+            &demo.obligation,
+            &binding,
+            &mismatched,
+            &demo.trace,
+            &demo.fingerprints,
+        )
+        .is_none(),
+        "mismatched operator mints nothing"
+    );
+    let overflowing = IntegerOperation {
+        left: i128::MAX,
+        right: 1,
+        ..witnessed.clone()
+    };
+    assert!(
+        proof_backed_no_overflow_certificate(
+            &demo.ssa,
+            instruction,
+            &demo.obligation,
+            &binding,
+            &overflowing,
+            &demo.trace,
+            &demo.fingerprints,
+        )
+        .is_none(),
+        "overflowing witness mints nothing: the proof alone never grants the range fact"
     );
 }
 

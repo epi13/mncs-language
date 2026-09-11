@@ -77,7 +77,9 @@ fn realized(profile: &str) -> BackendProfileSupport {
 /// intent-set vibes: `host_write` realization is bytecode-only (lowering
 /// refusal on the other four executables), filesystem observation is
 /// bytecode-only (explicit refusal tests on wasm/c11/llvm/cranelift),
-/// and external families have artifact evidence only through 0.6
+/// filesystem mutation is bytecode-only (whole-program refusal of the
+/// all-effectful mutation module on all four compiled backends), and
+/// external families have artifact evidence only through 0.6
 /// (`bounded-min.mncs` at 0.2, `profile06-boolean-operators.mncs` at
 /// 0.6). Unknown backend names fail closed to all-`unsupported`.
 ///
@@ -108,6 +110,16 @@ pub fn profile_support_for(backend_name: &str) -> Vec<BackendProfileSupport> {
                 // narrowing, and checked-index corpora all agree on all
                 // five executable backends.
                 realized("0.14"),
+                // Static view widening is elaboration-only (no new
+                // runtime operation; descriptors are identical), so it
+                // executes wherever 0.14 does: the widen corpus agrees
+                // on all five executable backends.
+                realized("0.15"),
+                // Durable filesystem mutation executes end to end: the
+                // fixture-anchored mutation corpus returns on every case
+                // with overall status PASS (independent observed replay
+                // agrees layer-by-layer).
+                realized("0.16"),
             ])
             .collect(),
         "mncs-portable-wasm-mvp" | "mncs-c11" | "mncs-llvm-ir" | "mncs-cranelift" => core
@@ -122,21 +134,33 @@ pub fn profile_support_for(backend_name: &str) -> Vec<BackendProfileSupport> {
                     &["fs_observation", "structural_recursion"],
                 ),
                 realized("0.14"),
+                // Same elaboration-only argument as the research path:
+                // the widen corpus agrees on all four compiled backends.
+                realized("0.15"),
+                // Filesystem mutation is bytecode-only: the all-effectful
+                // mutation module refuses whole-program with explicit
+                // host-call diagnostics (per-entrypoint admission keeps
+                // pure neighbors realizable), so compiled backends stay
+                // partial with the mutation gap named.
+                support("0.16", "partial", &["fs_mutation"]),
             ])
             .collect(),
         "mncs-riscv32" | "mncs-ebpf" | "mncs-ptx64" => ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6"]
             .iter()
             .map(|profile| support(profile, "artifact_only", &[]))
             .chain(
-                ["0.7", "0.8", "0.9", "0.10", "0.11", "0.12", "0.13", "0.14"]
-                    .iter()
-                    .map(|profile| {
-                        support(
-                            profile,
-                            "unsupported",
-                            &["outside_external_intent_envelope"],
-                        )
-                    }),
+                [
+                    "0.7", "0.8", "0.9", "0.10", "0.11", "0.12", "0.13", "0.14", "0.15",
+                    "0.16",
+                ]
+                .iter()
+                .map(|profile| {
+                    support(
+                        profile,
+                        "unsupported",
+                        &["outside_external_intent_envelope"],
+                    )
+                }),
             )
             .collect(),
         _ => mncs_syntax::SOURCE_PROFILE_REGISTRY

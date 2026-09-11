@@ -1,15 +1,30 @@
 mncs 0.6;
 
-// RFC 0007 flagship demonstration: a checked constant addition.
+// RFC 0007 flagship demonstration: a checked addition whose operands the
+// compiler cannot see through.
 //
 // The `+` operator carries Checked intent, so compilation generates a real
 // `integer-overflow` obligation with status UNKNOWN. The accompanying proof
 // artifact (Plus 2 3 = 5 in the kernel Nat fragment, witnessed by Refl)
 // discharges it through the kernel, and the compiler consumes the resulting
 // binding. See docs/rfc-0007-demo.md.
+//
+// The operands route through the transparent `id` call boundary on purpose:
+// a closed `2 + 3` would discharge statically through the compiler's
+// conservative range analysis (P1-021: `byte`/literal facts propagate
+// through casts and constant arithmetic), leaving no UNKNOWN obligation for
+// the proof pipeline to consume. Call results are an inter-procedural
+// opacity boundary the range analysis conservatively does not see through,
+// so the obligation stays genuinely UNKNOWN — while at runtime `id(2)`
+// evaluates to exactly 2 and `id(3)` to exactly 3, so the kernel proof
+// about 2 + 3 = 5 still witnesses this exact computation.
 module examples.proof_demo;
 
+fn id(x: i64) -> (result: i64) {
+    return x;
+}
+
 fn add_small() -> (result: i64) {
-    let total: i64 = 2 + 3;
+    let total: i64 = id(2) + id(3);
     return total;
 }

@@ -2758,7 +2758,15 @@ fn elaborate_function(
             };
             let returned = env.resolve(&returned_name.text, returned_name.span, &mut diagnostics);
             if let Some(returned) = returned {
-                if returned.ty != output_type {
+                // Static view widening (Profile 0.15) takes this fast path:
+                // like the borrow it needs no synthesized operation, and the
+                // terminator below records only the value id whose
+                // descriptor is identical under either capacity.
+                let widened = mncs_syntax::profile_at_least(
+                    &ast.language_version.text,
+                    mncs_syntax::SOURCE_PROFILE_VERSION_0_15,
+                ) && view_widen_dimensions(&returned.ty, &output_type).is_some();
+                if returned.ty != output_type && !widened {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE103",
                         "returned value type does not match the declared output type",
@@ -3230,6 +3238,34 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
             calls_in_expr(entry, calls);
             calls_in_expr(offset, calls);
             calls_in_expr(length, calls);
+        }
+        AstExpr::FsCreateFile { name, content, .. } => {
+            calls_in_expr(name, calls);
+            calls_in_expr(content, calls);
+        }
+        AstExpr::FsWriteBytesAt {
+            entry,
+            offset,
+            bytes,
+            ..
+        } => {
+            calls_in_expr(entry, calls);
+            calls_in_expr(offset, calls);
+            calls_in_expr(bytes, calls);
+        }
+        AstExpr::FsAppendBytesAt { entry, bytes, .. } => {
+            calls_in_expr(entry, calls);
+            calls_in_expr(bytes, calls);
+        }
+        AstExpr::FsMkdir { name, .. } => calls_in_expr(name, calls),
+        AstExpr::FsDeleteAt { entry, .. } | AstExpr::FsSyncAt { entry, .. } => {
+            calls_in_expr(entry, calls)
+        }
+        AstExpr::FsRenameAt {
+            entry, new_name, ..
+        } => {
+            calls_in_expr(entry, calls);
+            calls_in_expr(new_name, calls);
         }
         AstExpr::Name(_)
         | AstExpr::QualifiedPath { .. }
@@ -3793,6 +3829,34 @@ impl<'a> BodyBuilder<'a> {
         self.profile_at_least(mncs_syntax::SOURCE_PROFILE_VERSION_0_14)
     }
 
+    /// Source Profile 0.15 (bounded view composition): safe static
+    /// view-capacity widening. Older profiles keep the historical
+    /// MNE117/MNE133/MNE115/MNE103/MNE135 refusals exactly.
+    fn profile_0_15(&self) -> bool {
+        self.profile_at_least(mncs_syntax::SOURCE_PROFILE_VERSION_0_15)
+    }
+
+    /// Static view-capacity widening for one resolved use (Profile 0.15):
+    /// a `[T; up_to M]` value satisfies a `[T; up_to N]` expectation with
+    /// no copy and no runtime check. Unlike narrowing, this synthesizes no
+    /// operation — the descriptor is identical, only the static capacity
+    /// fact widens — so the SAME value id flows on with the wider type.
+    /// Provenance, borrow, and scope metadata ride along untouched; only
+    /// the type fact is re-annotated at this use site.
+    fn widen_view_for_expected(
+        &self,
+        binding: &ResolvedBinding,
+        expected: &BodyType,
+    ) -> Option<ResolvedBinding> {
+        if !self.profile_0_15() {
+            return None;
+        }
+        view_widen_dimensions(&binding.ty, expected)?;
+        let mut widened = binding.clone();
+        widened.ty = expected.clone();
+        Some(widened)
+    }
+
     /// Admitted sequence/view length ceiling for the active profile.
     fn admitted_sequence_ceiling(&self) -> u32 {
         mncs_syntax::max_sequence_bound_for(&self.source_profile).unwrap_or(0)
@@ -4019,7 +4083,9 @@ impl<'a> BodyBuilder<'a> {
                 else {
                     return;
                 };
-                if produced.ty != declared {
+                if produced.ty != declared
+                    && self.widen_view_for_expected(&produced, &declared).is_none()
+                {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE115",
                         "binding initializer type does not match its declared type",
@@ -4122,7 +4188,11 @@ impl<'a> BodyBuilder<'a> {
                 if let Some(resolved) =
                     self.elaborate_expr(value, Some(&self.output_type.clone()), env, diagnostics)
                 {
-                    if resolved.ty != self.output_type {
+                    if resolved.ty != self.output_type
+                        && self
+                            .widen_view_for_expected(&resolved, &self.output_type)
+                            .is_none()
+                    {
                         diagnostics.push(elaboration_diagnostic(
                             "MNE103",
                             "returned value type does not match the declared output type",
@@ -5482,6 +5552,216 @@ impl<'a> BodyBuilder<'a> {
         Some(ResolvedBinding::plain(id, result_ty))
     }
 
+    /// Emit one granted-filesystem mutation host call (Tranche A:
+    /// P1-001/P1-002/P1-003) under exactly one declared `fs_write`
+    /// effect. Every mutation returns `u64` (new entry index, byte
+    /// count, deleted kind, or the `1` barrier receipt); failures are
+    /// realization-time `InvalidRequest`/`RuntimeFailure`, never values,
+    /// so there is no error sum to discharge here (that is Tranche C's
+    /// typed-error work).
+    fn emit_fs_mutation(
+        &mut self,
+        operation: &str,
+        operands: Vec<String>,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let result_ty = BodyType::Integer(IntegerType {
+            bits: 64,
+            signed: false,
+        });
+        if expected.is_some_and(|expected| expected != &result_ty) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE261",
+                format!(
+                    "{operation} produces {} which does not satisfy the required type",
+                    result_ty.semantic_name()
+                ),
+                span,
+            ));
+            return None;
+        }
+        let capability =
+            self.check_host_authority("fs_write", "MNE277", "MNE278", span, diagnostics)?;
+        let id = self.new_value("fswrite");
+        self.blocks[self.current].operations.push(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability,
+                operation: operation.to_owned(),
+            },
+            operands,
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
+    /// Elaborate one byte-view operand (entry name or content bytes) of a
+    /// filesystem mutation. Names are bare single components and content
+    /// is at most one view; both arrive as byte sequences, policed
+    /// further at realization (`check_entry_name`, view bounds).
+    fn elaborate_fs_name_view(
+        &mut self,
+        operation: &str,
+        view: &AstExpr,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        self.elaborate_crypto_view(view, operation, "MNE279", env, diagnostics)
+    }
+
+    /// Elaborate `fs_create_file(name, content)`: two byte views, no
+    /// scalars. Returns the new entry's index.
+    fn elaborate_fs_create_file(
+        &mut self,
+        parts: (&AstExpr, &AstExpr),
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let (name, content) = parts;
+        let name_binding = self.elaborate_fs_name_view("fs_create_file", name, env, diagnostics)?;
+        let content_binding =
+            self.elaborate_fs_name_view("fs_create_file", content, env, diagnostics)?;
+        self.emit_fs_mutation(
+            "fs_create_file",
+            vec![name_binding.id.clone(), content_binding.id.clone()],
+            span,
+            expected,
+            diagnostics,
+        )
+    }
+
+    /// Elaborate `fs_write_bytes_at(entry, offset, bytes)`: two `u64`
+    /// scalars plus one content view. Returns the written count.
+    fn elaborate_fs_write_bytes_at(
+        &mut self,
+        parts: (&AstExpr, &AstExpr, &AstExpr),
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let (entry, offset, bytes) = parts;
+        let entry_binding =
+            self.elaborate_fs_index("fs_write_bytes_at", entry, env, diagnostics)?;
+        let offset_binding =
+            self.elaborate_fs_index("fs_write_bytes_at", offset, env, diagnostics)?;
+        let bytes_binding =
+            self.elaborate_fs_name_view("fs_write_bytes_at", bytes, env, diagnostics)?;
+        self.emit_fs_mutation(
+            "fs_write_bytes_at",
+            vec![
+                entry_binding.id.clone(),
+                offset_binding.id.clone(),
+                bytes_binding.id.clone(),
+            ],
+            span,
+            expected,
+            diagnostics,
+        )
+    }
+
+    /// Elaborate `fs_append_bytes_at(entry, bytes)`: one `u64` scalar
+    /// plus one content view. Returns the appended count.
+    fn elaborate_fs_append_bytes_at(
+        &mut self,
+        parts: (&AstExpr, &AstExpr),
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let (entry, bytes) = parts;
+        let entry_binding =
+            self.elaborate_fs_index("fs_append_bytes_at", entry, env, diagnostics)?;
+        let bytes_binding =
+            self.elaborate_fs_name_view("fs_append_bytes_at", bytes, env, diagnostics)?;
+        self.emit_fs_mutation(
+            "fs_append_bytes_at",
+            vec![entry_binding.id.clone(), bytes_binding.id.clone()],
+            span,
+            expected,
+            diagnostics,
+        )
+    }
+
+    /// Elaborate `fs_mkdir(name)`: one name view. Returns the new
+    /// entry's index.
+    fn elaborate_fs_mkdir(
+        &mut self,
+        name: &AstExpr,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let name_binding = self.elaborate_fs_name_view("fs_mkdir", name, env, diagnostics)?;
+        self.emit_fs_mutation(
+            "fs_mkdir",
+            vec![name_binding.id.clone()],
+            span,
+            expected,
+            diagnostics,
+        )
+    }
+
+    /// Elaborate the single-index mutations (`fs_delete_at`,
+    /// `fs_sync_at`). Delete returns the removed entry's kind;
+    /// sync returns the `1` barrier receipt.
+    fn elaborate_fs_index_mutation(
+        &mut self,
+        operation: &str,
+        entry: &AstExpr,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let entry_binding = self.elaborate_fs_index(operation, entry, env, diagnostics)?;
+        self.emit_fs_mutation(
+            operation,
+            vec![entry_binding.id.clone()],
+            span,
+            expected,
+            diagnostics,
+        )
+    }
+
+    /// Elaborate `fs_rename_at(entry, new_name)`: one `u64` scalar plus
+    /// one name view. Returns the renamed entry's new index (path-sorted
+    /// order may shift it).
+    fn elaborate_fs_rename_at(
+        &mut self,
+        parts: (&AstExpr, &AstExpr),
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let (entry, new_name) = parts;
+        let entry_binding = self.elaborate_fs_index("fs_rename_at", entry, env, diagnostics)?;
+        let name_binding =
+            self.elaborate_fs_name_view("fs_rename_at", new_name, env, diagnostics)?;
+        self.emit_fs_mutation(
+            "fs_rename_at",
+            vec![entry_binding.id.clone(), name_binding.id.clone()],
+            span,
+            expected,
+            diagnostics,
+        )
+    }
+
     /// Elaborate one byte-view operand of a verify-only crypto intrinsic.
     /// The operand must elaborate to a byte sequence; coverage is the
     /// view's runtime bytes, so no length accompanies it. Fixed
@@ -5816,6 +6096,14 @@ impl<'a> BodyBuilder<'a> {
                             self.borrow_view_for_expected(&resolved, expected_ty)
                         {
                             return Some(borrowed);
+                        }
+                        // Static view widening (Profile 0.15): a narrower
+                        // view satisfies a wider same-element expectation
+                        // with no copy and no check; the same value id
+                        // flows on re-annotated to the wider capacity.
+                        if let Some(widened) = self.widen_view_for_expected(&resolved, expected_ty)
+                        {
+                            return Some(widened);
                         }
                         diagnostics.push(elaboration_diagnostic(
                             "MNE117",
@@ -6467,6 +6755,20 @@ impl<'a> BodyBuilder<'a> {
                             }
                             continue;
                         }
+                        // Static view widening (Profile 0.15) needs no
+                        // operand rewrite: the same descriptor satisfies
+                        // the wider capacity, so the argument id flows on
+                        // unchanged.
+                        if self
+                            .widen_view_for_expected(&argument, parameter_type)
+                            .is_some()
+                        {
+                            if index == 0 {
+                                first_argument = Some(argument.clone());
+                            }
+                            operands.push(argument.id);
+                            continue;
+                        }
                         diagnostics.push(elaboration_diagnostic(
                             "MNE133",
                             "call argument type does not match the callee parameter",
@@ -6504,7 +6806,13 @@ impl<'a> BodyBuilder<'a> {
                     let borrows = expected.is_some_and(|expected| {
                         exact_view_borrow_dimensions(&concrete_output, expected).is_some()
                     });
-                    if !borrows {
+                    // Static view widening (Profile 0.15): a narrower call
+                    // result satisfies a wider expectation with no rewrite.
+                    let widens = expected.is_some_and(|expected| {
+                        let probe = ResolvedBinding::plain(String::new(), concrete_output.clone());
+                        self.widen_view_for_expected(&probe, expected).is_some()
+                    });
+                    if !borrows && !widens {
                         diagnostics.push(elaboration_diagnostic(
                             "MNE135",
                             "call result does not have the required expression type",
@@ -6569,6 +6877,13 @@ impl<'a> BodyBuilder<'a> {
                         if let Some(borrowed) = self.borrow_view_for_expected(&binding, expected_ty)
                         {
                             return Some(borrowed);
+                        }
+                        // Static view widening (Profile 0.15): the call's
+                        // recorded result stays narrow (the honest
+                        // definition type) while this use flows on
+                        // re-annotated to the wider expectation.
+                        if let Some(widened) = self.widen_view_for_expected(&binding, expected_ty) {
+                            return Some(widened);
                         }
                     }
                 }
@@ -7302,6 +7617,12 @@ impl<'a> BodyBuilder<'a> {
                         if let Some(borrowed) = self.borrow_view_for_expected(&projected, wanted) {
                             return Some(borrowed);
                         }
+                        // Static view widening (Profile 0.15): a projected
+                        // narrower view satisfies a wider same-element
+                        // expectation with no copy and no check.
+                        if let Some(widened) = self.widen_view_for_expected(&projected, wanted) {
+                            return Some(widened);
+                        }
                     }
                     diagnostics.push(elaboration_diagnostic(
                         "MNE163",
@@ -7592,6 +7913,50 @@ impl<'a> BodyBuilder<'a> {
                 env,
                 diagnostics,
             ),
+            AstExpr::FsCreateFile {
+                name,
+                content,
+                span,
+            } => self.elaborate_fs_create_file((name, content), *span, expected, env, diagnostics),
+            AstExpr::FsWriteBytesAt {
+                entry,
+                offset,
+                bytes,
+                span,
+            } => self.elaborate_fs_write_bytes_at(
+                (entry, offset, bytes),
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
+            AstExpr::FsAppendBytesAt { entry, bytes, span } => {
+                self.elaborate_fs_append_bytes_at((entry, bytes), *span, expected, env, diagnostics)
+            }
+            AstExpr::FsMkdir { name, span } => {
+                self.elaborate_fs_mkdir(name, *span, expected, env, diagnostics)
+            }
+            AstExpr::FsDeleteAt { entry, span } => self.elaborate_fs_index_mutation(
+                "fs_delete_at",
+                entry,
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
+            AstExpr::FsSyncAt { entry, span } => self.elaborate_fs_index_mutation(
+                "fs_sync_at",
+                entry,
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
+            AstExpr::FsRenameAt {
+                entry,
+                new_name,
+                span,
+            } => self.elaborate_fs_rename_at((entry, new_name), *span, expected, env, diagnostics),
             AstExpr::ClockRead { span } => self.elaborate_clock_read(*span, expected, diagnostics),
             AstExpr::Sha256Digest { view, span } => {
                 self.elaborate_sha256_digest(view, *span, expected, env, diagnostics)
@@ -8973,6 +9338,8 @@ impl<'a> BodyBuilder<'a> {
             let output_type = self.output_type.clone();
             if let Some(borrowed) = self.borrow_view_for_expected(&value, &output_type) {
                 value = borrowed;
+            } else if let Some(widened) = self.widen_view_for_expected(&value, &output_type) {
+                value = widened;
             } else {
                 diagnostics.push(elaboration_diagnostic(
                     "MNE103",
@@ -9638,6 +10005,33 @@ fn view_narrow_dimensions(actual: &BodyType, expected: &BodyType) -> Option<(u32
     {
         if actual_element == expected_element && new_cap < source_cap {
             return Some((*source_cap, *new_cap));
+        }
+    }
+    None
+}
+
+/// Static view-capacity widening rule (Profile 0.15): an `[E; up_to M]`
+/// value satisfies an `[E; up_to N]` expectation exactly when `M <= N`
+/// with the same element type. Returns the `(source capacity, target
+/// capacity)` for diagnostics and audit. This is the static dual of
+/// narrowing: narrowing checks the live span at runtime, widening checks
+/// nothing because every value valid under `M` is valid under `N`. Exact
+/// bounds never participate in either direction, element mismatches
+/// refuse, and symbolic generic capacities refuse (fail closed).
+fn view_widen_dimensions(actual: &BodyType, expected: &BodyType) -> Option<(u32, u32)> {
+    if let (
+        BodyType::Sequence {
+            element: actual_element,
+            bound: mncs_model::SequenceBound::UpTo(source_cap),
+        },
+        BodyType::Sequence {
+            element: expected_element,
+            bound: mncs_model::SequenceBound::UpTo(target_cap),
+        },
+    ) = (actual, expected)
+    {
+        if actual_element == expected_element && source_cap <= target_cap {
+            return Some((*source_cap, *target_cap));
         }
     }
     None

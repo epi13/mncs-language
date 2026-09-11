@@ -1,0 +1,33 @@
+mncs 0.10;
+
+// P1-B02 partial realization: pure entrypoints stay runnable on compiled
+// backends even when their module also hosts effects. `frame_add` and
+// `pure_caller` are pure (admitted everywhere); `append_word` needs the
+// `host_write` effect (bytecode with `--grant-write` realizes it,
+// compiled backends refuse the entrypoint as Unsupported);
+// `append_and_add` calls `append_word`, so its closure needs the effect
+// too (transitive refusal) even though its own body is pure arithmetic.
+module pressure.effect_partition;
+
+fn frame_add(a: u64, b: u64) -> (result: u64) {
+    return a +% b;
+}
+
+fn pure_caller(a: u64, b: u64) -> (result: u64) {
+    return frame_add(a, b) +% 1;
+}
+
+fn append_word(word: [byte; up_to 64]) -> (result: u64)
+    capability ledger_writer
+    effect host_write authorized_by ledger_writer
+{
+    return host_write(word);
+}
+
+fn append_and_add(word: [byte; up_to 64], n: u64) -> (result: u64)
+    capability ledger_writer
+    effect host_write authorized_by ledger_writer
+{
+    let written: u64 = append_word(word);
+    return written +% n;
+}

@@ -91,12 +91,22 @@ impl LlvmStatefulSession<'_> {
                 "LLVM execution requires a language-owned function value contract",
             );
         };
-        // The entry symbol is module-qualified (ENG-PRESSURE-0017).
-        let entry = crate::support::entry_native_symbol(
+        // The entry symbol is module-qualified (ENG-PRESSURE-0017). Refused
+        // entrypoints (P1-B02 admission) fail closed as Unsupported.
+        let Some(entry) = crate::support::resolve_entry_export(
             &self.artifact.exports,
             &request.target.module,
             &request.target.function,
-        );
+        ) else {
+            return execution_failure(
+                result,
+                ExecutionStatus::Unsupported,
+                crate::support::unrealized_entry_reason(
+                    &request.target.module,
+                    &request.target.function,
+                ),
+            );
+        };
         // RFC 0047 §5 uniform fuel: the driver seeds the entry depth from
         // the request budget, so an explicit budget means the same fuel
         // here as on the reference interpreters. The seed joins the cache
@@ -444,17 +454,20 @@ pub fn lower_llvm(
     }
     let names = function_names(program, ssa);
     let scalar = lower_to_scalar(program, ssa, &names);
-    if !scalar.unsupported.is_empty() || scalar.functions.is_empty() {
+    // Per-entrypoint admission (P1-B02 partial realization): the artifact
+    // realizes the admitted subset and records refusals in `unsupported`.
+    // Whole-program refusal survives only when nothing is realizable.
+    if scalar.functions.is_empty() {
         let mut diagnostics = vec![CompilerDiagnostic::new(
             "CGL301",
             CompilerDiagnosticKind::UnavailableBackendCapability,
             "selected SSA is outside the LLVM scalar envelope",
         )];
-        for reason in scalar.unsupported {
+        for reason in &scalar.unsupported {
             diagnostics.push(CompilerDiagnostic::new(
                 "CGL302",
                 CompilerDiagnosticKind::UnavailableBackendCapability,
-                reason,
+                reason.clone(),
             ));
         }
         return unknown(diagnostics);
@@ -495,7 +508,7 @@ pub fn lower_llvm(
             "no embedded LLVM interpreter".to_owned(),
         ],
         plan.target.evidence.clone(),
-        Vec::new(),
+        scalar.unsupported.clone(),
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(function_value_contracts(program))
@@ -2518,12 +2531,22 @@ pub fn execute_llvm(
     }
     // Composite arguments and results cross through the canonical call
     // file; pure scalar calls keep the historical argv-only protocol.
-    // The entry symbol is module-qualified (ENG-PRESSURE-0017).
-    let entry = crate::support::entry_native_symbol(
+    // The entry symbol is module-qualified (ENG-PRESSURE-0017). Refused
+    // entrypoints (P1-B02 admission) fail closed as Unsupported.
+    let Some(entry) = crate::support::resolve_entry_export(
         &artifact.exports,
         &request.target.module,
         &request.target.function,
-    );
+    ) else {
+        return execution_failure(
+            result,
+            ExecutionStatus::Unsupported,
+            crate::support::unrealized_entry_reason(
+                &request.target.module,
+                &request.target.function,
+            ),
+        );
+    };
     // RFC 0047 §5 uniform fuel (see the stateful session above).
     let entry_depth = match crate::support::depth_seed_for_request(request) {
         Ok(seed) => seed,

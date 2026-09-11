@@ -2452,6 +2452,93 @@ fn execute_instruction(
                     }
                 }
             }
+            if matches!(
+                operation.as_str(),
+                "fs_create_file"
+                    | "fs_write_bytes_at"
+                    | "fs_append_bytes_at"
+                    | "fs_mkdir"
+                    | "fs_delete_at"
+                    | "fs_rename_at"
+                    | "fs_sync_at"
+            ) {
+                // Granted-filesystem mutations (Tranche A), mirroring the
+                // body reference executor arm-for-arm: same grant
+                // matching, same scalar/view split through
+                // `fs_view_positions`, same realization, same intent-only
+                // path under `Record`, so the layered
+                // `check-backend-execution` comparison agrees.
+                let arity = crate::host_call_arity(operation).unwrap_or(0);
+                let view_positions = crate::fs_resource::fs_view_positions(operation);
+                let mut ints: Vec<u64> = Vec::new();
+                let mut views: Vec<Vec<u8>> = Vec::new();
+                for position in 0..arity {
+                    if view_positions.contains(&position) {
+                        let Some(view) = instruction.inputs.get(position).and_then(|input| {
+                            crate::execution::host_view_bytes(values.get(input)?)
+                        }) else {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                instruction_identity(instruction),
+                                format!(
+                                    "{operation} requires byte-view operands at view positions, not a non-view value"
+                                ),
+                            );
+                            return true;
+                        };
+                        views.push(view);
+                    } else {
+                        let Some(arg) =
+                            crate::fs_resource::host_u64_by(&instruction.inputs, values, position)
+                        else {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                instruction_identity(instruction),
+                                format!(
+                                    "{operation} requires u64 index/offset operands, not a non-u64 value"
+                                ),
+                            );
+                            return true;
+                        };
+                        ints.push(arg);
+                    }
+                }
+                let intent_only = observing;
+                debug_assert!(crate::execution::host_operation_mutates(operation));
+                match crate::fs_resource::fs_mutate(operation, grant, &ints, &views, !intent_only) {
+                    Ok((value, effect)) => {
+                        if let Some(output) = instruction.outputs.first() {
+                            values.insert(output.identity.clone(), value);
+                        }
+                        result.effects.push(ExecutionEffectEvent {
+                            operation: instruction_identity(instruction).unwrap_or_else(|| {
+                                crate::identity::SemanticId(format!("host-call:{capability}"))
+                            }),
+                            kind: effect.kind,
+                            target: effect.target,
+                            capability: capability.clone(),
+                            provenance: (!intent_only).then_some(effect.provenance),
+                        });
+                        return false;
+                    }
+                    Err(crate::fs_resource::FsFail::InvalidRequest(reason)) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                    Err(crate::fs_resource::FsFail::RuntimeFailure(reason)) => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                }
+            }
             if operation == "clock_read" {
                 let Some(millis) = crate::execution::host_epoch_millis() else {
                     result.fail(
@@ -3103,10 +3190,13 @@ fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) 
                 payload,
                 ..
             },
-            BodyType::Finite { identity, .. },
+            BodyType::Finite { identity, name },
         ) => {
-            type_identity == identity
-                && finite_payload_matches(program, type_identity, variant_identity, payload)
+            // Host-facing nominal resolution (P1-014): a name-spelled
+            // request resolves to exactly the expected declaration. The
+            // leniency profile below is unchanged.
+            crate::execution::nominal_identity_matches(identity, name, type_identity)
+                && finite_payload_matches(program, identity, variant_identity, payload)
         }
         (
             ExecutionValue::Record {
@@ -3114,8 +3204,11 @@ fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) 
                 fields,
                 ..
             },
-            BodyType::Record { identity, .. },
-        ) => type_identity == identity && record_fields_match(program, type_identity, fields),
+            BodyType::Record { identity, name },
+        ) => {
+            crate::execution::nominal_identity_matches(identity, name, type_identity)
+                && record_fields_match(program, identity, fields)
+        }
         // Sequence spellings reconstructed without a program leave record
         // elements as Named; admit them when the value's record name matches.
         // Field order is still resolved by name downstream, so a known
@@ -3181,11 +3274,9 @@ fn record_fields_match(
     record_identity: &SemanticId,
     fields: &[(String, ExecutionValue)],
 ) -> bool {
-    let Some(declaration) = program
-        .record_types
-        .iter()
-        .find(|decl| &decl.identity == record_identity)
-    else {
+    let Some(declaration) = program.record_types.iter().find(|decl| {
+        crate::execution::nominal_identity_matches(&decl.identity, &decl.name, record_identity)
+    }) else {
         return true;
     };
     let declared_names: Vec<String> = declaration
@@ -3218,12 +3309,17 @@ fn finite_payload_matches(
     let Some(variant) = program
         .finite_types
         .iter()
-        .find(|decl| &decl.identity == type_identity)
+        .find(|decl| {
+            crate::execution::nominal_identity_matches(&decl.identity, &decl.name, type_identity)
+        })
         .and_then(|finite_type| {
-            finite_type
-                .variants
-                .iter()
-                .find(|variant| &variant.identity == variant_identity)
+            finite_type.variants.iter().find(|variant| {
+                crate::execution::nominal_identity_matches(
+                    &variant.identity,
+                    &variant.name,
+                    variant_identity,
+                )
+            })
         })
     else {
         return true;
@@ -3251,11 +3347,13 @@ fn finite_payload_matches(
 /// nested nominal values validate recursively. Unknown spellings stay
 /// lenient; every known spelling checks exactly.
 fn value_matches_named_type(program: &Program, value: &ExecutionValue, name: &str) -> bool {
-    if let Some(finite) = program
-        .finite_types
-        .iter()
-        .find(|decl| decl.identity.0 == name)
-    {
+    if let Some(finite) = program.finite_types.iter().find(|decl| {
+        crate::execution::nominal_identity_matches(
+            &decl.identity,
+            &decl.name,
+            &crate::SemanticId(name.to_owned()),
+        )
+    }) {
         return value_matches_type(
             program,
             value,
@@ -3265,19 +3363,24 @@ fn value_matches_named_type(program: &Program, value: &ExecutionValue, name: &st
             },
         );
     }
-    if let Some(record) = program
-        .record_types
-        .iter()
-        .find(|decl| decl.identity.0 == name)
-    {
+    if let Some(record) = program.record_types.iter().find(|decl| {
+        crate::execution::nominal_identity_matches(
+            &decl.identity,
+            &decl.name,
+            &crate::SemanticId(name.to_owned()),
+        )
+    }) {
         return match value {
             ExecutionValue::Record {
                 type_identity,
                 fields,
                 ..
             } => {
-                type_identity == &record.identity
-                    && record_fields_match(program, &record.identity, fields)
+                crate::execution::nominal_identity_matches(
+                    &record.identity,
+                    &record.name,
+                    type_identity,
+                ) && record_fields_match(program, &record.identity, fields)
             }
             _ => false,
         };

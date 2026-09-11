@@ -181,7 +181,10 @@ pub use matrix::{
     backend_family_matrix, profile_support_for, with_experiment_status, BackendFamilyMatrix,
     BackendMatrixRow, BackendProfileSupport,
 };
-pub use promises::{integer_no_overflow_promise, LoweringPromise};
+pub use promises::{
+    integer_no_overflow_promise, proof_backed_no_overflow_certificate, LoweringPromise,
+    PROOF_RANGE_METHOD,
+};
 
 pub fn backend_names() -> Vec<&'static str> {
     vec![
@@ -664,7 +667,13 @@ pub fn lower_selected_ssa(
     if let Some(module) = outcome.module.as_mut() {
         crate::lower::emit_alloc_helpers(module);
     }
-    if !outcome.unsupported.is_empty() || outcome.module.is_none() {
+    // Per-entrypoint admission (P1-B02 partial realization): refused
+    // functions become dead stubs that are never exported, so the module
+    // materializes whenever at least one entrypoint lowered. Refusals ride
+    // in the artifact's `unsupported` admission report; drivers gate entry
+    // lookup on `exports`. Whole-program refusal survives only when nothing
+    // is realizable.
+    if outcome.module.is_none() {
         diagnostics.push(CompilerDiagnostic {
             code: "CGN301".to_owned(),
             kind: CompilerDiagnosticKind::UnavailableBackendCapability,
@@ -726,7 +735,7 @@ pub fn lower_selected_ssa(
             "no WASI".to_owned(),
         ],
         plan.target.evidence.clone(),
-        Vec::new(),
+        outcome.unsupported,
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(function_value_contracts(program))
@@ -1021,20 +1030,43 @@ fn execute_portable_wasm_decoded(
         .map(|contract| marshal_ty(contract, &artifact.composite_value_contracts))
         .collect::<Vec<_>>();
     // WASM exports are module-qualified; fall back to the legacy short
-    // export only for artifacts emitted before qualified lowering.
-    let export_names: Vec<String> = module
-        .functions
-        .iter()
-        .map(|function| function.name.clone())
-        .collect();
-    let entry = if support::exports_contain(
-        &export_names,
+    // export only for artifacts emitted before qualified lowering. A
+    // refused entrypoint (P1-B02 admission: omitted from the artifact
+    // `exports`, dead stub in the module) fails closed as Unsupported
+    // here instead of executing the stub, so the gate reads the artifact
+    // admission list — never the module's function names, which still
+    // carry the refused slots.
+    // The gate reads the artifact admission list (`exports`), never the
+    // module's function names: refused slots keep their names as dead
+    // stubs, so a module-name match would execute `unreachable`.
+    let Some(entry) = support::resolve_entry_export(
+        &artifact.exports,
         &request.target.module,
         &request.target.function,
-    ) {
-        support::qualified_c_symbol(&request.target.module, &request.target.function)
-    } else {
-        request.target.function.clone()
+    )
+    .or_else(|| {
+        // Legacy short-name fallback for artifacts emitted before
+        // qualified lowering: the artifact's own export list decides, so
+        // a short match is a real legacy entry.
+        if artifact
+            .exports
+            .iter()
+            .any(|export| export == &request.target.function)
+        {
+            Some(request.target.function.clone())
+        } else {
+            None
+        }
+    }) else {
+        result.status = ExecutionStatus::Unsupported;
+        result.failure = Some(ExecutionFailure {
+            identity: Some(artifact.identity.clone()),
+            reason: support::unrealized_entry_reason(
+                &request.target.module,
+                &request.target.function,
+            ),
+        });
+        return result;
     };
     // RFC 0047 §5 uniform fuel: seed the interpreter entry depth from
     // the request budget so an explicit budget means the same fuel here
@@ -1172,6 +1204,7 @@ pub(crate) fn backend_output_value(
             type_identity,
             variants,
             payloads: _,
+            ..
         } => {
             // Typed realizations return fully materialized finite values
             // carrying language-owned identities; legacy paths return an
@@ -1307,6 +1340,7 @@ fn marshal_ty(
             type_identity,
             variants,
             payloads,
+            ..
         } => {
             if !payloads.values().any(|fields| !fields.is_empty()) {
                 MarshalTy::BareFinite {

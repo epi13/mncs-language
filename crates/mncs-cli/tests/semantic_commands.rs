@@ -318,6 +318,14 @@ fn roadmap_05_arithmetic_control_and_bounded_refinement_are_evidence_gated() {
         .unwrap()
         .contains("Forge/search has no promotion authority"));
 
+    // The envelope's saturating entrypoint now lowers on LLVM (shared
+    // saturating-arithmetic lowering); the widening entrypoint stays
+    // outside the scalar envelope. Per-entrypoint admission therefore
+    // produces a partial artifact instead of the historical
+    // whole-program `unavailable_backend_capability` refusal: the
+    // admitted entry executes with pinned values while the refused
+    // entry fails closed per case with the admission reason. Exit stays
+    // 1 because the corpus holds cases the backend cannot realize.
     let unsupported = binary()
         .args([
             "experiment",
@@ -329,16 +337,56 @@ fn roadmap_05_arithmetic_control_and_bounded_refinement_are_evidence_gated() {
             &corpus,
         ])
         .output()
-        .expect("run unsupported scalar arithmetic experiment");
+        .expect("run partially supported scalar arithmetic experiment");
     assert_eq!(unsupported.status.code(), Some(1));
     let unsupported_result: Value =
-        serde_json::from_slice(&unsupported.stdout).expect("unsupported result JSON");
-    assert!(unsupported_result["artifact"].is_null());
-    assert!(unsupported_result["diagnostics"]
+        serde_json::from_slice(&unsupported.stdout).expect("partial admission result JSON");
+    let artifact = &unsupported_result["artifact"];
+    assert!(
+        !artifact.is_null(),
+        "partial admission carries an artifact: {unsupported_result:#}"
+    );
+    let exports: Vec<String> = artifact["exports"]
         .as_array()
-        .unwrap()
+        .cloned()
+        .unwrap_or_default()
         .iter()
-        .any(|diagnostic| diagnostic["kind"] == "unavailable_backend_capability"));
+        .filter_map(|value| value.as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(exports.len(), 1, "admitted subset: {exports:?}");
+    assert!(
+        exports.iter().any(|export| export.contains("saturating__add")),
+        "saturating_add is exported: {exports:?}"
+    );
+    let refused: Vec<String> = artifact["unsupported"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|value| value.as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(refused.len(), 1, "refusal report: {refused:?}");
+    assert!(
+        refused.iter().any(|reason| reason.contains("widening_mul")
+            && reason.contains("outside the current scalar realization envelope")),
+        "widening refusal names the entry and the envelope gap: {refused:?}"
+    );
+    for case in unsupported_result["cases"].as_array().expect("cases") {
+        let id = case["case_id"].as_str().unwrap_or("?");
+        if id.starts_with("sat-") {
+            assert_eq!(case["status"], "returned", "{id}: {case:#}");
+            assert_eq!(case["expectation_met"], true, "{id}: {case:#}");
+        } else if id.starts_with("wide-") {
+            assert_eq!(case["status"], "unsupported", "{id}: {case:#}");
+            let reason = case["failure_reason"].as_str().unwrap_or("");
+            assert!(
+                reason.contains("not realized by this artifact"),
+                "{id}: refusal must cite admission; {case:#}"
+            );
+        } else {
+            panic!("{id}: unexpected case in the arithmetic envelope");
+        }
+    }
 
     let _ = std::fs::remove_dir_all(temp);
 }

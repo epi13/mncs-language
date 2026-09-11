@@ -1,9 +1,10 @@
 # Filesystem/resource effects, watch hints, and the persistence substrate
 
-Index PRESS-003/007/013/016/017/018. Status: filesystem listing and
-chunked reads are a bounded implementation on the research path;
-generation polling is an experimental watch hint; durable mechanisms
-are substrate (contracts only, Section 4).
+Index PRESS-003/007/013/016/017/018. Status: filesystem listing,
+chunked reads, and the durable mutation family (§8) are bounded
+implementations on the research path; generation polling is an
+experimental watch hint; the broader persistence substrate stays
+contracts-only (Section 5).
 
 ## 1. Authority model
 
@@ -104,3 +105,34 @@ backends.
 - MNE262: filesystem index/offset/length operand must be `u64`.
 - MNP204: filesystem intrinsics require source profile 0.12+.
 - MNP205: filesystem intrinsic arity.
+- MNE277/MNE278: `fs_write` authority missing/doubled.
+- MNE279: filesystem mutation name/content operand must be a byte view.
+- MNP211: filesystem mutation intrinsics require source profile 0.16+.
+
+## 8. Durable mutations (Tranche A, profile 0.16)
+
+Status: implemented on the research path (P1-001/P1-002/P1-003,
+P2-005 atomic publication). The mutation family from §2's read-only
+world:
+
+| intrinsic | effect | returns |
+|---|---|---|
+| `fs_create_file(name, content)` | `fs_write` | `u64` new entry index (exclusive) |
+| `fs_write_bytes_at(entry, offset, bytes)` | `fs_write` | `u64` written count (no sparse gaps) |
+| `fs_append_bytes_at(entry, bytes)` | `fs_write` | `u64` appended count |
+| `fs_mkdir(name)` | `fs_write` | `u64` new entry index (exclusive) |
+| `fs_delete_at(entry)` | `fs_write` | `u64` removed kind (0 file, 1 empty dir) |
+| `fs_rename_at(entry, new_name)` | `fs_write` | `u64` new entry index (same-dir, atomic replace of files) |
+| `fs_sync_at(entry)` | `fs_write` | `u64` `1` barrier receipt (file + dir edges) |
+
+Authority reuses the granted root (`--grant-fs`, `Grant::fs_root`):
+no new grant shape. Names are bare single-component byte views —
+separators, NUL, `.`/`..` refuse; there is still no path type
+(Tranche E). Every call re-snapshots and reports post-state
+generation; returned indices are observed, never predicted. Under the
+`Record` policy mutations are intent-only (validated and valued,
+never realized); compiled backends refuse `HostCall` explicitly at
+lowering. Nothing fsyncs implicitly — durability is the explicit
+`fs_sync_at` barrier, with the POSIX-only directory-edge gap recorded
+in provenance. Normative profile text:
+`docs/source-profile-0.16.md`.

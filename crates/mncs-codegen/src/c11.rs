@@ -80,12 +80,22 @@ impl C11StatefulSession<'_> {
         };
         // Entry symbols are module-qualified (`mncs_<module>__<name>`), so
         // same-named functions from distinct modules lower and execute as
-        // distinct natives (ENG-PRESSURE-0017).
-        let entry = crate::support::entry_native_symbol(
+        // distinct natives (ENG-PRESSURE-0017). Refused entrypoints (P1-B02
+        // admission) fail closed as Unsupported instead of mislinking.
+        let Some(entry) = crate::support::resolve_entry_export(
             &self.artifact.exports,
             &request.target.module,
             &request.target.function,
-        );
+        ) else {
+            return execution_failure(
+                result,
+                ExecutionStatus::Unsupported,
+                crate::support::unrealized_entry_reason(
+                    &request.target.module,
+                    &request.target.function,
+                ),
+            );
+        };
         // RFC 0047 §5 uniform fuel: the driver seeds the entry depth from
         // the request budget, so an explicit budget means the same fuel
         // here as on the reference interpreters. The seed joins the cache
@@ -413,17 +423,25 @@ pub fn lower_c11(
     }
     let names = function_names(program, ssa);
     let scalar = lower_to_scalar(program, ssa, &names);
-    if !scalar.unsupported.is_empty() || scalar.functions.is_empty() {
+    // Per-entrypoint admission (P1-B02 partial realization): refused
+    // functions no longer poison admitted ones. The artifact realizes the
+    // admitted subset (`exports`) and records every refusal in its
+    // `unsupported` field — the machine-readable admission report. Only a
+    // module with NOTHING realizable still refuses whole-program (CGC301
+    // plus per-function CGC302s). On the success path no diagnostics are
+    // emitted for refused neighbors; drivers gate entry lookup on
+    // `exports` instead.
+    if scalar.functions.is_empty() {
         let mut diagnostics = vec![CompilerDiagnostic::new(
             "CGC301",
             CompilerDiagnosticKind::UnavailableBackendCapability,
             "selected SSA is outside the C11 scalar envelope",
         )];
-        for reason in scalar.unsupported {
+        for reason in &scalar.unsupported {
             diagnostics.push(CompilerDiagnostic::new(
                 "CGC302",
                 CompilerDiagnosticKind::UnavailableBackendCapability,
-                reason,
+                reason.clone(),
             ));
         }
         return unknown(diagnostics);
@@ -456,7 +474,7 @@ pub fn lower_c11(
             "generated C retained as a typed backend artifact".to_owned(),
         ],
         plan.target.evidence.clone(),
-        Vec::new(),
+        scalar.unsupported.clone(),
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(function_value_contracts(program))
@@ -855,17 +873,30 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
                 // still exactly detectable; narrower operands cannot overflow
                 // an int128/uint128 intermediate at all, but the guard stays
                 // uniform so failure semantics are identical at every width.
-                // Unsigned MNCS values ride in signed `int64_t` C cells, so
-                // the widening must zero-extend through `(uint64_t)` first:
+                // Unsigned MNCS values ride in signed C cells (`int32_t` for
+                // widths <= 32, `int64_t` for 64-bit), so the widening must
+                // reinterpret through the matching unsigned cell width first:
                 // a direct `(unsigned __int128)` of the signed cell would
-                // sign-extend and mistrap every operand >= 2^63.
+                // sign-extend and mistrap every operand >= 2^63, while
+                // `(uint64_t)` of a negative `int32_t` cell sign-extends to
+                // a huge 64-bit value and mistraps every u32 operand >= 2^31
+                // (P1-B01: 255*16777216 trapped on C11 only).
                 let wide_ty = if signed {
                     "__int128"
                 } else {
                     "unsigned __int128"
                 };
+                // Narrow unsigned cells reinterpret via `(uint32_t)` (C
+                // signed-to-unsigned conversion is modular, hence bit-exact);
+                // 64-bit unsigned cells reinterpret via `(uint64_t)`.
+                let unsigned_narrow = !signed && bits <= 32;
                 let (lhs_w, rhs_w) = if signed {
                     (format!("({wide_ty}){lhs_n}"), format!("({wide_ty}){rhs_n}"))
+                } else if unsigned_narrow {
+                    (
+                        format!("({wide_ty})(uint32_t){lhs_n}"),
+                        format!("({wide_ty})(uint32_t){rhs_n}"),
+                    )
                 } else {
                     (
                         format!("({wide_ty})(uint64_t){lhs_n}"),
@@ -882,15 +913,21 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
             } else if matches!(intent, ArithmeticIntent::Saturating) {
                 // Total by definition: compute in the wide domain, then clamp
                 // into the declared representable range. Unsigned cells
-                // zero-extend through `(uint64_t)` for the same reason as
-                // the checked path above.
+                // reinterpret through the matching unsigned width for the
+                // same reason as the checked path above (P1-B01).
                 let wide_ty = if signed {
                     "__int128"
                 } else {
                     "unsigned __int128"
                 };
+                let unsigned_narrow = !signed && bits <= 32;
                 let (lhs_w, rhs_w) = if signed {
                     (format!("({wide_ty}){lhs_n}"), format!("({wide_ty}){rhs_n}"))
+                } else if unsigned_narrow {
+                    (
+                        format!("({wide_ty})(uint32_t){lhs_n}"),
+                        format!("({wide_ty})(uint32_t){rhs_n}"),
+                    )
                 } else {
                     (
                         format!("({wide_ty})(uint64_t){lhs_n}"),
@@ -1876,12 +1913,22 @@ pub fn execute_c11(
     };
     // Composite arguments and results cross through the canonical call
     // file; pure scalar calls keep the historical argv-only protocol.
-    // The entry symbol is module-qualified (ENG-PRESSURE-0017).
-    let entry = crate::support::entry_native_symbol(
+    // The entry symbol is module-qualified (ENG-PRESSURE-0017). Refused
+    // entrypoints (P1-B02 admission) fail closed as Unsupported.
+    let Some(entry) = crate::support::resolve_entry_export(
         &artifact.exports,
         &request.target.module,
         &request.target.function,
-    );
+    ) else {
+        return execution_failure(
+            result,
+            ExecutionStatus::Unsupported,
+            crate::support::unrealized_entry_reason(
+                &request.target.module,
+                &request.target.function,
+            ),
+        );
+    };
     // RFC 0047 §5 uniform fuel (see the stateful session above).
     let entry_depth = match crate::support::depth_seed_for_request(request) {
         Ok(seed) => seed,

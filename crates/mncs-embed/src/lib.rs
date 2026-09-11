@@ -204,9 +204,10 @@ impl Grant {
     }
 
     /// Filesystem-root grant: `path` names the granted root the `fs_*`
-    /// intrinsics may enumerate and chunk-read. Canonicalization and
-    /// containment happen at realization; a bogus root fails the call
-    /// closed, never the scope.
+    /// intrinsics may enumerate, chunk-read (Profile 0.12), and mutate
+    /// through the `fs_write` family (Profile 0.16). Canonicalization
+    /// and containment happen at realization; a bogus root fails the
+    /// call closed, never the scope.
     pub fn fs_root(capability: &str, path: &str) -> Self {
         Self {
             capability: capability.to_owned(),

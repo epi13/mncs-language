@@ -1,0 +1,104 @@
+mncs 0.15;
+
+// STORE-P-0012 / P2-002 regression: safe static view-capacity widening.
+// A `[T; up_to M]` value satisfies a `[T; up_to N]` expectation when
+// `M <= N` with the same element type — no copy, no runtime check, the
+// descriptor is identical and only the static capacity fact widens.
+//
+// Hand-computed expectations:
+//   arg_widen    = check(up_to-8 view of [1..8]) = 8
+//   let_widen    = wide-bound copy of the same view, len = 8
+//   stmt_widen   = statement-form return of a narrow view at wide type = 8
+//   tail_widen   = bodyless-tail return of a narrow slice at wide type = 8
+//   result_widen = wide-bound call result of make_narrow, len = 8
+//   field_widen  = projected narrow record field into a wide param = 8
+//   field_let_widen = projected narrow record field into a wide let = 8
+//   import_widen = narrow view into the imported wide validator = 8
+//   generic_wide = explicit <64> specialization over a narrow view = 8
+//   chain_widen  = 8 -> 16 -> 64 through two lets, len = 8
+//   u64_widen    = widened u64 view reads index 2 = 30 (span intact)
+module pressure.widen;
+
+use pressure.widen.lib as lib;
+
+fn check(view: [byte; up_to 64]) -> (result: u64) {
+    return view.len;
+}
+
+fn make_narrow() -> (result: [byte; up_to 8]) {
+    let base: [byte; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+    return base[0..8];
+}
+
+fn arg_widen(x: [byte; 8]) -> (result: u64) {
+    let v: [byte; up_to 8] = x[0..8];
+    return check(v);
+}
+
+fn let_widen(x: [byte; 8]) -> (result: u64) {
+    let v: [byte; up_to 8] = x[0..8];
+    let w: [byte; up_to 64] = v;
+    return w.len;
+}
+
+fn stmt_widen(x: [byte; 8]) -> (result: u64) {
+    let v: [byte; up_to 8] = x[0..8];
+    let t: u64 = 1;
+    let u: u64 = t +% 1;
+    return check(v);
+}
+
+fn tail_widen(v: [byte; up_to 8]) -> (result: [byte; up_to 64]) {
+    return v;
+}
+
+fn tail_widen_len(x: [byte; 8]) -> (result: u64) {
+    let v: [byte; up_to 8] = x[0..8];
+    let w: [byte; up_to 64] = tail_widen(v);
+    return w.len;
+}
+
+fn result_widen() -> (result: u64) {
+    let w: [byte; up_to 64] = make_narrow();
+    return w.len;
+}
+
+record Holder { buf: [byte; up_to 8] }
+
+fn field_widen(x: [byte; 8]) -> (result: u64) {
+    let h: Holder = Holder { buf: x[0..8] };
+    return check(h.buf);
+}
+
+fn field_let_widen(x: [byte; 8]) -> (result: u64) {
+    let h: Holder = Holder { buf: x[0..8] };
+    let w: [byte; up_to 64] = h.buf;
+    return w.len;
+}
+
+fn import_widen(x: [byte; 8]) -> (result: u64) {
+    let v: [byte; up_to 8] = x[0..8];
+    return lib.validate(v);
+}
+
+fn glen<N: Nat>(v: [byte; up_to N]) -> (result: u64) {
+    return v.len;
+}
+
+fn generic_wide(x: [byte; 8]) -> (result: u64) {
+    let v: [byte; up_to 8] = x[0..8];
+    return glen<64>(v);
+}
+
+fn chain_widen(x: [byte; 8]) -> (result: u64) {
+    let v: [byte; up_to 8] = x[0..8];
+    let a: [byte; up_to 16] = v;
+    let b: [byte; up_to 64] = a;
+    return b.len;
+}
+
+fn u64_widen(e: [u64; 4]) -> (result: u64) {
+    let v: [u64; up_to 4] = e[0..4];
+    let w: [u64; up_to 16] = v;
+    return w[2];
+}

@@ -112,6 +112,21 @@ pub const SOURCE_PROFILE_VERSION_0_13: &str = "0.13";
 /// view-to-view narrowing, and the checked-index discharge form.
 pub const SOURCE_PROFILE_VERSION_0_14: &str = "0.14";
 
+/// Source Profile 0.15: bounded view-composition profile. Additive over
+/// 0.1–0.14 with unchanged ceilings; adds safe static view-capacity
+/// widening (a `[T; up_to M]` value satisfies a `[T; up_to N]` expectation
+/// when `M <= N`, with no copy and no runtime check).
+pub const SOURCE_PROFILE_VERSION_0_15: &str = "0.15";
+
+/// Source Profile 0.16: durable filesystem-mutation profile. Additive
+/// over 0.1–0.15 with unchanged ceilings; adds the `fs_write` effect
+/// family (`fs_create_file`, `fs_write_bytes_at`, `fs_append_bytes_at`,
+/// `fs_mkdir`, `fs_delete_at`, `fs_rename_at`, `fs_sync_at`) behind the
+/// pre-existing `--grant-fs` granted-root authority. Names stay bare
+/// single-component byte views (no path type yet); every mutation is
+/// bounded to one 64-byte view per call and fails closed.
+pub const SOURCE_PROFILE_VERSION_0_16: &str = "0.16";
+
 /// The registry is ordered oldest-first; `predecessor` links agree with
 /// this order (checked by `registry_chain_is_linear`).
 pub const SOURCE_PROFILE_REGISTRY: &[SourceProfileRecord] = &[
@@ -326,7 +341,7 @@ pub const SOURCE_PROFILE_REGISTRY: &[SourceProfileRecord] = &[
     },
     SourceProfileRecord {
         version: "0.14",
-        status: ProfileStatus::Current,
+        status: ProfileStatus::Sealed,
         spec_document: "docs/source-profile-0.14.md",
         predecessor: Some("0.13"),
         supports_parsing: true,
@@ -340,6 +355,43 @@ pub const SOURCE_PROFILE_REGISTRY: &[SourceProfileRecord] = &[
             "bulk_span_copy",
             "checked_view_narrowing",
             "checked_index_discharge",
+        ],
+    },
+    SourceProfileRecord {
+        version: "0.15",
+        status: ProfileStatus::Sealed,
+        spec_document: "docs/source-profile-0.15.md",
+        predecessor: Some("0.14"),
+        supports_parsing: true,
+        supports_elaboration: true,
+        max_sequence_bound: 1024,
+        max_iteration_bound: 1024,
+        max_iteration_nesting: 2,
+        max_iteration_work_product: 1048576,
+        max_vector_lanes: 64,
+        features: &["static_view_widening"],
+    },
+    SourceProfileRecord {
+        version: "0.16",
+        status: ProfileStatus::Current,
+        spec_document: "docs/source-profile-0.16.md",
+        predecessor: Some("0.15"),
+        supports_parsing: true,
+        supports_elaboration: true,
+        max_sequence_bound: 1024,
+        max_iteration_bound: 1024,
+        max_iteration_nesting: 2,
+        max_iteration_work_product: 1048576,
+        max_vector_lanes: 64,
+        features: &[
+            "fs_write_effect",
+            "fs_create_file",
+            "fs_positioned_write",
+            "fs_append",
+            "fs_mkdir",
+            "fs_delete",
+            "fs_atomic_rename",
+            "fs_sync_barrier",
         ],
     },
 ];
@@ -446,7 +498,7 @@ mod tests {
             assert!(record.supports_elaboration);
             previous = Some(record.version);
         }
-        assert_eq!(SOURCE_PROFILE_REGISTRY.last().unwrap().version, "0.14");
+        assert_eq!(SOURCE_PROFILE_REGISTRY.last().unwrap().version, "0.16");
     }
 
     #[test]
@@ -457,6 +509,8 @@ mod tests {
         assert!(!source_profile_supported("1.0"));
         assert!(!source_profile_supported("9.9"));
         assert!(source_profile_supported("0.14"));
+        assert!(source_profile_supported("0.15"));
+        assert!(source_profile_supported("0.16"));
         assert!(!source_profile_supported(""));
     }
 
@@ -474,6 +528,12 @@ mod tests {
         assert_eq!(ceiling("0.14").max_sequence_bound, 1024);
         assert_eq!(ceiling("0.14").max_iteration_bound, 1024);
         assert_eq!(ceiling("0.14").max_iteration_work_product, 1048576);
+        assert_eq!(ceiling("0.15").max_sequence_bound, 1024);
+        assert_eq!(ceiling("0.15").max_iteration_bound, 1024);
+        assert_eq!(ceiling("0.15").max_iteration_work_product, 1048576);
+        assert_eq!(ceiling("0.16").max_sequence_bound, 1024);
+        assert_eq!(ceiling("0.16").max_iteration_bound, 1024);
+        assert_eq!(ceiling("0.16").max_iteration_work_product, 1048576);
     }
 
     #[test]
