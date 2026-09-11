@@ -105,6 +105,20 @@ pub enum SsaInstructionKind {
         bound: crate::SequenceBound,
         evidence: crate::BoundsEvidence,
     },
+    /// Checked index against a sequence length (Profile 0.14): the result
+    /// is the candidate index, verified below the sequence length. The
+    /// carried bound resolves the runtime length on every backend.
+    BoundCheck {
+        bound: crate::SequenceBound,
+    },
+    /// Total functional bounded span copy (Profile 0.14): a new sequence
+    /// equal to the destination with one span replaced from the source.
+    SequenceCopy {
+        element_type: crate::BodyType,
+        dst_bound: crate::SequenceBound,
+        src_bound: crate::SequenceBound,
+        evidence: crate::BoundsEvidence,
+    },
     VectorConstruct {
         element_type: crate::BodyType,
         lanes: u32,
@@ -176,6 +190,11 @@ pub enum SsaInstructionKind {
     ViewConstruct {
         source_bound: crate::SequenceBound,
         view_bound: crate::SequenceBound,
+    },
+    /// Checked view narrowing to a smaller static capacity (Profile 0.14).
+    ViewNarrow {
+        source_cap: u32,
+        new_cap: u32,
     },
     FiniteConstruct {
         type_identity: SemanticId,
@@ -818,6 +837,10 @@ fn check_instruction_types(
         SsaInstructionKind::Constant { ty, .. } => check_ir_type(ty, generic_names, path, errors),
         SsaInstructionKind::Select { operand_type }
         | SsaInstructionKind::SequenceReplace {
+            element_type: operand_type,
+            ..
+        }
+        | SsaInstructionKind::SequenceCopy {
             element_type: operand_type,
             ..
         }
@@ -1949,6 +1972,20 @@ fn ssa_kind(kind: &IrOperationKind) -> SsaInstructionKind {
             bound: bound.clone(),
             evidence: evidence.clone(),
         },
+        IrOperationKind::BoundCheck { bound } => SsaInstructionKind::BoundCheck {
+            bound: bound.clone(),
+        },
+        IrOperationKind::SequenceCopy {
+            element_type,
+            dst_bound,
+            src_bound,
+            evidence,
+        } => SsaInstructionKind::SequenceCopy {
+            element_type: element_type.as_ref().clone(),
+            dst_bound: dst_bound.clone(),
+            src_bound: src_bound.clone(),
+            evidence: evidence.clone(),
+        },
         IrOperationKind::VectorConstruct {
             element_type,
             lanes,
@@ -2047,6 +2084,13 @@ fn ssa_kind(kind: &IrOperationKind) -> SsaInstructionKind {
         } => SsaInstructionKind::ViewConstruct {
             source_bound: source_bound.clone(),
             view_bound: view_bound.clone(),
+        },
+        IrOperationKind::ViewNarrow {
+            source_cap,
+            new_cap,
+        } => SsaInstructionKind::ViewNarrow {
+            source_cap: *source_cap,
+            new_cap: *new_cap,
         },
         IrOperationKind::RecordConstruct {
             type_identity,
@@ -2197,6 +2241,20 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
             bound: bound.clone(),
             evidence: evidence.clone(),
         },
+        BodyOperationKind::BoundCheck { bound } => SsaInstructionKind::BoundCheck {
+            bound: bound.clone(),
+        },
+        BodyOperationKind::SequenceCopy {
+            element_type,
+            dst_bound,
+            src_bound,
+            evidence,
+        } => SsaInstructionKind::SequenceCopy {
+            element_type: element_type.as_ref().clone(),
+            dst_bound: dst_bound.clone(),
+            src_bound: src_bound.clone(),
+            evidence: evidence.clone(),
+        },
         BodyOperationKind::VectorConstruct {
             element_type,
             lanes,
@@ -2295,6 +2353,13 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
         } => SsaInstructionKind::ViewConstruct {
             source_bound: source_bound.clone(),
             view_bound: view_bound.clone(),
+        },
+        BodyOperationKind::ViewNarrow {
+            source_cap,
+            new_cap,
+        } => SsaInstructionKind::ViewNarrow {
+            source_cap: *source_cap,
+            new_cap: *new_cap,
         },
         BodyOperationKind::RecordConstruct {
             type_identity,

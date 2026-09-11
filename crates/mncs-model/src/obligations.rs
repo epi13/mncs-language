@@ -319,10 +319,58 @@ impl Program {
                                 evidence: crate::BoundsEvidence::TraversalDomain,
                                 ..
                             }
+                            | BodyOperationKind::SequenceCopy {
+                                evidence: crate::BoundsEvidence::StaticExact,
+                                ..
+                            }
                             | BodyOperationKind::SequenceConstruct { .. }
-                            | BodyOperationKind::SequenceLength { .. } => {}
+                            | BodyOperationKind::SequenceLength { .. }
+                            // The checked-index operation is its own
+                            // check: it traps unless the candidate sits
+                            // below the sequence length, so elaborating it
+                            // establishes no further obligation.
+                            | BodyOperationKind::BoundCheck { .. } => {}
+                            // A traversal-domain claim on a span copy is
+                            // never established by elaboration (two
+                            // sequences share no single traversal domain);
+                            // fail closed with an unresolved obligation
+                            // rather than silently discharging it.
+                            BodyOperationKind::SequenceCopy {
+                                evidence:
+                                    crate::BoundsEvidence::RuntimeChecked { failure: _ }
+                                    | crate::BoundsEvidence::TraversalDomain
+                                    | crate::BoundsEvidence::CheckedBound,
+                                ..
+                            } => {
+                                let requirement =
+                                    requirement_id("sequence-copy-bounds", &subject);
+                                obligations.push(ObligationRecord {
+                                    schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
+                                    identity: body_obligation_id(
+                                        "sequence-copy-bounds",
+                                        &subject,
+                                    ),
+                                    subject,
+                                    requirement,
+                                    status: ObligationStatus::Unknown,
+                                    method: "runtime-checked-span-copy".to_owned(),
+                                    assumptions: Vec::new(),
+                                    dependencies: Vec::new(),
+                                    freshness: EvidenceFreshness::Unknown,
+                                    fallback: Some(
+                                        "checked span copy with explicit runtime failure"
+                                            .to_owned(),
+                                    ),
+                                });
+                            }
+                            // A checked-bound claim on a functional update is
+                            // never established by elaboration (only
+                            // projections discharge through checked indices);
+                            // fail closed like any other unexpected evidence.
                             BodyOperationKind::SequenceReplace {
-                                evidence: crate::BoundsEvidence::RuntimeChecked { failure: _ },
+                                evidence:
+                                    crate::BoundsEvidence::RuntimeChecked { failure: _ }
+                                    | crate::BoundsEvidence::CheckedBound,
                                 ..
                             } => {
                                 let requirement =
@@ -347,7 +395,9 @@ impl Program {
                                 });
                             }
                             BodyOperationKind::VectorExtract { evidence: crate::BoundsEvidence::RuntimeChecked { .. }, .. }
-                            | BodyOperationKind::VectorReplace { evidence: crate::BoundsEvidence::RuntimeChecked { .. }, .. } => {
+                            | BodyOperationKind::VectorReplace { evidence: crate::BoundsEvidence::RuntimeChecked { .. }, .. }
+                            | BodyOperationKind::VectorExtract { evidence: crate::BoundsEvidence::CheckedBound, .. }
+                            | BodyOperationKind::VectorReplace { evidence: crate::BoundsEvidence::CheckedBound, .. } => {
                                 let requirement = requirement_id("vector-lane-bounds", &subject);
                                 obligations.push(ObligationRecord {
                                     schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
@@ -392,10 +442,25 @@ impl Program {
                                     ),
                                 });
                             }
-                            BodyOperationKind::SequenceProject { .. } => {}
+                            // Statically established, traversal-domain, and
+                            // checked-bound projection evidence all discharge
+                            // by semantics; only RuntimeChecked retains the
+                            // obligation above. CheckedBound discharges
+                            // because only a dominating BoundCheck against
+                            // the same sequence establishes it, and the
+                            // check itself is retained at realization.
+                            BodyOperationKind::SequenceProject {
+                                evidence: crate::BoundsEvidence::CheckedBound,
+                                ..
+                            }
+                            | BodyOperationKind::SequenceProject { .. } => {}
                             // View range validity is checked at realization;
                             // the obligation stays UNKNOWN until discharged.
-                            BodyOperationKind::ViewConstruct { .. } => {
+                            // Narrowing keeps the same requirement: the
+                            // runtime span check is the check, and it is
+                            // retained on every backend.
+                            BodyOperationKind::ViewConstruct { .. }
+                            | BodyOperationKind::ViewNarrow { .. } => {
                                 let requirement = requirement_id("view-range-valid", &subject);
                                 obligations.push(ObligationRecord {
                                     schema_version: OBLIGATION_SCHEMA_VERSION.to_owned(),
@@ -897,9 +962,9 @@ mod tests {
     use crate::validation::tests::valid_program;
     use crate::{
         ArithmeticIntent, BodyBlock, BodyOperation, BodyOperationKind, BodyTerminator, BodyType,
-        BodyValue, EvidenceFreshness, Function, FunctionBody, IntegerOperation, IntegerType,
-        Intent, MachineIntentExpression, ObligationStatus, Program, Requirement, SemanticId,
-        SUPPORTED_SCHEMA_VERSION,
+        BodyValue, BoundsEvidence, EvidenceFreshness, Function, FunctionBody, IntegerOperation,
+        IntegerType, Intent, MachineIntentExpression, ObligationStatus, Program, Requirement,
+        SemanticId, SequenceBound, SUPPORTED_SCHEMA_VERSION,
     };
 
     fn div_program(divisor: Option<i128>, dividend: Option<i128>, signed: bool) -> Program {
@@ -1082,6 +1147,169 @@ mod tests {
                 .all(|(_, status, _)| *status == ObligationStatus::Pass),
             "{lit:?}"
         );
+    }
+
+    /// A dominating `BoundCheck` discharges the projection (WEB-P-009): the
+    /// check establishes no obligation of its own and a `CheckedBound`
+    /// projection retains none, while the same projection with
+    /// `RuntimeChecked` evidence keeps `sequence-index-bounds` open.
+    fn checked_index_program(evidence: BoundsEvidence) -> Program {
+        let u64_ty = BodyType::Integer(IntegerType {
+            bits: 64,
+            signed: false,
+        });
+        let seq_ty = BodyType::Sequence {
+            element: Box::new(BodyType::Byte),
+            bound: SequenceBound::Exact(4),
+        };
+        let mut operations = Vec::new();
+        let mut elements = Vec::new();
+        for (slot, value) in [10, 20, 30, 40].into_iter().enumerate() {
+            let id = format!("b{slot}");
+            operations.push(BodyOperation {
+                id: id.clone(),
+                kind: BodyOperationKind::Constant {
+                    value,
+                    ty: BodyType::Byte,
+                },
+                operands: Vec::new(),
+                results: vec![BodyValue {
+                    id: id.clone(),
+                    ty: BodyType::Byte,
+                }],
+                contracts: Vec::new(),
+                assumptions: Vec::new(),
+                machine_intent: None,
+                lowering: None,
+                portability: None,
+            });
+            elements.push(id);
+        }
+        operations.push(BodyOperation {
+            id: "seq".to_owned(),
+            kind: BodyOperationKind::SequenceConstruct {
+                element_type: Box::new(BodyType::Byte),
+                length: 4,
+            },
+            operands: elements,
+            results: vec![BodyValue {
+                id: "seq".to_owned(),
+                ty: seq_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        operations.push(BodyOperation {
+            id: "idx".to_owned(),
+            kind: BodyOperationKind::Constant {
+                value: 1,
+                ty: u64_ty.clone(),
+            },
+            operands: Vec::new(),
+            results: vec![BodyValue {
+                id: "idx".to_owned(),
+                ty: u64_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        operations.push(BodyOperation {
+            id: "chk".to_owned(),
+            kind: BodyOperationKind::BoundCheck {
+                bound: SequenceBound::Exact(4),
+            },
+            operands: vec!["seq".to_owned(), "idx".to_owned()],
+            results: vec![BodyValue {
+                id: "chk".to_owned(),
+                ty: u64_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        operations.push(BodyOperation {
+            id: "proj".to_owned(),
+            kind: BodyOperationKind::SequenceProject {
+                bound: SequenceBound::Exact(4),
+                evidence,
+            },
+            operands: vec!["seq".to_owned(), "chk".to_owned()],
+            results: vec![BodyValue {
+                id: "proj".to_owned(),
+                ty: BodyType::Byte,
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Program {
+            schema_version: SUPPORTED_SCHEMA_VERSION.to_owned(),
+            module: "test.checked_index".to_owned(),
+            dependencies: Vec::new(),
+            finite_types: Vec::new(),
+            record_types: Vec::new(),
+            assumptions: Vec::new(),
+            binding_table: None,
+            functions: vec![Function {
+                name: "probe".to_owned(),
+                home_module: None,
+                generic_params: Vec::new(),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                contracts: Vec::new(),
+                effects: Vec::new(),
+                capabilities: Vec::new(),
+                assumptions: Vec::new(),
+                evidence: Vec::new(),
+                failure: crate::FailureMode::Isolated,
+                body: Some(FunctionBody {
+                    schema_version: crate::body::EXECUTABLE_BODY_SCHEMA_VERSION.to_owned(),
+                    entry: "entry".to_owned(),
+                    parameters: Vec::new(),
+                    generic_params: Vec::new(),
+                    cycle_policy: crate::BodyCyclePolicy::Legacy,
+                    bounded_iterations: Vec::new(),
+                    blocks: vec![BodyBlock {
+                        id: "entry".to_owned(),
+                        parameters: Vec::new(),
+                        operations,
+                        terminator: BodyTerminator::Return {
+                            values: vec!["proj".to_owned()],
+                        },
+                    }],
+                }),
+            }],
+            generic_specializations: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn checked_bound_projection_discharges_after_bound_check() {
+        let entries = obligation_statuses(&checked_index_program(BoundsEvidence::CheckedBound));
+        assert!(entries.is_empty(), "{entries:?}");
+    }
+
+    #[test]
+    fn runtime_checked_projection_keeps_index_bounds_open() {
+        let entries = obligation_statuses(&checked_index_program(BoundsEvidence::RuntimeChecked {
+            failure: crate::FailureMode::Isolated,
+        }));
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert!(
+            entries[0].0.contains("sequence-index-bounds"),
+            "{entries:?}"
+        );
+        assert_eq!(entries[0].1, ObligationStatus::Unknown);
     }
 
     /// Unsigned division carries no signed-overflow obligation at all.

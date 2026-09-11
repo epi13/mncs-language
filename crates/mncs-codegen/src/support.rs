@@ -1263,7 +1263,8 @@ fn scalar_inst_uses_cells(inst: &crate::scalar::ScalarInst) -> bool {
         | ScalarInst::CellStoreDiscriminant { .. }
         | ScalarInst::CellStore { .. }
         | ScalarInst::CellLoad { .. }
-        | ScalarInst::SequenceReplace { .. } => true,
+        | ScalarInst::SequenceReplace { .. }
+        | ScalarInst::SequenceCopy { .. } => true,
         // Sequence projection lowers to canonical slot loads
         // (`mncs_slot_load32/64`) on every native backend, so a module that
         // only indexes into sequences or views still needs the cell helpers

@@ -208,7 +208,7 @@
   },
   {
     "version": "0.13",
-    "status": "current",
+    "status": "sealed",
     "spec_document": "docs/source-profile-0.13.md",
     "predecessor": "0.12",
     "supports_parsing": true,
@@ -229,6 +229,24 @@
       "raised_sequence_ceiling_1024",
       "raised_iteration_ceiling_1024",
       "structural_recursion"
+    ]
+  },
+  {
+    "version": "0.14",
+    "status": "current",
+    "spec_document": "docs/source-profile-0.14.md",
+    "predecessor": "0.13",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 1024,
+    "max_iteration_bound": 1024,
+    "max_iteration_nesting": 2,
+    "max_iteration_work_product": 1048576,
+    "max_vector_lanes": 64,
+    "features": [
+      "bulk_span_copy",
+      "checked_view_narrowing",
+      "checked_index_discharge"
     ]
   }
 ]

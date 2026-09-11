@@ -1558,6 +1558,140 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let _ = writeln!(out, "  %rige{store_tag} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %riaddr{store_tag}");
             let _ = writeln!(out, "  store {raw_ty} %{element}, ptr %rige{store_tag}");
         }
+        ScalarInst::SequenceCopy {
+            dest,
+            destination,
+            dst_at,
+            source,
+            src_at,
+            len,
+            dst_bound: _,
+            src_bound,
+            evidence,
+            dst_length,
+            element_width,
+            element_ty,
+        } => {
+            let dstat = load_value(out, names, dst_at, "cda", split);
+            let sstat = load_value(out, names, src_at, "csa", split);
+            let clen = load_value(out, names, len, "cln", split);
+            let dbv = load_value(out, names, destination, "cdb", split);
+            let srv = load_value(out, names, source, "csv", split);
+            // Resolve the source base and runtime length like
+            // SequenceProject: exact cells carry a static length, views
+            // unpack their packed descriptor.
+            *split += 1;
+            let pre = *split;
+            let (src_base, src_len) = match src_bound {
+                mncs_model::SequenceBound::Exact(length) => {
+                    (format!("%{srv}"), format!("{length}"))
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    let _ = writeln!(out, "  %csrc{pre}_base32 = trunc i64 %{srv} to i32");
+                    let _ = writeln!(out, "  %csrc{pre}_base = zext i32 %csrc{pre}_base32 to i64");
+                    let _ = writeln!(out, "  %csrc{pre}_len = lshr i64 %{srv}, 32");
+                    (format!("%csrc{pre}_base"), format!("%csrc{pre}_len"))
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
+                }
+            };
+            if matches!(evidence, mncs_model::BoundsEvidence::RuntimeChecked { .. }) {
+                *split += 1;
+                let tag = *split;
+                let _ = writeln!(out, "  %cdend{tag} = add i64 %{dstat}, %{clen}");
+                let _ = writeln!(out, "  %csend{tag} = add i64 %{sstat}, %{clen}");
+                let _ = writeln!(out, "  %cdwrap{tag} = icmp ult i64 %cdend{tag}, %{dstat}");
+                let _ = writeln!(
+                    out,
+                    "  %csover{tag} = icmp ugt i64 %cdend{tag}, {dst_length}"
+                );
+                let _ = writeln!(out, "  %cswrap{tag} = icmp ult i64 %csend{tag}, %{sstat}");
+                let _ = writeln!(out, "  %cssover{tag} = icmp ugt i64 %csend{tag}, {src_len}");
+                let _ = writeln!(out, "  %cdbad{tag} = or i1 %cdwrap{tag}, %csover{tag}");
+                let _ = writeln!(out, "  %csbad{tag} = or i1 %cswrap{tag}, %cssover{tag}");
+                let _ = writeln!(out, "  %cbad{tag} = or i1 %cdbad{tag}, %csbad{tag}");
+                let _ = writeln!(
+                    out,
+                    "  br i1 %cbad{tag}, label %mncs_fail, label %cbad{tag}_ok"
+                );
+                let _ = writeln!(out, "cbad{tag}_ok:");
+            }
+            *split += 1;
+            let tag = *split;
+            let d = names.value(&dest.id);
+            let bytes = u64::from(*dst_length) * 8;
+            let _ = writeln!(out, "  %cbump{tag} = load i64, ptr @mncs_bump");
+            let _ = writeln!(out, "  %cbb{tag} = add i64 %cbump{tag}, 7");
+            let _ = writeln!(out, "  %cal{tag} = and i64 %cbb{tag}, -8");
+            emit_alloc_guard(
+                out,
+                split,
+                &format!("cbump{tag}"),
+                &format!("cal{tag}"),
+                bytes,
+            );
+            let _ = writeln!(out, "  %cnb{tag} = add i64 %cal{tag}, {bytes}");
+            let _ = writeln!(out, "  store i64 %cnb{tag}, ptr @mncs_bump");
+            let _ = writeln!(out, "  store i64 %cal{tag}, ptr %{d}_slot");
+            let raw_ty = slot_payload_ty(*element_width, *element_ty);
+            // Branchless per-lane span select over the static destination
+            // bound; the fallback source address is the lane's own
+            // destination slot, so every guarded load is in-bounds by
+            // construction.
+            for lane in 0..*dst_length {
+                let offset = u64::from(lane) * 8;
+                let _ = writeln!(out, "  %ck{tag}_{lane} = sub i64 {lane}, %{dstat}");
+                let _ = writeln!(out, "  %cge{tag}_{lane} = icmp uge i64 {lane}, %{dstat}");
+                let _ = writeln!(
+                    out,
+                    "  %clt{tag}_{lane} = icmp ult i64 %ck{tag}_{lane}, %{clen}"
+                );
+                let _ = writeln!(
+                    out,
+                    "  %cin{tag}_{lane} = and i1 %cge{tag}_{lane}, %clt{tag}_{lane}"
+                );
+                let _ = writeln!(
+                    out,
+                    "  %csk{tag}_{lane} = add i64 %{sstat}, %ck{tag}_{lane}"
+                );
+                let _ = writeln!(out, "  %csoff{tag}_{lane} = shl i64 %csk{tag}_{lane}, 3");
+                let _ = writeln!(
+                    out,
+                    "  %csaddr{tag}_{lane} = add i64 {src_base}, %csoff{tag}_{lane}"
+                );
+                let _ = writeln!(out, "  %cdbase{tag}_{lane} = add i64 %{dbv}, {offset}");
+                let _ = writeln!(out, "  %csuse{tag}_{lane} = select i1 %cin{tag}_{lane}, i64 %csaddr{tag}_{lane}, i64 %cdbase{tag}_{lane}");
+                emit_arena_guard(out, split, &format!("csuse{tag}_{lane}"), 8, "seq-copy-src");
+                emit_arena_guard(
+                    out,
+                    split,
+                    &format!("cdbase{tag}_{lane}"),
+                    8,
+                    "seq-copy-dst",
+                );
+                let _ = writeln!(out, "  %csgep{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %csuse{tag}_{lane}");
+                let _ = writeln!(out, "  %cdgep{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %cdbase{tag}_{lane}");
+                let _ = writeln!(
+                    out,
+                    "  %csval{tag}_{lane} = load {raw_ty}, ptr %csgep{tag}_{lane}"
+                );
+                let _ = writeln!(
+                    out,
+                    "  %cdval{tag}_{lane} = load {raw_ty}, ptr %cdgep{tag}_{lane}"
+                );
+                let _ = writeln!(out, "  %cval{tag}_{lane} = select i1 %cin{tag}_{lane}, {raw_ty} %csval{tag}_{lane}, {raw_ty} %cdval{tag}_{lane}");
+                let _ = writeln!(out, "  %cddst{tag}_{lane} = add i64 %cal{tag}, {offset}");
+                emit_arena_guard(out, split, &format!("cddst{tag}_{lane}"), 8, "seq-copy-out");
+                let _ = writeln!(out, "  %cdgepo{tag}_{lane} = getelementptr inbounds [{NATIVE_ARENA_LEN} x i8], ptr @mncs_arena, i64 0, i64 %cddst{tag}_{lane}");
+                let _ = writeln!(
+                    out,
+                    "  store {raw_ty} %cval{tag}_{lane}, ptr %cdgepo{tag}_{lane}"
+                );
+            }
+        }
         ScalarInst::SequenceProject {
             dest,
             seq,
@@ -1730,6 +1864,58 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             let _ = writeln!(out, "  %pl{split} = shl i64 %span{tag}, 32");
             let _ = writeln!(out, "  %{packed} = or i64 %pa{split}, %pl{split}");
             store_dest(out, names, dest, &packed);
+        }
+        ScalarInst::ViewNarrow {
+            dest,
+            source,
+            new_cap,
+        } => {
+            let srcv = load_value(out, names, source, "narr", split);
+            // The static capacity is the only thing that changes: trap
+            // unless the runtime span fits, then alias the descriptor.
+            *split += 1;
+            let tag = *split;
+            let _ = writeln!(out, "  %nspan{tag} = lshr i64 %{srcv}, 32");
+            let _ = writeln!(out, "  %nbad{tag} = icmp ugt i64 %nspan{tag}, {new_cap}");
+            let _ = writeln!(
+                out,
+                "  br i1 %nbad{tag}, label %mncs_fail, label %vn{tag}_ok"
+            );
+            let _ = writeln!(out, "vn{tag}_ok:");
+            store_dest(out, names, dest, &srcv);
+        }
+        ScalarInst::BoundCheck {
+            dest,
+            seq,
+            index,
+            bound,
+        } => {
+            let idx = load_value(out, names, index, "bchk", split);
+            let seqv = load_value(out, names, seq, "bseq", split);
+            // The check is always retained: trap unless the candidate sits
+            // below the runtime length, then carry it unchanged.
+            *split += 1;
+            let tag = *split;
+            match bound {
+                mncs_model::SequenceBound::Exact(length) => {
+                    let _ = writeln!(out, "  %boob{tag} = icmp uge i64 %{idx}, {length}");
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    let _ = writeln!(out, "  %bvlen{tag} = lshr i64 %{seqv}, 32");
+                    let _ = writeln!(out, "  %boob{tag} = icmp uge i64 %{idx}, %bvlen{tag}");
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
+                }
+            }
+            let _ = writeln!(
+                out,
+                "  br i1 %boob{tag}, label %mncs_fail, label %boob{tag}_ok"
+            );
+            let _ = writeln!(out, "boob{tag}_ok:");
+            store_dest(out, names, dest, &idx);
         }
         ScalarInst::FiniteIsVariant {
             dest,
@@ -2107,6 +2293,9 @@ fn scalar_inst_dest(inst: &ScalarInst) -> Option<&ScalarValue> {
         | ScalarInst::Convert { dest, .. }
         | ScalarInst::Select { dest, .. }
         | ScalarInst::SequenceReplace { dest, .. }
+        | ScalarInst::SequenceCopy { dest, .. }
+        | ScalarInst::ViewNarrow { dest, .. }
+        | ScalarInst::BoundCheck { dest, .. }
         | ScalarInst::SequenceProject { dest, .. }
         | ScalarInst::SequenceLength { dest, .. }
         | ScalarInst::ViewConstruct { dest, .. }

@@ -1096,6 +1096,161 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
                 let _ = writeln!(out, "    ok_{d}:");
             }
         }
+        ScalarInst::SequenceCopy {
+            dest,
+            destination,
+            dst_at,
+            source,
+            src_at,
+            len,
+            dst_bound: _,
+            src_bound,
+            evidence,
+            dst_length,
+            element_width,
+            ..
+        } => {
+            let d = names.value(&dest.id);
+            let dst_at_n = names.value(dst_at);
+            let src_at_n = names.value(src_at);
+            let len_n = names.value(len);
+            let checked = matches!(evidence, mncs_model::BoundsEvidence::RuntimeChecked { .. });
+            let (src_base, src_len) = match src_bound {
+                mncs_model::SequenceBound::Exact(length) => {
+                    let _ = writeln!(out, "        {d}_csrc_len = iconst.i64 {length}");
+                    (names.value(source).to_owned(), format!("{d}_csrc_len"))
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    let _ = writeln!(
+                        out,
+                        "        {d}_csrc_len = ushr_imm.i64 {}, 32",
+                        names.value(source)
+                    );
+                    let _ = writeln!(
+                        out,
+                        "        {d}_csrc_base = band {}, 4294967295",
+                        names.value(source)
+                    );
+                    (format!("{d}_csrc_base"), format!("{d}_csrc_len"))
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
+                }
+            };
+            if checked {
+                let _ = writeln!(out, "        {d}_cdend = iadd {dst_at_n}, {len_n}");
+                let _ = writeln!(out, "        {d}_csend = iadd {src_at_n}, {len_n}");
+                let _ = writeln!(out, "        {d}_cdwrap = icmp ult {d}_cdend, {dst_at_n}");
+                let _ = writeln!(out, "        {d}_cdover = icmp ugt {d}_cdend, {dst_length}");
+                let _ = writeln!(out, "        {d}_cswrap = icmp ult {d}_csend, {src_at_n}");
+                let _ = writeln!(out, "        {d}_cssover = icmp ugt {d}_csend, {src_len}");
+                let _ = writeln!(out, "        {d}_cdbad = bor {d}_cdwrap, {d}_cdover");
+                let _ = writeln!(out, "        {d}_csbad = bor {d}_cswrap, {d}_cssover");
+                let _ = writeln!(out, "        {d}_cbad = bor {d}_cdbad, {d}_csbad");
+                let _ = writeln!(out, "        brnz {d}_cbad, fail_{d}");
+            }
+            let _ = writeln!(
+                out,
+                "        {d} = call %mncs_cell_alloc({})",
+                dst_length * 8
+            );
+            // Branchless per-lane span select over the static destination
+            // bound; the fallback use-address is the lane's own destination
+            // slot, so every load stays in-bounds by construction. Lane
+            // membership folds through `select` exactly like ScalarInst::
+            // Select (icmp conditions, `icmp_imm ne` back to boolean).
+            let _ = writeln!(out, "        {d}_cz = iconst.i64 0");
+            let _ = writeln!(out, "        {d}_co = iconst.i64 1");
+            for lane in 0..*dst_length {
+                let offset = lane * 8;
+                let _ = writeln!(out, "        {d}_cj{lane} = iconst.i64 {lane}");
+                let _ = writeln!(out, "        {d}_ck{lane} = isub {d}_cj{lane}, {dst_at_n}");
+                let _ = writeln!(
+                    out,
+                    "        {d}_cge{lane} = icmp uge {d}_cj{lane}, {dst_at_n}"
+                );
+                let _ = writeln!(
+                    out,
+                    "        {d}_clt{lane} = icmp ult {d}_ck{lane}, {len_n}"
+                );
+                let _ = writeln!(
+                    out,
+                    "        {d}_cin0{lane} = select {d}_clt{lane}, {d}_co, {d}_cz"
+                );
+                let _ = writeln!(
+                    out,
+                    "        {d}_cin1{lane} = select {d}_cge{lane}, {d}_cin0{lane}, {d}_cz"
+                );
+                let _ = writeln!(out, "        {d}_cin{lane} = icmp_imm ne {d}_cin1{lane}, 0");
+                let _ = writeln!(out, "        {d}_csk{lane} = iadd {src_at_n}, {d}_ck{lane}");
+                let _ = writeln!(
+                    out,
+                    "        {d}_csoff{lane} = ishl_imm.i64 {d}_csk{lane}, 3"
+                );
+                let _ = writeln!(
+                    out,
+                    "        {d}_csaddr{lane} = iadd {src_base}, {d}_csoff{lane}"
+                );
+                let _ = writeln!(
+                    out,
+                    "        {d}_cdaddr{lane} = iadd_imm.i64 {}, {offset}",
+                    names.value(destination)
+                );
+                let _ = writeln!(
+                    out,
+                    "        {d}_cuse{lane} = select {d}_cin{lane}, {d}_csaddr{lane}, {d}_cdaddr{lane}"
+                );
+                match element_width {
+                    crate::composite::SlotWidth::W32 => {
+                        let _ = writeln!(
+                            out,
+                            "        {d}_cs{lane} = load.i32 {d}_cuse{lane}, {d}_cz"
+                        );
+                        let _ = writeln!(
+                            out,
+                            "        {d}_cd{lane} = load.i32 {d}_cdaddr{lane}, {d}_cz"
+                        );
+                        let _ = writeln!(
+                            out,
+                            "        {d}_cv{lane} = select {d}_cin{lane}, {d}_cs{lane}, {d}_cd{lane}"
+                        );
+                        let _ = writeln!(
+                            out,
+                            "        call %mncs_slot_store32({d}, {offset}, {d}_cv{lane})"
+                        );
+                    }
+                    crate::composite::SlotWidth::W64 => {
+                        let _ = writeln!(
+                            out,
+                            "        {d}_cs{lane} = load.i64 {d}_cuse{lane}, {d}_cz"
+                        );
+                        let _ = writeln!(
+                            out,
+                            "        {d}_cd{lane} = load.i64 {d}_cdaddr{lane}, {d}_cz"
+                        );
+                        let _ = writeln!(
+                            out,
+                            "        {d}_cv{lane} = select {d}_cin{lane}, {d}_cs{lane}, {d}_cd{lane}"
+                        );
+                        let _ = writeln!(
+                            out,
+                            "        call %mncs_slot_store64({d}, {offset}, {d}_cv{lane})"
+                        );
+                    }
+                }
+            }
+            if checked {
+                let _ = writeln!(out, "        jump ok_{d}");
+                let _ = writeln!(out, "    fail_{d}:");
+                out.push_str("        v_bad = iconst.i32 1\n        v_z = iconst.i64 0\n");
+                out.push_str(
+                    "        store.i32 v_bad, st\n        store.i64 v_z, val\n        return\n",
+                );
+                let _ = writeln!(out, "    ok_{d}:");
+            }
+        }
         ScalarInst::SequenceProject {
             dest,
             seq,
@@ -1192,6 +1347,73 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
             let _ = writeln!(out, "        {d}_lo = band {d}_addr, 4294967295");
             let _ = writeln!(out, "        {d}_hi = ishl_imm.i64 {d}_span, 32");
             let _ = writeln!(out, "        {d} = bor {d}_lo, {d}_hi");
+            let _ = writeln!(out, "        jump ok_{d}");
+            let _ = writeln!(out, "    fail_{d}:");
+            out.push_str("        v_bad = iconst.i32 1\n        v_z = iconst.i64 0\n");
+            out.push_str(
+                "        store.i32 v_bad, st\n        store.i64 v_z, val\n        return\n",
+            );
+            let _ = writeln!(out, "    ok_{d}:");
+        }
+        ScalarInst::ViewNarrow {
+            dest,
+            source,
+            new_cap,
+        } => {
+            let d = names.value(&dest.id);
+            // The static capacity is the only thing that changes: trap
+            // unless the runtime span fits, then alias the descriptor.
+            let _ = writeln!(
+                out,
+                "        {d}_nspan = ushr_imm.i64 {}, 32",
+                names.value(source)
+            );
+            let _ = writeln!(out, "        {d}_nbad = icmp ugt {d}_nspan, {new_cap}");
+            let _ = writeln!(out, "        brnz {d}_nbad, fail_{d}");
+            let _ = writeln!(out, "        {d} = {}", names.value(source));
+            let _ = writeln!(out, "        jump ok_{d}");
+            let _ = writeln!(out, "    fail_{d}:");
+            out.push_str("        v_bad = iconst.i32 1\n        v_z = iconst.i64 0\n");
+            out.push_str(
+                "        store.i32 v_bad, st\n        store.i64 v_z, val\n        return\n",
+            );
+            let _ = writeln!(out, "    ok_{d}:");
+        }
+        ScalarInst::BoundCheck {
+            dest,
+            seq,
+            index,
+            bound,
+        } => {
+            let d = names.value(&dest.id);
+            // The check is always retained: trap unless the candidate sits
+            // below the runtime length, then carry it unchanged.
+            let length = match bound {
+                mncs_model::SequenceBound::Exact(length) => {
+                    let _ = writeln!(out, "        {d}_len = iconst.i64 {length}");
+                    format!("{d}_len")
+                }
+                mncs_model::SequenceBound::UpTo(_) => {
+                    let _ = writeln!(
+                        out,
+                        "        {d}_len = ushr_imm.i64 {}, 32",
+                        names.value(seq)
+                    );
+                    format!("{d}_len")
+                }
+                mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
+                    unreachable!(
+                        "generic SequenceBound must be specialized before backend lowering"
+                    )
+                }
+            };
+            let _ = writeln!(
+                out,
+                "        {d}_bad = icmp uge {}, {length}",
+                names.value(index)
+            );
+            let _ = writeln!(out, "        brnz {d}_bad, fail_{d}");
+            let _ = writeln!(out, "        {d} = {}", names.value(index));
             let _ = writeln!(out, "        jump ok_{d}");
             let _ = writeln!(out, "    fail_{d}:");
             out.push_str("        v_bad = iconst.i32 1\n        v_z = iconst.i64 0\n");
@@ -1400,6 +1622,9 @@ fn scalar_dest(inst: &ScalarInst) -> Option<&crate::scalar::ScalarValue> {
         | ScalarInst::Convert { dest, .. }
         | ScalarInst::Select { dest, .. }
         | ScalarInst::SequenceReplace { dest, .. }
+        | ScalarInst::SequenceCopy { dest, .. }
+        | ScalarInst::ViewNarrow { dest, .. }
+        | ScalarInst::BoundCheck { dest, .. }
         | ScalarInst::SequenceProject { dest, .. }
         | ScalarInst::SequenceLength { dest, .. }
         | ScalarInst::ViewConstruct { dest, .. }
@@ -2882,6 +3107,133 @@ where
                             builder.ins().call(store, &[dest_addr, values[element]]);
                             values.insert(dest.id.clone(), allocated);
                         }
+                        ScalarInst::SequenceCopy {
+                            dest,
+                            destination,
+                            dst_at,
+                            source,
+                            src_at,
+                            len,
+                            dst_bound: _,
+                            src_bound,
+                            evidence,
+                            dst_length,
+                            element_width,
+                            ..
+                        } => {
+                            let dst_at_v = values[dst_at];
+                            let src_at_v = values[src_at];
+                            let len_v = values[len];
+                            let dst_base_v = values[destination];
+                            let src_v = values[source];
+                            let (src_base_v, src_len_v) = match src_bound {
+                                mncs_model::SequenceBound::Exact(length) => {
+                                    (src_v, builder.ins().iconst(types::I64, i64::from(*length)))
+                                }
+                                mncs_model::SequenceBound::UpTo(_) => {
+                                    let base32 = builder.ins().ireduce(types::I32, src_v);
+                                    let base = builder.ins().uextend(types::I64, base32);
+                                    let shifted = builder.ins().ushr_imm(src_v, 32);
+                                    // `ushr_imm` keeps the operand width;
+                                    // the high half already holds the
+                                    // runtime length.
+                                    (base, shifted)
+                                }
+                                mncs_model::SequenceBound::Param(_)
+                                | mncs_model::SequenceBound::UpToParam(_) => {
+                                    unreachable!(
+                                        "generic SequenceBound must be specialized before backend lowering"
+                                    )
+                                }
+                            };
+                            if matches!(evidence, mncs_model::BoundsEvidence::RuntimeChecked { .. })
+                            {
+                                let dst_end = builder.ins().iadd(dst_at_v, len_v);
+                                let src_end = builder.ins().iadd(src_at_v, len_v);
+                                let dst_wrap =
+                                    builder
+                                        .ins()
+                                        .icmp(IntCC::UnsignedLessThan, dst_end, dst_at_v);
+                                let dst_limit =
+                                    builder.ins().iconst(types::I64, i64::from(*dst_length));
+                                let dst_over = builder.ins().icmp(
+                                    IntCC::UnsignedGreaterThan,
+                                    dst_end,
+                                    dst_limit,
+                                );
+                                let src_wrap =
+                                    builder
+                                        .ins()
+                                        .icmp(IntCC::UnsignedLessThan, src_end, src_at_v);
+                                let src_over = builder.ins().icmp(
+                                    IntCC::UnsignedGreaterThan,
+                                    src_end,
+                                    src_len_v,
+                                );
+                                let dst_bad = builder.ins().bor(dst_wrap, dst_over);
+                                let src_bad = builder.ins().bor(src_wrap, src_over);
+                                let bad = builder.ins().bor(dst_bad, src_bad);
+                                let cont = builder.create_block();
+                                builder.ins().brif(
+                                    bad,
+                                    fail,
+                                    &[] as &[BlockArg],
+                                    cont,
+                                    &[] as &[BlockArg],
+                                );
+                                builder.switch_to_block(cont);
+                                builder.seal_block(cont);
+                            }
+                            let alloc = cell_libcall(module, builder.func, "mncs_cell_alloc");
+                            let bytes =
+                                builder.ins().iconst(types::I64, i64::from(*dst_length) * 8);
+                            let call = builder.ins().call(alloc, &[bytes]);
+                            let allocated = builder.inst_results(call)[0];
+                            let (load_name, store_name) = match element_width {
+                                crate::composite::SlotWidth::W32 => {
+                                    ("mncs_slot_load32", "mncs_slot_store32")
+                                }
+                                crate::composite::SlotWidth::W64 => {
+                                    ("mncs_slot_load64", "mncs_slot_store64")
+                                }
+                            };
+                            let load = cell_libcall(module, builder.func, load_name);
+                            let store = cell_libcall(module, builder.func, store_name);
+                            let zero = builder.ins().iconst(types::I64, 0);
+                            let one = builder.ins().iconst(types::I64, 1);
+                            // Branchless per-lane span select over the static
+                            // destination bound; the fallback use-address is
+                            // the lane's own destination slot, so every
+                            // guarded load is in-bounds by construction.
+                            for lane in 0..*dst_length {
+                                let lane_v = builder.ins().iconst(types::I64, i64::from(lane));
+                                let lane_off =
+                                    builder.ins().iconst(types::I64, i64::from(lane) * 8);
+                                let k = builder.ins().isub(lane_v, dst_at_v);
+                                let ge = builder.ins().icmp(
+                                    IntCC::UnsignedGreaterThanOrEqual,
+                                    lane_v,
+                                    dst_at_v,
+                                );
+                                let lt = builder.ins().icmp(IntCC::UnsignedLessThan, k, len_v);
+                                let in0 = builder.ins().select(lt, one, zero);
+                                let in1 = builder.ins().select(ge, in0, zero);
+                                let in_flag = builder.ins().icmp_imm(IntCC::NotEqual, in1, 0);
+                                let sk = builder.ins().iadd(src_at_v, k);
+                                let soff = builder.ins().ishl_imm(sk, 3);
+                                let saddr = builder.ins().iadd(src_base_v, soff);
+                                let daddr = builder.ins().iadd(dst_base_v, lane_off);
+                                let use_addr = builder.ins().select(in_flag, saddr, daddr);
+                                let loaded_s = builder.ins().call(load, &[use_addr]);
+                                let lane_s = builder.inst_results(loaded_s)[0];
+                                let loaded_d = builder.ins().call(load, &[daddr]);
+                                let lane_d = builder.inst_results(loaded_d)[0];
+                                let picked = builder.ins().select(in_flag, lane_s, lane_d);
+                                let out_addr = builder.ins().iadd(allocated, lane_off);
+                                builder.ins().call(store, &[out_addr, picked]);
+                            }
+                            values.insert(dest.id.clone(), allocated);
+                        }
                         ScalarInst::SequenceProject {
                             dest,
                             seq,
@@ -3025,6 +3377,69 @@ where
                             let hi = builder.ins().ishl_imm(span, 32);
                             let packed = builder.ins().bor(lo, hi);
                             values.insert(dest.id.clone(), packed);
+                        }
+                        ScalarInst::ViewNarrow {
+                            dest,
+                            source,
+                            new_cap,
+                        } => {
+                            let src_v = values[source];
+                            let span = builder.ins().ushr_imm(src_v, 32);
+                            let cap = builder.ins().iconst(types::I64, i64::from(*new_cap));
+                            let bad = builder.ins().icmp(IntCC::UnsignedGreaterThan, span, cap);
+                            let cont = builder.create_block();
+                            builder.ins().brif(
+                                bad,
+                                fail,
+                                &[] as &[BlockArg],
+                                cont,
+                                &[] as &[BlockArg],
+                            );
+                            builder.switch_to_block(cont);
+                            builder.seal_block(cont);
+                            values.insert(dest.id.clone(), src_v);
+                        }
+                        ScalarInst::BoundCheck {
+                            dest,
+                            seq,
+                            index,
+                            bound,
+                        } => {
+                            let seq_v = values[seq];
+                            let idx_v = values[index];
+                            // The check is always retained: trap unless the
+                            // candidate sits below the runtime length, then
+                            // carry it unchanged.
+                            let length = match bound {
+                                mncs_model::SequenceBound::Exact(length) => {
+                                    builder.ins().iconst(types::I64, i64::from(*length))
+                                }
+                                mncs_model::SequenceBound::UpTo(_) => {
+                                    builder.ins().ushr_imm(seq_v, 32)
+                                }
+                                mncs_model::SequenceBound::Param(_)
+                                | mncs_model::SequenceBound::UpToParam(_) => {
+                                    unreachable!(
+                                        "generic SequenceBound must be specialized before backend lowering"
+                                    )
+                                }
+                            };
+                            let bad = builder.ins().icmp(
+                                IntCC::UnsignedGreaterThanOrEqual,
+                                idx_v,
+                                length,
+                            );
+                            let cont = builder.create_block();
+                            builder.ins().brif(
+                                bad,
+                                fail,
+                                &[] as &[BlockArg],
+                                cont,
+                                &[] as &[BlockArg],
+                            );
+                            builder.switch_to_block(cont);
+                            builder.seal_block(cont);
+                            values.insert(dest.id.clone(), idx_v);
                         }
                         ScalarInst::Call { dest, callee, args } => {
                             let callee_id = declared[callee];

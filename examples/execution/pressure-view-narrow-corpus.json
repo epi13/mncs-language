@@ -1,0 +1,472 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-view-narrow",
+ "cases": [
+  {
+   "id": "literal",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.view_narrow",
+     "function": "narrow_literal"
+    },
+    "arguments": [],
+    "step_budget": 45000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 4660,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "dynamic",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.view_narrow",
+     "function": "narrow_dynamic"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 64,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "at_call",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.view_narrow",
+     "function": "narrow_at_call"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 45000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 258,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "chained",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.view_narrow",
+     "function": "narrow_chained"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 64,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 30000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "chained_escape",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.view_narrow",
+     "function": "narrow_chained"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 100,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   }
+  },
+  {
+   "id": "return_narrow",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.view_narrow",
+     "function": "narrow_return"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 32,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "sequence": {
+      "element": {
+       "byte": {}
+      },
+      "values": [
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       },
+       {
+        "byte": {
+         "value": 0
+        }
+       }
+      ]
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "traverse8",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.view_narrow",
+     "function": "narrow_traverse"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 15000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 8,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "traverse40",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.view_narrow",
+     "function": "narrow_traverse"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 40,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 20000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 40,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "escape",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.view_narrow",
+     "function": "narrow_escape"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 65,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   }
+  },
+  {
+   "id": "escape_edge",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.view_narrow",
+     "function": "narrow_escape"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 64,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

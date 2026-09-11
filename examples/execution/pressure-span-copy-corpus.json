@@ -1,0 +1,488 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-span-copy",
+ "cases": [
+  {
+   "id": "bytes_mid",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_bytes"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 6000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 11,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "bytes_tail",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_bytes"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 60,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 6000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 17,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "view_src",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_view_src"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 16,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 20,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "view_src_short",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_view_src"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 20,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "static_window",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_static"
+    },
+    "arguments": [],
+    "step_budget": 1000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 10,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "overlap_fwd",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_overlap_fwd"
+    },
+    "arguments": [],
+    "step_budget": 1000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 46,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "overlap_bwd",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_overlap_bwd"
+    },
+    "arguments": [],
+    "step_budget": 1000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 66,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "zero_len",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_zero_len"
+    },
+    "arguments": [],
+    "step_budget": 1000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 9,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "full",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_full"
+    },
+    "arguments": [],
+    "step_budget": 1000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 10,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "u16",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_u16"
+    },
+    "arguments": [],
+    "step_budget": 1000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2000,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "bool",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_bool"
+    },
+    "arguments": [],
+    "step_budget": 1000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "trap_oob_dst",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_oob_dst"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 14,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   }
+  },
+  {
+   "id": "trap_oob_src",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_oob_src"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   }
+  },
+  {
+   "id": "trap_wrap_max",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_wrap"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 18446744073709551615,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   }
+  },
+  {
+   "id": "trap_wrap_edge",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_wrap"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 16,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 1024
+   }
+  }
+ ]
+}

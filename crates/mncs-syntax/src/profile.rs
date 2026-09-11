@@ -107,6 +107,11 @@ pub struct SourceProfileRecord {
 /// pressure-driven extensions (RFC 0036 evolution of 0.12).
 pub const SOURCE_PROFILE_VERSION_0_13: &str = "0.13";
 
+/// Source Profile 0.14: bounded buffer-pipeline profile. Additive over
+/// 0.1–0.13 with unchanged ceilings; adds bulk span copy, checked
+/// view-to-view narrowing, and the checked-index discharge form.
+pub const SOURCE_PROFILE_VERSION_0_14: &str = "0.14";
+
 /// The registry is ordered oldest-first; `predecessor` links agree with
 /// this order (checked by `registry_chain_is_linear`).
 pub const SOURCE_PROFILE_REGISTRY: &[SourceProfileRecord] = &[
@@ -296,7 +301,7 @@ pub const SOURCE_PROFILE_REGISTRY: &[SourceProfileRecord] = &[
     },
     SourceProfileRecord {
         version: "0.13",
-        status: ProfileStatus::Current,
+        status: ProfileStatus::Sealed,
         spec_document: "docs/source-profile-0.13.md",
         predecessor: Some("0.12"),
         supports_parsing: true,
@@ -317,6 +322,24 @@ pub const SOURCE_PROFILE_REGISTRY: &[SourceProfileRecord] = &[
             "raised_sequence_ceiling_1024",
             "raised_iteration_ceiling_1024",
             "structural_recursion",
+        ],
+    },
+    SourceProfileRecord {
+        version: "0.14",
+        status: ProfileStatus::Current,
+        spec_document: "docs/source-profile-0.14.md",
+        predecessor: Some("0.13"),
+        supports_parsing: true,
+        supports_elaboration: true,
+        max_sequence_bound: 1024,
+        max_iteration_bound: 1024,
+        max_iteration_nesting: 2,
+        max_iteration_work_product: 1048576,
+        max_vector_lanes: 64,
+        features: &[
+            "bulk_span_copy",
+            "checked_view_narrowing",
+            "checked_index_discharge",
         ],
     },
 ];
@@ -423,7 +446,7 @@ mod tests {
             assert!(record.supports_elaboration);
             previous = Some(record.version);
         }
-        assert_eq!(SOURCE_PROFILE_REGISTRY.last().unwrap().version, "0.13");
+        assert_eq!(SOURCE_PROFILE_REGISTRY.last().unwrap().version, "0.14");
     }
 
     #[test]
@@ -433,7 +456,7 @@ mod tests {
         }
         assert!(!source_profile_supported("1.0"));
         assert!(!source_profile_supported("9.9"));
-        assert!(!source_profile_supported("0.14"));
+        assert!(source_profile_supported("0.14"));
         assert!(!source_profile_supported(""));
     }
 
@@ -448,6 +471,9 @@ mod tests {
         assert_eq!(ceiling("0.13").max_sequence_bound, 1024);
         assert_eq!(ceiling("0.13").max_iteration_bound, 1024);
         assert_eq!(ceiling("0.13").max_iteration_work_product, 1048576);
+        assert_eq!(ceiling("0.14").max_sequence_bound, 1024);
+        assert_eq!(ceiling("0.14").max_iteration_bound, 1024);
+        assert_eq!(ceiling("0.14").max_iteration_work_product, 1048576);
     }
 
     #[test]

@@ -219,6 +219,27 @@ pub enum ScalarInst {
         when_true: SemanticId,
         when_false: SemanticId,
     },
+    /// Checked view narrowing to a smaller static capacity (Profile 0.14):
+    /// trap unless the source view's runtime span fits `new_cap`, then the
+    /// destination aliases the same descriptor (static capacity is the only
+    /// thing that changes; no copy is materialized).
+    ViewNarrow {
+        dest: ScalarValue,
+        source: SemanticId,
+        new_cap: u32,
+    },
+    /// Checked index against a sequence length (Profile 0.14): trap unless
+    /// `index < len(seq)`, then carry the index unchanged. The bound
+    /// resolves the runtime length (static for exact cells, packed
+    /// descriptor for views); projections through the result discharge
+    /// with `CheckedBound` evidence upstream, but the check itself is
+    /// always retained here.
+    BoundCheck {
+        dest: ScalarValue,
+        seq: SemanticId,
+        index: SemanticId,
+        bound: mncs_model::SequenceBound,
+    },
     /// Total functional sequence update over an exact bound (Profile 0.8):
     /// allocate a new cell, copy the source slots, store the replacement
     /// element at the (dynamically checked when required) index. The source
@@ -232,6 +253,26 @@ pub enum ScalarInst {
         evidence: mncs_model::BoundsEvidence,
         length: u32,
         element_width: SlotWidth,
+    },
+    /// Total functional bounded span copy (Profile 0.14): allocate a new
+    /// destination-sized cell, copy the destination slots, then overwrite
+    /// the `[dst_at, dst_at + len)` window from the source window starting
+    /// at `src_at`. The source may be an exact cell or a packed view
+    /// descriptor; realization resolves the source base and runtime length
+    /// before the checked window arithmetic. Neither input cell is written.
+    SequenceCopy {
+        dest: ScalarValue,
+        destination: SemanticId,
+        dst_at: SemanticId,
+        source: SemanticId,
+        src_at: SemanticId,
+        len: SemanticId,
+        dst_bound: mncs_model::SequenceBound,
+        src_bound: mncs_model::SequenceBound,
+        evidence: mncs_model::BoundsEvidence,
+        dst_length: u32,
+        element_width: SlotWidth,
+        element_ty: ScalarTy,
     },
     /// One source instruction lowered into an ordered group of cell
     /// operations (allocation followed by canonical field stores).
@@ -708,6 +749,46 @@ fn lower_instruction(
                 evidence: evidence.clone(),
                 length: *length,
                 element_width: width,
+            })
+        }
+        SsaInstructionKind::ViewNarrow {
+            source_cap: _,
+            new_cap,
+        } => Ok(ScalarInst::ViewNarrow {
+            dest,
+            source: operand(instruction, 0)?,
+            new_cap: *new_cap,
+        }),
+        SsaInstructionKind::BoundCheck { bound } => Ok(ScalarInst::BoundCheck {
+            dest,
+            seq: operand(instruction, 0)?,
+            index: operand(instruction, 1)?,
+            bound: bound.clone(),
+        }),
+        SsaInstructionKind::SequenceCopy {
+            element_type,
+            dst_bound,
+            src_bound,
+            evidence,
+        } => {
+            let mncs_model::SequenceBound::Exact(dst_length) = dst_bound else {
+                return Err("functional span copy requires an exact destination".to_owned());
+            };
+            let element_ty = scalar_ty_in(&ir_type_of(element_type), layout)?;
+            let width = slot_width_of(element_ty);
+            Ok(ScalarInst::SequenceCopy {
+                dest,
+                destination: operand(instruction, 0)?,
+                dst_at: operand(instruction, 1)?,
+                source: operand(instruction, 2)?,
+                src_at: operand(instruction, 3)?,
+                len: operand(instruction, 4)?,
+                dst_bound: dst_bound.clone(),
+                src_bound: src_bound.clone(),
+                evidence: evidence.clone(),
+                dst_length: *dst_length,
+                element_width: width,
+                element_ty,
             })
         }
         SsaInstructionKind::ViewConstruct {

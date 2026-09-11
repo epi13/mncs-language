@@ -182,6 +182,12 @@ pub enum BoundsEvidence {
     /// deterministic check whose failure is an explicit runtime failure and
     /// whose obligation stays UNKNOWN until discharged.
     RuntimeChecked { failure: FailureMode },
+    /// The index is the result of a checked-index operation against this
+    /// same sequence value (Profile 0.14): elaboration verified the
+    /// linkage structurally, so no bounds obligation is retained.
+    /// Realization still performs the check — discharge records the
+    /// static fact, it never removes the check.
+    CheckedBound,
 }
 
 /// What domain a bounded iteration counts over. `Attempts` is the Profile 0.4
@@ -670,6 +676,37 @@ pub enum BodyOperationKind {
         bound: SequenceBound,
         evidence: BoundsEvidence,
     },
+    /// Checked index against a sequence length (Profile 0.14). Operands are
+    /// subject-first like projections: the bounded sequence, then the u64
+    /// candidate index. Checked semantics require `index < len(sequence)`;
+    /// violations are explicit runtime failures. The result is the index
+    /// itself, so a projection through the result carries first-class
+    /// machine knowledge: elaboration discharges the projection's bounds
+    /// obligation exactly when the checked sequence is the projected
+    /// sequence value. The check is retained at realization either way.
+    /// The carried bound resolves the runtime length on every backend
+    /// (static for exact bounds, descriptor for views).
+    BoundCheck {
+        bound: SequenceBound,
+    },
+    /// Total functional bounded span copy (Profile 0.14): produce a new
+    /// sequence equal to the destination (operand 0, exact bound) except
+    /// the `len` elements starting at `dst_at` (operand 1), which become
+    /// the `len` elements of the source (operand 2, exact or view) starting
+    /// at `src_at` (operand 3); operand 4 is `len`. All three positions
+    /// are u64. Checked semantics require `dst_at + len <= len(dst)` and
+    /// `src_at + len <= len(src)` under checked u64 addition; violations
+    /// are explicit runtime failures with a retained span-copy obligation.
+    /// Value semantics mirror `SequenceReplace`: both inputs are unchanged
+    /// and no aliasing is created. The destination stays exact so the
+    /// result has a static bound; the source may be a view so staged and
+    /// parsed spans copy without remarshal.
+    SequenceCopy {
+        element_type: Box<BodyType>,
+        dst_bound: SequenceBound,
+        src_bound: SequenceBound,
+        evidence: BoundsEvidence,
+    },
     VectorConstruct {
         element_type: Box<BodyType>,
         lanes: u32,
@@ -751,6 +788,17 @@ pub enum BodyOperationKind {
     ViewConstruct {
         source_bound: SequenceBound,
         view_bound: SequenceBound,
+    },
+    /// Narrow a bounded view to a smaller static capacity (Profile 0.14).
+    /// Operand: the source view; the result is the same view value with
+    /// static capacity `new_cap`. Checked semantics require
+    /// `len(source) <= new_cap`; violations are explicit runtime failures
+    /// with a retained range-validity obligation. Widening refuses at
+    /// validation. No copy is materialized and element identity is
+    /// untouched; only the static capacity fact changes.
+    ViewNarrow {
+        source_cap: u32,
+        new_cap: u32,
     },
     FiniteConstruct {
         type_identity: SemanticId,
@@ -2073,6 +2121,132 @@ fn validate_operation(
             }
             let _ = evidence;
         }
+        BodyOperationKind::BoundCheck { .. } => {
+            if operation.operands.len() != 2 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB155",
+                    path.to_owned(),
+                    "checked-index construction requires one sequence operand, one index operand, and one result",
+                ));
+                return;
+            }
+            let counter_type = BodyType::Integer(IntegerType {
+                bits: 64,
+                signed: false,
+            });
+            match available.get(operation.operands.first().unwrap_or(&String::new())) {
+                Some(BodyType::Sequence { .. }) => {}
+                _ => {
+                    errors.push(body_diagnostic(
+                        "MNB157",
+                        format!("{path}.operands[0]"),
+                        "checked-index bounds must come from a bounded sequence",
+                    ));
+                }
+            }
+            if available.get(operation.operands.get(1).unwrap_or(&String::new()))
+                != Some(&counter_type)
+            {
+                errors.push(body_diagnostic(
+                    "MNB156",
+                    format!("{path}.operands[1]"),
+                    "checked-index candidates must have u64 type",
+                ));
+            }
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| result.ty != counter_type)
+            {
+                errors.push(body_diagnostic(
+                    "MNB158",
+                    format!("{path}.results"),
+                    "checked-index results carry the checked u64 index",
+                ));
+            }
+        }
+        BodyOperationKind::SequenceCopy {
+            element_type,
+            dst_bound,
+            src_bound,
+            evidence,
+        } => {
+            if !matches!(dst_bound, SequenceBound::Exact(_)) {
+                errors.push(body_diagnostic(
+                    "MNB142",
+                    format!("{path}.kind.dst_bound"),
+                    "functional span copy requires an exact-bound destination; views refuse",
+                ));
+            }
+            // The source bound stays shape-agnostic here: exact, view, and
+            // generic bounds all type-check, and specialization resolves
+            // generic shapes before backend lowering.
+            let _ = src_bound;
+            if operation.operands.len() != 5 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB144",
+                    path.to_owned(),
+                    "functional span copy requires a destination, two offsets, a source, a length, and one result",
+                ));
+            }
+            let counter_type = BodyType::Integer(IntegerType {
+                bits: 64,
+                signed: false,
+            });
+            for (position, name) in [
+                (1, "destination offset"),
+                (3, "source offset"),
+                (4, "length"),
+            ] {
+                if available.get(operation.operands.get(position).unwrap_or(&String::new()))
+                    != Some(&counter_type)
+                {
+                    errors.push(body_diagnostic(
+                        "MNB145",
+                        format!("{path}.operands[{position}]"),
+                        format!("functional span copy {name} must have u64 type"),
+                    ));
+                }
+            }
+            let expected_destination = BodyType::Sequence {
+                element: element_type.clone(),
+                bound: dst_bound.clone(),
+            };
+            if available.get(operation.operands.first().unwrap_or(&String::new()))
+                != Some(&expected_destination)
+            {
+                errors.push(body_diagnostic(
+                    "MNB146",
+                    format!("{path}.operands[0]"),
+                    "functional span copy destination does not have the declared bounded-sequence type",
+                ));
+            }
+            let expected_source = BodyType::Sequence {
+                element: element_type.clone(),
+                bound: src_bound.clone(),
+            };
+            if available.get(operation.operands.get(2).unwrap_or(&String::new()))
+                != Some(&expected_source)
+            {
+                errors.push(body_diagnostic(
+                    "MNB147",
+                    format!("{path}.operands[2]"),
+                    "functional span copy source does not have the declared bounded-sequence type",
+                ));
+            }
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| result.ty != expected_destination)
+            {
+                errors.push(body_diagnostic(
+                    "MNB148",
+                    format!("{path}.results"),
+                    "functional span copy result does not preserve the destination bounded-sequence type",
+                ));
+            }
+            let _ = evidence;
+        }
         BodyOperationKind::VectorConstruct {
             element_type,
             lanes,
@@ -2419,6 +2593,68 @@ fn validate_operation(
                         ),
                     ));
                 }
+            }
+        }
+        BodyOperationKind::ViewNarrow {
+            source_cap,
+            new_cap,
+        } => {
+            if *new_cap > *source_cap {
+                errors.push(body_diagnostic(
+                    "MNB149",
+                    format!("{path}.kind.new_cap"),
+                    "view narrowing cannot widen past the source capacity",
+                ));
+            }
+            if operation.operands.len() != 1 || operation.results.len() != 1 {
+                errors.push(body_diagnostic(
+                    "MNB150",
+                    path.to_owned(),
+                    "view narrowing requires one source view operand and one result",
+                ));
+                return;
+            }
+            let source_ty = available
+                .get(operation.operands.first().unwrap_or(&String::new()))
+                .cloned();
+            let Some(BodyType::Sequence { element, bound }) = source_ty else {
+                errors.push(body_diagnostic(
+                    "MNB151",
+                    format!("{path}.operands[0]"),
+                    "view narrowing requires a bounded-sequence source",
+                ));
+                return;
+            };
+            if bound != SequenceBound::UpTo(*source_cap) {
+                errors.push(body_diagnostic(
+                    "MNB152",
+                    format!("{path}.operands[0]"),
+                    "view narrowing source does not have the declared source capacity",
+                ));
+            }
+            let expected_result = BodyType::Sequence {
+                element,
+                bound: SequenceBound::UpTo(*new_cap),
+            };
+            if operation
+                .results
+                .first()
+                .is_some_and(|result| result.ty != expected_result)
+            {
+                errors.push(body_diagnostic(
+                    "MNB153",
+                    format!("{path}.results"),
+                    "view narrowing result does not carry the narrowed capacity",
+                ));
+            }
+            if *new_cap > MAX_SEQUENCE_BOUND {
+                errors.push(body_diagnostic(
+                    "MNB154",
+                    format!("{path}.kind.new_cap"),
+                    format!(
+                        "view narrowing capacity exceeds the declared profile ceiling {MAX_SEQUENCE_BOUND}"
+                    ),
+                ));
             }
         }
         BodyOperationKind::FiniteConstruct {

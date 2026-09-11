@@ -1,0 +1,28 @@
+mncs 0.14;
+
+// WEB-P-004 evidence: runtime-length-bounded traversal. A traversal over a
+// view counts down from the observed runtime length, so slicing the live
+// prefix first and traversing the view costs the live window — never the
+// static capacity. The tight per-case step budgets below pin this: a take
+// of 8 over a 1024-capacity buffer must stay far below any budget sized
+// for the full capacity. Narrowing (Profile 0.14) lets the same idiom feed
+// capacity-constrained consumers.
+module pressure.prefix_traverse;
+
+// Sum the first `take` bytes through the slice-then-traverse idiom.
+fn sum_prefix(data: [byte; 1024], take: u64) -> (result: u64) {
+    let window: [byte; up_to 1024] = data[0..take];
+    iterate i over window carrying acc: u64 = 0 {
+        next acc = acc + (window[i] as u64);
+    }
+    return acc;
+}
+
+// The same idiom through a narrowed 64-capacity view.
+fn sum_prefix_narrow(data: [byte; 1024], take: u64) -> (result: u64) {
+    let window: [byte; up_to 64] = data[0..take];
+    iterate i over window carrying acc: u64 = 0 {
+        next acc = acc + (window[i] as u64);
+    }
+    return acc;
+}

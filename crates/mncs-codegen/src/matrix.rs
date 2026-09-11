@@ -104,6 +104,10 @@ pub fn profile_support_for(backend_name: &str) -> Vec<BackendProfileSupport> {
             .chain([
                 realized("0.12"),
                 support("0.13", "partial", &["structural_recursion"]),
+                // Buffer pipelines execute end to end: span-copy, view
+                // narrowing, and checked-index corpora all agree on all
+                // five executable backends.
+                realized("0.14"),
             ])
             .collect(),
         "mncs-portable-wasm-mvp" | "mncs-c11" | "mncs-llvm-ir" | "mncs-cranelift" => core
@@ -117,13 +121,14 @@ pub fn profile_support_for(backend_name: &str) -> Vec<BackendProfileSupport> {
                     "partial",
                     &["fs_observation", "structural_recursion"],
                 ),
+                realized("0.14"),
             ])
             .collect(),
         "mncs-riscv32" | "mncs-ebpf" | "mncs-ptx64" => ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6"]
             .iter()
             .map(|profile| support(profile, "artifact_only", &[]))
             .chain(
-                ["0.7", "0.8", "0.9", "0.10", "0.11", "0.12", "0.13"]
+                ["0.7", "0.8", "0.9", "0.10", "0.11", "0.12", "0.13", "0.14"]
                     .iter()
                     .map(|profile| {
                         support(
