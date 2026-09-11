@@ -1,0 +1,84 @@
+mncs 0.13;
+
+// WEB-P-011 regression: nominal record (and finite payload) corpus values
+// resolve fields BY NAME on every backend. Declaration order below is
+// deliberately non-alphabetical so declaration-order and canonical-order
+// inputs differ; every projection must agree regardless of input order,
+// and malformed values (missing/unknown/duplicate/wrong-type, at any
+// nesting level) must be rejected, never silently misbound.
+module pressure.record_field_identity;
+
+// zeta before alpha: canonical order is alpha, zeta.
+record Pair { zeta: u64, alpha: u64 }
+
+// Adjacent same-type scalars (high/low) catch positional swaps that type
+// checks alone would miss; bool and byte widen scalar coverage.
+record Sliders { high: u64, low: u64, tag: bool, mark: byte }
+
+// Sequence inside a record; items before count is declaration order,
+// canonical order is count, items.
+record Box { items: [Pair; 2], count: u64 }
+
+// Nested record; n before inner is declaration order.
+record Wrap { n: u64, inner: Pair }
+
+// Deeper nesting: record inside record inside record.
+record Deep { wrap: Wrap, tag: u64 }
+
+// Payload-bearing finite: zeta before alpha, like Pair.
+enum Choice { Pick { zeta: u64, alpha: u64 }, Skip }
+
+fn get_alpha(pair: Pair) -> (result: u64) {
+    return pair.alpha;
+}
+
+fn get_zeta(pair: Pair) -> (result: u64) {
+    return pair.zeta;
+}
+
+fn get_high(slider: Sliders) -> (result: u64) {
+    return slider.high;
+}
+
+fn get_low(slider: Sliders) -> (result: u64) {
+    return slider.low;
+}
+
+fn get_tag(slider: Sliders) -> (result: bool) {
+    return slider.tag;
+}
+
+fn get_mark(slider: Sliders) -> (result: byte) {
+    return slider.mark;
+}
+
+fn first_alpha(box: Box) -> (result: u64) {
+    return box.items[0].alpha;
+}
+
+fn first_zeta(box: Box) -> (result: u64) {
+    return box.items[0].zeta;
+}
+
+fn box_count(box: Box) -> (result: u64) {
+    return box.count;
+}
+
+fn wrap_alpha(wrap: Wrap) -> (result: u64) {
+    return wrap.inner.alpha;
+}
+
+fn deep_alpha(deep: Deep) -> (result: u64) {
+    return deep.wrap.inner.alpha;
+}
+
+fn deep_tag(deep: Deep) -> (result: u64) {
+    return deep.tag;
+}
+
+fn pick_alpha(choice: Choice) -> (result: u64) {
+    return match choice {
+        Choice.Pick { zeta, alpha } => alpha,
+        Choice.Skip => 999,
+    };
+}

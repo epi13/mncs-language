@@ -116,6 +116,12 @@ a +| b    a -| b    a *| b    // saturating: clamp at representable bounds
 - Saturating direction is exact: signed products saturate toward `MIN` when
   operand signs differ; unsigned values only saturate upward.
 - The operators are gated to Profile 0.6 (`MNP143` below it).
+- Integer literals adapt symmetrically in every arithmetic/bitwise
+  operator above: a literal on either side takes the other side's
+  concrete integer type (`1000 +% x` means what `x +% 1000` means), and
+  both literals take an outer annotated type. Genuinely mixed
+  non-literal widths stay refused (`MNE119`); comparisons keep strict
+  mixed-width refusal on both sides.
 - Realization: reference executors, research bytecode, portable WASM
   (i64-cell lowering for 64-bit operands; unsigned 64-bit saturating
   multiplication still refuses honestly), C11 (128-bit wide intermediates),

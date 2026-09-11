@@ -171,6 +171,17 @@ impl LlvmStatefulSession<'_> {
             .expect("LLVM executable inserted above");
         match executable.run(&args, call_path.as_deref()) {
             Ok(run) => {
+                // WEB-P-012: attribute non-returned observations; never a
+                // silent null reason.
+                if run.status != ExecutionStatus::Returned {
+                    let reason = run.reason.unwrap_or_else(|| {
+                        format!(
+                            "native execution ended with status {:?} and no attributed reason",
+                            run.status
+                        )
+                    });
+                    return execution_failure(result, run.status, reason);
+                }
                 result.status = run.status;
                 result.steps = 1;
                 match crate::support::decode_native_observation(
@@ -847,8 +858,11 @@ fn emit_arena_guard(out: &mut String, split: &mut u32, addr: &str, width: u64, t
 /// `@mncs_bump` cursor and `aligned` the 8-aligned candidate base. A request
 /// larger than the arena, an already-past-the-end cursor (possible only
 /// from a corrupted global, since every stored cursor is range-checked),
-/// or an aligned base with no room left all branch to `%mncs_fail` instead
-/// of wrapping around or handing out an out-of-bounds base. The `spent`
+/// or an aligned base with no room left all branch to `%mncs_exhausted`
+/// (status 3, budget_exhausted with an attributed resource reason) instead
+/// of wrapping around or handing out an out-of-bounds base. Dereference
+/// faults keep branching to `%mncs_fail` (status 1): exhaustion and wild
+/// access stay observably distinct (WEB-P-012). The `spent`
 /// check must come from the loaded cursor rather than the aligned base: a
 /// near-`u64::MAX` cursor would wrap the align arithmetic back to a small
 /// value that the room check alone would accept.
@@ -878,7 +892,7 @@ fn emit_alloc_guard(out: &mut String, split: &mut u32, bump: &str, aligned: &str
     );
     let _ = writeln!(
         out,
-        "  br i1 %ag{guard}_fail, label %mncs_fail, label %ag{guard}_ok"
+        "  br i1 %ag{guard}_fail, label %mncs_exhausted, label %ag{guard}_ok"
     );
     let _ = writeln!(out, "ag{guard}_ok:");
 }
@@ -2289,8 +2303,29 @@ pub fn execute_llvm(
         return execution_failure(
             result,
             ExecutionStatus::InvalidRequest,
-            "backend request violates the language-owned value contract",
+            format!(
+                "backend request violates the language-owned value contract: expected {} argument(s), received {}",
+                contract.inputs.len(),
+                request.arguments.len()
+            ),
         );
+    }
+    // Name-based record resolution at every nesting level (WEB-P-011),
+    // identical to the session path: build_call_file revalidates, but an
+    // early, attributed rejection keeps the failure local.
+    for (index, (contract, value)) in contract.inputs.iter().zip(&request.arguments).enumerate() {
+        if let Err(reason) = crate::support::check_contract_value(
+            contract,
+            value,
+            &artifact.composite_value_contracts,
+            &format!("argument {index}"),
+        ) {
+            return execution_failure(
+                result,
+                ExecutionStatus::InvalidRequest,
+                format!("backend request violates the language-owned value contract: {reason}"),
+            );
+        }
     }
     // Composite arguments and results cross through the canonical call
     // file; pure scalar calls keep the historical argv-only protocol.
@@ -2344,6 +2379,17 @@ pub fn execute_llvm(
         call_path.as_deref(),
     ) {
         Ok((run, _toolchain)) => {
+            // WEB-P-012: attribute non-returned observations; never a
+            // silent null reason.
+            if run.status != ExecutionStatus::Returned {
+                let reason = run.reason.unwrap_or_else(|| {
+                    format!(
+                        "native execution ended with status {:?} and no attributed reason",
+                        run.status
+                    )
+                });
+                return execution_failure(result, run.status, reason);
+            }
             result.failure = None;
             result.status = run.status;
             result.steps = 1;

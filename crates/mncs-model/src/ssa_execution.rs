@@ -2528,13 +2528,14 @@ fn declared_effect(
 /// received value summary. Keeps the historical message prefix so existing
 /// consumers keep matching.
 fn abi_mismatch_reason(
+    program: &Program,
     request: &crate::ExecutionRequest,
     function: &SsaFunction,
     index: usize,
     expected: &BodyType,
     received: &ExecutionValue,
 ) -> String {
-    format!(
+    let mut reason = format!(
         "argument does not match SSA input type: function {}::{} (ssa function {}), argument index {index}, expected {} ({}) but received {}",
         request.target.module,
         request.target.function,
@@ -2542,7 +2543,27 @@ fn abi_mismatch_reason(
         expected.semantic_name(),
         expected.canonical_identity(),
         execution_value_summary(received)
-    )
+    );
+    // Name-based field mismatches carry the actionable detail: which field
+    // disagrees and the expected-vs-received lists (WEB-P-011).
+    if let Some(note) =
+        aggregate_shape_note(program, received, expected, &format!("argument {index}"))
+    {
+        reason.push_str("; ");
+        reason.push_str(&note);
+    }
+    reason
+}
+
+/// Field-identity detail for a rejected aggregate SSA argument, shared with
+/// the reference interpreter so both paths diagnose identically.
+fn aggregate_shape_note(
+    program: &Program,
+    value: &ExecutionValue,
+    ty: &BodyType,
+    path: &str,
+) -> Option<String> {
+    crate::value_contract::first_aggregate_mismatch(program, value, ty, path)
 }
 
 fn initialize_inputs(
@@ -2579,8 +2600,8 @@ fn initialize_inputs(
             let argument = owned_arguments
                 .as_ref()
                 .and_then(|arguments| arguments.get(index).and_then(Option::as_ref))?;
-            if !value_matches_type(argument, &ty) {
-                let reason = abi_mismatch_reason(request, function, index, &ty, argument);
+            if !value_matches_type(program, argument, &ty) {
+                let reason = abi_mismatch_reason(program, request, function, index, &ty, argument);
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     Some(input.identity.clone()),
@@ -2611,8 +2632,8 @@ fn initialize_inputs(
             }
         } else {
             let argument = request.arguments.get(index)?;
-            if !value_matches_type(argument, &ty) {
-                let reason = abi_mismatch_reason(request, function, index, &ty, argument);
+            if !value_matches_type(program, argument, &ty) {
+                let reason = abi_mismatch_reason(program, request, function, index, &ty, argument);
                 result.fail(
                     ExecutionStatus::InvalidRequest,
                     Some(input.identity.clone()),
@@ -2643,17 +2664,25 @@ fn initialize_inputs(
             }
         }
         let normalized = if owned_arguments.is_some() {
-            normalize_value_owned(owned_arguments.as_mut()?.get_mut(index)?.take(), &ty)?
+            normalize_value_owned(
+                program,
+                owned_arguments.as_mut()?.get_mut(index)?.take(),
+                &ty,
+            )?
         } else {
             let argument = request.arguments.get(index)?;
-            normalize_value(argument, &ty)?
+            normalize_value(program, argument, &ty)?
         };
         values.insert(input.identity.clone(), normalized);
     }
     Some(values)
 }
 
-fn normalize_value_owned(value: Option<ExecutionValue>, ty: &BodyType) -> Option<ExecutionValue> {
+fn normalize_value_owned(
+    program: &Program,
+    value: Option<ExecutionValue>,
+    ty: &BodyType,
+) -> Option<ExecutionValue> {
     let value = value?;
     match (&value, ty) {
         (ExecutionValue::Finite { type_identity, .. }, BodyType::Finite { identity, .. })
@@ -2669,7 +2698,7 @@ fn normalize_value_owned(value: Option<ExecutionValue>, ty: &BodyType) -> Option
         (ExecutionValue::Record { name, .. }, BodyType::Named(named)) if name == named => {
             Some(value)
         }
-        _ => normalize_value(&value, ty),
+        _ => normalize_value(program, &value, ty),
     }
 }
 
@@ -2893,7 +2922,7 @@ fn body_type(ty: &IrType) -> Option<BodyType> {
     })
 }
 
-fn value_matches_type(value: &ExecutionValue, ty: &BodyType) -> bool {
+fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) -> bool {
     match (value, ty) {
         (ExecutionValue::Integer { value, ty: actual }, BodyType::Integer(expected)) => {
             actual == expected && in_range(*value, *expected)
@@ -2902,15 +2931,41 @@ fn value_matches_type(value: &ExecutionValue, ty: &BodyType) -> bool {
         (ExecutionValue::Boolean { .. }, BodyType::Integer(integer)) => {
             integer.bits == 1 && !integer.signed
         }
-        (ExecutionValue::Finite { type_identity, .. }, BodyType::Finite { identity, .. }) => {
+        (
+            ExecutionValue::Finite {
+                type_identity,
+                variant_identity,
+                payload,
+                ..
+            },
+            BodyType::Finite { identity, .. },
+        ) => {
             type_identity == identity
+                && finite_payload_matches(program, type_identity, variant_identity, payload)
         }
-        (ExecutionValue::Record { type_identity, .. }, BodyType::Record { identity, .. }) => {
-            type_identity == identity
-        }
+        (
+            ExecutionValue::Record {
+                type_identity,
+                fields,
+                ..
+            },
+            BodyType::Record { identity, .. },
+        ) => type_identity == identity && record_fields_match(program, type_identity, fields),
         // Sequence spellings reconstructed without a program leave record
         // elements as Named; admit them when the value's record name matches.
-        (ExecutionValue::Record { name, .. }, BodyType::Named(named)) if name == named => true,
+        // Field order is still resolved by name downstream, so a known
+        // declaration is shape-checked here as well.
+        (ExecutionValue::Record { name, .. }, BodyType::Named(named)) if name == named => {
+            match program.record_types.iter().find(|decl| &decl.name == named) {
+                Some(declaration) => {
+                    let ExecutionValue::Record { fields, .. } = value else {
+                        return false;
+                    };
+                    record_fields_match(program, &declaration.identity, fields)
+                }
+                None => true,
+            }
+        }
         (ExecutionValue::Byte { value }, BodyType::Byte) => (0..=255).contains(value),
         (
             ExecutionValue::Sequence { values },
@@ -2922,7 +2977,7 @@ fn value_matches_type(value: &ExecutionValue, ty: &BodyType) -> bool {
             values.len() == *length as usize
                 && values
                     .iter()
-                    .all(|element_value| value_matches_type(element_value, element))
+                    .all(|element_value| value_matches_type(program, element_value, element))
         }
         (
             ExecutionValue::Sequence { values },
@@ -2934,11 +2989,13 @@ fn value_matches_type(value: &ExecutionValue, ty: &BodyType) -> bool {
             values.len() <= *capacity as usize
                 && values
                     .iter()
-                    .all(|element_value| value_matches_type(element_value, element))
+                    .all(|element_value| value_matches_type(program, element_value, element))
         }
         (ExecutionValue::Vector { values }, BodyType::Vector { element, lanes }) => {
             values.len() == *lanes as usize
-                && values.iter().all(|lane| value_matches_type(lane, element))
+                && values
+                    .iter()
+                    .all(|lane| value_matches_type(program, lane, element))
         }
         (ExecutionValue::Mask { lanes: bits }, BodyType::Mask { lanes }) => {
             bits.len() == *lanes as usize
@@ -2950,7 +3007,156 @@ fn value_matches_type(value: &ExecutionValue, ty: &BodyType) -> bool {
     }
 }
 
-fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionValue> {
+/// A logical record value matches its declaration when every received field
+/// resolves by name against the canonical declaration. Unknown declarations
+/// stay lenient (identity was already checked by the caller); every known
+/// declaration rejects duplicate, unknown, or missing fields (WEB-P-011).
+fn record_fields_match(
+    program: &Program,
+    record_identity: &SemanticId,
+    fields: &[(String, ExecutionValue)],
+) -> bool {
+    let Some(declaration) = program
+        .record_types
+        .iter()
+        .find(|decl| &decl.identity == record_identity)
+    else {
+        return true;
+    };
+    let declared_names: Vec<String> = declaration
+        .fields
+        .iter()
+        .map(|field| field.name.clone())
+        .collect();
+    let context = format!("record {:?}", declaration.name);
+    let Ok(order) = crate::value_contract::order_fields_by_name(&context, &declared_names, fields)
+    else {
+        return false;
+    };
+    order
+        .iter()
+        .enumerate()
+        .all(|(declared_index, received_index)| {
+            let declared = &declaration.fields[declared_index];
+            value_matches_named_type(program, &fields[*received_index].1, &declared.field_type)
+        })
+}
+
+/// A finite payload matches when every received field resolves by name
+/// against the canonical variant declaration (WEB-P-011).
+fn finite_payload_matches(
+    program: &Program,
+    type_identity: &SemanticId,
+    variant_identity: &SemanticId,
+    payload: &[(String, ExecutionValue)],
+) -> bool {
+    let Some(variant) = program
+        .finite_types
+        .iter()
+        .find(|decl| &decl.identity == type_identity)
+        .and_then(|finite_type| {
+            finite_type
+                .variants
+                .iter()
+                .find(|variant| &variant.identity == variant_identity)
+        })
+    else {
+        return true;
+    };
+    let declared_names: Vec<String> = variant
+        .payload
+        .iter()
+        .map(|field| field.name.clone())
+        .collect();
+    let context = format!("finite payload {variant_identity:?}");
+    let Ok(order) = crate::value_contract::order_fields_by_name(&context, &declared_names, payload)
+    else {
+        return false;
+    };
+    order
+        .iter()
+        .enumerate()
+        .all(|(declared_index, received_index)| {
+            let declared = &variant.payload[declared_index];
+            value_matches_named_type(program, &payload[*received_index].1, &declared.field_type)
+        })
+}
+
+/// Resolve one declared field semantic type against the linked program so
+/// nested nominal values validate recursively. Unknown spellings stay
+/// lenient; every known spelling checks exactly.
+fn value_matches_named_type(program: &Program, value: &ExecutionValue, name: &str) -> bool {
+    if let Some(finite) = program
+        .finite_types
+        .iter()
+        .find(|decl| decl.identity.0 == name)
+    {
+        return value_matches_type(
+            program,
+            value,
+            &BodyType::Finite {
+                identity: finite.identity.clone(),
+                name: finite.name.clone(),
+            },
+        );
+    }
+    if let Some(record) = program
+        .record_types
+        .iter()
+        .find(|decl| decl.identity.0 == name)
+    {
+        return match value {
+            ExecutionValue::Record {
+                type_identity,
+                fields,
+                ..
+            } => {
+                type_identity == &record.identity
+                    && record_fields_match(program, &record.identity, fields)
+            }
+            _ => false,
+        };
+    }
+    let derived = BodyType::from_program(program, name);
+    if !matches!(derived, BodyType::Named(_)) {
+        return value_matches_type(program, value, &derived);
+    }
+    if name == "bool" {
+        return matches!(value, ExecutionValue::Boolean { .. });
+    }
+    if let Some(finite) = program.finite_types.iter().find(|decl| decl.name == name) {
+        return value_matches_type(
+            program,
+            value,
+            &BodyType::Finite {
+                identity: finite.identity.clone(),
+                name: finite.name.clone(),
+            },
+        );
+    }
+    if let Some(record) = program.record_types.iter().find(|decl| decl.name == name) {
+        return match value {
+            ExecutionValue::Record {
+                type_identity,
+                fields,
+                ..
+            } => {
+                type_identity == &record.identity
+                    && record_fields_match(program, &record.identity, fields)
+            }
+            _ => false,
+        };
+    }
+    // Anything else has no program declaration to resolve against; like the
+    // reference interpreter, reject rather than admit an unresolvable shape.
+    false
+}
+
+fn normalize_value(
+    program: &Program,
+    value: &ExecutionValue,
+    ty: &BodyType,
+) -> Option<ExecutionValue> {
     match (value, ty) {
         (ExecutionValue::Integer { value, ty: actual }, BodyType::Integer(expected))
             if actual == expected
@@ -2976,16 +3182,37 @@ fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionVal
         {
             Some(ExecutionValue::Boolean { value: *value })
         }
-        (ExecutionValue::Finite { type_identity, .. }, BodyType::Finite { identity, .. })
-            if type_identity == identity =>
-        {
-            Some(value.clone())
+        (
+            ExecutionValue::Finite {
+                type_identity,
+                variant_identity,
+                discriminant,
+                payload,
+            },
+            BodyType::Finite { identity, .. },
+        ) if type_identity == identity => {
+            normalize_finite_payload(program, type_identity, variant_identity, payload).map(
+                |normalized_payload| ExecutionValue::Finite {
+                    type_identity: type_identity.clone(),
+                    variant_identity: variant_identity.clone(),
+                    discriminant: *discriminant,
+                    payload: normalized_payload.into(),
+                },
+            )
         }
-        (ExecutionValue::Record { type_identity, .. }, BodyType::Record { identity, .. })
-            if type_identity == identity =>
-        {
-            Some(value.clone())
-        }
+        (
+            ExecutionValue::Record {
+                type_identity,
+                name,
+                fields,
+            },
+            BodyType::Record { identity, .. },
+        ) if type_identity == identity => normalize_record_fields(program, type_identity, fields)
+            .map(|normalized_fields| ExecutionValue::Record {
+                type_identity: type_identity.clone(),
+                name: name.clone(),
+                fields: normalized_fields.into(),
+            }),
         (ExecutionValue::Record { name, .. }, BodyType::Named(named)) if name == named => {
             Some(value.clone())
         }
@@ -3011,7 +3238,7 @@ fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionVal
         ) if values.len() == *length as usize => {
             let mut normalized = Vec::with_capacity(values.len());
             for value in values.iter() {
-                normalized.push(normalize_value(value, element)?);
+                normalized.push(normalize_value(program, value, element)?);
             }
             Some(ExecutionValue::Sequence {
                 values: normalized.into(),
@@ -3026,7 +3253,7 @@ fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionVal
         ) if values.len() <= *capacity as usize => {
             let mut normalized = Vec::with_capacity(values.len());
             for value in values.iter() {
-                normalized.push(normalize_value(value, element)?);
+                normalized.push(normalize_value(program, value, element)?);
             }
             Some(ExecutionValue::Sequence {
                 values: normalized.into(),
@@ -3037,7 +3264,7 @@ fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionVal
         {
             let mut normalized = Vec::with_capacity(values.len());
             for value in values.iter() {
-                normalized.push(normalize_value(value, element)?);
+                normalized.push(normalize_value(program, value, element)?);
             }
             Some(ExecutionValue::Vector {
                 values: normalized.into(),
@@ -3052,6 +3279,86 @@ fn normalize_value(value: &ExecutionValue, ty: &BodyType) -> Option<ExecutionVal
         }
         _ => None,
     }
+}
+
+/// Reorder received record fields into canonical declaration order,
+/// normalizing each field value against its declared semantic type. Unknown
+/// declarations keep the legacy clone (identity was already checked); every
+/// known declaration resolves strictly by name (WEB-P-011).
+fn normalize_record_fields(
+    program: &Program,
+    record_identity: &SemanticId,
+    fields: &[(String, ExecutionValue)],
+) -> Option<Vec<(String, ExecutionValue)>> {
+    let Some(declaration) = program
+        .record_types
+        .iter()
+        .find(|decl| &decl.identity == record_identity)
+    else {
+        return Some(fields.to_vec());
+    };
+    let declared_names: Vec<String> = declaration
+        .fields
+        .iter()
+        .map(|field| field.name.clone())
+        .collect();
+    let context = format!("record {:?}", declaration.name);
+    let order =
+        crate::value_contract::order_fields_by_name(&context, &declared_names, fields).ok()?;
+    let mut normalized = Vec::with_capacity(declaration.fields.len());
+    for (declared_index, received_index) in order.iter().enumerate() {
+        let declared = &declaration.fields[declared_index];
+        let field_ty = BodyType::from_program(program, &declared.field_type);
+        // Unresolvable spellings cannot occur after successful validation;
+        // the Named fallback keeps them verbatim instead of failing.
+        let field_value = match &field_ty {
+            BodyType::Named(_) => fields[*received_index].1.clone(),
+            _ => normalize_value(program, &fields[*received_index].1, &field_ty)?,
+        };
+        normalized.push((declared.name.clone(), field_value));
+    }
+    Some(normalized)
+}
+
+/// Reorder finite payload fields into canonical variant order (WEB-P-011).
+fn normalize_finite_payload(
+    program: &Program,
+    type_identity: &SemanticId,
+    variant_identity: &SemanticId,
+    payload: &[(String, ExecutionValue)],
+) -> Option<Vec<(String, ExecutionValue)>> {
+    let Some(variant) = program
+        .finite_types
+        .iter()
+        .find(|decl| &decl.identity == type_identity)
+        .and_then(|finite_type| {
+            finite_type
+                .variants
+                .iter()
+                .find(|variant| &variant.identity == variant_identity)
+        })
+    else {
+        return Some(payload.to_vec());
+    };
+    let declared_names: Vec<String> = variant
+        .payload
+        .iter()
+        .map(|field| field.name.clone())
+        .collect();
+    let context = format!("finite payload {variant_identity:?}");
+    let order =
+        crate::value_contract::order_fields_by_name(&context, &declared_names, payload).ok()?;
+    let mut normalized = Vec::with_capacity(variant.payload.len());
+    for (declared_index, received_index) in order.iter().enumerate() {
+        let declared = &variant.payload[declared_index];
+        let field_ty = BodyType::from_program(program, &declared.field_type);
+        let field_value = match &field_ty {
+            BodyType::Named(_) => payload[*received_index].1.clone(),
+            _ => normalize_value(program, &payload[*received_index].1, &field_ty)?,
+        };
+        normalized.push((declared.name.clone(), field_value));
+    }
+    Some(normalized)
 }
 
 fn integer_limits(bits: u16, signed: bool) -> Option<(i128, i128)> {

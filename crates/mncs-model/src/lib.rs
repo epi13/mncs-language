@@ -36,6 +36,7 @@ mod ssa_execution;
 mod termination;
 mod translation;
 mod validation;
+pub mod value_contract;
 mod verifier;
 
 pub use authority::{
@@ -211,6 +212,9 @@ pub use translation::{
     TRANSLATION_VALIDATION_CONTRACT_ID, TRANSLATION_VALIDATION_SCHEMA_VERSION,
 };
 pub use validation::{Diagnostic, ValidationReport, ValidationSummary};
+pub use value_contract::{
+    first_aggregate_mismatch, order_fields_by_name, FieldOrderError, FieldOrderProblem,
+};
 pub use verifier::{
     AlignmentVerifierInput, CapabilityVerifierInput, DeterministicVerifier, EvidenceAuthorityClass,
     IntegerVerifierInput, MicroVerifier, VerifierArtifactError, VerifierIdentity,

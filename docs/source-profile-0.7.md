@@ -87,8 +87,8 @@ fn probe44(header: [byte; 44]) -> (result: u16) {
 An `[E; N]` value satisfies an `[E; up_to M]` expectation exactly when
 `N ≤ M`. The compiler synthesizes the full-range slice at the expectation
 site (annotated `let` bindings, named values, call results, call arguments,
-and `return` positions), so the borrow is explicit in the body and lowers
-through the view machinery:
+field and chained-field projections, and `return` positions), so the
+borrow is explicit in the body and lowers through the view machinery:
 
 - no copy is materialized: the view aliases the immutable source cells;
 - the bound is preserved from the static length (`len` observes `N`);

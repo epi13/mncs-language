@@ -125,6 +125,11 @@ struct NativeObservation {
     value: Option<i128>,
     #[serde(default)]
     arena_hex: Option<String>,
+    /// Language-owned failure detail. Absent for legacy observations and
+    /// for failure classes the driver cannot attribute; present for
+    /// attributed resource exhaustion and other diagnosed failures.
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 /// As `compile_and_run`, with an optional canonical call file whose path is
@@ -147,6 +152,7 @@ pub fn compile_and_run_with_call_file_full(
             status: run.status,
             value: run.value,
             arena_hex: run.arena_hex,
+            reason: run.reason,
         },
         compiler.summary(),
     ))
@@ -351,6 +357,8 @@ pub(crate) struct NativeRun {
     pub status: ExecutionStatus,
     pub value: i128,
     pub arena_hex: Option<String>,
+    /// Driver-attributed failure detail, when the observation carried one.
+    pub reason: Option<String>,
 }
 
 fn run_executable_full(
@@ -387,16 +395,19 @@ fn run_executable_full(
                 NativeError::InvalidOutput("returned observation lacks a value".to_owned())
             })?,
             arena_hex: observation.arena_hex,
+            reason: None,
         }),
         "runtime_failure" => Ok(NativeRun {
             status: ExecutionStatus::RuntimeFailure,
             value: 0,
             arena_hex: None,
+            reason: observation.reason,
         }),
         "budget_exhausted" => Ok(NativeRun {
             status: ExecutionStatus::BudgetExhausted,
             value: 0,
             arena_hex: None,
+            reason: observation.reason,
         }),
         other => Err(NativeError::InvalidOutput(format!(
             "unknown native status {other:?}"
@@ -558,11 +569,17 @@ pub fn compile_object_and_run_full(
             status: run.status,
             value: run.value,
             arena_hex: run.arena_hex,
+            reason: run.reason,
         }),
-        Err(NativeError::InvalidOutput(_)) => Ok(crate::support::NativeRunView {
+        Err(NativeError::InvalidOutput(reason)) => Ok(crate::support::NativeRunView {
             status: ExecutionStatus::RuntimeFailure,
             value: 0,
             arena_hex: None,
+            // A driver that died without JSON still yields an attributed
+            // observation instead of a null reason downstream.
+            reason: Some(format!(
+                "native program produced no decodable observation: {reason}"
+            )),
         }),
         Err(other) => Err(other),
     }

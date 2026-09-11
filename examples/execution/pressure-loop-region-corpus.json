@@ -1,0 +1,126 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-loop-region",
+ "cases": [
+  {
+   "id": "carry",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.loop_region",
+     "function": "carry_wide"
+    },
+    "arguments": [],
+    "step_budget": 8000000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1024,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "nested",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.loop_region",
+     "function": "carry_nested"
+    },
+    "arguments": [],
+    "step_budget": 8000000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2047,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "invariant",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.loop_region",
+     "function": "invariant_big"
+    },
+    "arguments": [],
+    "step_budget": 8000000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 116736,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "nested-loops",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.loop_region",
+     "function": "nested_loops"
+    },
+    "arguments": [],
+    "step_budget": 8000000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1024,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "boxed",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.loop_region",
+     "function": "carry_boxed"
+    },
+    "arguments": [],
+    "step_budget": 8000000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

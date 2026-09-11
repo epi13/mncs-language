@@ -1,0 +1,48 @@
+mncs 0.13;
+
+// WEB-P-005 regression: integer literals adapt symmetrically in binary
+// arithmetic. A literal on the left adapts to the right operand's
+// concrete type exactly as a right-side literal adapts to the left's, so
+// `1000 +% x` means what `x +% 1000` means. Comparisons keep their
+// strict mixed-width refusal; only arithmetic/bitwise literals adapt.
+module pressure.literal_symmetry;
+
+fn left_wrap(kind: u64, err: u64) -> (result: u64) {
+    return 1000 +% (kind *% 10) +% err;
+}
+
+fn right_wrap(kind: u64, err: u64) -> (result: u64) {
+    return (kind *% 10) +% err +% 1000;
+}
+
+fn left_add(x: u64) -> (result: u64) {
+    return 1 + x;
+}
+
+fn left_sub(x: u64) -> (result: u64) {
+    return 100 - x;
+}
+
+fn left_mul(x: u64) -> (result: u64) {
+    return 6 * x;
+}
+
+fn left_div(x: u64) -> (result: u64) {
+    return 100 / x;
+}
+
+fn left_mod(x: u64) -> (result: u64) {
+    return 100 % x;
+}
+
+fn left_sat(x: u64) -> (result: u64) {
+    return 1000 +| x;
+}
+
+fn left_and(x: u64) -> (result: u64) {
+    return 12 & x;
+}
+
+fn left_byte_and(b: byte) -> (result: byte) {
+    return 200 & b;
+}

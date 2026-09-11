@@ -1515,7 +1515,7 @@ pub fn execute_cranelift(
             arena.extend_from_slice(image);
         });
     }
-    JIT_OOB.store(false, std::sync::atomic::Ordering::Relaxed);
+    clear_jit_failure_state();
     // RFC 0047 §5 uniform fuel: seed the entry depth from the request
     // budget so an explicit budget means the same fuel here as on the
     // reference interpreters (zero seed is the historical full cap).
@@ -1535,14 +1535,37 @@ pub fn execute_cranelift(
     match jit_execute_with_arguments(&payload, &entry, &raw_args, entry_depth) {
         Ok((status, value)) => {
             if JIT_OOB.load(std::sync::atomic::Ordering::Relaxed) {
-                // A host slot access escaped the installed arena image
-                // (allocation cap or wild address). The computed value is
-                // untrustworthy, so the observation fails closed here
-                // instead of decoding possibly-zeroed cells.
+                // A host slot access escaped the installed arena image.
+                // Allocation-cap exhaustion is a bounded resource failure
+                // with the attributed request/arena detail; anything else
+                // (wild address) fails closed as a runtime failure instead
+                // of decoding possibly-zeroed cells (WEB-P-012).
+                let diagnosis = take_jit_diagnosis();
+                if JIT_EXHAUSTED.load(std::sync::atomic::Ordering::Relaxed) {
+                    return execution_failure(
+                        result,
+                        ExecutionStatus::BudgetExhausted,
+                        diagnosis.unwrap_or_else(|| {
+                            "MNCS_RSRC_EXHAUSTED cranelift JIT canonical arena exhausted".to_owned()
+                        }),
+                    );
+                }
                 return execution_failure(
                     result,
                     ExecutionStatus::RuntimeFailure,
-                    "cranelift JIT cell access exceeded the arena image; failing closed",
+                    diagnosis.unwrap_or_else(|| {
+                        "cranelift JIT cell access exceeded the arena image; failing closed"
+                            .to_owned()
+                    }),
+                );
+            }
+            // WEB-P-012: a non-returned JIT status carries an attributed
+            // reason instead of a silent null.
+            if status != ExecutionStatus::Returned {
+                return execution_failure(
+                    result,
+                    status,
+                    format!("cranelift JIT execution ended with status {status:?}"),
                 );
             }
             result.status = status;
@@ -1569,6 +1592,17 @@ pub fn execute_cranelift(
             if reason.contains("readable+executable") || reason.contains("executable memory") {
                 match aot_fallback_execute(artifact, &payload, request, &raw_args, &arena_image) {
                     Ok(run) => {
+                        // WEB-P-012: attribute non-returned observations;
+                        // never a silent null reason.
+                        if run.status != ExecutionStatus::Returned {
+                            let reason = run.reason.unwrap_or_else(|| {
+                                format!(
+                                    "native execution ended with status {:?} and no attributed reason",
+                                    run.status
+                                )
+                            });
+                            return execution_failure(result, run.status, reason);
+                        }
                         result.status = run.status;
                         result.steps = 1;
                         match crate::support::decode_native_observation(
@@ -3159,13 +3193,55 @@ fn with_jit_arena<T>(operation: impl FnOnce(&mut Vec<u8>) -> T) -> T {
 /// `RuntimeFailure` while it is set; it is cleared on each arena install.
 static JIT_OOB: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Set by `host_cell_alloc` when the request does not fit the canonical
+/// arena cap, distinguishing bounded exhaustion (BudgetExhausted with the
+/// attributed request/arena detail) from wild accesses. Cleared on each
+/// arena install alongside [`JIT_OOB`].
+static JIT_EXHAUSTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Attributed failure detail recorded by the JIT host calls (WEB-P-012):
+/// the failed request size and arena state, so exhaustion reports bytes
+/// instead of internals. Cleared on each arena install; drained once per
+/// failed call by the execute path.
+static JIT_DIAG: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn record_jit_diagnosis(message: String) {
+    if let Ok(mut slot) = JIT_DIAG.lock() {
+        *slot = Some(message);
+    }
+}
+
+fn take_jit_diagnosis() -> Option<String> {
+    JIT_DIAG.lock().ok().and_then(|mut slot| slot.take())
+}
+
+fn clear_jit_failure_state() {
+    JIT_OOB.store(false, std::sync::atomic::Ordering::Relaxed);
+    JIT_EXHAUSTED.store(false, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut slot) = JIT_DIAG.lock() {
+        *slot = None;
+    }
+}
+
 extern "C" fn host_cell_alloc(bytes: u64) -> u64 {
     with_jit_arena(|arena| {
         let base = (arena.len() as u64 + 7) & !7u64;
         let Some(end) = base.checked_add(bytes) else {
+            JIT_EXHAUSTED.store(true, std::sync::atomic::Ordering::Relaxed);
+            record_jit_diagnosis(format!(
+                "MNCS_RSRC_EXHAUSTED cranelift JIT canonical arena exhausted: requested {bytes} byte(s), {} of {} byte(s) used; bounded loops over large aggregate values allocate one fresh cell per functional update",
+                arena.len(),
+                crate::support::NATIVE_ARENA_BYTES
+            ));
             return u64::MAX;
         };
         if end > crate::support::NATIVE_ARENA_BYTES {
+            JIT_EXHAUSTED.store(true, std::sync::atomic::Ordering::Relaxed);
+            record_jit_diagnosis(format!(
+                "MNCS_RSRC_EXHAUSTED cranelift JIT canonical arena exhausted: requested {bytes} byte(s), {} of {} byte(s) used; bounded loops over large aggregate values allocate one fresh cell per functional update",
+                arena.len(),
+                crate::support::NATIVE_ARENA_BYTES
+            ));
             return u64::MAX;
         }
         arena.resize(end as usize, 0);
@@ -3187,12 +3263,24 @@ fn slot_range(arena_len: usize, at: u64, width: usize) -> Option<std::ops::Range
     }
 }
 
+/// Flag a wild slot access with its offset/width/image detail. A preceding
+/// allocation-cap exhaustion keeps its better diagnosis: the first
+/// attributed cause wins.
+fn flag_slot_oob(arena_len: usize, at: u64, width: usize) {
+    JIT_OOB.store(true, std::sync::atomic::Ordering::Relaxed);
+    if !JIT_EXHAUSTED.load(std::sync::atomic::Ordering::Relaxed) {
+        record_jit_diagnosis(format!(
+            "cranelift JIT cell access outside the canonical arena: {width}-byte access at offset {at}, image length {arena_len} byte(s)"
+        ));
+    }
+}
+
 extern "C" fn host_slot_store32(at: u64, value: u64) {
     with_jit_arena(|arena| {
         if let Some(range) = slot_range(arena.len(), at, 4) {
             arena[range].copy_from_slice(&(value as u32).to_le_bytes());
         } else {
-            JIT_OOB.store(true, std::sync::atomic::Ordering::Relaxed);
+            flag_slot_oob(arena.len(), at, 4);
         }
     });
 }
@@ -3202,7 +3290,7 @@ extern "C" fn host_slot_store64(at: u64, value: u64) {
         if let Some(range) = slot_range(arena.len(), at, 8) {
             arena[range].copy_from_slice(&value.to_le_bytes());
         } else {
-            JIT_OOB.store(true, std::sync::atomic::Ordering::Relaxed);
+            flag_slot_oob(arena.len(), at, 8);
         }
     });
 }
@@ -3212,7 +3300,7 @@ extern "C" fn host_slot_load32(at: u64) -> u64 {
         if let Some(range) = slot_range(arena.len(), at, 4) {
             u32::from_le_bytes(arena[range].try_into().unwrap()) as u64
         } else {
-            JIT_OOB.store(true, std::sync::atomic::Ordering::Relaxed);
+            flag_slot_oob(arena.len(), at, 4);
             0
         }
     })
@@ -3223,7 +3311,7 @@ extern "C" fn host_slot_load64(at: u64) -> u64 {
         if let Some(range) = slot_range(arena.len(), at, 8) {
             u64::from_le_bytes(arena[range].try_into().unwrap())
         } else {
-            JIT_OOB.store(true, std::sync::atomic::Ordering::Relaxed);
+            flag_slot_oob(arena.len(), at, 8);
             0
         }
     })
@@ -3298,6 +3386,18 @@ fn jit_boundary_arguments_for_request(
             })
             .collect::<Result<Vec<_>, _>>()?;
         return Ok((raw_args, None));
+    }
+    // Same entry validation as the call-file path (WEB-P-011): recursive
+    // name-based resolution with expected-vs-received detail.
+    for (index, value) in request.arguments.iter().enumerate() {
+        if let Some(contract) = input_contracts.get(index) {
+            crate::support::check_contract_value(
+                contract,
+                value,
+                composite_contracts,
+                &format!("argument {index}"),
+            )?;
+        }
     }
     let mut writer = crate::composite::ArenaWriter::new(composite_contracts.clone());
     let mut raw_args = Vec::new();
@@ -3668,7 +3768,7 @@ impl CraneliftStatefulSession<'_> {
                 return execution_failure(result, ExecutionStatus::InvalidRequest, reason);
             }
         };
-        JIT_OOB.store(false, std::sync::atomic::Ordering::Relaxed);
+        clear_jit_failure_state();
         // Trampolines are keyed by module-qualified native symbol
         // (ENG-PRESSURE-0017).
         let entry = crate::support::entry_native_symbol(
@@ -3678,11 +3778,35 @@ impl CraneliftStatefulSession<'_> {
         );
         match self.jit.call(&entry, &raw_args, entry_depth) {
             Ok((status, value)) => {
+                // Same attribution as the one-shot path (WEB-P-012):
+                // exhaustion reports bytes with BudgetExhausted, wild
+                // accesses fail closed, and no observation goes unattributed.
                 if JIT_OOB.load(std::sync::atomic::Ordering::Relaxed) {
+                    let diagnosis = take_jit_diagnosis();
+                    if JIT_EXHAUSTED.load(std::sync::atomic::Ordering::Relaxed) {
+                        return execution_failure(
+                            result,
+                            ExecutionStatus::BudgetExhausted,
+                            diagnosis.unwrap_or_else(|| {
+                                "MNCS_RSRC_EXHAUSTED cranelift JIT canonical arena exhausted"
+                                    .to_owned()
+                            }),
+                        );
+                    }
                     return execution_failure(
                         result,
                         ExecutionStatus::RuntimeFailure,
-                        "cranelift JIT cell access exceeded the arena image; failing closed",
+                        diagnosis.unwrap_or_else(|| {
+                            "cranelift JIT cell access exceeded the arena image; failing closed"
+                                .to_owned()
+                        }),
+                    );
+                }
+                if status != ExecutionStatus::Returned {
+                    return execution_failure(
+                        result,
+                        status,
+                        format!("cranelift JIT execution ended with status {status:?}"),
                     );
                 }
                 result.status = status;

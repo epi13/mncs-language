@@ -967,18 +967,39 @@ fn execute_portable_wasm_decoded(
         &request.target.function,
     );
     if let Some(contract) = value_contract {
-        if contract.inputs.len() != request.arguments.len()
-            || !contract
-                .inputs
-                .iter()
-                .zip(&request.arguments)
-                .all(|(contract, value)| {
-                    backend_input_matches(contract, value, &artifact.composite_value_contracts)
-                })
-        {
+        if contract.inputs.len() != request.arguments.len() {
             result.failure = Some(ExecutionFailure {
                 identity: Some(artifact.identity.clone()),
-                reason: "backend request violates the language-owned value contract".to_owned(),
+                reason: format!(
+                    "backend request violates the language-owned value contract: expected {} argument(s), received {}",
+                    contract.inputs.len(),
+                    request.arguments.len()
+                ),
+            });
+            return result;
+        }
+        // Records resolve by name at every nesting level (WEB-P-011); the
+        // first disagreement names the argument, the field path, and the
+        // expected-vs-received shapes.
+        let mut mismatch: Option<String> = None;
+        for (index, (contract, value)) in contract.inputs.iter().zip(&request.arguments).enumerate()
+        {
+            if let Err(reason) = support::check_contract_value(
+                contract,
+                value,
+                &artifact.composite_value_contracts,
+                &format!("argument {index}"),
+            ) {
+                mismatch = Some(reason);
+                break;
+            }
+        }
+        if let Some(reason) = mismatch {
+            result.failure = Some(ExecutionFailure {
+                identity: Some(artifact.identity.clone()),
+                reason: format!(
+                    "backend request violates the language-owned value contract: {reason}"
+                ),
             });
             return result;
         }
@@ -1072,142 +1093,6 @@ fn execute_portable_wasm_decoded(
         }
     }
     result
-}
-
-fn backend_input_matches(
-    contract: &BackendValueContract,
-    value: &ExecutionValue,
-    _composites: &BTreeMap<String, BackendValueContract>,
-) -> bool {
-    match (contract, value) {
-        (BackendValueContract::Scalar { semantic_type }, value) => {
-            match (BodyType::from_semantic_name(semantic_type), value) {
-                (BodyType::Named(name), ExecutionValue::Boolean { .. }) => name == "bool",
-                (BodyType::Integer(expected), ExecutionValue::Integer { value, ty }) => {
-                    expected == *ty && support::integer_fits(*value, expected)
-                }
-                // Bytes marshal through their unsigned 8-bit domain.
-                (BodyType::Byte, ExecutionValue::Byte { value }) => (0..=255).contains(value),
-                // Binary64 arguments match by type: finiteness is a
-                // runtime trap, not a request rejection.
-                (BodyType::Float(expected), ExecutionValue::Float { ty: actual, .. }) => {
-                    expected.is_supported() && actual.is_supported() && expected == *actual
-                }
-                _ => false,
-            }
-        }
-        (
-            BackendValueContract::Finite {
-                type_identity,
-                variants,
-                payloads,
-            },
-            ExecutionValue::Finite {
-                type_identity: actual_type,
-                variant_identity,
-                discriminant,
-                payload,
-            },
-        ) => {
-            if type_identity != actual_type || variants.get(discriminant) != Some(variant_identity)
-            {
-                return false;
-            }
-            match payloads.get(discriminant) {
-                None => payload.is_empty(),
-                Some(fields) => {
-                    fields.len() == payload.len()
-                        && fields.iter().zip(payload.iter()).all(
-                            |((name, field_type), (field_name, field_value))| {
-                                name == field_name && scalar_field_matches(field_type, field_value)
-                            },
-                        )
-                }
-            }
-        }
-        (
-            BackendValueContract::Record {
-                type_identity,
-                fields,
-                ..
-            },
-            ExecutionValue::Record {
-                type_identity: actual_type,
-                fields: values,
-                ..
-            },
-        ) => {
-            type_identity == actual_type
-                && fields.len() == values.len()
-                && fields.iter().zip(values.iter()).all(
-                    |((name, field_type), (field_name, field_value))| {
-                        name == field_name && scalar_field_matches(field_type, field_value)
-                    },
-                )
-        }
-        (
-            BackendValueContract::Sequence {
-                element, length, ..
-            },
-            ExecutionValue::Sequence { values },
-        ) => {
-            values.len() == *length as usize
-                && values
-                    .iter()
-                    .all(|value| scalar_field_matches(element, value))
-        }
-        (
-            BackendValueContract::View {
-                element, capacity, ..
-            },
-            ExecutionValue::Sequence { values },
-        ) => {
-            values.len() <= *capacity as usize
-                && values
-                    .iter()
-                    .all(|value| scalar_field_matches(element, value))
-        }
-        (
-            BackendValueContract::Vector { element, lanes, .. },
-            ExecutionValue::Vector { values },
-        ) => {
-            values.len() == *lanes as usize
-                && values
-                    .iter()
-                    .all(|value| scalar_field_matches(element, value))
-        }
-        (BackendValueContract::Mask { lanes, .. }, ExecutionValue::Mask { lanes: bits }) => {
-            bits.len() == *lanes as usize
-        }
-        _ => false,
-    }
-}
-
-/// One-level field validation: scalars are checked exactly; named composite
-/// leaves (finite/record references) are checked structurally here and their
-/// contents were fully validated while marshaling into the realization.
-fn scalar_field_matches(semantic_type: &str, value: &ExecutionValue) -> bool {
-    match (BodyType::from_semantic_name(semantic_type), value) {
-        (BodyType::Named(name), ExecutionValue::Boolean { .. }) if name == "bool" => true,
-        (BodyType::Integer(expected), ExecutionValue::Integer { value, ty }) => {
-            expected == *ty && support::integer_fits(*value, expected)
-        }
-        (BodyType::Byte, ExecutionValue::Byte { value }) => (0..=255).contains(value),
-        // Binary64 fields match by type exactly like top-level float
-        // arguments; finiteness stays a runtime trap, not a rejection
-        // (ENG-PRESSURE-0002 WASM record-argument divergence).
-        (BodyType::Float(expected), ExecutionValue::Float { ty: actual, .. }) => {
-            expected.is_supported() && actual.is_supported() && expected == *actual
-        }
-        (BodyType::Named(_), ExecutionValue::Finite { .. } | ExecutionValue::Record { .. }) => true,
-        (
-            BodyType::Sequence { .. } | BodyType::Vector { .. } | BodyType::Mask { .. },
-            ExecutionValue::Sequence { .. }
-            | ExecutionValue::Vector { .. }
-            | ExecutionValue::Mask { .. },
-        ) => true,
-        _ => false,
-    }
 }
 
 pub(crate) fn backend_output_value(

@@ -7246,13 +7246,6 @@ impl<'a> BodyBuilder<'a> {
                     diagnostics,
                     self.admitted_sequence_ceiling(),
                 );
-                if expected.is_some_and(|expected| expected != &result_ty) {
-                    diagnostics.push(elaboration_diagnostic(
-                        "MNE163",
-                        "projected field does not have the required expression type",
-                        *span,
-                    ));
-                }
                 let projected = self.emit_record_project(
                     &subject,
                     &record_type,
@@ -7261,6 +7254,22 @@ impl<'a> BodyBuilder<'a> {
                     diagnostics,
                 );
                 if projected.ty != result_ty {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE163",
+                        "projected field does not have the required expression type",
+                        *span,
+                    ));
+                }
+                // WEB-P-002: a projected exact-sequence field borrows as a
+                // bounded view exactly like a named value does (same
+                // N <= M, same-element rule, same borrow machinery); only
+                // genuinely mismatched expectations stay MNE163.
+                if expected.is_some_and(|expected| expected != &result_ty) {
+                    if let Some(wanted) = expected {
+                        if let Some(borrowed) = self.borrow_view_for_expected(&projected, wanted) {
+                            return Some(borrowed);
+                        }
+                    }
                     diagnostics.push(elaboration_diagnostic(
                         "MNE163",
                         "projected field does not have the required expression type",
@@ -8029,20 +8038,48 @@ impl<'a> BodyBuilder<'a> {
                     return Some(ResolvedBinding::plain(id, result_ty));
                 }
                 // Thread the result expectation into literal operands for
-                // total operators (arithmetic and bitwise alike).
+                // total operators (arithmetic and bitwise alike, including
+                // the wrapping/saturating/division spellings, which share
+                // the same literal-adaptation rule).
                 let threads_expected = matches!(
                     op,
                     AstBinaryOp::Add
                         | AstBinaryOp::Sub
                         | AstBinaryOp::Mul
+                        | AstBinaryOp::Div
+                        | AstBinaryOp::Mod
+                        | AstBinaryOp::AddWrap
+                        | AstBinaryOp::SubWrap
+                        | AstBinaryOp::MulWrap
+                        | AstBinaryOp::AddSat
+                        | AstBinaryOp::SubSat
+                        | AstBinaryOp::MulSat
                         | AstBinaryOp::BitwiseAnd
                         | AstBinaryOp::BitwiseOr
                         | AstBinaryOp::BitwiseXor
                 );
                 let operand_expected = threads_expected.then_some(expected).flatten();
-                let left_value = self.elaborate_expr(left, operand_expected, env, diagnostics)?;
-                let right_value =
-                    self.elaborate_expr(right, Some(&left_value.ty), env, diagnostics)?;
+                // Symmetric literal adaptation (WEB-P-005): when the left
+                // operand is a bare integer literal, elaborate the right
+                // side first so the literal adapts to the right side's
+                // concrete type exactly as a right-side literal adapts to
+                // the left's. `1000 +% x` then means what `x +% 1000`
+                // means. Comparisons keep their strict order (mixed-width
+                // refusal is pinned behavior, not an adaptation gap).
+                let (left_value, right_value) =
+                    if threads_expected && matches!(left.as_ref(), AstExpr::Integer { .. }) {
+                        let right_value =
+                            self.elaborate_expr(right, operand_expected, env, diagnostics)?;
+                        let left_value =
+                            self.elaborate_expr(left, Some(&right_value.ty), env, diagnostics)?;
+                        (left_value, right_value)
+                    } else {
+                        let left_value =
+                            self.elaborate_expr(left, operand_expected, env, diagnostics)?;
+                        let right_value =
+                            self.elaborate_expr(right, Some(&left_value.ty), env, diagnostics)?;
+                        (left_value, right_value)
+                    };
                 if left_value.ty != right_value.ty {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE119",
