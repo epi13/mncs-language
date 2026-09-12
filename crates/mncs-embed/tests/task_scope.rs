@@ -181,6 +181,7 @@ fn fs_grant_lists_granted_root_per_task() {
         mncs_embed::CallOptions {
             step_budget: 8_192,
             grants: vec![Grant::fs_root("fs_root", &dir.to_string_lossy())],
+            type_arguments: Vec::new(),
         },
     );
     let run = scope.run_batch(vec![item]).expect("run");
@@ -318,6 +319,7 @@ fn index_shaped_workload_is_millisecond_scale() {
         CallOptions {
             step_budget: 8_192,
             grants: vec![grant],
+            type_arguments: Vec::new(),
         },
     );
     let effect_run = scope.run_batch(vec![effect_item]).expect("effect call");

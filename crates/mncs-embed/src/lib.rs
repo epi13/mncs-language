@@ -22,8 +22,8 @@ use std::collections::BTreeSet;
 use mncs_codegen::OwnedExecutionSession;
 use mncs_model::{
     BackendArtifact, EffectExecutionPolicy, ExecutionPolicy, ExecutionRequest, ExecutionStatus,
-    ExecutionTarget, ExecutionValue, HostGrant, EXECUTION_REQUEST_SCHEMA_VERSION,
-    HOST_GRANT_MAX_BYTES,
+    ExecutionTarget, ExecutionTypeArgument, ExecutionValue, HostGenericSeedRequest, HostGrant,
+    EXECUTION_REQUEST_SCHEMA_VERSION, HOST_GRANT_MAX_BYTES,
 };
 use serde::{Deserialize, Serialize};
 
@@ -85,13 +85,26 @@ impl Artifact {
     /// refused here: embedding executes frozen artifacts, and library
     /// resolution belongs to the build step that froze them.
     pub fn from_source(source: &str, backend: &str) -> Result<Self, EmbedError> {
+        Self::from_source_with_seeds(source, backend, &[])
+    }
+
+    /// Compile self-contained source text plus host-requested generic
+    /// instantiations (P1-013/P2-003): each seed compiles its
+    /// specialization into the artifact, which [`Session::call`] then
+    /// selects with matching `type_arguments` in [`CallOptions`].
+    /// Seed-free sources behave exactly like [`Artifact::from_source`].
+    pub fn from_source_with_seeds(
+        source: &str,
+        backend: &str,
+        seeds: &[HostGenericSeedRequest],
+    ) -> Result<Self, EmbedError> {
         use mncs_compiler::ReferenceCompiler;
         use mncs_model::ArtifactRepresentation;
         use mncs_syntax::{SourceArtifactKind, SourceEnvelope};
 
         let compiler = ReferenceCompiler::default();
         let envelope = SourceEnvelope::inline(SourceArtifactKind::Program, "embed-source", source);
-        let front_end = compiler.front_end(envelope);
+        let front_end = compiler.front_end_with_seeds(envelope, seeds);
         if !front_end.is_valid() {
             return Err(EmbedError::new(
                 "compile_failed",
@@ -241,12 +254,20 @@ impl Grant {
     }
 }
 
-/// Per-call options: step budget plus explicit grants. No grants means no
-/// realized host effects on that call.
+/// Per-call options: step budget, explicit grants, and explicit generic
+/// arguments. No grants means no realized host effects on that call;
+/// empty `type_arguments` means a concrete target.
 #[derive(Debug, Clone, Default)]
 pub struct CallOptions {
     pub step_budget: u64,
     pub grants: Vec<Grant>,
+    /// Explicit generic arguments selecting a compiled specialization
+    /// of a generic entrypoint (P1-013/P2-003), mirroring
+    /// `ExecutionRequest.type_arguments`. Empty for concrete targets.
+    /// The artifact must have compiled the instantiation — via
+    /// [`Artifact::from_source_with_seeds`] or a seeded frozen
+    /// artifact — or the call fails closed as `invalid_request`.
+    pub type_arguments: Vec<ExecutionTypeArgument>,
 }
 
 impl CallOptions {
@@ -254,6 +275,7 @@ impl CallOptions {
         Self {
             step_budget,
             grants: Vec::new(),
+            type_arguments: Vec::new(),
         }
     }
 }
@@ -308,6 +330,9 @@ impl Session {
 
     /// Execute one named entrypoint with canonical ABI values. A
     /// zero `step_budget` in `options` selects the default bound.
+    /// Generic entrypoints run through the explicit `type_arguments`
+    /// in `options` (see [`CallOptions`]); a bare generic target fails
+    /// closed as `invalid_request`, never by running the template.
     pub fn call(
         &self,
         module: &str,
@@ -333,6 +358,7 @@ impl Session {
                 function: function.to_owned(),
             },
             arguments,
+            type_arguments: options.type_arguments.clone(),
             step_budget,
             policy: ExecutionPolicy::default(),
             host_grants: Vec::new(),
@@ -540,9 +566,13 @@ pub unsafe extern "C" fn mncs_session_call(
             }
         }
     };
+    // The single-call C boundary stays concrete-only (stable signature):
+    // generic entrypoints go through the batch API's per-request
+    // `type_arguments` or the Rust `Session::call`.
     let options = CallOptions {
         step_budget,
         grants,
+        type_arguments: Vec::new(),
     };
     match session.call_json(&module, &function, &args_text, &options) {
         Ok(output) => match CallResponse::of(&output) {
@@ -561,7 +591,9 @@ pub unsafe extern "C" fn mncs_session_call(
 
 /// Execute many entrypoints sequentially on one session with one boundary
 /// crossing; `requests_json` is a JSON array of
-/// `{module, function, args, grants?, step_budget?}` objects. Returns the
+/// `{module, function, args, grants?, step_budget?, type_arguments?}`
+/// objects (`type_arguments` selects a compiled generic specialization
+/// exactly like `ExecutionRequest.type_arguments`). Returns the
 /// JSON array of [`CallOutput`] documents in request order, or NULL on
 /// failure. This is the stable-boundary batch API for hosts that issue
 /// hundreds of kernel calls per build (index PRESS-010): per-call
@@ -593,6 +625,8 @@ pub unsafe extern "C" fn mncs_session_call_batch(
         grants: Vec<Grant>,
         #[serde(default)]
         step_budget: u64,
+        #[serde(default)]
+        type_arguments: Vec<mncs_model::ExecutionTypeArgument>,
     }
     let requests: Vec<BatchRequest> = match serde_json::from_str(&text) {
         Ok(requests) => requests,
@@ -607,6 +641,7 @@ pub unsafe extern "C" fn mncs_session_call_batch(
             let options = CallOptions {
                 step_budget: request.step_budget,
                 grants: request.grants,
+                type_arguments: request.type_arguments,
             };
             session.call(&request.module, &request.function, request.args, &options)
         })

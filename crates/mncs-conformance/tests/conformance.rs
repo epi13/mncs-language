@@ -316,6 +316,7 @@ fn nested_calls_reuse_execution_identity() {
                 },
             }],
             step_budget: 16384,
+            type_arguments: Vec::new(),
             policy: Default::default(),
             host_grants: Vec::new(),
             call_depth_budget: None,

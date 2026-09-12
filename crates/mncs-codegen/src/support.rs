@@ -457,6 +457,100 @@ pub(crate) fn function_value_contracts(
     contracts
 }
 
+/// Build the host-addressable generic entrypoint map for an artifact
+/// (P1-013/P2-003): one row per compiled specialization that carries host
+/// seed spellings, resolved to the concrete `(module, function)` entry the
+/// backend emitted. In-language-only instantiations (empty spellings) are
+/// not host-addressable: the host must name its instantiation in the
+/// corpus so the seed spellings are recorded at elaboration. Callers pass
+/// the rows into [`mncs_model::BackendArtifact::with_generic_entrypoints`],
+/// which sorts them into the artifact identity.
+pub(crate) fn generic_entrypoint_records(
+    program: &Program,
+) -> Vec<mncs_model::GenericEntrypointRecord> {
+    let mut rows = Vec::new();
+    for record in &program.generic_specializations {
+        if record.host_spellings.is_empty() {
+            continue;
+        }
+        let generic = program.functions.iter().find(|function| {
+            mncs_model::function_id(function.identity_namespace(&program.module), &function.name)
+                == record.generic_function
+        });
+        let specialization = program.functions.iter().find(|function| {
+            mncs_model::function_id(function.identity_namespace(&program.module), &function.name)
+                == record.specialization_function
+        });
+        let (Some(generic), Some(specialization)) = (generic, specialization) else {
+            continue;
+        };
+        rows.push(mncs_model::GenericEntrypointRecord {
+            generic_module: generic.identity_namespace(&program.module).to_owned(),
+            generic_function: generic.name.clone(),
+            args_spellings: record.host_spellings.clone(),
+            canonical_args: record.canonical_args.clone(),
+            entry_module: specialization
+                .identity_namespace(&program.module)
+                .to_owned(),
+            entry_function: specialization.name.clone(),
+        });
+    }
+    rows
+}
+
+/// Resolve an execution request to its concrete `(module, function)` entry
+/// through the artifact's generic-entrypoint map. Requests without type
+/// arguments pass through untouched, so every existing entry resolves
+/// exactly as before. A request naming a compiled instantiation resolves
+/// to the emitted entry; anything else fails closed with an
+/// `InvalidRequest` reason: unknown spellings, uncompiled
+/// instantiations, and pre-0.4 artifacts (which predate the map) each
+/// name the remedy instead of mislinking.
+pub(crate) fn resolve_request_entry(
+    artifact: &BackendArtifact,
+    module: &str,
+    function: &str,
+    type_arguments: &[mncs_model::ExecutionTypeArgument],
+) -> Result<(String, String), String> {
+    if type_arguments.is_empty() {
+        return Ok((module.to_owned(), function.to_owned()));
+    }
+    let spellings = type_arguments
+        .iter()
+        .map(|argument| argument.normalized_spelling())
+        .collect::<Vec<_>>();
+    if let Some(row) = artifact.generic_entrypoints.iter().find(|row| {
+        row.generic_module == module
+            && row.generic_function == function
+            && row.args_spellings == spellings
+    }) {
+        return Ok((row.entry_module.clone(), row.entry_function.clone()));
+    }
+    if matches!(artifact.schema_version.as_str(), "0.1" | "0.2" | "0.3") {
+        return Err(format!(
+            "generic function {module}::{function} names type arguments but artifact schema {} predates generic entrypoints: recompile the artifact from a corpus that names the instantiation",
+            artifact.schema_version
+        ));
+    }
+    let available = artifact
+        .generic_entrypoints
+        .iter()
+        .filter(|row| row.generic_module == module && row.generic_function == function)
+        .map(|row| format!("({})", row.args_spellings.join(", ")))
+        .collect::<Vec<_>>();
+    if available.is_empty() {
+        Err(format!(
+            "no compiled generic instantiation of {module}::{function} matches this artifact: name the instantiation in the corpus so elaboration compiles it in"
+        ))
+    } else {
+        Err(format!(
+            "no compiled specialization of generic function {module}::{function} for arguments ({}); compiled instantiations: [{}]",
+            spellings.join(", "),
+            available.join(", ")
+        ))
+    }
+}
+
 /// Language-owned value contract for one execution entry, resolved by
 /// canonical `(module, function)` identity first and by legacy short name
 /// second. The qualified slot always names the requested declaration
@@ -2075,5 +2169,108 @@ mod driver_tests {
             scalar_module_needs_arena_symbols(&module),
             "index-into-view needs arena symbols"
         );
+    }
+}
+
+#[cfg(test)]
+mod generic_entry_tests {
+    use super::*;
+    use mncs_model::{
+        ArtifactRepresentation, BackendArtifact, CompilerArtifactRef, ExecutionTypeArgument,
+        GenericEntrypointRecord, TargetContractRef, TransformationStatus,
+    };
+
+    fn test_artifact() -> BackendArtifact {
+        BackendArtifact::new_with_kind(
+            mncs_model::BackendIdentity::new("test-backend", "0.1"),
+            CompilerArtifactRef::new(ArtifactRepresentation::SelectedSsa, "0.1", "fingerprint"),
+            TargetContractRef::new("test-target", BTreeMap::new(), Vec::new(), Vec::new()),
+            "backend_defined",
+            "test-format",
+            b"bytes",
+            vec!["mncs_m__fill__spec_01".to_owned()],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            TransformationStatus::Pass,
+        )
+        .with_generic_entrypoints(vec![GenericEntrypointRecord {
+            generic_module: "m".to_owned(),
+            generic_function: "fill".to_owned(),
+            args_spellings: vec!["8".to_owned()],
+            canonical_args: "value:8".to_owned(),
+            entry_module: "m".to_owned(),
+            entry_function: "fill__spec_01".to_owned(),
+        }])
+    }
+
+    fn nat(value: u32) -> ExecutionTypeArgument {
+        ExecutionTypeArgument::Nat { value }
+    }
+
+    #[test]
+    fn requests_without_type_arguments_pass_through_untouched() {
+        let artifact = test_artifact();
+        assert_eq!(
+            resolve_request_entry(&artifact, "m", "fill", &[]),
+            Ok(("m".to_owned(), "fill".to_owned()))
+        );
+    }
+
+    #[test]
+    fn named_instantiations_resolve_to_the_emitted_entry() {
+        let artifact = test_artifact();
+        assert_eq!(
+            resolve_request_entry(&artifact, "m", "fill", &[nat(8)]),
+            Ok(("m".to_owned(), "fill__spec_01".to_owned()))
+        );
+    }
+
+    #[test]
+    fn uncompiled_spellings_list_the_compiled_ones() {
+        let artifact = test_artifact();
+        let reason = resolve_request_entry(&artifact, "m", "fill", &[nat(4)]).unwrap_err();
+        assert!(
+            reason.contains("no compiled specialization") && reason.contains("(8)"),
+            "refusal lists compiled spellings: {reason}"
+        );
+    }
+
+    #[test]
+    fn unseeded_generics_name_the_corpus_remedy() {
+        let mut artifact = test_artifact();
+        artifact.generic_entrypoints.clear();
+        let reason = resolve_request_entry(&artifact, "m", "fill", &[nat(8)]).unwrap_err();
+        assert!(
+            reason.contains("name the instantiation in the corpus"),
+            "refusal names the remedy: {reason}"
+        );
+    }
+
+    #[test]
+    fn pre_map_artifacts_fail_closed_with_a_recompile_diagnostic() {
+        let mut artifact = test_artifact();
+        artifact.generic_entrypoints.clear();
+        artifact.schema_version = "0.3".to_owned();
+        let reason = resolve_request_entry(&artifact, "m", "fill", &[nat(8)]).unwrap_err();
+        assert!(
+            reason.contains("predates generic entrypoints") && reason.contains("recompile"),
+            "legacy artifacts name the recompile: {reason}"
+        );
+    }
+
+    #[test]
+    fn spelling_normalization_agrees_across_whitespace() {
+        let ty = |spelling: &str| ExecutionTypeArgument::Type {
+            ty: spelling.to_owned(),
+        };
+        assert_eq!(
+            ty("[i64;8]").normalized_spelling(),
+            ty("[i64; 8]").normalized_spelling()
+        );
+        assert_eq!(nat(8).normalized_spelling(), "8");
     }
 }

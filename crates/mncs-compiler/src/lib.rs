@@ -10,8 +10,10 @@ mod resolution;
 
 pub use frontend::{
     elaborate_program, elaborate_program_with_resolutions, elaborate_program_with_resolver,
-    elaborate_program_with_resolver_and_modules, ModuleResolution, ModuleResolutionOutcome,
-    ModuleResolver, NullResolver, SourceFrontEndResult, SourceStudyOutput,
+    elaborate_program_with_resolver_and_modules,
+    elaborate_program_with_resolver_and_modules_and_seeds, specialize_program_with_host_seeds,
+    ModuleResolution, ModuleResolutionOutcome, ModuleResolver, NullResolver, SourceFrontEndResult,
+    SourceStudyOutput,
 };
 pub use proof_admission::{
     admission_library_roots, admit_artifact, authorize_reuse, lower_with_proofs, AdmissionError,
@@ -1582,6 +1584,7 @@ mod tests {
                 step_budget: 10_000,
                 policy: mncs_model::ExecutionPolicy::default(),
                 host_grants: Vec::new(),
+                type_arguments: Vec::new(),
                 call_depth_budget: None,
             };
             let body = mncs_model::execute_with_policy(&program, &request);

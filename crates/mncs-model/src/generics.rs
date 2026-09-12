@@ -7,7 +7,48 @@ use crate::canonical::sha256_hex;
 use crate::identity::{function_id, instantiation_id, SemanticId};
 use crate::{Function, Program, Value};
 
+/// Deterministic native entry name for one instantiation. The hash covers
+/// the canonical argument string shared with in-language call sites, so a
+/// host-requested instantiation and an in-language instantiation with the
+/// same arguments name the same function. Entry names are a stability
+/// contract: do not change the shape without a schema bump, because
+/// artifact-only execution layers map requests through these names.
+pub fn specialization_entry_name(base_name: &str, canonical_args: &str) -> String {
+    format!(
+        "{}__spec_{}",
+        base_name,
+        &sha256_hex(canonical_args.as_bytes())[0..8]
+    )
+}
+
+/// One host-requested instantiation seed (P1-013/P2-003). The `args` are
+/// the resolved [`GenericArg`] values (identical to an in-language
+/// explicit `<...>` call); `host_spellings` are the normalized request
+/// spellings recorded on the specialization so artifact-only execution
+/// layers can map the request back without re-resolving nominal types.
+#[derive(Debug, Clone)]
+pub struct HostSpecializationSeed {
+    pub generic_id: SemanticId,
+    pub args: Vec<GenericArg>,
+    pub host_spellings: Vec<String>,
+}
+
 pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagnostic>> {
+    specialize_program_with_seeds(program, &[])
+}
+
+/// Specialize exactly like [`specialize_program`], plus the given
+/// host-requested instantiations. Seeds join the same fixed-point queue
+/// ahead of the in-language call-site scan, so a seed naming an
+/// instantiation an in-language call also names produces ONE function,
+/// ONE record, and ONE identity — never a second specialization system.
+/// Seeds consume the same `MAX_SPECIALIZATIONS` budget and run through
+/// the same substitution, unresolved-generic, and (downstream, in the
+/// elaborator) ceiling checks as in-language instantiations.
+pub fn specialize_program_with_seeds(
+    program: &Program,
+    seeds: &[HostSpecializationSeed],
+) -> Result<Program, Vec<crate::Diagnostic>> {
     use crate::Diagnostic;
     let mut diagnostics = Vec::new();
 
@@ -19,7 +60,7 @@ pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagn
             generic_by_id.insert(fid, func);
         }
     }
-    if generic_by_id.is_empty() {
+    if generic_by_id.is_empty() && seeds.is_empty() {
         return Ok(program.clone());
     }
 
@@ -28,8 +69,8 @@ pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagn
         generic_id: SemanticId,
         args: Vec<GenericArg>,
         canonical: String,
-        hash: String,
         key: String,
+        host_spellings: Vec<String>,
     }
 
     let mut specialization_by_key: BTreeMap<String, Function> = BTreeMap::new();
@@ -37,6 +78,83 @@ pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagn
     let mut queue: VecDeque<InstKey> = VecDeque::new();
     let mut in_progress: BTreeSet<String> = BTreeSet::new();
     let mut seen_keys: BTreeSet<String> = BTreeSet::new();
+
+    // Host seeds queue before the in-language call-site scan, merged by
+    // instantiation key with spellings unioned: different spellings of
+    // one instantiation (a nominal by name vs by identity) still produce
+    // one function, while every spelling stays host-addressable. Seeds
+    // that fail the same checks an in-language call would fail report
+    // the same diagnostics (MNE131/MNE221/MNE222) instead of queueing.
+    {
+        /// Seeds merged by (generic identity, canonical args): different
+        /// spellings of one instantiation union their spellings.
+        type MergedSeed = (SemanticId, Vec<GenericArg>, Vec<String>);
+        let mut merged: BTreeMap<(String, String), MergedSeed> = BTreeMap::new();
+        for seed in seeds {
+            let canonical = seed
+                .args
+                .iter()
+                .map(|a| a.canonical_string())
+                .collect::<Vec<_>>()
+                .join("|");
+            merged
+                .entry((seed.generic_id.0.clone(), canonical))
+                .and_modify(|(_, _, spellings)| {
+                    spellings.extend(seed.host_spellings.iter().cloned());
+                })
+                .or_insert_with(|| {
+                    (
+                        seed.generic_id.clone(),
+                        seed.args.clone(),
+                        seed.host_spellings.clone(),
+                    )
+                });
+        }
+        for ((_, canonical), (generic_id, args, mut spellings)) in merged {
+            spellings.sort();
+            spellings.dedup();
+            let Some(generic_fn) = generic_by_id.get(&generic_id) else {
+                diagnostics.push(Diagnostic {
+                    code: "MNE131".to_owned(),
+                    path: generic_id.0.clone(),
+                    message: "host type arguments name an unknown generic function".to_owned(),
+                });
+                continue;
+            };
+            if args.len() != generic_fn.generic_params.len() {
+                diagnostics.push(Diagnostic {
+                    code: "MNE221".to_owned(),
+                    path: generic_fn.name.clone(),
+                    message: format!(
+                        "generic argument count mismatch for '{}': expected {}, got {}",
+                        generic_fn.name,
+                        generic_fn.generic_params.len(),
+                        args.len()
+                    ),
+                });
+                continue;
+            }
+            if !args.iter().all(|a| a.is_concrete()) {
+                diagnostics.push(Diagnostic {
+                    code: "MNE226".to_owned(),
+                    path: generic_fn.name.clone(),
+                    message: "host type arguments must be concrete".to_owned(),
+                });
+                continue;
+            }
+            let key = format!("{}|{}", generic_id.0, canonical);
+            if !seen_keys.contains(&key) {
+                queue.push_back(InstKey {
+                    generic_id,
+                    args,
+                    canonical,
+                    key: key.clone(),
+                    host_spellings: spellings,
+                });
+                seen_keys.insert(key);
+            }
+        }
+    }
 
     // Initial population from concrete (non-generic) functions
     for func in &program.functions {
@@ -73,13 +191,15 @@ pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagn
                             .join("|");
                         let key = format!("{}|{}", callee_id.0, canonical);
                         if !specialization_by_key.contains_key(&key) && !seen_keys.contains(&key) {
-                            let hash = sha256_hex(canonical.as_bytes());
                             queue.push_back(InstKey {
                                 generic_id: callee_id.clone(),
                                 args: generic_args.clone(),
                                 canonical,
-                                hash,
                                 key: key.clone(),
+                                // In-language instantiations carry no host
+                                // spellings; a host seed for the same key
+                                // was already queued ahead of this scan.
+                                host_spellings: Vec::new(),
                             });
                             seen_keys.insert(key);
                         }
@@ -200,8 +320,7 @@ pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagn
             continue;
         }
 
-        let hash = inst.hash.clone();
-        let new_name = format!("{}__spec_{}", generic_fn.name, &hash[0..8]);
+        let new_name = specialization_entry_name(&generic_fn.name, &inst.canonical);
         let home = generic_fn.home_module.clone();
         let inst_id = instantiation_id(&inst.generic_id, &inst.canonical);
 
@@ -251,6 +370,7 @@ pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagn
             instantiation: inst_id.clone(),
             args: inst.args.clone(),
             canonical_args: inst.canonical.clone(),
+            host_spellings: inst.host_spellings.clone(),
         };
         specialization_records.push(record);
         specialization_by_key.insert(inst.key.clone(), new_function.clone());
@@ -288,13 +408,12 @@ pub fn specialize_program(program: &Program) -> Result<Program, Vec<crate::Diagn
                                     message: "specialization expansion limit exceeded".to_owned(),
                                 });
                             } else {
-                                let hash2 = sha256_hex(canonical.as_bytes());
                                 queue.push_back(InstKey {
                                     generic_id: callee_id.clone(),
                                     args: generic_args.clone(),
                                     canonical,
-                                    hash: hash2,
                                     key: key.clone(),
+                                    host_spellings: Vec::new(),
                                 });
                                 seen_keys.insert(key);
                                 expansions += 1;

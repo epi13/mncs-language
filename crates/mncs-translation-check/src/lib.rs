@@ -612,6 +612,7 @@ mod tests {
                 module: "Examples.Executable".to_owned(),
                 function: "checked_add".to_owned(),
             },
+            type_arguments: Vec::new(),
             arguments: vec![
                 ExecutionValue::Integer {
                     value: a,

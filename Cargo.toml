@@ -24,6 +24,9 @@ serde_json = "1"
 thiserror = "2"
 sha2 = "0.10"
 ed25519-dalek = "2"
+# Unix-only `O_NOFOLLOW` for the filesystem provider's final-component
+# symlink gate (Tranche B). Already in the lockfile transitively.
+libc = "0.2"
 
 [profile.fabric]
 inherits = "release"

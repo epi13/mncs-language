@@ -104,12 +104,35 @@ impl ReferenceCompiler {
         self.front_end_with_resolver(envelope, &NullResolver)
     }
 
+    /// Runs the resolver-free front end plus host-requested generic
+    /// instantiations (P1-013/P2-003) for embedding flows that compile
+    /// self-contained sources with no import closure.
+    pub fn front_end_with_seeds(
+        &self,
+        envelope: SourceEnvelope,
+        seeds: &[mncs_model::HostGenericSeedRequest],
+    ) -> SourceFrontEndResult {
+        self.front_end_with_resolver_and_seeds(envelope, &NullResolver, seeds)
+    }
+
     /// Runs the front end with a module resolver, linking `use` imports at
     /// elaboration time.
     pub fn front_end_with_resolver(
         &self,
         envelope: SourceEnvelope,
         resolver: &dyn ModuleResolver,
+    ) -> SourceFrontEndResult {
+        self.front_end_with_resolver_and_seeds(envelope, resolver, &[])
+    }
+
+    /// Runs the front end with a module resolver plus host-requested
+    /// generic instantiations (P1-013/P2-003): the corpus names them, the
+    /// elaborator compiles them in, every backend lowers them.
+    pub fn front_end_with_resolver_and_seeds(
+        &self,
+        envelope: SourceEnvelope,
+        resolver: &dyn ModuleResolver,
+        seeds: &[mncs_model::HostGenericSeedRequest],
     ) -> SourceFrontEndResult {
         let started = Instant::now();
         let ParseOutput {
@@ -159,7 +182,8 @@ impl ReferenceCompiler {
                 ));
             } else {
                 let elaboration_started = Instant::now();
-                let elaboration = elaborate_program_with_resolver_and_modules(tree, resolver);
+                let elaboration =
+                    elaborate_program_with_resolver_and_modules_and_seeds(tree, resolver, seeds);
                 trace_timing("elaboration", elaboration_started);
                 match elaboration {
                     (Ok(elaborated), resolutions, resolved_modules) => {
@@ -500,6 +524,24 @@ pub fn elaborate_program_with_resolver_and_modules(
     Vec<NameResolution>,
     Vec<ModuleResolution>,
 ) {
+    elaborate_program_with_resolver_and_modules_and_seeds(ast, resolver, &[])
+}
+
+/// Elaborates like [`elaborate_program_with_resolver_and_modules`], plus
+/// the given host-requested generic instantiations (P1-013/P2-003).
+/// Seeds resolve against the linked program and specialize through the
+/// same queue, identity scheme, and ceiling sweep as in-language
+/// instantiations; malformed seeds are elaboration diagnostics (MNE131 /
+/// MNE221 / MNE222 / MNE224 / MNE225 / MNE105), never silent skips.
+pub fn elaborate_program_with_resolver_and_modules_and_seeds(
+    ast: &AbstractSyntaxTree,
+    resolver: &dyn ModuleResolver,
+    seeds: &[mncs_model::HostGenericSeedRequest],
+) -> (
+    Result<Program, Vec<SourceDiagnostic>>,
+    Vec<NameResolution>,
+    Vec<ModuleResolution>,
+) {
     let recording_resolver = RecordingResolver {
         inner: resolver,
         sources: RefCell::new(BTreeMap::new()),
@@ -528,43 +570,29 @@ pub fn elaborate_program_with_resolver_and_modules(
             &mut resolutions,
             &ast.module.text,
         ) {
-            Ok(program) => match mncs_model::generics::specialize_program(&program) {
-                Ok(specialized) => {
-                    // Admitted-ceiling enforcement for concrete bounds
-                    // substituted into generic specializations (RFC 0036).
-                    // Generic definitions defer the admitted check, so each
-                    // specialization's concrete traversal bounds are checked
-                    // here against the admitted ceiling of the module that
-                    // defines the traversal: explicit Nat arguments already
-                    // pass MNE225 at their call site, and this sweep closes
-                    // the remaining paths (inference, cross-module
-                    // substitution). A narrow root never un-admits library
-                    // internals admitted under the library's own profile.
-                    // Non-generic functions keep exactly their
-                    // definition-site behavior.
-                    let mut ceiling_errors = specialized_traversal_ceiling_errors(
-                        &specialized,
-                        &module_ceilings,
-                        mncs_syntax::max_sequence_bound_for(&ast.language_version.text)
-                            .unwrap_or(0),
-                        ast.module.span,
-                    );
-                    if ceiling_errors.is_empty() {
-                        Ok(specialized)
-                    } else {
-                        diagnostics.append(&mut ceiling_errors);
+            Ok(program) => {
+                // Admitted-ceiling enforcement for concrete bounds
+                // substituted into generic specializations (RFC 0036) lives
+                // inside `specialize_program_with_host_seeds`, which also
+                // compiles any host-requested instantiations through the
+                // same queue, identity scheme, and sweep.
+                let fallback_ceiling =
+                    mncs_syntax::max_sequence_bound_for(&ast.language_version.text).unwrap_or(0);
+                match specialize_program_with_host_seeds(
+                    &program,
+                    seeds,
+                    &module_ceilings,
+                    fallback_ceiling,
+                    ast.module.span,
+                    None,
+                ) {
+                    Ok(specialized) => Ok(specialized),
+                    Err(mut errors) => {
+                        diagnostics.append(&mut errors);
                         Err(diagnostics)
                     }
                 }
-                Err(diags) => {
-                    let mut errors: Vec<SourceDiagnostic> = diags
-                        .into_iter()
-                        .map(|d| elaboration_diagnostic(&d.code, d.message, ast.module.span))
-                        .collect();
-                    diagnostics.append(&mut errors);
-                    Err(diagnostics)
-                }
-            },
+            }
             Err(mut errors) => {
                 diagnostics.append(&mut errors);
                 Err(diagnostics)
@@ -2981,11 +3009,147 @@ impl FunctionSignature {
 /// until that caller specializes. Only functions named by specialization
 /// records are examined, so non-generic programs keep exactly their
 /// definition-site behavior.
+/// Specialize a linked program with host-requested generic instantiations
+/// (P1-013/P2-003) through the same queue, identity scheme, and ceiling
+/// sweep as in-language instantiations. Malformed seeds are elaboration
+/// diagnostics (MNE131/MNE221/MNE222/MNE224/MNE225/MNE105), never silent
+/// skips. `prior_specializations` scopes the post-specialization ceiling
+/// sweep: `None` sweeps every record (source elaboration, where the
+/// closure ceilings are exact); `Some(set)` sweeps only records whose
+/// specialization is outside `set` (semantic-JSON programs, where
+/// pre-existing records were admitted under profiles the JSON no longer
+/// names and must not be re-judged under the envelope ceiling).
+pub fn specialize_program_with_host_seeds(
+    program: &Program,
+    seeds: &[mncs_model::HostGenericSeedRequest],
+    module_ceilings: &BTreeMap<String, u32>,
+    fallback_ceiling: u32,
+    span: SourceSpan,
+    prior_specializations: Option<&BTreeSet<SemanticId>>,
+) -> Result<Program, Vec<SourceDiagnostic>> {
+    let host_seeds = resolve_host_seeds(program, seeds, module_ceilings, fallback_ceiling, span)?;
+    let specialized = mncs_model::generics::specialize_program_with_seeds(program, &host_seeds)
+        .map_err(|diags| {
+            diags
+                .into_iter()
+                .map(|d| elaboration_diagnostic(&d.code, d.message, span))
+                .collect::<Vec<_>>()
+        })?;
+    let mut ceiling_errors = specialized_traversal_ceiling_errors(
+        &specialized,
+        module_ceilings,
+        fallback_ceiling,
+        span,
+        prior_specializations,
+    );
+    if ceiling_errors.is_empty() {
+        Ok(specialized)
+    } else {
+        let mut errors = Vec::new();
+        errors.append(&mut ceiling_errors);
+        Err(errors)
+    }
+}
+
+/// Resolve host generic-instantiation seeds against the linked program
+/// (P1-013/P2-003). Each seed parses exactly like an in-language
+/// explicit `<...>` argument list (same [`mncs_model::parse_host_generic_args`]
+/// shape, same MNE221/MNE222/MNE105 taxonomy), with two host-specific
+/// rules: the target must name a generic declaration (MNE131 when it
+/// names nothing, MNE222 when it names a concrete function), and `Nat`
+/// values check against the DEFINING module's admitted ceiling (MNE225) —
+/// there is no call-site module on the boundary, and the
+/// post-specialization sweep re-checks every substituted traversal bound
+/// (MNE182) downstream, so no ceiling path is lost.
+fn resolve_host_seeds(
+    program: &Program,
+    seeds: &[mncs_model::HostGenericSeedRequest],
+    module_ceilings: &BTreeMap<String, u32>,
+    fallback_ceiling: u32,
+    span: SourceSpan,
+) -> Result<Vec<mncs_model::generics::HostSpecializationSeed>, Vec<SourceDiagnostic>> {
+    let mut resolved = Vec::with_capacity(seeds.len());
+    let mut errors = Vec::new();
+    for seed in seeds {
+        let Some(declaration) = program.functions.iter().find(|function| {
+            function.name == seed.function
+                && function.identity_namespace(&program.module) == seed.module
+        }) else {
+            errors.push(elaboration_diagnostic(
+                "MNE131",
+                format!(
+                    "host type arguments name unknown function '{}::{}'",
+                    seed.module, seed.function
+                ),
+                span,
+            ));
+            continue;
+        };
+        if declaration.generic_params.is_empty() {
+            errors.push(elaboration_diagnostic(
+                "MNE222",
+                "generic arguments supplied for non-generic function",
+                span,
+            ));
+            continue;
+        }
+        let args =
+            match mncs_model::parse_host_generic_args(program, declaration, &seed.type_arguments) {
+                Ok(args) => args,
+                Err(error) => {
+                    errors.push(elaboration_diagnostic(error.code, error.message, span));
+                    continue;
+                }
+            };
+        let home = declaration.identity_namespace(&program.module);
+        let admitted = module_ceilings
+            .get(home)
+            .copied()
+            .unwrap_or(fallback_ceiling);
+        let mut over_ceiling = false;
+        for (param, arg) in declaration.generic_params.iter().zip(&seed.type_arguments) {
+            if param.kind == mncs_model::GenericParamKind::Nat {
+                if let mncs_model::ExecutionTypeArgument::Nat { value } = arg {
+                    if *value > admitted {
+                        errors.push(elaboration_diagnostic(
+                            "MNE225",
+                            format!(
+                                "host Nat argument {value} for '{}' exceeds the defining module's profile ceiling {admitted}",
+                                param.name
+                            ),
+                            span,
+                        ));
+                        over_ceiling = true;
+                    }
+                }
+            }
+        }
+        if over_ceiling {
+            continue;
+        }
+        resolved.push(mncs_model::generics::HostSpecializationSeed {
+            generic_id: function_id(home, &declaration.name),
+            args,
+            host_spellings: seed
+                .type_arguments
+                .iter()
+                .map(|arg| arg.normalized_spelling())
+                .collect(),
+        });
+    }
+    if errors.is_empty() {
+        Ok(resolved)
+    } else {
+        Err(errors)
+    }
+}
+
 fn specialized_traversal_ceiling_errors(
     program: &Program,
     module_ceilings: &BTreeMap<String, u32>,
     fallback: u32,
     span: SourceSpan,
+    prior_specializations: Option<&BTreeSet<SemanticId>>,
 ) -> Vec<SourceDiagnostic> {
     // One shared implementation with the model so the
     // definition/instantiation contract cannot drift between layers.
@@ -2997,6 +3161,14 @@ fn specialized_traversal_ceiling_errors(
         .collect();
     let mut errors = Vec::new();
     for record in &program.generic_specializations {
+        // Semantic-JSON programs keep their pre-existing admissions:
+        // only newly seeded instantiations are judged under the
+        // envelope ceiling.
+        if prior_specializations
+            .is_some_and(|prior| prior.contains(&record.specialization_function))
+        {
+            continue;
+        }
         let Some(function) = by_id.get(&record.specialization_function) else {
             continue;
         };

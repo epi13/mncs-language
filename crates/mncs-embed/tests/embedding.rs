@@ -185,3 +185,75 @@ fn c_abi_round_trip_without_rust_layout() {
 
     unsafe { mncs_session_close(handle) };
 }
+
+/// P1-013/P2-003 embedding evidence: a seeded artifact serves a generic
+/// entrypoint through explicit `type_arguments`, while the bare target
+/// and an unseeded artifact fail closed with explicit reasons.
+#[test]
+fn seeded_artifacts_serve_generic_entrypoints_in_process() {
+    use mncs_model::{ExecutionTypeArgument, ExecutionValue, HostGenericSeedRequest};
+
+    const GENERIC_SOURCE: &str = "mncs 0.13;\nmodule probe.generics;\nfn fill<W: Nat>(row: [i64; W], v: i64) -> (result: [i64; W]) {\n    iterate i over row carrying out: [i64; W] = row {\n        next out = replace(out, i, v);\n    }\n    return out;\n}\n";
+    let seeds = vec![HostGenericSeedRequest {
+        module: "probe.generics".to_owned(),
+        function: "fill".to_owned(),
+        type_arguments: vec![ExecutionTypeArgument::Nat { value: 4 }],
+    }];
+    let artifact =
+        Artifact::from_source_with_seeds(GENERIC_SOURCE, "mncs-research-bytecode", &seeds)
+            .expect("seeded compile");
+    let session = Session::open(artifact).expect("open session");
+    let row = |value: i64| ExecutionValue::Integer {
+        value: value as i128,
+        ty: mncs_model::IntegerType {
+            bits: 64,
+            signed: true,
+        },
+    };
+    let args = vec![
+        ExecutionValue::Sequence {
+            values: vec![row(0), row(0), row(0), row(0)].into(),
+        },
+        row(9),
+    ];
+    let mut options = CallOptions::budgeted(8_192);
+    options.type_arguments = vec![ExecutionTypeArgument::Nat { value: 4 }];
+    let output = session.call("probe.generics", "fill", args.clone(), &options);
+    assert_eq!(output.status, "returned", "{output:?}");
+    let values = match &output.returned[..] {
+        [ExecutionValue::Sequence { values }] => values.clone(),
+        other => panic!("sequence expected, got {other:?}"),
+    };
+    assert_eq!(values.len(), 4);
+    for value in values.iter() {
+        assert!(matches!(value, ExecutionValue::Integer { value: 9, .. }));
+    }
+    // Bare generic target fails closed, never by running the template.
+    let bare = session.call(
+        "probe.generics",
+        "fill",
+        args.clone(),
+        &CallOptions::budgeted(8_192),
+    );
+    assert_eq!(bare.status, "invalid_request", "{bare:?}");
+    assert!(
+        bare.failure_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("requires explicit type_arguments")),
+        "{bare:?}"
+    );
+    // Unseeded artifact plus type arguments fails closed: the
+    // instantiation was never compiled in.
+    let plain =
+        Artifact::from_source(GENERIC_SOURCE, "mncs-research-bytecode").expect("plain compile");
+    let plain_session = Session::open(plain).expect("open plain session");
+    let unseeded = plain_session.call("probe.generics", "fill", args, &options);
+    assert_eq!(unseeded.status, "invalid_request", "{unseeded:?}");
+    assert!(
+        unseeded
+            .failure_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("no compiled generic instantiation")),
+        "{unseeded:?}"
+    );
+}

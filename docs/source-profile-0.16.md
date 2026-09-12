@@ -83,6 +83,22 @@ as IO failure (fail closed) or generation drift (re-list). The granted
 root is operator-owned; mutually untrusting writers must not share
 one.
 
+Tranche B hardening note (2026-09-12, no semantic change): on Unix
+builds the provider now opens validated entries with `O_NOFOLLOW`, so
+a final-component symlink swapped in between validation and open
+fails the open atomically instead of redirecting the read,
+positioned write, append, create-content write, or barrier outside
+the root; creates additionally re-resolve under the root after the
+syscall (`mkdir(2)` already refuses links with `EEXIST`, and
+unlink/rename never follow a final-component link). What remains is
+the irreducible portable remainder, still explicitly non-claimed:
+intermediate-component swaps on nested paths, the final-component
+swap on non-Unix builds, and directory-handle stability across the
+snapshot walk. Adversarial evidence lives in
+`crates/mncs-model/src/fs_resource.rs` (`outside_pointing_symlinks_*`,
+`dangling_symlinks_*`, `post_create_verification_*`,
+`gated_open_*`, `final_component_swap_stress_*`).
+
 Under the `Record` effect policy, mutations are intent-only:
 validated and valued, never realized — so replay stays side-effect
 free and the logical mutation realizes exactly once. Compiled backends

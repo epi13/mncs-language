@@ -1,0 +1,16 @@
+mncs 0.13;
+
+// P1-013/P2-003 regression leaf: Nat- and type-generic functions the
+// host names directly through explicit `type_arguments`.
+module pressure.host_generics.lib;
+
+fn grow_fill<W: Nat>(row: [i64; W], v: i64) -> (result: [i64; W]) {
+    iterate i over row carrying out: [i64; W] = row {
+        next out = replace(out, i, v);
+    }
+    return out;
+}
+
+fn first<T>(value: T) -> (result: T) {
+    return value;
+}

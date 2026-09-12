@@ -67,10 +67,24 @@ pub fn prepare_stateful_session<'a>(
 impl C11StatefulSession<'_> {
     pub fn execute(&mut self, request: &ExecutionRequest) -> BackendExecutionResult {
         let mut result = empty_execution(self.artifact, request);
-        let Some(contract) = crate::support::entry_value_contract(
-            &self.artifact.function_value_contracts,
+        // P1-013: a request naming a compiled generic instantiation
+        // resolves to the emitted specialization entry; requests without
+        // type arguments pass through untouched.
+        let (entry_module, entry_function) = match crate::support::resolve_request_entry(
+            self.artifact,
             &request.target.module,
             &request.target.function,
+            &request.type_arguments,
+        ) {
+            Ok(entry) => entry,
+            Err(reason) => {
+                return execution_failure(result, ExecutionStatus::InvalidRequest, reason)
+            }
+        };
+        let Some(contract) = crate::support::entry_value_contract(
+            &self.artifact.function_value_contracts,
+            &entry_module,
+            &entry_function,
         ) else {
             return execution_failure(
                 result,
@@ -84,16 +98,13 @@ impl C11StatefulSession<'_> {
         // admission) fail closed as Unsupported instead of mislinking.
         let Some(entry) = crate::support::resolve_entry_export(
             &self.artifact.exports,
-            &request.target.module,
-            &request.target.function,
+            &entry_module,
+            &entry_function,
         ) else {
             return execution_failure(
                 result,
                 ExecutionStatus::Unsupported,
-                crate::support::unrealized_entry_reason(
-                    &request.target.module,
-                    &request.target.function,
-                ),
+                crate::support::unrealized_entry_reason(&entry_module, &entry_function),
             );
         };
         // RFC 0047 §5 uniform fuel: the driver seeds the entry depth from
@@ -145,7 +156,7 @@ impl C11StatefulSession<'_> {
         // executable for a budgeted request would silently grant full fuel.
         let cache_key = format!(
             "{}#depth{entry_depth}",
-            crate::support::entry_key(&request.target.module, &request.target.function)
+            crate::support::entry_key(&entry_module, &entry_function)
         );
         if !self.executables.contains_key(&cache_key) {
             let executable = match NativeExecutable::compile_or_reuse(
@@ -479,6 +490,7 @@ pub fn lower_c11(
     )
     .with_function_value_contracts(function_value_contracts(program))
     .with_composite_value_contracts(crate::support::composite_value_contracts(program))
+    .with_generic_entrypoints(crate::support::generic_entrypoint_records(program))
     .with_promise_decisions(scalar.promise_decisions.clone());
     let artifact_ref = artifact_ref(&artifact);
     let evidence = BackendEvidence::new(
@@ -1900,10 +1912,21 @@ pub fn execute_c11(
         Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
         Err(reason) => return execution_failure(result, ExecutionStatus::InvalidRequest, reason),
     };
-    let Some(contract) = crate::support::entry_value_contract(
-        &artifact.function_value_contracts,
+    // P1-013: resolve a host-requested generic instantiation to its
+    // emitted specialization entry before contract/export lookup.
+    let (entry_module, entry_function) = match crate::support::resolve_request_entry(
+        artifact,
         &request.target.module,
         &request.target.function,
+        &request.type_arguments,
+    ) {
+        Ok(entry) => entry,
+        Err(reason) => return execution_failure(result, ExecutionStatus::InvalidRequest, reason),
+    };
+    let Some(contract) = crate::support::entry_value_contract(
+        &artifact.function_value_contracts,
+        &entry_module,
+        &entry_function,
     ) else {
         return execution_failure(
             result,
@@ -1915,18 +1938,13 @@ pub fn execute_c11(
     // file; pure scalar calls keep the historical argv-only protocol.
     // The entry symbol is module-qualified (ENG-PRESSURE-0017). Refused
     // entrypoints (P1-B02 admission) fail closed as Unsupported.
-    let Some(entry) = crate::support::resolve_entry_export(
-        &artifact.exports,
-        &request.target.module,
-        &request.target.function,
-    ) else {
+    let Some(entry) =
+        crate::support::resolve_entry_export(&artifact.exports, &entry_module, &entry_function)
+    else {
         return execution_failure(
             result,
             ExecutionStatus::Unsupported,
-            crate::support::unrealized_entry_reason(
-                &request.target.module,
-                &request.target.function,
-            ),
+            crate::support::unrealized_entry_reason(&entry_module, &entry_function),
         );
     };
     // RFC 0047 §5 uniform fuel (see the stateful session above).

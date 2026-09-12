@@ -15,7 +15,7 @@ use crate::{CanonicalForm, HighLevelIr, ObligationRecord, SemanticId, SsaModule}
 pub const PORTABLE_WASM_MVP_TARGET: &str = "mncs:target:portable-wasm-mvp-0.1";
 pub const PORTABLE_WASM_MVP_BACKEND_NAME: &str = "mncs-portable-wasm-mvp";
 pub const PORTABLE_WASM_MVP_BACKEND_VERSION: &str = "0.1";
-pub const BACKEND_ARTIFACT_SCHEMA_VERSION: &str = "0.3";
+pub const BACKEND_ARTIFACT_SCHEMA_VERSION: &str = "0.4";
 pub const BACKEND_CAPABILITY_SCHEMA_VERSION: &str = "0.1";
 pub const REALIZATION_REQUEST_SCHEMA_VERSION: &str = "0.1";
 pub const LAYERED_EXECUTION_COMPARISON_INTERPRETATION: &str =
@@ -1094,6 +1094,22 @@ pub enum BackendValueContract {
     },
 }
 
+/// One host-addressable generic instantiation realized by an artifact
+/// (P1-013/P2-003). The host names `(generic_module, generic_function)`
+/// plus the normalized argument spellings from its request; the artifact
+/// answers the concrete `(entry_module, entry_function)` the backend
+/// actually emitted. `canonical_args` is provenance: the identity shared
+/// with the in-language instantiation of the same arguments.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GenericEntrypointRecord {
+    pub generic_module: String,
+    pub generic_function: String,
+    pub args_spellings: Vec<String>,
+    pub canonical_args: String,
+    pub entry_module: String,
+    pub entry_function: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackendArtifact {
     pub schema_version: String,
@@ -1123,6 +1139,15 @@ pub struct BackendArtifact {
     /// compilations of the same bytes never share an identity.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub proof_bindings: Vec<crate::ProofBindingRef>,
+    /// Host-callable generic entrypoints (P1-013/P2-003, schema 0.4): one
+    /// row per compiled specialization that a host seed requested, mapping
+    /// the requesting (module, generic name, normalized spellings) to the
+    /// concrete (module, function) entry this artifact realized. Empty for
+    /// generic-free programs. Part of the artifact identity. Artifacts
+    /// emitted before 0.4 parse without it and fail closed on any request
+    /// carrying type arguments.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generic_entrypoints: Vec<GenericEntrypointRecord>,
     pub execution_applicability: Vec<String>,
     pub evidence_dependencies: Vec<SemanticId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1230,6 +1255,7 @@ impl BackendArtifact {
             execution_applicability,
             evidence_dependencies,
             promise_decisions: Vec::new(),
+            generic_entrypoints: Vec::new(),
             unsupported,
             status,
         };
@@ -1255,6 +1281,38 @@ impl BackendArtifact {
         composite_value_contracts: BTreeMap<String, BackendValueContract>,
     ) -> Self {
         self.composite_value_contracts = composite_value_contracts;
+        self.identity = identified("backend-artifact", &self.without_identity());
+        self
+    }
+
+    /// Attach the compiled generic-entrypoint map, keeping the artifact
+    /// identity exact. Rows must arrive sorted by
+    /// (generic_module, generic_function, spellings) so identical
+    /// compilations share one identity regardless of seed order.
+    pub fn with_generic_entrypoints(
+        mut self,
+        mut generic_entrypoints: Vec<GenericEntrypointRecord>,
+    ) -> Self {
+        generic_entrypoints.sort_by(|left, right| {
+            (
+                &left.generic_module,
+                &left.generic_function,
+                &left.args_spellings,
+                &left.canonical_args,
+                &left.entry_module,
+                &left.entry_function,
+            )
+                .cmp(&(
+                    &right.generic_module,
+                    &right.generic_function,
+                    &right.args_spellings,
+                    &right.canonical_args,
+                    &right.entry_module,
+                    &right.entry_function,
+                ))
+        });
+        generic_entrypoints.dedup();
+        self.generic_entrypoints = generic_entrypoints;
         self.identity = identified("backend-artifact", &self.without_identity());
         self
     }
@@ -1313,6 +1371,7 @@ impl BackendArtifact {
             execution_applicability: &self.execution_applicability,
             evidence_dependencies: &self.evidence_dependencies,
             promise_decisions: &self.promise_decisions,
+            generic_entrypoints: &self.generic_entrypoints,
             unsupported: &self.unsupported,
             status: self.status,
         }
@@ -1337,6 +1396,7 @@ struct BackendArtifactMaterial<'a> {
     execution_applicability: &'a [String],
     evidence_dependencies: &'a [SemanticId],
     promise_decisions: &'a [crate::BackendPromiseDecision],
+    generic_entrypoints: &'a [GenericEntrypointRecord],
     unsupported: &'a [String],
     status: TransformationStatus,
 }

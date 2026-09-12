@@ -81,6 +81,22 @@ pub fn language_owned_value_contracts(
 /// The value contract describes the transport shape.  The additional
 /// declaration metadata lets a consumer bind that shape to the semantic
 /// function identity without reimplementing module/linking identity rules.
+/// One compiled instantiation of a generic function visible in the ABI.
+#[derive(Debug, Clone, Serialize)]
+pub struct CompiledInstantiationAbi {
+    /// Identity shared with the in-language instantiation of the same
+    /// arguments (`GenericArg::canonical_string` joined by `|`).
+    pub canonical_args: String,
+    /// Concrete entry this artifact (or program) realizes.
+    pub entry_module: String,
+    pub entry_function: String,
+    /// Normalized host spellings that address this instantiation
+    /// (`ExecutionTypeArgument::normalized_spelling`); empty for
+    /// in-language-only instantiations, which a host cannot name until
+    /// it seeds them through a corpus.
+    pub spellings: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct LanguageOwnedFunctionAbi {
     pub function_identity: SemanticId,
@@ -88,6 +104,19 @@ pub struct LanguageOwnedFunctionAbi {
     pub name: String,
     pub inputs: Vec<BackendValueContract>,
     pub outputs: Vec<BackendValueContract>,
+    /// Generic parameters in declaration order; empty for concrete
+    /// functions. A host calls a generic entry by spelling one
+    /// `type_arguments` element per parameter (`{"kind": "nat",
+    /// "value": N}` for `Nat`, `{"kind": "type", "type": "<semantic
+    /// name>"}` for `Type`) against the `target` module and this `name`.
+    pub generic_params: Vec<mncs_model::GenericParam>,
+    /// True exactly when `generic_params` is non-empty: the entry runs
+    /// only through a compiled specialization selected by explicit
+    /// `type_arguments`, never bare.
+    pub requires_type_arguments: bool,
+    /// Instantiations compiled into this program, in-language and
+    /// host-seeded alike.
+    pub compiled_instantiations: Vec<CompiledInstantiationAbi>,
 }
 
 /// Return language-owned ABI contracts with qualified declaration identity.
@@ -109,15 +138,61 @@ pub fn language_owned_abi_contracts(
         let Some(contract) = value_contracts.get(&function.name) else {
             continue;
         };
+        let function_identity =
+            mncs_model::function_id(function.identity_namespace(&program.module), &function.name);
+        // Instantiations of this declaration, in declaration-independent
+        // order: the host addresses them through `type_arguments`, never
+        // by guessing specialization entry names.
+        let mut compiled_instantiations = program
+            .generic_specializations
+            .iter()
+            .filter(|record| record.generic_function == function_identity)
+            .map(|record| {
+                let (entry_module, entry_function) = program
+                    .functions
+                    .iter()
+                    .find(|candidate| {
+                        mncs_model::function_id(
+                            candidate.identity_namespace(&program.module),
+                            &candidate.name,
+                        ) == record.specialization_function
+                    })
+                    .map(|candidate| {
+                        (
+                            candidate.identity_namespace(&program.module).to_owned(),
+                            candidate.name.clone(),
+                        )
+                    })
+                    .unwrap_or_default();
+                CompiledInstantiationAbi {
+                    canonical_args: record.canonical_args.clone(),
+                    entry_module,
+                    entry_function,
+                    spellings: record.host_spellings.clone(),
+                }
+            })
+            .collect::<Vec<_>>();
+        compiled_instantiations.sort_by(|left, right| {
+            (
+                &left.canonical_args,
+                &left.entry_module,
+                &left.entry_function,
+            )
+                .cmp(&(
+                    &right.canonical_args,
+                    &right.entry_module,
+                    &right.entry_function,
+                ))
+        });
         let declaration = LanguageOwnedFunctionAbi {
-            function_identity: mncs_model::function_id(
-                function.identity_namespace(&program.module),
-                &function.name,
-            ),
+            function_identity,
             declaring_module: function.identity_namespace(&program.module).to_owned(),
             name: function.name.clone(),
             inputs: contract.inputs.clone(),
             outputs: contract.outputs.clone(),
+            requires_type_arguments: !function.generic_params.is_empty(),
+            generic_params: function.generic_params.clone(),
+            compiled_instantiations,
         };
 
         if function.home_module.is_none() {
@@ -739,7 +814,8 @@ pub fn lower_selected_ssa(
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(function_value_contracts(program))
-    .with_composite_value_contracts(crate::support::composite_value_contracts(program));
+    .with_composite_value_contracts(crate::support::composite_value_contracts(program))
+    .with_generic_entrypoints(crate::support::generic_entrypoint_records(program));
     let artifact_ref = CompilerArtifactRef::new(
         ArtifactRepresentation::BackendArtifact,
         BACKEND_ARTIFACT_SCHEMA_VERSION,
@@ -862,7 +938,8 @@ pub fn lower_research_bytecode(
         TransformationStatus::Pass,
     )
     .with_function_value_contracts(function_value_contracts(program))
-    .with_composite_value_contracts(crate::support::composite_value_contracts(program));
+    .with_composite_value_contracts(crate::support::composite_value_contracts(program))
+    .with_generic_entrypoints(crate::support::generic_entrypoint_records(program));
     let artifact_ref = CompilerArtifactRef::new(
         ArtifactRepresentation::BackendArtifact,
         BACKEND_ARTIFACT_SCHEMA_VERSION,
@@ -970,10 +1047,29 @@ fn execute_portable_wasm_decoded(
         effects: Vec::new(),
         failure: None,
     };
-    let value_contract = support::entry_value_contract(
-        &artifact.function_value_contracts,
+    // P1-013: a request naming a compiled generic instantiation resolves
+    // to the emitted specialization entry; requests without type
+    // arguments pass through untouched.
+    let (entry_module, entry_function) = match support::resolve_request_entry(
+        artifact,
         &request.target.module,
         &request.target.function,
+        &request.type_arguments,
+    ) {
+        Ok(entry) => entry,
+        Err(reason) => {
+            result.failure = Some(ExecutionFailure {
+                identity: Some(artifact.identity.clone()),
+                reason,
+            });
+            result.status = ExecutionStatus::InvalidRequest;
+            return result;
+        }
+    };
+    let value_contract = support::entry_value_contract(
+        &artifact.function_value_contracts,
+        &entry_module,
+        &entry_function,
     );
     if let Some(contract) = value_contract {
         if contract.inputs.len() != request.arguments.len() {
@@ -1015,8 +1111,8 @@ fn execute_portable_wasm_decoded(
     }
     let entry_contracts = support::entry_value_contract(
         &artifact.function_value_contracts,
-        &request.target.module,
-        &request.target.function,
+        &entry_module,
+        &entry_function,
     );
     let (input_contracts, output_contracts) = entry_contracts
         .map(|contracts| (contracts.inputs.as_slice(), contracts.outputs.as_slice()))
@@ -1039,32 +1135,28 @@ fn execute_portable_wasm_decoded(
     // The gate reads the artifact admission list (`exports`), never the
     // module's function names: refused slots keep their names as dead
     // stubs, so a module-name match would execute `unreachable`.
-    let Some(entry) = support::resolve_entry_export(
-        &artifact.exports,
-        &request.target.module,
-        &request.target.function,
-    )
-    .or_else(|| {
-        // Legacy short-name fallback for artifacts emitted before
-        // qualified lowering: the artifact's own export list decides, so
-        // a short match is a real legacy entry.
-        if artifact
-            .exports
-            .iter()
-            .any(|export| export == &request.target.function)
-        {
-            Some(request.target.function.clone())
-        } else {
-            None
-        }
-    }) else {
+    let Some(entry) =
+        support::resolve_entry_export(&artifact.exports, &entry_module, &entry_function).or_else(
+            || {
+                // Legacy short-name fallback for artifacts emitted before
+                // qualified lowering: the artifact's own export list decides, so
+                // a short match is a real legacy entry.
+                if artifact
+                    .exports
+                    .iter()
+                    .any(|export| export == &entry_function)
+                {
+                    Some(entry_function.clone())
+                } else {
+                    None
+                }
+            },
+        )
+    else {
         result.status = ExecutionStatus::Unsupported;
         result.failure = Some(ExecutionFailure {
             identity: Some(artifact.identity.clone()),
-            reason: support::unrealized_entry_reason(
-                &request.target.module,
-                &request.target.function,
-            ),
+            reason: support::unrealized_entry_reason(&entry_module, &entry_function),
         });
         return result;
     };
@@ -1203,7 +1295,6 @@ pub(crate) fn backend_output_value(
         BackendValueContract::Finite {
             type_identity,
             variants,
-            payloads: _,
             ..
         } => {
             // Typed realizations return fully materialized finite values
@@ -2544,6 +2635,7 @@ mod tests {
                 module: "Examples.Executable".to_owned(),
                 function: "checked_add".to_owned(),
             },
+            type_arguments: Vec::new(),
             arguments: vec![
                 ExecutionValue::Integer {
                     value: a,
@@ -2777,6 +2869,7 @@ mod tests {
                 module: "test.nested".to_owned(),
                 function: "quadruple".to_owned(),
             },
+            type_arguments: Vec::new(),
             arguments: vec![mncs_model::ExecutionValue::Integer {
                 value: 21,
                 ty: mncs_model::IntegerType {
@@ -3151,6 +3244,7 @@ mod record_tests {
                 module: "examples.profile05_record_values".to_owned(),
                 function: "main".to_owned(),
             },
+            type_arguments: Vec::new(),
             arguments: vec![ExecutionValue::Integer {
                 value,
                 ty: IntegerType {

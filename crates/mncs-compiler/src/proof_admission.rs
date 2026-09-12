@@ -492,6 +492,8 @@ fn execute_admit(
             function: function.to_owned(),
         },
         arguments,
+        // Admission executes concrete admission entrypoints only.
+        type_arguments: Vec::new(),
         step_budget: budget,
         policy: Default::default(),
         host_grants: Vec::new(),
