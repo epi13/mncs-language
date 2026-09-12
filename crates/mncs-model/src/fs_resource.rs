@@ -207,6 +207,85 @@ fn u64_operand(args: &[u64], position: usize, intrinsic: &str) -> Result<u64, Fs
     })
 }
 
+/// Open a resolved entry without following a final-component symlink
+/// (Tranche B TOCTOU hardening). On Unix the open carries `O_NOFOLLOW`,
+/// so a symlink swapped in after validation fails the open atomically —
+/// the file descriptor can never name the swap target — instead of
+/// redirecting the call outside the granted root. Once the open
+/// succeeds, all further IO uses the descriptor, which no later swap
+/// can redirect. On non-Unix builds the open is best-effort and the
+/// documented race remainder stands (see the Profile 0.16 TOCTOU
+/// section); behavior differs only in attack resistance, never in
+/// admitted semantics.
+#[cfg(unix)]
+fn open_nofollow(path: &Path, write: bool, append: bool) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut options = std::fs::OpenOptions::new();
+    if append {
+        options.append(true);
+    } else if write {
+        options.write(true);
+    } else {
+        options.read(true);
+    }
+    options.custom_flags(libc::O_NOFOLLOW).open(path)
+}
+
+#[cfg(not(unix))]
+fn open_nofollow(path: &Path, write: bool, append: bool) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    if append {
+        options.append(true);
+    } else if write {
+        options.write(true);
+    } else {
+        options.read(true);
+    }
+    options.open(path)
+}
+
+/// Recognize an `O_NOFOLLOW` refusal: the entry became a symlink between
+/// validation and open. Only applied to the gated opens above — never to
+/// `canonicalize`, where a loop has a different meaning. Unix-only in
+/// effect: non-Unix builds carry no gate, so no open there can refuse
+/// this way.
+#[cfg(unix)]
+fn is_symlink_swap_refusal(error: &std::io::Error) -> bool {
+    error.raw_os_error() == Some(libc::ELOOP)
+}
+
+#[cfg(not(unix))]
+fn is_symlink_swap_refusal(_error: &std::io::Error) -> bool {
+    false
+}
+
+/// Re-resolve a just-created path under the canonical root (Tranche B).
+/// `create_new` is atomic against regular files but follows a dangling
+/// final-component symlink swapped in after the existence check,
+/// creating the referent — so the create path canonicalizes after the
+/// syscall and prefix-checks, catching that swap deterministically.
+///
+/// On escape the call fails closed as `RuntimeFailure` and the file is
+/// deliberately LEFT in place: unlinking a re-swapped path could delete
+/// a file the provider never verified, while the created content is
+/// bounded program-supplied bytes (at most one view) under `O_EXCL`
+/// (never an overwrite), so litter is safer than a blind unlink.
+fn verify_inside_root(
+    canonical_root: &Path,
+    path: &Path,
+    operation: &str,
+) -> Result<PathBuf, FsFail> {
+    let resolved = std::fs::canonicalize(path).map_err(|error| {
+        FsFail::RuntimeFailure(format!("{operation} created entry is unreadable: {error}"))
+    })?;
+    if !resolved.starts_with(canonical_root) {
+        return Err(FsFail::RuntimeFailure(format!(
+            "{operation} created entry escapes the granted root; refusing (no overwrite occurred)"
+        )));
+    }
+    Ok(resolved)
+}
+
 /// Realize one filesystem intrinsic against an already-matched grant.
 /// `args` are the call's u64 operands in order (indices, offsets,
 /// lengths); view-returning calls deliver `[byte; up_to 64]` values.
@@ -319,7 +398,8 @@ pub fn fs_realize(
             // lossy rendering. The joined path is re-canonicalized and
             // prefix-checked, so a symlink swap between listing and read
             // resolves outside the root and is refused rather than
-            // followed.
+            // followed; the gated open below additionally refuses a swap
+            // that lands after the re-canonicalization.
             let mut path = canonical_root.clone();
             path.push(rel_os_str(&entry.rel));
             let resolved = std::fs::canonicalize(&path).map_err(|error| {
@@ -349,10 +429,20 @@ pub fn fs_realize(
             let mut bytes = vec![0u8; end.saturating_sub(start)];
             if !bytes.is_empty() {
                 use std::io::{Read, Seek, SeekFrom};
-                let mut file = std::fs::File::open(&resolved).map_err(|error| {
-                    FsFail::RuntimeFailure(format!(
-                        "{operation} read of entry index {index} failed: {error}"
-                    ))
+                // Tranche B: the gated open refuses a final-component
+                // symlink swapped in after validation instead of reading
+                // through it (which would leak outside bytes plus their
+                // provenance into the program).
+                let mut file = open_nofollow(&resolved, false, false).map_err(|error| {
+                    if is_symlink_swap_refusal(&error) {
+                        FsFail::InvalidRequest(format!(
+                            "{operation} entry index {index} became a symlink between validation and open; refusing"
+                        ))
+                    } else {
+                        FsFail::RuntimeFailure(format!(
+                            "{operation} read of entry index {index} failed: {error}"
+                        ))
+                    }
                 })?;
                 file.seek(SeekFrom::Start(start as u64)).map_err(|error| {
                     FsFail::RuntimeFailure(format!(
@@ -617,10 +707,11 @@ pub fn fs_mutate(
             }
             if realize {
                 use std::io::Write;
-                let mut file = std::fs::OpenOptions::new()
+                let () = std::fs::OpenOptions::new()
                     .write(true)
                     .create_new(true)
                     .open(&target)
+                    .map(|_| ())
                     .map_err(|error| {
                         if error.kind() == std::io::ErrorKind::AlreadyExists {
                             FsFail::InvalidRequest(
@@ -631,9 +722,27 @@ pub fn fs_mutate(
                             FsFail::RuntimeFailure(format!("fs_create_file write failed: {error}"))
                         }
                     })?;
+                // Tranche B: `create_new` is atomic against regular files
+                // but follows a dangling final-component symlink swapped
+                // in after the existence check. The gated open refuses a
+                // swapped link before any content lands (at most an empty
+                // outside file remains), and the post-create prefix check
+                // catches intermediate-component swaps deterministically.
+                let mut file = open_nofollow(&target, true, false).map_err(|error| {
+                    if is_symlink_swap_refusal(&error) {
+                        FsFail::InvalidRequest(
+                            "fs_create_file entry became a symlink between validation and open; refusing"
+                                .to_owned(),
+                        )
+                    } else {
+                        FsFail::RuntimeFailure(format!("fs_create_file write failed: {error}"))
+                    }
+                })?;
                 file.write_all(&content).map_err(|error| {
                     FsFail::RuntimeFailure(format!("fs_create_file write failed: {error}"))
                 })?;
+                drop(file);
+                verify_inside_root(&canonical_root, &target, operation)?;
             }
             // Intent-only reports the computed rank in observed
             // pre-state; realized calls observe the post-state listing.
@@ -680,14 +789,21 @@ pub fn fs_mutate(
             }
             if realize {
                 use std::io::{Seek, SeekFrom, Write};
-                let mut file = std::fs::OpenOptions::new()
-                    .write(true)
-                    .open(&resolved)
-                    .map_err(|error| {
+                // Tranche B: the gated open pins the validated file —
+                // a swapped final-component symlink fails here instead
+                // of redirecting the positioned write outside the root.
+                // All IO below uses the descriptor, immune to later swaps.
+                let mut file = open_nofollow(&resolved, true, false).map_err(|error| {
+                    if is_symlink_swap_refusal(&error) {
+                        FsFail::InvalidRequest(format!(
+                            "{operation} entry index {index} became a symlink between validation and open; refusing"
+                        ))
+                    } else {
                         FsFail::RuntimeFailure(format!(
                             "{operation} write of entry index {index} failed: {error}"
                         ))
-                    })?;
+                    }
+                })?;
                 file.seek(SeekFrom::Start(offset)).map_err(|error| {
                     FsFail::RuntimeFailure(format!(
                         "{operation} write of entry index {index} failed: {error}"
@@ -732,14 +848,19 @@ pub fn fs_mutate(
             let resolved = resolve_existing(&canonical_root, &entry.rel, operation, index)?;
             if realize {
                 use std::io::Write;
-                let mut file = std::fs::OpenOptions::new()
-                    .append(true)
-                    .open(&resolved)
-                    .map_err(|error| {
+                // Tranche B: same gate as the positioned write — the
+                // descriptor pins the validated file.
+                let mut file = open_nofollow(&resolved, false, true).map_err(|error| {
+                    if is_symlink_swap_refusal(&error) {
+                        FsFail::InvalidRequest(format!(
+                            "{operation} entry index {index} became a symlink between validation and open; refusing"
+                        ))
+                    } else {
                         FsFail::RuntimeFailure(format!(
                             "{operation} append to entry index {index} failed: {error}"
                         ))
-                    })?;
+                    }
+                })?;
                 file.write_all(bytes).map_err(|error| {
                     FsFail::RuntimeFailure(format!(
                         "{operation} append to entry index {index} failed: {error}"
@@ -773,6 +894,11 @@ pub fn fs_mutate(
                     "fs_mkdir entry already exists; refusing".to_owned(),
                 ));
             }
+            // Tranche B: `mkdir(2)` refuses symlinks — including dangling
+            // ones — with `EEXIST`, so unlike `create_new` there is no
+            // dangling-link escape here and no post-create re-resolve is
+            // needed. A concurrent plant of a real directory between the
+            // check and the syscall still fails closed (`AlreadyExists`).
             if realize {
                 std::fs::create_dir(&target).map_err(|error| {
                     if error.kind() == std::io::ErrorKind::AlreadyExists {
@@ -810,6 +936,11 @@ pub fn fs_mutate(
                 )));
             }
             let resolved = resolve_existing(&canonical_root, &entry.rel, operation, index)?;
+            // Tranche B: unlink-family syscalls never follow a
+            // final-component symlink — `remove_file`/`remove_dir` delete
+            // the link itself — so a swap after validation cannot divert
+            // a delete outside the root. At worst the call removes the
+            // attacker's own link (still inside the root) or fails.
             if entry.kind == FS_KIND_DIR {
                 let empty = std::fs::read_dir(&resolved)
                     .map_err(|error| {
@@ -880,6 +1011,10 @@ pub fn fs_mutate(
                     return Err(FsFail::InvalidRequest(format!("{operation} destination already names a directory; atomic replace covers files only")));
                 }
             }
+            // Tranche B: `rename(2)` replaces (never follows) a
+            // destination symlink, so a swapped destination link cannot
+            // divert the move outside the root — the move lands inside,
+            // replacing the link itself.
             if realize {
                 std::fs::rename(&resolved, &dest).map_err(|error| {
                     FsFail::RuntimeFailure(format!(
@@ -936,12 +1071,21 @@ pub fn fs_mutate(
             let resolved = resolve_existing(&canonical_root, &entry.rel, operation, index)?;
             let mut dirsync = "dirsync:ok";
             if realize {
-                std::fs::File::open(&resolved)
+                // Tranche B: the barrier pins the validated file through
+                // the gated open, so a swapped link cannot divert the
+                // durability receipt onto an outside file.
+                open_nofollow(&resolved, false, false)
                     .and_then(|file| file.sync_all())
                     .map_err(|error| {
-                        FsFail::RuntimeFailure(format!(
-                            "{operation} barrier for entry index {index} failed: {error}"
-                        ))
+                        if is_symlink_swap_refusal(&error) {
+                            FsFail::InvalidRequest(format!(
+                                "{operation} entry index {index} became a symlink between validation and open; refusing"
+                            ))
+                        } else {
+                            FsFail::RuntimeFailure(format!(
+                                "{operation} barrier for entry index {index} failed: {error}"
+                            ))
+                        }
                     })?;
                 // The commit barrier is file bytes PLUS the namespace
                 // edges that publish them: containing directory and root.
@@ -1317,5 +1461,250 @@ mod tests {
         );
         assert!(root.join("d").is_dir(), "directory untouched");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Tranche B: a pre-placed symlink pointing OUTSIDE the root is
+    /// refused on every indexed entrypoint before any open, and the
+    /// outside target is never touched.
+    #[test]
+    #[cfg(unix)]
+    fn outside_pointing_symlinks_refuse_on_every_indexed_entrypoint() {
+        let root = test_root("symlink-outside");
+        let outside = std::env::temp_dir().join(format!(
+            "mncs-fs-outside-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&outside).expect("outside dir");
+        std::fs::write(outside.join("secret"), b"sentinel").expect("sentinel");
+        let grant = grant_for(&root);
+        std::os::unix::fs::symlink(outside.join("secret"), root.join("aaa")).expect("outside link");
+        std::fs::write(root.join("victim"), b"vv").expect("victim");
+        let snapshot = fs_snapshot(root.as_path()).expect("snapshot");
+        // "aaa" sorts first, so the link is index 0.
+        assert_eq!(snapshot.entries[0].rel, b"aaa");
+        assert_eq!(snapshot.entries[0].kind, FS_KIND_OTHER);
+        // Reads refuse through non-files.
+        let refused = fs_realize("fs_read_bytes_at", &grant, &[0, 0, 64]);
+        assert!(
+            matches!(refused, Err(FsFail::InvalidRequest(_))),
+            "{refused:?}"
+        );
+        // Positioned write, append, barrier, and delete all refuse by
+        // kind before resolving, let alone opening.
+        for (operation, ints, views) in [
+            ("fs_write_bytes_at", vec![0, 0], vec![vec![9]]),
+            ("fs_append_bytes_at", vec![0], vec![vec![9]]),
+            ("fs_sync_at", vec![0], Vec::new()),
+            ("fs_delete_at", vec![0], Vec::new()),
+        ] {
+            let refused = fs_mutate(operation, &grant, &ints, &views, true);
+            assert!(
+                matches!(refused, Err(FsFail::InvalidRequest(_))),
+                "{operation}: {refused:?}"
+            );
+        }
+        // Create/mkdir onto the link name refuse as already-existing.
+        for (operation, views) in [
+            ("fs_create_file", vec![b"aaa".to_vec(), vec![9]]),
+            ("fs_mkdir", vec![b"aaa".to_vec()]),
+        ] {
+            let refused = fs_mutate(operation, &grant, &[], &views, true);
+            assert!(
+                matches!(refused, Err(FsFail::InvalidRequest(_))),
+                "{operation}: {refused:?}"
+            );
+        }
+        assert_eq!(
+            std::fs::read(outside.join("secret")).expect("sentinel read"),
+            b"sentinel",
+            "outside target untouched"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    /// Tranche B: dangling links refuse create/mkdir as already-existing
+    /// (`symlink_metadata` sees the link; `mkdir(2)` reports `EEXIST`
+    /// even through a dangling link), so the dangling-create escape has
+    /// no deterministic entry.
+    #[test]
+    #[cfg(unix)]
+    fn dangling_symlinks_refuse_create_and_mkdir() {
+        let root = test_root("symlink-dangling");
+        let grant = grant_for(&root);
+        std::os::unix::fs::symlink("nowhere", root.join("alias")).expect("dangling link");
+        let refused = fs_mutate(
+            "fs_create_file",
+            &grant,
+            &[],
+            &[b"alias".to_vec(), vec![1]],
+            true,
+        );
+        assert!(
+            matches!(refused, Err(FsFail::InvalidRequest(_))),
+            "{refused:?}"
+        );
+        let refused = fs_mutate("fs_mkdir", &grant, &[], &[b"alias".to_vec()], true);
+        assert!(
+            matches!(refused, Err(FsFail::InvalidRequest(_))),
+            "{refused:?}"
+        );
+        assert!(
+            root.join("alias").is_symlink(),
+            "dangling link untouched, nothing created through it"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Tranche B: `verify_inside_root` is exact on fixtures — real
+    /// entries pass, links escaping the root (flat or nested) and
+    /// dangling links fail closed.
+    #[test]
+    #[cfg(unix)]
+    fn post_create_verification_is_exact_on_fixtures() {
+        let root = test_root("verify-root");
+        let outside = std::env::temp_dir().join(format!(
+            "mncs-fs-verify-outside-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&outside).expect("outside dir");
+        std::fs::write(outside.join("secret"), b"s").expect("sentinel");
+        std::fs::write(root.join("real"), b"r").expect("real file");
+        std::fs::create_dir_all(root.join("sub")).expect("subdir");
+        std::os::unix::fs::symlink(outside.join("secret"), root.join("flat")).expect("flat link");
+        std::os::unix::fs::symlink(&outside, root.join("sub").join("nested")).expect("nested link");
+        std::os::unix::fs::symlink("nowhere", root.join("dangling")).expect("dangling");
+        let canonical = std::fs::canonicalize(&root).expect("canonical root");
+        assert!(verify_inside_root(&canonical, &root.join("real"), "probe").is_ok());
+        assert!(verify_inside_root(&canonical, &root.join("sub"), "probe").is_ok());
+        for escape in ["flat", "sub/nested", "dangling"] {
+            let refused = verify_inside_root(&canonical, &root.join(escape), "probe");
+            assert!(
+                matches!(refused, Err(FsFail::RuntimeFailure(_))),
+                "{escape}: {refused:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    /// Tranche B: the gated open passes real files in every mode and
+    /// refuses links with the mapped `ELOOP`, which the refusal
+    /// classifier recognizes.
+    #[test]
+    #[cfg(unix)]
+    fn gated_open_passes_files_and_refuses_links() {
+        let root = test_root("nofollow");
+        std::fs::write(root.join("real"), b"r").expect("real file");
+        std::os::unix::fs::symlink("real", root.join("link")).expect("link");
+        assert!(open_nofollow(&root.join("real"), false, false).is_ok());
+        assert!(open_nofollow(&root.join("real"), true, false).is_ok());
+        assert!(open_nofollow(&root.join("real"), false, true).is_ok());
+        let refused = open_nofollow(&root.join("link"), false, false)
+            .expect_err("link must not open through the gate");
+        assert!(
+            is_symlink_swap_refusal(&refused),
+            "ELOOP maps to the swap refusal: {refused:?}"
+        );
+        let missing = open_nofollow(&root.join("absent"), false, false)
+            .expect_err("missing file still errors");
+        assert!(
+            !is_symlink_swap_refusal(&missing),
+            "other errors keep their meaning: {missing:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Tranche B stress: a concurrent flipper swaps the victim between a
+    /// real file and an outside-pointing symlink while positioned writes
+    /// land. Every outcome must be `Ok` or a clean refusal, the outside
+    /// sentinel must be byte-identical afterwards (the security
+    /// property), and the victim must converge back to exact content.
+    /// The assertions are exact — no timing assumption passes or fails
+    /// this test — while the interleaving exercises the gate.
+    #[test]
+    #[cfg(unix)]
+    fn final_component_swap_stress_never_escapes() {
+        let root = test_root("swap-stress");
+        let outside = std::env::temp_dir().join(format!(
+            "mncs-fs-stress-outside-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&outside).expect("outside dir");
+        std::fs::write(outside.join("secret"), b"sentinel-bytes").expect("sentinel");
+        let grant = grant_for(&root);
+        std::fs::write(root.join("victim"), vec![0u8; 8]).expect("victim");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopper = stop.clone();
+        let root_clone = root.clone();
+        let outside_clone = outside.clone();
+        let flipper = std::thread::spawn(move || {
+            let mut real = true;
+            for _ in 0..400 {
+                if stopper.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
+                let _ = std::fs::remove_file(root_clone.join("victim"));
+                if real {
+                    std::fs::write(root_clone.join("victim"), vec![0u8; 8]).ok();
+                } else {
+                    std::os::unix::fs::symlink(
+                        outside_clone.join("secret"),
+                        root_clone.join("victim"),
+                    )
+                    .ok();
+                }
+                real = !real;
+            }
+        });
+        // Idempotent positioned writes: offset 0, same bytes, file always
+        // 8 bytes when real, so every success writes exactly CAFE.
+        let mut outcomes = [0u64; 3];
+        for _ in 0..400 {
+            match fs_mutate(
+                "fs_write_bytes_at",
+                &grant,
+                &[0, 0],
+                &[vec![0xCA, 0xFE]],
+                true,
+            ) {
+                Ok(_) => outcomes[0] += 1,
+                Err(FsFail::InvalidRequest(_)) => outcomes[1] += 1,
+                Err(FsFail::RuntimeFailure(_)) => outcomes[2] += 1,
+            }
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        flipper.join().expect("flipper joins");
+        // The security property: the outside file is byte-identical.
+        assert_eq!(
+            std::fs::read(outside.join("secret")).expect("sentinel read"),
+            b"sentinel-bytes",
+            "no swap window wrote outside the root (ok={}, refused={}, runtime={})",
+            outcomes[0],
+            outcomes[1],
+            outcomes[2]
+        );
+        // Convergence: with the link gone, the victim takes exact content.
+        let _ = std::fs::remove_file(root.join("victim"));
+        std::fs::write(root.join("victim"), vec![0u8; 8]).expect("victim");
+        let (written, _) = fs_mutate(
+            "fs_write_bytes_at",
+            &grant,
+            &[0, 0],
+            &[vec![0xCA, 0xFE]],
+            true,
+        )
+        .expect("converged write");
+        assert_eq!(u64_of(&written), 2);
+        let content = std::fs::read(root.join("victim")).expect("victim read");
+        assert_eq!(&content[..2], &[0xCA, 0xFE]);
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 }

@@ -15,3 +15,8 @@ sha2.workspace = true
 # Verify-only Ed25519 (HARNESS-PRESSURE-006). Only verification entry
 # points are used; no signing API is imported anywhere in this crate.
 ed25519-dalek.workspace = true
+# Unix-only: O_NOFOLLOW for the fs provider's final-component symlink
+# gate (fs_resource.rs). Non-Unix builds keep the documented best-effort
+# path; the value never crosses the portability boundary unguarded.
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
