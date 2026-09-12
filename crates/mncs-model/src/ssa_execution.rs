@@ -3164,6 +3164,9 @@ fn constant_value(value: i128, ty: &IrType) -> Option<ExecutionValue> {
         BodyType::Integer(integer) if in_range(value, integer) => {
             Some(ExecutionValue::Integer { value, ty: integer })
         }
+        BodyType::Bool if matches!(value, 0 | 1) => {
+            Some(ExecutionValue::Boolean { value: value == 1 })
+        }
         BodyType::Named(name) if name == "bool" && matches!(value, 0 | 1) => {
             Some(ExecutionValue::Boolean { value: value == 1 })
         }
@@ -3210,6 +3213,7 @@ fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) 
         (ExecutionValue::Integer { value, ty: actual }, BodyType::Integer(expected)) => {
             actual == expected && in_range(*value, *expected)
         }
+        (ExecutionValue::Boolean { .. }, BodyType::Bool) => true,
         (ExecutionValue::Boolean { .. }, BodyType::Named(name)) if name == "bool" => true,
         (ExecutionValue::Boolean { .. }, BodyType::Integer(integer)) => {
             integer.bits == 1 && !integer.signed
@@ -3472,6 +3476,9 @@ fn normalize_value(
                 value: *value,
                 ty: *actual,
             })
+        }
+        (ExecutionValue::Boolean { value }, BodyType::Bool) => {
+            Some(ExecutionValue::Boolean { value: *value })
         }
         (ExecutionValue::Boolean { value }, BodyType::Named(name)) if name == "bool" => {
             Some(ExecutionValue::Boolean { value: *value })

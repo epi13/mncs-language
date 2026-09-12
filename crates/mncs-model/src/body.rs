@@ -8,7 +8,12 @@ use crate::{
     Intent, MachinePreference, Obligation, Program, Requirement, SemanticId,
 };
 
-pub const EXECUTABLE_BODY_SCHEMA_VERSION: &str = "0.2";
+pub const EXECUTABLE_BODY_SCHEMA_VERSION: &str = "0.3";
+/// The previous executable-body schema version. Bodies carrying `"0.2"`
+/// remain accepted by validation (with legacy `Named("bool")` normalized to
+/// [`BodyType::Bool`]); new elaboration always emits
+/// [`EXECUTABLE_BODY_SCHEMA_VERSION`].
+pub const EXECUTABLE_BODY_SCHEMA_VERSION_PRE_BOOL: &str = "0.2";
 /// Absolute model ceiling for `iterate ... up_to N` counter loops and
 /// sequence-traversal steps: the largest bound any layer may represent,
 /// regardless of source profile.
@@ -292,6 +297,12 @@ pub struct BodyValue {
 #[serde(rename_all = "snake_case")]
 pub enum BodyType {
     Named(String),
+    /// The boolean type (source spelling `bool`). Previously represented as
+    /// `Named("bool")`; now an explicit semantic variant so resolved IR never
+    /// carries an arbitrary name for booleans. Legacy `Named("bool")`
+    /// spellings still deserialize and are normalized by
+    /// [`BodyType::normalize_legacy_bool`].
+    Bool,
     Integer(IntegerType),
     /// IEEE-754 binary64 floating point (Profile 0.12). The only float
     /// width; NaN and infinities never cross operation boundaries (float
@@ -346,6 +357,9 @@ impl BodyType {
         }
         if let Some(sequence) = Self::parse_sequence_name(name) {
             return sequence;
+        }
+        if name == "bool" {
+            return Self::Bool;
         }
         if name == "byte" {
             return Self::Byte;
@@ -454,8 +468,9 @@ impl BodyType {
             return None;
         }
         let element = Box::new(Self::from_semantic_name(element_text));
-        // Nominal elements (`bool`, declared records/finites) stay Named
-        // until a program resolves them. The spelling is still a sequence.
+        // Nominal elements (declared records/finites) stay Named until a
+        // program resolves them. `bool` is already semantic
+        // (`BodyType::Bool`). The spelling is still a sequence.
         Some(Self::Sequence { element, bound })
     }
 
@@ -489,6 +504,7 @@ impl BodyType {
     pub fn semantic_name(&self) -> String {
         match self {
             Self::Named(name) => name.clone(),
+            Self::Bool => "bool".to_owned(),
             Self::Integer(integer) => {
                 format!("{}{}", if integer.signed { 'i' } else { 'u' }, integer.bits)
             }
@@ -512,7 +528,11 @@ impl BodyType {
     /// must retain it so same-named records from two modules cannot collide.
     pub fn canonical_identity(&self) -> String {
         match self {
+            // Legacy `Named("bool")` spellings from pre-0.3 artifacts share
+            // the new `Bool` identity so old and new fingerprints agree.
+            Self::Named(name) if name == "bool" => "bool".to_owned(),
             Self::Named(name) => format!("named:{name}"),
+            Self::Bool => "bool".to_owned(),
             Self::Integer(integer) => format!(
                 "integer:{}:{}",
                 if integer.signed { "signed" } else { "unsigned" },
@@ -546,9 +566,153 @@ impl BodyType {
         }
     }
 
+    /// Whether this type is the boolean type. Accepts the explicit
+    /// [`BodyType::Bool`] variant and, for pre-0.3 artifact compatibility,
+    /// the legacy `Named("bool")` spelling. The 1-bit unsigned integer is a
+    /// separate historical boolean admission at value boundaries, not a
+    /// boolean type: see [`BodyType::is_strict_boolean`].
     fn is_boolean(&self) -> bool {
-        matches!(self, Self::Named(name) if name == "bool")
+        matches!(self, Self::Bool)
+            || matches!(self, Self::Named(name) if name == "bool")
             || matches!(self, Self::Integer(integer) if integer.bits == 1 && !integer.signed)
+    }
+
+    /// Strict boolean identity: only the explicit `Bool` variant. Use for
+    /// semantic decisions; [`BodyType::is_boolean`] additionally admits
+    /// legacy spellings and the `u1` value-boundary admission.
+    pub fn is_strict_boolean(&self) -> bool {
+        matches!(self, Self::Bool)
+    }
+
+    /// Whether this type still carries an arbitrary unresolved name after
+    /// resolution should have happened. `Bool` is semantic; every other
+    /// `Named` (including the `"invalid"` error poison) is unresolved.
+    /// Legacy `Named("bool")` is treated as resolved for pre-0.3
+    /// compatibility; call [`BodyType::normalize_legacy_bool`] to migrate it.
+    pub fn has_unresolved_named(&self) -> bool {
+        match self {
+            Self::Named(name) => name != "bool",
+            Self::Sequence { element, .. } => element.has_unresolved_named(),
+            Self::Vector { element, .. } => element.has_unresolved_named(),
+            _ => false,
+        }
+    }
+
+    /// Recursively rewrite legacy `Named("bool")` spellings to
+    /// [`BodyType::Bool`]. Idempotent; new code never produces the legacy
+    /// spelling via [`BodyType::from_semantic_name`].
+    pub fn normalize_legacy_bool(&mut self) {
+        match self {
+            Self::Named(name) if name == "bool" => *self = Self::Bool,
+            Self::Sequence { element, .. } | Self::Vector { element, .. } => {
+                element.normalize_legacy_bool();
+            }
+            _ => {}
+        }
+    }
+
+    /// Normalize a legacy spelling, returning the owned migrated type.
+    pub fn normalized_legacy_bool(mut self) -> Self {
+        self.normalize_legacy_bool();
+        self
+    }
+
+    /// Structural type equality: the same semantic type. Nominal record and
+    /// finite types compare by [`SemanticId`] identity, never by structural
+    /// field layout or short name; sequences compare element and bound.
+    pub fn same_type(&self, other: &Self) -> bool {
+        self.normalized_for_comparison() == other.normalized_for_comparison()
+    }
+
+    fn normalized_for_comparison(&self) -> Self {
+        self.clone().normalized_legacy_bool()
+    }
+
+    /// Classify the relation between an actual value type and an expected
+    /// type without inventing implicit coercion:
+    /// - `Equal`: identical semantic types;
+    /// - `ViewWidening`: `[T; up_to M]` satisfies `[T; up_to N]` with
+    ///   `M <= N` and equal elements (no copy, descriptor-identical);
+    /// - `Incompatible`: everything else, including symbolic generic bounds
+    ///   that must substitute first.
+    pub fn classify_compatibility(actual: &Self, expected: &Self) -> TypeRelation {
+        let actual = actual.clone().normalized_legacy_bool();
+        let expected = expected.clone().normalized_legacy_bool();
+        if actual == expected {
+            return TypeRelation::Equal;
+        }
+        if let (
+            Self::Sequence {
+                element: actual_element,
+                bound: SequenceBound::UpTo(source_cap),
+            },
+            Self::Sequence {
+                element: expected_element,
+                bound: SequenceBound::UpTo(target_cap),
+            },
+        ) = (&actual, &expected)
+        {
+            if actual_element == expected_element && source_cap <= target_cap {
+                return TypeRelation::ViewWidening;
+            }
+        }
+        TypeRelation::Incompatible
+    }
+
+    /// Whether an actual value of type `actual` is admissible where
+    /// `expected` is declared: equality or static view-capacity widening.
+    /// Exact bounds never participate; element mismatches and symbolic
+    /// generic capacities refuse.
+    pub fn is_compatible_with(&self, expected: &Self) -> bool {
+        !matches!(
+            Self::classify_compatibility(self, expected),
+            TypeRelation::Incompatible
+        )
+    }
+}
+
+/// The admissible relation between an actual value type and an expected
+/// type. Distinct from representation or ABI compatibility: those describe
+/// how a logical value is physically realized, not whether the value
+/// satisfies the declared type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeRelation {
+    Equal,
+    ViewWidening,
+    Incompatible,
+}
+
+/// Source type syntax as written (or canonicalized) before resolution:
+/// the `value_type` / `field_type` string spellings carried by
+/// [`Program`] signatures and declarations. This is deliberately distinct
+/// from [`BodyType`]: syntax names meaning, it is not meaning. Resolve it
+/// with [`BodyType::from_program`] (program-aware) or
+/// [`BodyType::from_semantic_name`] (ABI-only, no nominals) exactly once,
+/// then carry the semantic type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeSyntax(String);
+
+impl TypeSyntax {
+    pub fn new(spelling: impl Into<String>) -> Self {
+        Self(spelling.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn resolve_against(&self, program: &Program) -> BodyType {
+        BodyType::from_program(program, &self.0)
+    }
+
+    pub fn resolve_abi_only(&self) -> BodyType {
+        BodyType::from_semantic_name(&self.0)
+    }
+}
+
+impl From<&str> for TypeSyntax {
+    fn from(spelling: &str) -> Self {
+        Self::new(spelling)
     }
 }
 
@@ -1013,7 +1177,9 @@ impl FunctionBody {
         function_path: &str,
         errors: &mut Vec<Diagnostic>,
     ) {
-        if self.schema_version != EXECUTABLE_BODY_SCHEMA_VERSION {
+        if self.schema_version != EXECUTABLE_BODY_SCHEMA_VERSION
+            && self.schema_version != EXECUTABLE_BODY_SCHEMA_VERSION_PRE_BOOL
+        {
             errors.push(body_diagnostic(
                 "MNB001",
                 format!("{function_path}.body.schema_version"),
@@ -1023,6 +1189,7 @@ impl FunctionBody {
                 ),
             ));
         }
+        validate_no_unresolved_named(self, function_path, errors);
         let mut values = BTreeMap::<String, BodyType>::new();
         let mut parameter_ids = BTreeSet::new();
         if self.parameters.len() != function.inputs.len() {
@@ -1051,7 +1218,7 @@ impl FunctionBody {
             if let Some(input) = function.inputs.get(index) {
                 let expected_ty =
                     body_type_for_function_value(program, function, &input.value_type);
-                if parameter.name != input.name || parameter.ty != expected_ty {
+                if parameter.name != input.name || !parameter.ty.same_type(&expected_ty) {
                     errors.push(body_diagnostic(
                         "MNB005",
                         path,
@@ -1320,10 +1487,7 @@ fn validate_bounded_iterations(
                 // a `u64` element type is a legitimate domain, not a missing
                 // resolution (MNB101). Only truly unresolvable nominal types
                 // fail here; generic parameters resolve through substitution.
-                let unresolved_named = matches!(
-                    element_type.as_ref(),
-                    BodyType::Named(name) if name != "bool"
-                );
+                let unresolved_named = element_type.has_unresolved_named();
                 if unresolved_named {
                     errors.push(body_diagnostic(
                         "MNB101",
@@ -1745,9 +1909,12 @@ fn validate_operation(
                     "boolean operation requires two operands and one result",
                 ));
             }
-            let bool_type = BodyType::Named("bool".to_owned());
+            let bool_type = BodyType::Bool;
             for (index, operand) in operation.operands.iter().enumerate() {
-                if available.get(operand) != Some(&bool_type) {
+                if !available
+                    .get(operand)
+                    .is_some_and(|actual| actual.same_type(&bool_type))
+                {
                     errors.push(body_diagnostic(
                         "MNB069",
                         format!("{path}.inputs[{index}]"),
@@ -1758,7 +1925,7 @@ fn validate_operation(
             if operation
                 .results
                 .first()
-                .is_some_and(|result| result.ty != bool_type)
+                .is_some_and(|result| !result.ty.same_type(&bool_type))
             {
                 errors.push(body_diagnostic(
                     "MNB070",
@@ -1782,9 +1949,12 @@ fn validate_operation(
                     "boolean comparison requires two operands and one result",
                 ));
             }
-            let bool_type = BodyType::Named("bool".to_owned());
+            let bool_type = BodyType::Bool;
             for (index, operand) in operation.operands.iter().enumerate() {
-                if available.get(operand) != Some(&bool_type) {
+                if !available
+                    .get(operand)
+                    .is_some_and(|actual| actual.same_type(&bool_type))
+                {
                     errors.push(body_diagnostic(
                         "MNB140",
                         format!("{path}.inputs[{index}]"),
@@ -1795,7 +1965,7 @@ fn validate_operation(
             if operation
                 .results
                 .first()
-                .is_some_and(|result| result.ty != bool_type)
+                .is_some_and(|result| !result.ty.same_type(&bool_type))
             {
                 errors.push(body_diagnostic(
                     "MNB141",
@@ -1812,9 +1982,12 @@ fn validate_operation(
                     "boolean negation requires one operand and one result",
                 ));
             }
-            let bool_type = BodyType::Named("bool".to_owned());
+            let bool_type = BodyType::Bool;
             for (index, operand) in operation.operands.iter().enumerate() {
-                if available.get(operand) != Some(&bool_type) {
+                if !available
+                    .get(operand)
+                    .is_some_and(|actual| actual.same_type(&bool_type))
+                {
                     errors.push(body_diagnostic(
                         "MNB140",
                         format!("{path}.inputs[{index}]"),
@@ -1825,7 +1998,7 @@ fn validate_operation(
             if operation
                 .results
                 .first()
-                .is_some_and(|result| result.ty != bool_type)
+                .is_some_and(|result| !result.ty.same_type(&bool_type))
             {
                 errors.push(body_diagnostic(
                     "MNB141",
@@ -2039,9 +2212,12 @@ fn validate_operation(
             }
             let condition_type = match operand_type.as_ref() {
                 BodyType::Vector { lanes, .. } => BodyType::Mask { lanes: *lanes },
-                _ => BodyType::Named("bool".to_owned()),
+                _ => BodyType::Bool,
             };
-            if available.get(operation.operands[0].as_str()) != Some(&condition_type) {
+            if !available
+                .get(operation.operands[0].as_str())
+                .is_some_and(|actual| actual.same_type(&condition_type))
+            {
                 errors.push(body_diagnostic(
                     "MNB103",
                     format!("{path}.operands[0]"),
@@ -2472,7 +2648,7 @@ fn validate_operation(
         }
         BodyOperationKind::MaskReduce { operator, lanes } => {
             let mask = BodyType::Mask { lanes: *lanes };
-            let boolean = BodyType::Named("bool".to_owned());
+            let boolean = BodyType::Bool;
             if !matches!(operator.as_str(), "any" | "all" | "none")
                 || operation.operands.len() != 1
                 || operation.results.len() != 1
@@ -2481,7 +2657,7 @@ fn validate_operation(
                 || operation
                     .results
                     .first()
-                    .is_none_or(|result| result.ty != boolean)
+                    .is_none_or(|result| !result.ty.same_type(&boolean))
             {
                 errors.push(body_diagnostic(
                     "MNB120",
@@ -3167,7 +3343,7 @@ fn validate_operation(
             {
                 let expected = expected_callee_input(idx);
                 let matches = available.get(operand).is_some_and(|actual| {
-                    actual == &expected || body_view_widening(actual, &expected)
+                    actual.same_type(&expected) || body_view_widening(actual, &expected)
                 });
                 if !matches {
                     errors.push(body_diagnostic(
@@ -3181,7 +3357,7 @@ fn validate_operation(
                 operation.results.iter().zip(&callee.outputs).enumerate()
             {
                 let expected = expected_callee_output(idx);
-                if result.ty != expected {
+                if !result.ty.same_type(&expected) {
                     errors.push(body_diagnostic(
                         "MNB052",
                         format!("{path}.results"),
@@ -3389,7 +3565,9 @@ fn validate_metadata(
         }
     }
     if let Some(lowering) = &operation.lowering {
-        if lowering.schema_version != EXECUTABLE_BODY_SCHEMA_VERSION {
+        if lowering.schema_version != EXECUTABLE_BODY_SCHEMA_VERSION
+            && lowering.schema_version != EXECUTABLE_BODY_SCHEMA_VERSION_PRE_BOOL
+        {
             errors.push(body_diagnostic(
                 "MNB028",
                 format!("{path}.lowering.schema_version"),
@@ -3405,7 +3583,9 @@ fn validate_metadata(
         }
     }
     if let Some(portability) = &operation.portability {
-        if portability.schema_version != EXECUTABLE_BODY_SCHEMA_VERSION {
+        if portability.schema_version != EXECUTABLE_BODY_SCHEMA_VERSION
+            && portability.schema_version != EXECUTABLE_BODY_SCHEMA_VERSION_PRE_BOOL
+        {
             errors.push(body_diagnostic(
                 "MNB030",
                 format!("{path}.portability.schema_version"),
@@ -3561,9 +3741,9 @@ fn validate_return_types(
     for (index, value) in values.iter().enumerate() {
         let expected =
             body_type_for_function_value(program, function, &function.outputs[index].value_type);
-        let matches = available
-            .get(value)
-            .is_some_and(|actual| actual == &expected || body_view_widening(actual, &expected));
+        let matches = available.get(value).is_some_and(|actual| {
+            actual.same_type(&expected) || body_view_widening(actual, &expected)
+        });
         if !matches {
             errors.push(body_diagnostic(
                 "MNB036",
@@ -3609,15 +3789,56 @@ fn semantic_sequence_type(program: &Program, name: &str) -> Option<BodyType> {
         return None;
     }
     let element = Box::new(semantic_body_type(program, element_text));
-    match &*element {
-        BodyType::Named(name) if name != "bool" => None,
-        _ => Some(BodyType::Sequence { element, bound }),
+    if element.has_unresolved_named() {
+        return None;
     }
+    Some(BodyType::Sequence { element, bound })
 }
 
 /// Resolve a declared record field's semantic body type at validation time.
 fn semantic_record_field_type(program: &Program, field: &crate::core::RecordField) -> BodyType {
     semantic_body_type(program, &field.field_type)
+}
+
+/// Rehydrate one sequence element spelling to its semantic type: generic
+/// type parameters first, then nominal record/finite identities (by identity
+/// or short name), otherwise the spelling as-is (`Bool`, scalars, nested
+/// sequences, or an unresolved `Named` that validation reports).
+fn resolve_sequence_element(program: &Program, function: &Function, element: BodyType) -> BodyType {
+    match element {
+        BodyType::Named(n)
+            if function
+                .generic_params
+                .iter()
+                .any(|p| p.name == n && p.kind == GenericParamKind::Type) =>
+        {
+            BodyType::GenericParam { name: n }
+        }
+        BodyType::Named(n) => {
+            if let Some(rec) = program
+                .record_types
+                .iter()
+                .find(|r| r.identity.0 == n || r.name == n)
+            {
+                BodyType::Record {
+                    identity: rec.identity.clone(),
+                    name: rec.name.clone(),
+                }
+            } else if let Some(fin) = program
+                .finite_types
+                .iter()
+                .find(|f| f.identity.0 == n || f.name == n)
+            {
+                BodyType::Finite {
+                    identity: fin.identity.clone(),
+                    name: fin.name.clone(),
+                }
+            } else {
+                BodyType::Named(n)
+            }
+        }
+        other => other,
+    }
 }
 
 fn body_type_for_function_value(
@@ -3635,112 +3856,18 @@ fn body_type_for_function_value(
         };
     }
     if value_type.trim_start().starts_with('[') {
-        let base = BodyType::from_program(program, value_type);
-        // from_program for "[Point; N]" where Point is a record and N is a value param
-        // will return Sequence with Named("Point") and Param("N") because
-        // semantic_sequence_type doesn't handle Param bounds. So we need to
-        // handle generic case via from_semantic_name fallback.
-        let base = if let BodyType::Sequence { .. } = base {
-            base
-        } else {
-            // Try generic-aware parsing for "[T; N]" where T is a type param
-            let alt = BodyType::from_semantic_name(value_type);
-            if let BodyType::Sequence { element, bound } = alt {
-                // Check if element is a generic param or a record that from_semantic_name left as Named
-                BodyType::Sequence { element, bound }
-            } else {
-                alt
-            }
+        // Program-aware resolution first (handles concrete nominal elements
+        // and concrete bounds); generic-aware spelling parse second (handles
+        // `Param`/`UpToParam` bounds that program resolution refuses).
+        // Exactly one of them yields the sequence skeleton; element
+        // rehydration below is shared so nominal identity cannot diverge
+        // between the two paths.
+        let base = match BodyType::from_program(program, value_type) {
+            base @ BodyType::Sequence { .. } => base,
+            _ => BodyType::from_semantic_name(value_type),
         };
         if let BodyType::Sequence { element, bound } = base {
-            let new_element = match *element {
-                BodyType::Named(n)
-                    if function
-                        .generic_params
-                        .iter()
-                        .any(|p| p.name == n && p.kind == GenericParamKind::Type) =>
-                {
-                    Box::new(BodyType::GenericParam { name: n })
-                }
-                BodyType::Named(n) => {
-                    if let Some(rec) = program
-                        .record_types
-                        .iter()
-                        .find(|r| r.identity.0 == n || r.name == n)
-                    {
-                        Box::new(BodyType::Record {
-                            identity: rec.identity.clone(),
-                            name: rec.name.clone(),
-                        })
-                    } else if let Some(fin) = program
-                        .finite_types
-                        .iter()
-                        .find(|f| f.identity.0 == n || f.name == n)
-                    {
-                        Box::new(BodyType::Finite {
-                            identity: fin.identity.clone(),
-                            name: fin.name.clone(),
-                        })
-                    } else {
-                        Box::new(BodyType::Named(n))
-                    }
-                }
-                other => Box::new(other),
-            };
-            // Validate bound param kind if generic
-            if let Some(param_name) = bound.generic_param_name() {
-                if !function
-                    .generic_params
-                    .iter()
-                    .any(|p| p.name == param_name && p.kind == GenericParamKind::Nat)
-                {
-                    // Let validation error be emitted elsewhere; keep bound as is
-                }
-            }
-            return BodyType::Sequence {
-                element: new_element,
-                bound,
-            };
-        }
-        // If from_program didn't return a Sequence (e.g., for generic [T; N] where T is generic, from_program returns Named("T") not Record, but still Sequence with Named("T"))
-        // Fall through to generic handling already done via from_program's Named("T") case, but we already handled generic element above.
-        // For safety, try from_semantic_name as fallback for generic bounds.
-        let parsed = BodyType::from_semantic_name(value_type);
-        if let BodyType::Sequence { element, bound } = parsed {
-            let new_element = match *element {
-                BodyType::Named(n)
-                    if function
-                        .generic_params
-                        .iter()
-                        .any(|p| p.name == n && p.kind == GenericParamKind::Type) =>
-                {
-                    Box::new(BodyType::GenericParam { name: n })
-                }
-                BodyType::Named(n) => program
-                    .record_types
-                    .iter()
-                    .find(|record| record.identity.0 == n || record.name == n)
-                    .map(|record| {
-                        Box::new(BodyType::Record {
-                            identity: record.identity.clone(),
-                            name: record.name.clone(),
-                        })
-                    })
-                    .or_else(|| {
-                        program
-                            .finite_types
-                            .iter()
-                            .find(|finite| finite.identity.0 == n || finite.name == n)
-                            .map(|finite| {
-                                Box::new(BodyType::Finite {
-                                    identity: finite.identity.clone(),
-                                    name: finite.name.clone(),
-                                })
-                            })
-                    })
-                    .unwrap_or_else(|| Box::new(BodyType::Named(n))),
-                other => Box::new(other),
-            };
+            let new_element = Box::new(resolve_sequence_element(program, function, *element));
             return BodyType::Sequence {
                 element: new_element,
                 bound,
@@ -3835,7 +3962,7 @@ fn validate_byte_operands(
     }
     let produces_bool = matches!(operation.kind, BodyOperationKind::ByteCompare { .. });
     let expected_result = if produces_bool {
-        BodyType::Named("bool".to_owned())
+        BodyType::Bool
     } else {
         BodyType::Byte
     };
@@ -3857,6 +3984,7 @@ fn validate_byte_operands(
 fn is_convertible_scalar(ty: &BodyType) -> bool {
     matches!(ty, BodyType::Byte)
         || matches!(ty, BodyType::Integer(integer) if matches!(integer.bits, 1..=64))
+        || matches!(ty, BodyType::Bool)
         || matches!(ty, BodyType::Named(name) if name == "bool")
         || matches!(ty, BodyType::Float(float) if float.is_supported())
 }
@@ -3882,20 +4010,133 @@ fn body_diagnostic(code: &str, path: String, message: impl Into<String>) -> Diag
 /// mismatches refuse, and symbolic generic capacities (`Param`,
 /// `UpToParam`) refuse: callers must substitute concrete bounds first.
 fn body_view_widening(actual: &BodyType, expected: &BodyType) -> bool {
-    if let (
-        BodyType::Sequence {
-            element: actual_element,
-            bound: SequenceBound::UpTo(source_cap),
-        },
-        BodyType::Sequence {
-            element: expected_element,
-            bound: SequenceBound::UpTo(target_cap),
-        },
-    ) = (actual, expected)
-    {
-        return actual_element == expected_element && source_cap <= target_cap;
+    matches!(
+        BodyType::classify_compatibility(actual, expected),
+        crate::TypeRelation::ViewWidening
+    )
+}
+
+/// Enforce the resolved-type invariant: successful elaboration leaves no
+/// arbitrary unresolved type names in executable semantic IR. Every `Named`
+/// other than the legacy `bool` spelling (including the `"invalid"` error
+/// poison) is reported as `MNB122`. `Bool`, scalars, sequences, vectors,
+/// masks, nominal records/finites, and generic parameters all pass.
+fn validate_no_unresolved_named(
+    body: &FunctionBody,
+    function_path: &str,
+    errors: &mut Vec<Diagnostic>,
+) {
+    let mut check = |ty: &BodyType, path: String| {
+        if ty.has_unresolved_named() {
+            errors.push(body_diagnostic(
+                "MNB122",
+                path,
+                format!(
+                    "unresolved type name {} in executable body; resolution must produce a semantic type or generic parameter",
+                    ty.semantic_name()
+                ),
+            ));
+        }
+    };
+    for (index, parameter) in body.parameters.iter().enumerate() {
+        check(
+            &parameter.ty,
+            format!("{function_path}.body.parameters[{index}].type"),
+        );
     }
-    false
+    for iteration in &body.bounded_iterations {
+        check(
+            &iteration.state_type,
+            format!(
+                "{}.body.bounded_iterations.{}.state_type",
+                function_path, iteration.id
+            ),
+        );
+    }
+    for block in &body.blocks {
+        for parameter in &block.parameters {
+            check(
+                &parameter.ty,
+                format!(
+                    "{function_path}.body.blocks.{}.parameters.{}.type",
+                    block.id, parameter.id
+                ),
+            );
+        }
+        for operation in &block.operations {
+            for result in &operation.results {
+                check(
+                    &result.ty,
+                    format!(
+                        "{function_path}.body.blocks.{}.operations.{}.results.{}.type",
+                        block.id, operation.id, result.id
+                    ),
+                );
+            }
+            match &operation.kind {
+                BodyOperationKind::Constant { ty, .. } => check(
+                    ty,
+                    format!(
+                        "{function_path}.body.blocks.{}.operations.{}.constant.type",
+                        block.id, operation.id
+                    ),
+                ),
+                BodyOperationKind::Select { operand_type } => check(
+                    operand_type.as_ref(),
+                    format!(
+                        "{function_path}.body.blocks.{}.operations.{}.element.type",
+                        block.id, operation.id
+                    ),
+                ),
+                BodyOperationKind::SequenceReplace { element_type, .. }
+                | BodyOperationKind::SequenceCopy { element_type, .. }
+                | BodyOperationKind::VectorConstruct { element_type, .. }
+                | BodyOperationKind::VectorSplat { element_type, .. }
+                | BodyOperationKind::VectorExtract { element_type, .. }
+                | BodyOperationKind::VectorReplace { element_type, .. }
+                | BodyOperationKind::VectorBinary { element_type, .. }
+                | BodyOperationKind::VectorCompare { element_type, .. }
+                | BodyOperationKind::VectorReduce { element_type, .. }
+                | BodyOperationKind::SequenceConstruct { element_type, .. } => check(
+                    element_type.as_ref(),
+                    format!(
+                        "{function_path}.body.blocks.{}.operations.{}.element.type",
+                        block.id, operation.id
+                    ),
+                ),
+                BodyOperationKind::Convert { from, to } => {
+                    check(
+                        from,
+                        format!(
+                            "{function_path}.body.blocks.{}.operations.{}.convert.from",
+                            block.id, operation.id
+                        ),
+                    );
+                    check(
+                        to,
+                        format!(
+                            "{function_path}.body.blocks.{}.operations.{}.convert.to",
+                            block.id, operation.id
+                        ),
+                    );
+                }
+                BodyOperationKind::Call { generic_args, .. } => {
+                    for (index, arg) in generic_args.iter().enumerate() {
+                        if let GenericArg::Type { ty } = arg {
+                            check(
+                                ty,
+                                format!(
+                                    "{function_path}.body.blocks.{}.operations.{}.generic_args[{index}]",
+                                    block.id, operation.id
+                                ),
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -4164,7 +4405,7 @@ pub(crate) mod tests {
             id: "join".to_owned(),
             parameters: vec![BodyValue {
                 id: "joined".to_owned(),
-                ty: BodyType::Named("bool".to_owned()),
+                ty: BodyType::Bool,
             }],
             operations: Vec::new(),
             terminator: BodyTerminator::Return {
@@ -4188,7 +4429,7 @@ pub(crate) mod tests {
         body.parameters = vec![BodyParameter {
             id: "condition".to_owned(),
             name: "condition".to_owned(),
-            ty: BodyType::Named("bool".to_owned()),
+            ty: BodyType::Bool,
         }];
         body.blocks = vec![
             BodyBlock {
@@ -4279,7 +4520,7 @@ pub(crate) mod tests {
         assert_eq!(
             BodyType::from_semantic_name("[bool; 4]"),
             BodyType::Sequence {
-                element: Box::new(BodyType::Named("bool".to_owned())),
+                element: Box::new(BodyType::Bool),
                 bound: SequenceBound::Exact(4),
             }
         );
@@ -4338,9 +4579,163 @@ pub(crate) mod tests {
         assert_eq!(
             BodyType::from_program(&program, "[bool; 2]"),
             BodyType::Sequence {
-                element: Box::new(BodyType::Named("bool".to_owned())),
+                element: Box::new(BodyType::Bool),
                 bound: SequenceBound::Exact(2),
             }
         );
+    }
+
+    #[test]
+    fn bool_is_semantic_not_named() {
+        assert_eq!(BodyType::from_semantic_name("bool"), BodyType::Bool);
+        assert_eq!(BodyType::Bool.semantic_name(), "bool");
+        assert_eq!(BodyType::Bool.canonical_identity(), "bool");
+        // Legacy spelling shares the new identity so pre-0.3 fingerprints agree.
+        assert_eq!(
+            BodyType::Named("bool".to_owned()).canonical_identity(),
+            "bool"
+        );
+        assert!(BodyType::Bool.is_strict_boolean());
+        assert!(!BodyType::Bool.has_unresolved_named());
+        assert!(!BodyType::Named("bool".to_owned()).has_unresolved_named());
+        assert!(BodyType::Named("Point".to_owned()).has_unresolved_named());
+        assert!(BodyType::Named("invalid".to_owned()).has_unresolved_named());
+    }
+
+    #[test]
+    fn legacy_bool_normalizes_recursively() {
+        let legacy = BodyType::Sequence {
+            element: Box::new(BodyType::Named("bool".to_owned())),
+            bound: SequenceBound::Exact(4),
+        };
+        assert_eq!(
+            legacy.clone().normalized_legacy_bool(),
+            BodyType::Sequence {
+                element: Box::new(BodyType::Bool),
+                bound: SequenceBound::Exact(4),
+            }
+        );
+        assert!(legacy.same_type(&BodyType::Sequence {
+            element: Box::new(BodyType::Bool),
+            bound: SequenceBound::Exact(4),
+        }));
+        // Byte and u8 stay distinct from bool; bool is not a byte.
+        assert!(!BodyType::Bool.same_type(&BodyType::Byte));
+        assert!(!BodyType::Bool.same_type(&BodyType::Integer(IntegerType {
+            bits: 8,
+            signed: false,
+        })));
+    }
+
+    #[test]
+    fn type_relation_distinguishes_equality_from_widening() {
+        use crate::TypeRelation;
+        let exact = |n: u32| BodyType::Sequence {
+            element: Box::new(BodyType::Bool),
+            bound: SequenceBound::Exact(n),
+        };
+        let view = |n: u32| BodyType::Sequence {
+            element: Box::new(BodyType::Bool),
+            bound: SequenceBound::UpTo(n),
+        };
+        assert_eq!(
+            BodyType::classify_compatibility(&view(4), &view(4)),
+            TypeRelation::Equal
+        );
+        assert_eq!(
+            BodyType::classify_compatibility(&view(4), &view(8)),
+            TypeRelation::ViewWidening
+        );
+        assert!(view(4).is_compatible_with(&view(8)));
+        assert!(!view(8).is_compatible_with(&view(4)));
+        // Exact bounds never participate in widening.
+        assert_eq!(
+            BodyType::classify_compatibility(&exact(4), &view(8)),
+            TypeRelation::Incompatible
+        );
+        // Element mismatches refuse.
+        assert_eq!(
+            BodyType::classify_compatibility(
+                &view(4),
+                &BodyType::Sequence {
+                    element: Box::new(BodyType::Byte),
+                    bound: SequenceBound::UpTo(8),
+                }
+            ),
+            TypeRelation::Incompatible
+        );
+        // Symbolic generic capacities refuse until substituted.
+        let param_view = BodyType::Sequence {
+            element: Box::new(BodyType::Bool),
+            bound: SequenceBound::UpToParam("M".to_owned()),
+        };
+        assert_eq!(
+            BodyType::classify_compatibility(&param_view, &view(8)),
+            TypeRelation::Incompatible
+        );
+        // Legacy bool spelling classifies like Bool.
+        let legacy_view = BodyType::Sequence {
+            element: Box::new(BodyType::Named("bool".to_owned())),
+            bound: SequenceBound::UpTo(4),
+        };
+        assert_eq!(
+            BodyType::classify_compatibility(&legacy_view, &view(8)),
+            TypeRelation::ViewWidening
+        );
+    }
+
+    #[test]
+    fn nominal_identities_do_not_collapse_by_structure() {
+        let left = BodyType::Record {
+            identity: SemanticId("mncs:0.2:record-type:m::A::x%3Ai64%3B".to_owned()),
+            name: "A".to_owned(),
+        };
+        let right = BodyType::Record {
+            identity: SemanticId("mncs:0.2:record-type:m::B::x%3Ai64%3B".to_owned()),
+            name: "B".to_owned(),
+        };
+        assert!(!left.same_type(&right));
+        assert_ne!(left.canonical_identity(), right.canonical_identity());
+        // Identical identities stay one type even across clones.
+        assert!(left.same_type(&left.clone()));
+        // Short names never participate in identity: canonical form keeps the
+        // identity, display form keeps the short name.
+        assert!(left.canonical_identity().contains("m::A"));
+        assert_eq!(left.semantic_name(), "A");
+    }
+
+    #[test]
+    fn unresolved_named_is_an_invariant_violation() {
+        let mut program = executable_program();
+        program.functions[0].inputs.push(Value {
+            name: "mystery".to_owned(),
+            value_type: "Mystery".to_owned(),
+        });
+        let body = program.functions[0].body.as_mut().expect("body");
+        body.parameters.push(BodyParameter {
+            id: "mystery".to_owned(),
+            name: "mystery".to_owned(),
+            ty: BodyType::Named("Mystery".to_owned()),
+        });
+        let report = program.validate();
+        assert!(!report.valid);
+        assert!(report.errors.iter().any(|error| error.code == "MNB122"));
+    }
+
+    #[test]
+    fn bool_body_validates_without_unresolved_names() {
+        let mut program = executable_program();
+        program.functions[0].inputs.push(Value {
+            name: "flag".to_owned(),
+            value_type: "bool".to_owned(),
+        });
+        let body = program.functions[0].body.as_mut().expect("body");
+        body.parameters.push(BodyParameter {
+            id: "flag".to_owned(),
+            name: "flag".to_owned(),
+            ty: BodyType::Bool,
+        });
+        let report = program.validate();
+        assert!(!report.errors.iter().any(|error| error.code == "MNB122"));
     }
 }

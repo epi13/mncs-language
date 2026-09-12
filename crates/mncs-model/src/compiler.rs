@@ -1094,6 +1094,64 @@ pub enum BackendValueContract {
     },
 }
 
+impl BackendValueContract {
+    /// Authoritative scalar constructor from a resolved semantic type.
+    /// ABI construction must consume [`crate::BodyType`], never re-derive a
+    /// parallel type system from spellings: the wire keeps the stable
+    /// [`crate::BodyType::semantic_name`] spelling while meaning comes from
+    /// the type passed in.
+    pub fn scalar_from_body_type(ty: &crate::BodyType) -> Self {
+        Self::Scalar {
+            semantic_type: ty.semantic_name(),
+        }
+    }
+
+    /// Resolve this contract's logical semantic type through one choke
+    /// point. Nominal record/finite contracts resolve by identity against
+    /// `program`; scalar spellings (including `bool`, now
+    /// [`crate::BodyType::Bool`]) resolve structurally. Sequence/view/vector
+    /// contracts resolve their element the same way so nested nominal
+    /// elements cannot silently become opaque names.
+    pub fn logical_type(&self, program: &crate::Program) -> crate::BodyType {
+        match self {
+            Self::Scalar { semantic_type } => crate::BodyType::from_program(program, semantic_type),
+            Self::Finite {
+                type_identity,
+                name,
+                ..
+            } => crate::BodyType::Finite {
+                identity: type_identity.clone(),
+                name: name.clone(),
+            },
+            Self::Record {
+                type_identity,
+                name,
+                ..
+            } => crate::BodyType::Record {
+                identity: type_identity.clone(),
+                name: name.clone(),
+            },
+            Self::Sequence {
+                element, length, ..
+            } => crate::BodyType::Sequence {
+                element: Box::new(crate::BodyType::from_program(program, element)),
+                bound: crate::SequenceBound::Exact(*length),
+            },
+            Self::View {
+                element, capacity, ..
+            } => crate::BodyType::Sequence {
+                element: Box::new(crate::BodyType::from_program(program, element)),
+                bound: crate::SequenceBound::UpTo(*capacity),
+            },
+            Self::Vector { element, lanes, .. } => crate::BodyType::Vector {
+                element: Box::new(crate::BodyType::from_program(program, element)),
+                lanes: *lanes,
+            },
+            Self::Mask { lanes, .. } => crate::BodyType::Mask { lanes: *lanes },
+        }
+    }
+}
+
 /// One host-addressable generic instantiation realized by an artifact
 /// (P1-013/P2-003). The host names `(generic_module, generic_function)`
 /// plus the normalized argument spellings from its request; the artifact

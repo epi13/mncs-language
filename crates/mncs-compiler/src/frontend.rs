@@ -2722,7 +2722,9 @@ fn elaborate_function(
                         return None;
                     }
                     Some(signature) => {
-                        if !matches!(&signature.output, BodyType::Named(name) if name == "bool") {
+                        if !matches!(&signature.output, BodyType::Bool)
+                            && !matches!(&signature.output, BodyType::Named(name) if name == "bool")
+                        {
                             diagnostics.push(elaboration_diagnostic(
                                 "MNE233",
                                 "executable contract predicate must return bool",
@@ -4306,7 +4308,7 @@ impl<'a> BodyBuilder<'a> {
                 else_body,
                 ..
             } => {
-                let bool_type = BodyType::Named("bool".to_owned());
+                let bool_type = BodyType::Bool;
                 let Some(cond) = self.elaborate_expr(condition, Some(&bool_type), env, diagnostics)
                 else {
                     return;
@@ -4753,7 +4755,7 @@ impl<'a> BodyBuilder<'a> {
             operands: vec![header_counter.clone(), zero_id],
             results: vec![BodyValue {
                 id: has_attempt_id.clone(),
-                ty: BodyType::Named("bool".to_owned()),
+                ty: BodyType::Bool,
             }],
             contracts: Vec::new(),
             assumptions: Vec::new(),
@@ -5339,7 +5341,7 @@ impl<'a> BodyBuilder<'a> {
                     operands: vec![subject.id.clone(), constant],
                     results: vec![BodyValue {
                         id: condition.clone(),
-                        ty: BodyType::Named("bool".to_owned()),
+                        ty: BodyType::Bool,
                     }],
                     contracts: Vec::new(),
                     assumptions: Vec::new(),
@@ -6193,7 +6195,7 @@ impl<'a> BodyBuilder<'a> {
         env: &mut BindingEnv,
         diagnostics: &mut Vec<SourceDiagnostic>,
     ) -> Option<ResolvedBinding> {
-        let result_ty = BodyType::Named("bool".to_owned());
+        let result_ty = BodyType::Bool;
         if expected.is_some_and(|expected| expected != &result_ty) {
             diagnostics.push(elaboration_diagnostic(
                 "MNE246",
@@ -6447,7 +6449,7 @@ impl<'a> BodyBuilder<'a> {
                 Some(ResolvedBinding::plain(id, ty))
             }
             AstExpr::Boolean { value, text: _ } => {
-                let ty = BodyType::Named("bool".to_owned());
+                let ty = BodyType::Bool;
                 if expected.is_some_and(|expected| expected != &ty) {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE122",
@@ -7143,7 +7145,7 @@ impl<'a> BodyBuilder<'a> {
                 // Boolean patterns (HARNESS-PRESSURE-013): `match` over a
                 // `bool` subject accepts `true`/`false` arms with the same
                 // exhaustiveness rule as a two-variant finite type.
-                if subject.ty == BodyType::Named("bool".to_owned()) {
+                if subject.ty == BodyType::Bool {
                     return self.elaborate_bool_match(
                         &subject,
                         arms,
@@ -7430,7 +7432,7 @@ impl<'a> BodyBuilder<'a> {
                             operands: vec![subject.id.clone()],
                             results: vec![BodyValue {
                                 id: condition.clone(),
-                                ty: BodyType::Named("bool".to_owned()),
+                                ty: BodyType::Bool,
                             }],
                             contracts: Vec::new(),
                             assumptions: Vec::new(),
@@ -7922,7 +7924,7 @@ impl<'a> BodyBuilder<'a> {
                 }
                 let required_condition = match &operand_type {
                     BodyType::Vector { lanes, .. } => BodyType::Mask { lanes: *lanes },
-                    _ => BodyType::Named("bool".to_owned()),
+                    _ => BodyType::Bool,
                 };
                 if condition_binding.ty != required_condition {
                     diagnostics.push(elaboration_diagnostic(
@@ -8588,6 +8590,7 @@ impl<'a> BodyBuilder<'a> {
                 let convertible_source = |ty: &BodyType| {
                     matches!(ty, BodyType::Byte)
                         || matches!(ty, BodyType::Integer(integer) if matches!(integer.bits, 1..=64))
+                        || matches!(ty, BodyType::Bool)
                         || matches!(ty, BodyType::Named(name) if name == "bool")
                         || is_float(ty)
                 };
@@ -8658,7 +8661,7 @@ impl<'a> BodyBuilder<'a> {
                     ));
                     return None;
                 }
-                let bool_type = BodyType::Named("bool".to_owned());
+                let bool_type = BodyType::Bool;
                 // No expectation threading: like `&&`/`||`, the operand is
                 // elaborated in its own type and checked here, so a
                 // mistyped operand reports the single precise MNE181.
@@ -8807,7 +8810,7 @@ impl<'a> BodyBuilder<'a> {
                 // Strict boolean operators (Profile 0.6): both operands are
                 // total bool values; evaluation is not short-circuited.
                 if matches!(op, AstBinaryOp::And | AstBinaryOp::Or) {
-                    let bool_type = BodyType::Named("bool".to_owned());
+                    let bool_type = BodyType::Bool;
                     if left_value.ty != bool_type || right_value.ty != bool_type {
                         diagnostics.push(elaboration_diagnostic(
                             "MNE181",
@@ -8847,7 +8850,7 @@ impl<'a> BodyBuilder<'a> {
                 // comparisons on bools fall through to the integer gate
                 // below (MNE121).
                 if self.profile_0_13() && matches!(op, AstBinaryOp::Eq | AstBinaryOp::Ne) {
-                    let bool_type = BodyType::Named("bool".to_owned());
+                    let bool_type = BodyType::Bool;
                     if left_value.ty == bool_type && right_value.ty == bool_type {
                         let id = self.new_value("b");
                         self.blocks[self.current].operations.push(BodyOperation {
@@ -8910,7 +8913,7 @@ impl<'a> BodyBuilder<'a> {
                                 }
                                 .to_owned(),
                             },
-                            BodyType::Named("bool".to_owned()),
+                            BodyType::Bool,
                         )
                     } else {
                         (
@@ -9042,7 +9045,7 @@ impl<'a> BodyBuilder<'a> {
                                 }
                                 .to_owned(),
                             },
-                            BodyType::Named("bool".to_owned()),
+                            BodyType::Bool,
                         )
                     } else {
                         (
@@ -9159,7 +9162,7 @@ impl<'a> BodyBuilder<'a> {
                                 predicate: predicate.to_owned(),
                                 operand_type,
                             },
-                            BodyType::Named("bool".to_owned()),
+                            BodyType::Bool,
                         )
                     }
                 };
@@ -9537,7 +9540,7 @@ impl<'a> BodyBuilder<'a> {
                     lanes,
                 },
                 vec![value.id],
-                BodyType::Named("bool".to_owned()),
+                BodyType::Bool,
             ));
         }
 
@@ -10579,6 +10582,7 @@ fn substitute_body_type(
         BodyType::Integer(i) => BodyType::Integer(i),
         BodyType::Float(f) => BodyType::Float(f),
         BodyType::Byte => BodyType::Byte,
+        BodyType::Bool => BodyType::Bool,
         BodyType::Named(n) => BodyType::Named(n),
     }
 }
@@ -10720,10 +10724,10 @@ fn profile_sequence_type(
     if matches!(&*element, BodyType::Mask { .. } | BodyType::Vector { .. }) {
         return None;
     }
-    match &*element {
-        BodyType::Named(name) if name != "bool" => None,
-        _ => Some(BodyType::Sequence { element, bound }),
+    if element.has_unresolved_named() {
+        return None;
     }
+    Some(BodyType::Sequence { element, bound })
 }
 
 fn profile_sequence_type_with_generics(
@@ -10827,10 +10831,10 @@ fn profile_sequence_type_with_generics(
     } else {
         // Try scalar via from_semantic_name for bool etc.
         let ty = BodyType::from_semantic_name(element_text);
-        match &ty {
-            BodyType::Named(n) if n != "bool" => return None,
-            _ => ty,
+        if ty.has_unresolved_named() {
+            return None;
         }
+        ty
     };
     if matches!(&element, BodyType::Mask { .. } | BodyType::Vector { .. }) {
         return None;
@@ -10843,7 +10847,8 @@ fn profile_sequence_type_with_generics(
 
 fn profile_scalar_supported(name: &str) -> Option<BodyType> {
     let ty = BodyType::from_semantic_name(name);
-    let supported = matches!(&ty, BodyType::Named(named) if named == "bool")
+    let supported = matches!(&ty, BodyType::Bool)
+        || matches!(&ty, BodyType::Named(named) if named == "bool")
         || matches!(
             &ty,
             BodyType::Integer(IntegerType {

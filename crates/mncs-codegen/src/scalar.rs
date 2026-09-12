@@ -1646,6 +1646,8 @@ pub fn scalar_ty_in(ty: &IrType, layout: &CompositeLayout) -> Result<ScalarTy, S
                 Ok(ScalarTy::Int(integer))
             }
             BodyType::Float(float) if float.is_supported() => Ok(ScalarTy::Float),
+            BodyType::Bool => Ok(ScalarTy::Bool),
+            BodyType::Named(name) if name == "bool" => Ok(ScalarTy::Bool),
             // Bytes realize as unsigned 8-bit cells.
             BodyType::Byte => Ok(ScalarTy::Byte),
             // Exact sequences are canonical cells; bounded views are packed

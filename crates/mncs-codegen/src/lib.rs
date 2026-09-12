@@ -1243,10 +1243,16 @@ pub(crate) fn backend_output_value(
         BackendValueContract::Scalar { semantic_type } => {
             match (BodyType::from_semantic_name(semantic_type), value) {
                 // Typed realizations return booleans directly.
+                (BodyType::Bool, observed @ ExecutionValue::Boolean { .. }) => Ok(observed),
                 (BodyType::Named(name), observed @ ExecutionValue::Boolean { .. })
                     if name == "bool" =>
                 {
                     Ok(observed)
+                }
+                (BodyType::Bool, ExecutionValue::Integer { value, .. })
+                    if value == 0 || value == 1 =>
+                {
+                    Ok(ExecutionValue::Boolean { value: value == 1 })
                 }
                 (BodyType::Named(name), ExecutionValue::Integer { value, .. })
                     if name == "bool" && (value == 0 || value == 1) =>
@@ -1390,6 +1396,7 @@ fn marshal_ty(
     match contract {
         BackendValueContract::Scalar { semantic_type } => {
             match BodyType::from_semantic_name(semantic_type) {
+                BodyType::Bool => MarshalTy::Bool,
                 BodyType::Named(name) if name == "bool" => MarshalTy::Bool,
                 BodyType::Integer(ty) => MarshalTy::Int(ty),
                 BodyType::Float(ty) if ty.is_supported() => MarshalTy::Float(ty),
@@ -1492,6 +1499,7 @@ fn named_marshal(
         return marshal_ty(composite, composites);
     }
     match BodyType::from_semantic_name(semantic_type) {
+        BodyType::Bool => crate::wasm::MarshalTy::Bool,
         BodyType::Named(name) if name == "bool" => crate::wasm::MarshalTy::Bool,
         BodyType::Integer(ty) => crate::wasm::MarshalTy::Int(ty),
         // Binary64 fields marshal bit-carried through 8-byte slots; without

@@ -546,6 +546,7 @@ impl ArenaWriter {
             }
             Value::Boolean { value } => {
                 match mncs_model::BodyType::from_semantic_name(declared_type) {
+                    mncs_model::BodyType::Bool => {}
                     mncs_model::BodyType::Named(name) if name == "bool" => {}
                     _ => {
                         return Err(format!(
@@ -842,6 +843,7 @@ impl<'a> ArenaReader<'a> {
     ) -> Option<&'a mncs_model::BackendValueContract> {
         match mncs_model::BodyType::from_semantic_name(declared_type) {
             mncs_model::BodyType::Integer(_) => None,
+            mncs_model::BodyType::Bool => None,
             mncs_model::BodyType::Named(name) if name == "bool" => None,
             _ => registry.get(declared_type),
         }
@@ -911,6 +913,9 @@ impl<'a> ArenaReader<'a> {
                 }
                 Ok(mncs_model::ExecutionValue::Float { bits, ty })
             }
+            BodyType::Bool => Ok(mncs_model::ExecutionValue::Boolean {
+                value: self.get32(offset)? == 1,
+            }),
             BodyType::Named(name) if name == "bool" => Ok(mncs_model::ExecutionValue::Boolean {
                 value: self.get32(offset)? == 1,
             }),

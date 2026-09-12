@@ -302,6 +302,7 @@ pub fn first_aggregate_mismatch(
                 ))
             }
         }
+        (ExecutionValue::Boolean { .. }, BodyType::Bool) => None,
         (ExecutionValue::Boolean { .. }, BodyType::Named(name)) if name == "bool" => None,
         // The interpreters admit booleans for 1-bit unsigned integers.
         (ExecutionValue::Boolean { .. }, BodyType::Integer(integer))
