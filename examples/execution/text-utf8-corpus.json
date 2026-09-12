@@ -1,0 +1,2035 @@
+{
+ "schema_version": "0.1",
+ "name": "text-utf8",
+ "cases": [
+  {
+   "id": "ascii-valid",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_validate"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 72
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 111
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 90
+         }
+        },
+        {
+         "byte": {
+          "value": 111
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 100000,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "non-ascii-valid-zoe",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_validate"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 90
+         }
+        },
+        {
+         "byte": {
+          "value": 111
+         }
+        },
+        {
+         "byte": {
+          "value": 195
+         }
+        },
+        {
+         "byte": {
+          "value": 169
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 100000,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "four-byte-valid",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_validate"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 240
+         }
+        },
+        {
+         "byte": {
+          "value": 159
+         }
+        },
+        {
+         "byte": {
+          "value": 152
+         }
+        },
+        {
+         "byte": {
+          "value": 128
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 100000,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "reject-c3-28",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_validate"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 195
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "reject-stray-continuation",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_validate"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 128
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "reject-overlong-2byte",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_validate"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 192
+         }
+        },
+        {
+         "byte": {
+          "value": 175
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "reject-overlong-3byte",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_validate"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 224
+         }
+        },
+        {
+         "byte": {
+          "value": 128
+         }
+        },
+        {
+         "byte": {
+          "value": 175
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "reject-surrogate",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_validate"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 237
+         }
+        },
+        {
+         "byte": {
+          "value": 160
+         }
+        },
+        {
+         "byte": {
+          "value": 128
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "reject-truncated",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_validate"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 226
+         }
+        },
+        {
+         "byte": {
+          "value": 130
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "empty-valid",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_validate"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 100000,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "step-ascii",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_step"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 90
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 100006501,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "step-2byte-e-acute",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_step"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 195
+         }
+        },
+        {
+         "byte": {
+          "value": 169
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 100023302,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "step-stray-invalid",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_step"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 195
+         }
+        },
+        {
+         "byte": {
+          "value": 169
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "step-4byte-grin",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_step"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 240
+         }
+        },
+        {
+         "byte": {
+          "value": 159
+         }
+        },
+        {
+         "byte": {
+          "value": 152
+         }
+        },
+        {
+         "byte": {
+          "value": 128
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 112851204,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "step-truncated",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_step"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 226
+         }
+        },
+        {
+         "byte": {
+          "value": 130
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 1,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "step-past-end",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_step"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 90
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        },
+        {
+         "byte": {
+          "value": 0
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 2,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "fold-pairs",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "mncs.std.text_utf8.v1",
+     "function": "candidate_fold"
+    },
+    "arguments": [],
+    "step_budget": 60000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 970023300215223233,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

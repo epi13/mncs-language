@@ -15,7 +15,12 @@ use crate::{CanonicalForm, HighLevelIr, ObligationRecord, SemanticId, SsaModule}
 pub const PORTABLE_WASM_MVP_TARGET: &str = "mncs:target:portable-wasm-mvp-0.1";
 pub const PORTABLE_WASM_MVP_BACKEND_NAME: &str = "mncs-portable-wasm-mvp";
 pub const PORTABLE_WASM_MVP_BACKEND_VERSION: &str = "0.1";
-pub const BACKEND_ARTIFACT_SCHEMA_VERSION: &str = "0.4";
+pub const BACKEND_ARTIFACT_SCHEMA_VERSION: &str = "0.5";
+/// The previous backend-artifact schema version. Artifacts carrying `"0.4"`
+/// spell contract element/field types as bare strings; they deserialize via
+/// [`AbiTypeRef`] (strings become verbatim `Named` carriers) and must pass
+/// through [`BackendArtifact::normalize_legacy_contracts`] before execution.
+pub const BACKEND_ARTIFACT_SCHEMA_VERSION_PRE_TYPED: &str = "0.4";
 pub const BACKEND_CAPABILITY_SCHEMA_VERSION: &str = "0.1";
 pub const REALIZATION_REQUEST_SCHEMA_VERSION: &str = "0.1";
 pub const LAYERED_EXECUTION_COMPARISON_INTERPRETATION: &str =
@@ -1028,11 +1033,211 @@ pub struct BackendFunctionValueContract {
     pub outputs: Vec<BackendValueContract>,
 }
 
+/// A semantic type reference carried by ABI value contracts. Serializes
+/// transparently as the resolved [`crate::BodyType`]; deserializes from
+/// either the typed shape (current artifacts) or a bare spelling string
+/// (pre-0.5 artifacts), resolved by the single ABI spelling authority
+/// [`crate::BodyType::from_semantic_name`] — scalar spellings denote
+/// scalars, anything else becomes a verbatim `Named` carrier, never a
+/// guess. [`BackendArtifact::normalize_legacy_contracts`] then resolves
+/// those carriers structurally and, for nominals, against the artifact's
+/// own composite map, so a detached fragment carrying two same-named types
+/// cannot silently pick the wrong one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct AbiTypeRef(pub crate::BodyType);
+
+impl<'de> Deserialize<'de> for AbiTypeRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct AbiTypeVisitor;
+        impl<'de> serde::de::Visitor<'de> for AbiTypeVisitor {
+            type Value = AbiTypeRef;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a resolved semantic type or a legacy type spelling")
+            }
+            fn visit_str<E: serde::de::Error>(self, spelling: &str) -> Result<Self::Value, E> {
+                // One authority for bare spellings: `from_semantic_name`
+                // is the ABI-only spelling→type conversion, so scalar
+                // spellings denote scalars and anything else stays a
+                // verbatim `Named` carrier for `normalize_legacy_contracts`
+                // to rehydrate against the composite map. This keeps the
+                // serde round-trip exact — unit scalars serialize as bare
+                // strings, so they must parse back to the same scalar, or
+                // every artifact carrying one fails its identity check
+                // after reload.
+                Ok(AbiTypeRef(crate::BodyType::from_semantic_name(spelling)))
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                map: A,
+            ) -> Result<Self::Value, A::Error> {
+                crate::BodyType::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+                    .map(AbiTypeRef)
+            }
+        }
+        deserializer.deserialize_any(AbiTypeVisitor)
+    }
+}
+
+impl AbiTypeRef {
+    pub fn get(&self) -> &crate::BodyType {
+        &self.0
+    }
+
+    fn normalize_spelling(&mut self) {
+        self.0.normalize_legacy_ir_named();
+    }
+
+    /// Rehydrate nominal leaves against the artifact's composite map, keyed
+    /// by short name and by identity. Deterministic: a spelling that matches
+    /// no composite stays `Named` for contract checks to reject explicitly.
+    fn rehydrate_nominals(&mut self, composites: &BTreeMap<String, BackendValueContract>) {
+        rehydrate_body_type(&mut self.0, composites);
+    }
+}
+
+fn nominal_body_type(contract: &BackendValueContract) -> Option<crate::BodyType> {
+    match contract {
+        BackendValueContract::Finite {
+            type_identity,
+            name,
+            ..
+        } => Some(crate::BodyType::Finite {
+            identity: type_identity.clone(),
+            name: name.clone(),
+        }),
+        BackendValueContract::Record {
+            type_identity,
+            name,
+            ..
+        } => Some(crate::BodyType::Record {
+            identity: type_identity.clone(),
+            name: name.clone(),
+        }),
+        _ => None,
+    }
+}
+
+/// How a legacy nominal spelling resolves against a composite map.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NominalResolution {
+    /// Exactly one nominal identified: by identity key, or by a short name
+    /// no other nominal shares.
+    Resolved(crate::BodyType),
+    /// Nothing in the map answers to this spelling.
+    Unknown,
+    /// Several distinct nominals share the short name: resolving would be
+    /// a guess, so every reader must refuse explicitly.
+    Ambiguous,
+}
+
+impl BackendValueContract {
+    /// Find the composite contract for an exact nominal identity: the
+    /// identity key first, then a scan for the same identity under any key.
+    /// Never matches by short name, so same-named types cannot collide.
+    /// Builders always emit the identity key; the scan covers hand-built
+    /// and legacy maps that carry only short-name keys.
+    pub fn find_nominal_contract<'a>(
+        composites: &'a BTreeMap<String, BackendValueContract>,
+        identity: &crate::SemanticId,
+    ) -> Option<&'a BackendValueContract> {
+        composites.get(&identity.0).or_else(|| {
+            composites.values().find(|contract| {
+                matches!(
+                    contract,
+                    BackendValueContract::Finite { type_identity, .. }
+                    | BackendValueContract::Record { type_identity, .. }
+                    if type_identity == identity
+                )
+            })
+        })
+    }
+
+    /// Resolve one legacy nominal spelling against a composite map keyed by
+    /// short name and by identity. The single authority behind artifact
+    /// normalization and every contract reader: identity keys are exact,
+    /// short names resolve only when unique, and ambiguity is reported —
+    /// never silently picked.
+    pub fn resolve_nominal_spelling(
+        spelling: &str,
+        composites: &BTreeMap<String, BackendValueContract>,
+    ) -> NominalResolution {
+        if let Some(contract) = composites.get(spelling) {
+            if let Some(resolved) = nominal_body_type(contract) {
+                let is_identity_key = match &resolved {
+                    crate::BodyType::Finite { identity, .. }
+                    | crate::BodyType::Record { identity, .. } => identity.0 == spelling,
+                    _ => false,
+                };
+                if is_identity_key {
+                    return NominalResolution::Resolved(resolved);
+                }
+            }
+        }
+        let mut candidates = Vec::new();
+        for contract in composites.values() {
+            let matches_name = matches!(
+                contract,
+                BackendValueContract::Finite { name, .. }
+                | BackendValueContract::Record { name, .. }
+                if name == spelling
+            );
+            if matches_name {
+                if let Some(candidate) = nominal_body_type(contract) {
+                    if !candidates.contains(&candidate) {
+                        candidates.push(candidate);
+                    }
+                }
+            }
+        }
+        match candidates.len() {
+            0 => NominalResolution::Unknown,
+            1 => NominalResolution::Resolved(candidates.pop().expect("single candidate")),
+            _ => NominalResolution::Ambiguous,
+        }
+    }
+}
+
+fn rehydrate_body_type(
+    ty: &mut crate::BodyType,
+    composites: &BTreeMap<String, BackendValueContract>,
+) {
+    match ty {
+        crate::BodyType::Named(spelling) => {
+            if let NominalResolution::Resolved(resolved) =
+                BackendValueContract::resolve_nominal_spelling(spelling, composites)
+            {
+                *ty = resolved;
+            }
+        }
+        crate::BodyType::Sequence { element, .. } | crate::BodyType::Vector { element, .. } => {
+            rehydrate_body_type(element, composites);
+        }
+        _ => {}
+    }
+}
+
+impl From<crate::BodyType> for AbiTypeRef {
+    fn from(ty: crate::BodyType) -> Self {
+        Self(ty)
+    }
+}
+
+impl std::ops::Deref for AbiTypeRef {
+    type Target = crate::BodyType;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BackendValueContract {
     Scalar {
-        semantic_type: String,
+        semantic_type: AbiTypeRef,
     },
     Finite {
         type_identity: SemanticId,
@@ -1053,13 +1258,13 @@ pub enum BackendValueContract {
         /// (field name, declared semantic type). Empty for payload-free
         /// finite types; serialized as absent so existing artifacts parse.
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        payloads: BTreeMap<u32, Vec<(String, String)>>,
+        payloads: BTreeMap<u32, Vec<(String, AbiTypeRef)>>,
     },
     Record {
         type_identity: SemanticId,
         name: String,
         /// Canonical (name-sorted) fields: field name -> semantic type name.
-        fields: Vec<(String, String)>,
+        fields: Vec<(String, AbiTypeRef)>,
     },
     /// Exact-length bounded sequence (`[E; N]`). The ABI value is a
     /// canonical cell root; element count is a type fact, not a runtime
@@ -1067,7 +1272,7 @@ pub enum BackendValueContract {
     /// earlier artifacts without this variant remain valid.
     Sequence {
         semantic_type: String,
-        element: String,
+        element: AbiTypeRef,
         length: u32,
     },
     /// Bounded view (`[E; up_to M]`). The ABI value is a packed 64-bit
@@ -1075,7 +1280,7 @@ pub enum BackendValueContract {
     /// in the same canonical arena as records and exact sequences.
     View {
         semantic_type: String,
-        element: String,
+        element: AbiTypeRef,
         capacity: u32,
     },
     /// Logical integer vector (`vec<T, N>`). The ABI value is a cell root;
@@ -1083,7 +1288,7 @@ pub enum BackendValueContract {
     /// slot per lane; portable WASM stores packed lane widths.
     Vector {
         semantic_type: String,
-        element: String,
+        element: AbiTypeRef,
         lanes: u32,
     },
     /// Logical mask (`mask<N>`). The ABI value is packed predicate bits in
@@ -1092,6 +1297,103 @@ pub enum BackendValueContract {
         semantic_type: String,
         lanes: u32,
     },
+}
+
+impl BackendValueContract {
+    /// Authoritative scalar constructor from a resolved semantic type.
+    /// ABI construction must consume [`crate::BodyType`], never re-derive a
+    /// parallel type system from spellings: the contract carries the type
+    /// itself, not a spelling to reparse downstream.
+    pub fn scalar_from_body_type(ty: &crate::BodyType) -> Self {
+        Self::Scalar {
+            semantic_type: AbiTypeRef(ty.clone()),
+        }
+    }
+
+    /// The logical semantic type this contract denotes. No program context,
+    /// no parsing: contracts carry resolved types, so reading one back is a
+    /// clone. A `Named` survivor (legacy artifact that did not normalize, or
+    /// a nominal the artifact's composites cannot identify) is returned
+    /// verbatim for the caller to reject explicitly — never re-resolved
+    /// through ambient program state here, which would let a detached
+    /// fragment silently adopt whatever same-named type happens to be
+    /// linked.
+    pub fn logical_type(&self) -> crate::BodyType {
+        match self {
+            Self::Scalar { semantic_type } => semantic_type.0.clone(),
+            Self::Finite {
+                type_identity,
+                name,
+                ..
+            } => crate::BodyType::Finite {
+                identity: type_identity.clone(),
+                name: name.clone(),
+            },
+            Self::Record {
+                type_identity,
+                name,
+                ..
+            } => crate::BodyType::Record {
+                identity: type_identity.clone(),
+                name: name.clone(),
+            },
+            Self::Sequence {
+                element, length, ..
+            } => crate::BodyType::Sequence {
+                element: Box::new(element.0.clone()),
+                bound: crate::SequenceBound::Exact(*length),
+            },
+            Self::View {
+                element, capacity, ..
+            } => crate::BodyType::Sequence {
+                element: Box::new(element.0.clone()),
+                bound: crate::SequenceBound::UpTo(*capacity),
+            },
+            Self::Vector { element, lanes, .. } => crate::BodyType::Vector {
+                element: Box::new(element.0.clone()),
+                lanes: *lanes,
+            },
+            Self::Mask { lanes, .. } => crate::BodyType::Mask { lanes: *lanes },
+        }
+    }
+
+    /// Normalize this contract's carried type references: structural
+    /// spellings first, then nominal rehydration against `composites` (the
+    /// artifact's own composite map, keyed by short name and by identity).
+    /// Current builder-produced contracts are already normalized, so this is
+    /// idempotent; it exists for pre-0.5 artifacts whose element/field
+    /// types traveled as bare strings. Anything still `Named` afterwards is
+    /// genuinely unidentified and must be rejected by contract checks, never
+    /// guessed.
+    pub fn normalize_legacy_refs(&mut self, composites: &BTreeMap<String, BackendValueContract>) {
+        match self {
+            Self::Scalar { semantic_type } => {
+                semantic_type.normalize_spelling();
+                semantic_type.rehydrate_nominals(composites);
+            }
+            Self::Finite { payloads, .. } => {
+                for fields in payloads.values_mut() {
+                    for (_, field_type) in fields {
+                        field_type.normalize_spelling();
+                        field_type.rehydrate_nominals(composites);
+                    }
+                }
+            }
+            Self::Record { fields, .. } => {
+                for (_, field_type) in fields {
+                    field_type.normalize_spelling();
+                    field_type.rehydrate_nominals(composites);
+                }
+            }
+            Self::Sequence { element, .. }
+            | Self::View { element, .. }
+            | Self::Vector { element, .. } => {
+                element.normalize_spelling();
+                element.rehydrate_nominals(composites);
+            }
+            Self::Mask { .. } => {}
+        }
+    }
 }
 
 /// One host-addressable generic instantiation realized by an artifact
@@ -1265,6 +1567,34 @@ impl BackendArtifact {
 
     pub fn bytes(&self) -> Result<Vec<u8>, String> {
         hex_decode(&self.bytes_hex)
+    }
+
+    /// Normalize every value contract carried by this artifact from its
+    /// legacy (pre-0.5) bare-string element/field spellings to resolved
+    /// semantic type references, rehydrating nominals against the
+    /// artifact's own composite map. Idempotent: current artifacts are
+    /// unchanged except for the schema upgrade stamp, which also refreshes
+    /// the artifact identity. Detached holders of 0.4 artifacts must call
+    /// this after deserialization and before execution; current emitters
+    /// never produce legacy spellings.
+    pub fn normalize_legacy_contracts(&mut self) {
+        let composites = self.composite_value_contracts.clone();
+        for contract in self.composite_value_contracts.values_mut() {
+            contract.normalize_legacy_refs(&composites);
+        }
+        for function in self.function_value_contracts.values_mut() {
+            for contract in function
+                .inputs
+                .iter_mut()
+                .chain(function.outputs.iter_mut())
+            {
+                contract.normalize_legacy_refs(&composites);
+            }
+        }
+        if self.schema_version == BACKEND_ARTIFACT_SCHEMA_VERSION_PRE_TYPED {
+            self.schema_version = BACKEND_ARTIFACT_SCHEMA_VERSION.to_owned();
+        }
+        self.identity = identified("backend-artifact", &self.without_identity());
     }
 
     pub fn with_function_value_contracts(
@@ -2327,6 +2657,38 @@ mod tests {
         let json = serde_json::to_string(&bearing).expect("artifact serializes");
         let decoded: BackendArtifact = serde_json::from_str(&json).expect("roundtrip");
         assert_eq!(decoded, bearing);
+        assert!(decoded.identity_is_valid());
+    }
+
+    #[test]
+    fn scalar_element_contracts_survive_a_serde_round_trip_with_identity_intact() {
+        // Regression: unit scalars serialize as bare strings (`"byte"`),
+        // so `AbiTypeRef` deserialization must resolve them through the
+        // same spelling authority. Wrapping every bare string in `Named`
+        // reloaded `Byte` as `Named("byte")`, silently invalidated the
+        // artifact identity, and frozen execution refused the artifact as
+        // stale/laundered.
+        let mut artifact = test_artifact(Vec::new());
+        artifact.function_value_contracts.insert(
+            "vlen".to_owned(),
+            BackendFunctionValueContract {
+                inputs: vec![BackendValueContract::View {
+                    semantic_type: "[byte; up_to 8]".to_owned(),
+                    element: AbiTypeRef(crate::BodyType::Byte),
+                    capacity: 8,
+                }],
+                outputs: vec![],
+            },
+        );
+        artifact.identity = identified("backend-artifact", &artifact.without_identity());
+        assert!(artifact.identity_is_valid());
+        let json = serde_json::to_string(&artifact).expect("artifact serializes");
+        assert!(
+            json.contains("\"element\":\"byte\""),
+            "scalar elements travel as bare strings: {json}"
+        );
+        let decoded: BackendArtifact = serde_json::from_str(&json).expect("roundtrip");
+        assert_eq!(decoded, artifact);
         assert!(decoded.identity_is_valid());
     }
 

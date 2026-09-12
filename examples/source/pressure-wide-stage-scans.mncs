@@ -1,0 +1,60 @@
+mncs 0.13;
+
+// INGEST-P-011 regression: 64-, 256-, and 392-byte stages share one
+// capacity-generic implementation each for newline scans
+// (`mncs.std.chunk.v1::find_newline_generic`) and little-endian readers
+// (`mncs.std.encoding.v1::read_u16_le_generic`/`read_u32_le_generic`)
+// instead of reimplementing the same folds per width. Wide exact buffers
+// need the 0.13 ceiling, so these entry points live here rather than in
+// the 0.10 std modules; the generic implementations stay there.
+//
+// Corpus: examples/execution/pressure-wide-stage-scans-corpus.json.
+module examples.pressure_wide_stage_scans;
+
+use mncs.std.chunk.v1;
+use mncs.std.encoding.v1;
+
+// Newline scan over a 256-byte stage: newline at 200, absent past 201.
+// Packs first * 1000 + (second-missing-flag).
+fn stage_find_newline256(buf: [byte; 256], view_length: u64) -> (result: i64) {
+    let view: [byte; up_to 256] = buf[0..view_length];
+    let first: i64 = find_newline_generic<256>(view, view_length, 0);
+    let second: i64 = find_newline_generic<256>(view, view_length, 201);
+    return first * 1000 + select(second == 0 - 1, 1, 0);
+}
+
+// Newline scan over a 392-byte stage with the newline at the last live
+// byte.
+fn stage_find_newline392(buf: [byte; 392], view_length: u64) -> (result: i64) {
+    let view: [byte; up_to 392] = buf[0..view_length];
+    return find_newline_generic<392>(view, view_length, 0);
+}
+
+// Single-chunk line step over a 256-byte stage from a nonzero cursor.
+// Packs start * 10000 + length * 1000 + next * 10 + term, the same packing
+// law as the 64-byte `candidate_next_line`, so stage widths agree.
+fn stage_next_line256(buf: [byte; 256], view_length: u64, from: u64) -> (result: i64) {
+    let view: [byte; up_to 256] = buf[0..view_length];
+    let step: LineStep = next_line_generic<256>(view, view_length, Cursor { chunk: 1, offset: from });
+    return step.span.start as i64 * 10000 + step.span.length as i64 * 1000 + step.after.offset as i64 * 10 + select(step.terminated, 1, 0);
+}
+
+// Cross-chunk continuation over a 392-byte stage: `prefix_length` bytes
+// arrived earlier, this stage holds the rest. Packs total * 10 + term.
+fn stage_continue_line392(buf: [byte; 392], view_length: u64, prefix_length: u64) -> (result: i64) {
+    let view: [byte; up_to 392] = buf[0..view_length];
+    let joined: JoinedLine = continue_line_generic<392>(view, view_length, prefix_length);
+    return joined.total_length as i64 * 10 + select(joined.terminated, 1, 0);
+}
+
+// Little-endian u16 at `offset` of a 256-byte stage.
+fn stage_read_u16_le256(buf: [byte; 256], offset: u64) -> (result: u16) {
+    let window: [byte; up_to 256] = buf[0..256];
+    return read_u16_le_generic<256>(window, offset);
+}
+
+// Little-endian u32 at `offset` of a 392-byte stage.
+fn stage_read_u32_le392(buf: [byte; 392], offset: u64) -> (result: u32) {
+    let window: [byte; up_to 392] = buf[0..392];
+    return read_u32_le_generic<392>(window, offset);
+}

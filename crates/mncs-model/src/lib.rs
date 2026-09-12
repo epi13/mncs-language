@@ -57,8 +57,9 @@ pub use body::{
     BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator, BodyType, BodyValue,
     BoundedIterationCompletion, BoundsEvidence, FunctionBody, GenericArg, GenericParam,
     GenericParamKind, IterationDomain, LoweringEnvelope, MachineIntentSpec, PortabilityEnvelope,
-    PortabilityTarget, RealizationClass, SequenceBound, EXECUTABLE_BODY_SCHEMA_VERSION,
-    MAX_SEQUENCE_BOUND, MAX_VECTOR_LANES, MODEL_MAX_ITERATION_BOUND, MODEL_MAX_SEQUENCE_BOUND,
+    PortabilityTarget, RealizationClass, SequenceBound, TypeRelation, TypeSyntax,
+    EXECUTABLE_BODY_SCHEMA_VERSION, EXECUTABLE_BODY_SCHEMA_VERSION_PRE_BOOL, MAX_SEQUENCE_BOUND,
+    MAX_VECTOR_LANES, MODEL_MAX_ITERATION_BOUND, MODEL_MAX_SEQUENCE_BOUND,
     SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
 };
 pub use canonical::sha256_hex;
@@ -69,17 +70,18 @@ pub use capability_gap::{
 };
 pub use cfg::{Cfg, CfgBlock, CFG_SCHEMA_VERSION};
 pub use compiler::{
-    ArtifactRepresentation, BackendArtifact, BackendCapabilityManifest, BackendConfiguration,
-    BackendEvidence, BackendFunctionValueContract, BackendIdentity, BackendResult,
-    BackendValueContract, BuildHostIdentity, CompilationEmissions, CompilationEvidenceBundle,
-    CompilationRequest, CompilationResult, CompilationStatus, CompilationStudyRequest,
-    CompilationStudyResult, CompilerArtifactRef, CompilerDiagnostic, CompilerDiagnosticKind,
-    CompilerHostIdentity, CompilerImplementationIdentity, CompilerNodeProfile,
-    CompilerPassExecutionObservation, CompilerPassIdentity, CrossHostInvariants,
-    FamilyArtifactReference, FamilyCompilerObservation, FamilyCompilerReference,
-    GenericEntrypointRecord, ObservationModelRef, PassPipelineIdentity, RealizationRequest,
-    RelationClaim, RunEnvironmentRef, TargetContractRef, TargetLoweringPlan, TransformationEdge,
-    TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION, BACKEND_CAPABILITY_SCHEMA_VERSION,
+    AbiTypeRef, ArtifactRepresentation, BackendArtifact, BackendCapabilityManifest,
+    BackendConfiguration, BackendEvidence, BackendFunctionValueContract, BackendIdentity,
+    BackendResult, BackendValueContract, BuildHostIdentity, CompilationEmissions,
+    CompilationEvidenceBundle, CompilationRequest, CompilationResult, CompilationStatus,
+    CompilationStudyRequest, CompilationStudyResult, CompilerArtifactRef, CompilerDiagnostic,
+    CompilerDiagnosticKind, CompilerHostIdentity, CompilerImplementationIdentity,
+    CompilerNodeProfile, CompilerPassExecutionObservation, CompilerPassIdentity,
+    CrossHostInvariants, FamilyArtifactReference, FamilyCompilerObservation,
+    FamilyCompilerReference, GenericEntrypointRecord, NominalResolution, ObservationModelRef,
+    PassPipelineIdentity, RealizationRequest, RelationClaim, RunEnvironmentRef, TargetContractRef,
+    TargetLoweringPlan, TransformationEdge, TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION,
+    BACKEND_ARTIFACT_SCHEMA_VERSION_PRE_TYPED, BACKEND_CAPABILITY_SCHEMA_VERSION,
     COMPILATION_STUDY_OBSERVATION_INTERPRETATION, COMPILATION_STUDY_RESULT_CONTRACT_ID,
     COMPILER_ARTIFACT_SCHEMA_VERSION, FAMILY_COMPILER_REFERENCE_SCHEMA_VERSION,
     LAYERED_EXECUTION_COMPARISON_INTERPRETATION, PORTABLE_WASM_MVP_BACKEND_NAME,
@@ -147,8 +149,9 @@ pub use identity::{
 };
 pub use ir::{
     CapabilityUse, FailurePathKind, HighLevelIr, IrBlock, IrBoundedIteration, IrError, IrFunction,
-    IrOperation, IrOperationKind, IrStateRegion, IrTransition, IrType, IrValue, MachineIntentLinks,
+    IrOperation, IrOperationKind, IrStateRegion, IrTransition, IrValue, MachineIntentLinks,
     PathKind, StateRegionKind, TraceEntry, TraceMap, HIGH_LEVEL_IR_SCHEMA_VERSION,
+    HIGH_LEVEL_IR_SCHEMA_VERSION_PRE_TYPED,
 };
 pub use machine_intent::{
     arithmetic_result_type, minimum_widening_bits, AlignmentCapability, ArithmeticIntent,
@@ -197,6 +200,7 @@ pub use ssa::{
     SsaBlock, SsaBoundedIteration, SsaDiagnostic, SsaError, SsaFunction, SsaInstruction,
     SsaInstructionKind, SsaModule, SsaTerminator, SsaTraceEntry, SsaTraceMap,
     SsaTransformationDecision, SsaValidationReport, SsaValue, SSA_SCHEMA_VERSION,
+    SSA_SCHEMA_VERSION_PRE_TYPED,
 };
 pub use ssa_execution::{
     compare_body_and_ssa, execute_ssa, execute_ssa_module, execute_ssa_module_prevalidated,

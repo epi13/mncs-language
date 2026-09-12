@@ -822,7 +822,7 @@ mod tests {
             bits: 32,
             signed: true,
         });
-        let bool_ty = crate::BodyType::Named("bool".to_owned());
+        let bool_ty = crate::BodyType::Bool;
         let u64_ty = crate::BodyType::Integer(crate::IntegerType {
             bits: 64,
             signed: false,

@@ -195,7 +195,7 @@ mod tests {
             parameters: vec![BodyParameter {
                 id: "condition".to_owned(),
                 name: "condition".to_owned(),
-                ty: BodyType::Named("bool".to_owned()),
+                ty: BodyType::Bool,
             }],
             generic_params: Vec::new(),
             cycle_policy: crate::BodyCyclePolicy::Legacy,

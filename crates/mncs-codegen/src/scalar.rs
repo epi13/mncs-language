@@ -8,8 +8,8 @@
 use std::collections::BTreeMap;
 
 use mncs_model::{
-    ArithmeticIntent, BodyType, IntegerType, IrType, Program, SemanticId, SsaFunction,
-    SsaInstruction, SsaInstructionKind, SsaModule, SsaTerminator, SsaValue,
+    ArithmeticIntent, BodyType, IntegerType, Program, SemanticId, SsaFunction, SsaInstruction,
+    SsaInstructionKind, SsaModule, SsaTerminator, SsaValue,
 };
 
 use crate::composite::{CompositeLayout, SlotWidth};
@@ -732,8 +732,8 @@ fn lower_instruction(
             })
         }
         SsaInstructionKind::Convert { from, to } => Ok(ScalarInst::Convert {
-            from: scalar_ty_in(&ir_type_of(from), layout)?,
-            to: scalar_ty_in(&ir_type_of(to), layout)?,
+            from: scalar_ty_in(from, layout)?,
+            to: scalar_ty_in(to, layout)?,
             dest,
             src: operand(instruction, 0)?,
         }),
@@ -741,7 +741,7 @@ fn lower_instruction(
             element_type,
             length,
         } => {
-            let element_ty = scalar_ty_in(&ir_type_of(element_type), layout)?;
+            let element_ty = scalar_ty_in(element_type, layout)?;
             let width = slot_width_of(element_ty);
             if *length as usize != instruction.inputs.len() {
                 return Err("sequence construction does not match its declared length".to_owned());
@@ -816,7 +816,7 @@ fn lower_instruction(
             let mncs_model::SequenceBound::Exact(length) = bound else {
                 return Err("functional sequence update requires an exact bound".to_owned());
             };
-            let element_ty = scalar_ty_in(&ir_type_of(element_type), layout)?;
+            let element_ty = scalar_ty_in(element_type, layout)?;
             let width = slot_width_of(element_ty);
             Ok(ScalarInst::SequenceReplace {
                 dest,
@@ -852,7 +852,7 @@ fn lower_instruction(
             let mncs_model::SequenceBound::Exact(dst_length) = dst_bound else {
                 return Err("functional span copy requires an exact destination".to_owned());
             };
-            let element_ty = scalar_ty_in(&ir_type_of(element_type), layout)?;
+            let element_ty = scalar_ty_in(element_type, layout)?;
             let width = slot_width_of(element_ty);
             Ok(ScalarInst::SequenceCopy {
                 dest,
@@ -1165,7 +1165,7 @@ fn vector_element(
     let BodyType::Integer(integer) = element else {
         return Err("initial scalar vector realization supports integer lanes only".to_owned());
     };
-    let ty = scalar_ty_in(&ir_type_of(element), layout)?;
+    let ty = scalar_ty_in(element, layout)?;
     Ok((ty, slot_width_of(ty), *integer))
 }
 
@@ -1622,16 +1622,19 @@ fn scalar_value(value: &SsaValue, layout: &CompositeLayout) -> Result<ScalarValu
 
 /// Map a semantic type into its scalar realization type. Composite types
 /// become canonical cell references when the program declares their layout.
-pub fn scalar_ty_in(ty: &IrType, layout: &CompositeLayout) -> Result<ScalarTy, String> {
+/// The input is the resolved semantic type carried by SSA: no spelling is
+/// parsed here, so a type the compiler resolved cannot silently change
+/// meaning at the backend boundary.
+pub fn scalar_ty_in(ty: &BodyType, layout: &CompositeLayout) -> Result<ScalarTy, String> {
     match ty {
-        IrType::Finite { identity, .. } => {
+        BodyType::Finite { identity, .. } => {
             if layout.is_boxed_finite(identity) {
                 Ok(ScalarTy::Cell)
             } else {
                 Ok(ScalarTy::Finite)
             }
         }
-        IrType::Record { identity, name } => {
+        BodyType::Record { identity, name } => {
             if layout.records.contains_key(identity) {
                 Ok(ScalarTy::Cell)
             } else {
@@ -1640,28 +1643,29 @@ pub fn scalar_ty_in(ty: &IrType, layout: &CompositeLayout) -> Result<ScalarTy, S
                 ))
             }
         }
-        IrType::Named(name) if name == "bool" => Ok(ScalarTy::Bool),
-        IrType::Named(name) => match BodyType::from_semantic_name(name) {
-            BodyType::Integer(integer) if matches!(integer.bits, 8 | 16 | 32 | 64) => {
-                Ok(ScalarTy::Int(integer))
-            }
-            BodyType::Float(float) if float.is_supported() => Ok(ScalarTy::Float),
-            // Bytes realize as unsigned 8-bit cells.
-            BodyType::Byte => Ok(ScalarTy::Byte),
-            // Exact sequences are canonical cells; bounded views are packed
-            // descriptors riding one 64-bit cell.
-            BodyType::Sequence {
-                bound: mncs_model::SequenceBound::Exact(_),
-                ..
-            } => Ok(ScalarTy::Cell),
-            BodyType::Sequence {
-                bound: mncs_model::SequenceBound::UpTo(_),
-                ..
-            } => Ok(ScalarTy::View),
-            BodyType::Vector { .. } => Ok(ScalarTy::Cell),
-            BodyType::Mask { lanes } => Ok(ScalarTy::Mask(lanes)),
-            _ => Err(format!("unsupported SSA type {name}")),
-        },
+        BodyType::Integer(integer) if matches!(integer.bits, 8 | 16 | 32 | 64) => {
+            Ok(ScalarTy::Int(*integer))
+        }
+        BodyType::Float(float) if float.is_supported() => Ok(ScalarTy::Float),
+        BodyType::Bool => Ok(ScalarTy::Bool),
+        // Bytes realize as unsigned 8-bit cells.
+        BodyType::Byte => Ok(ScalarTy::Byte),
+        // Exact sequences are canonical cells; bounded views are packed
+        // descriptors riding one 64-bit cell.
+        BodyType::Sequence {
+            bound: mncs_model::SequenceBound::Exact(_),
+            ..
+        } => Ok(ScalarTy::Cell),
+        BodyType::Sequence {
+            bound: mncs_model::SequenceBound::UpTo(_),
+            ..
+        } => Ok(ScalarTy::View),
+        BodyType::Vector { .. } => Ok(ScalarTy::Cell),
+        BodyType::Mask { lanes } => Ok(ScalarTy::Mask(*lanes)),
+        // Widths outside the admitted scalar set, symbolic generic bounds,
+        // unresolved names, and unspecialized generic parameters fail closed
+        // here; the SSA boundary check reports them with codes first.
+        other => Err(format!("unsupported SSA type {}", other.semantic_name())),
     }
 }
 
@@ -1700,23 +1704,6 @@ pub fn llvm_type(ty: ScalarTy) -> String {
     }
 }
 
-/// Map a semantic body type into the IR view used by scalar lowering.
-/// Nominal types keep their structural variants; scalars, bytes, and
-/// bounded sequences travel as canonical semantic names.
-fn ir_type_of(ty: &mncs_model::BodyType) -> IrType {
-    match ty {
-        mncs_model::BodyType::Finite { identity, name } => IrType::Finite {
-            identity: identity.clone(),
-            name: name.clone(),
-        },
-        mncs_model::BodyType::Record { identity, name } => IrType::Record {
-            identity: identity.clone(),
-            name: name.clone(),
-        },
-        other => IrType::Named(other.semantic_name()),
-    }
-}
-
 /// Canonical slot width for a sequence element inside an exact cell.
 ///
 /// Every exact-sequence element occupies one 8-byte canonical slot. 64-bit
@@ -1736,11 +1723,11 @@ pub fn slot_width_of(ty: ScalarTy) -> SlotWidth {
 #[cfg(test)]
 mod tests {
     use super::{scalar_ty_in, CompositeLayout};
-    use mncs_model::{IrType, SemanticId};
+    use mncs_model::{BodyType, SemanticId};
 
     #[test]
     fn record_values_without_a_declared_layout_fail_closed() {
-        let record = IrType::Record {
+        let record = BodyType::Record {
             identity: SemanticId("mncs:0.2:record-type:m::R".to_owned()),
             name: "R".to_owned(),
         };

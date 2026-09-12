@@ -1241,12 +1241,18 @@ pub(crate) fn backend_output_value(
 ) -> Result<ExecutionValue, String> {
     match contract {
         BackendValueContract::Scalar { semantic_type } => {
-            match (BodyType::from_semantic_name(semantic_type), value) {
+            match (semantic_type.get(), value) {
                 // Typed realizations return booleans directly.
+                (BodyType::Bool, observed @ ExecutionValue::Boolean { .. }) => Ok(observed),
                 (BodyType::Named(name), observed @ ExecutionValue::Boolean { .. })
                     if name == "bool" =>
                 {
                     Ok(observed)
+                }
+                (BodyType::Bool, ExecutionValue::Integer { value, .. })
+                    if value == 0 || value == 1 =>
+                {
+                    Ok(ExecutionValue::Boolean { value: value == 1 })
                 }
                 (BodyType::Named(name), ExecutionValue::Integer { value, .. })
                     if name == "bool" && (value == 0 || value == 1) =>
@@ -1254,8 +1260,8 @@ pub(crate) fn backend_output_value(
                     Ok(ExecutionValue::Boolean { value: value == 1 })
                 }
                 (BodyType::Integer(expected), ExecutionValue::Integer { value, .. }) => {
-                    let value = reinterpret_backend_value(value, expected);
-                    if !support::integer_fits(value, expected) {
+                    let value = reinterpret_backend_value(value, *expected);
+                    if !support::integer_fits(value, *expected) {
                         return Err(
                             "backend returned a scalar outside the language-owned integer type"
                                 .to_owned(),
@@ -1263,7 +1269,7 @@ pub(crate) fn backend_output_value(
                     }
                     Ok(ExecutionValue::Integer {
                         value,
-                        ty: expected,
+                        ty: *expected,
                     })
                 }
                 // Float results cross the native boundary as bit-carried
@@ -1277,7 +1283,10 @@ pub(crate) fn backend_output_value(
                     if !f64::from_bits(bits).is_finite() {
                         return Err("backend returned a non-finite float result".to_owned());
                     }
-                    Ok(ExecutionValue::Float { bits, ty: expected })
+                    Ok(ExecutionValue::Float {
+                        bits,
+                        ty: *expected,
+                    })
                 }
                 // Backends with native binary64 realizations (WASM MVP,
                 // Cranelift) return the float value itself instead of a
@@ -1289,7 +1298,10 @@ pub(crate) fn backend_output_value(
                     if !f64::from_bits(bits).is_finite() {
                         return Err("backend returned a non-finite float result".to_owned());
                     }
-                    Ok(ExecutionValue::Float { bits, ty: expected })
+                    Ok(ExecutionValue::Float {
+                        bits,
+                        ty: *expected,
+                    })
                 }
                 // Byte results normalize through the unsigned byte domain.
                 (BodyType::Byte, ExecutionValue::Integer { value, .. })
@@ -1389,15 +1401,19 @@ fn marshal_ty(
     use crate::wasm::{BoxedFiniteTy, FiniteVariantTy, MarshalTy, RecordTy};
     match contract {
         BackendValueContract::Scalar { semantic_type } => {
-            match BodyType::from_semantic_name(semantic_type) {
+            match semantic_type.get() {
+                BodyType::Bool => MarshalTy::Bool,
                 BodyType::Named(name) if name == "bool" => MarshalTy::Bool,
-                BodyType::Integer(ty) => MarshalTy::Int(ty),
-                BodyType::Float(ty) if ty.is_supported() => MarshalTy::Float(ty),
+                BodyType::Integer(ty) => MarshalTy::Int(*ty),
+                BodyType::Float(ty) if ty.is_supported() => MarshalTy::Float(*ty),
                 // Bytes marshal as unsigned 8-bit scalar cells.
                 BodyType::Byte => MarshalTy::Int(IntegerType {
                     bits: 8,
                     signed: false,
                 }),
+                // Defensive default (parity with the old spelling fallback):
+                // contracts reaching marshal generation passed validation,
+                // so an untyped `Named` here cannot denote a wider cell.
                 _ => MarshalTy::Int(IntegerType {
                     bits: 64,
                     signed: true,
@@ -1417,12 +1433,13 @@ fn marshal_ty(
             capacity: *capacity,
         },
         BackendValueContract::Vector { element, lanes, .. } => {
-            let BodyType::Integer(integer) = BodyType::from_semantic_name(element) else {
+            let BodyType::Integer(integer) = element.get() else {
                 return MarshalTy::Int(IntegerType {
                     bits: 64,
                     signed: true,
                 });
             };
+            let integer = *integer;
             MarshalTy::Vector {
                 element: integer,
                 lanes: *lanes,
@@ -1484,21 +1501,48 @@ fn marshal_ty(
     }
 }
 
+/// Marshal one contract-carried element/field type. Nominal types resolve
+/// through the artifact's composite map by identity (never by a bare
+/// spelling); structural types map structurally. The input is the resolved
+/// semantic type — no spelling is parsed here.
 fn named_marshal(
-    semantic_type: &str,
+    declared: &BodyType,
     composites: &BTreeMap<String, BackendValueContract>,
 ) -> crate::wasm::MarshalTy {
-    if let Some(composite) = composites.get(semantic_type) {
-        return marshal_ty(composite, composites);
+    match declared {
+        BodyType::Finite { identity, .. } | BodyType::Record { identity, .. } => {
+            if let Some(composite) =
+                mncs_model::BackendValueContract::find_nominal_contract(composites, identity)
+            {
+                return marshal_ty(composite, composites);
+            }
+        }
+        // Legacy spelling (only reachable from unnormalized pre-0.5
+        // artifacts): the single resolution authority, so a shared short
+        // name refuses instead of inheriting whichever entry won the slot.
+        BodyType::Named(spelling) => {
+            if let mncs_model::NominalResolution::Resolved(
+                BodyType::Finite { identity, .. } | BodyType::Record { identity, .. },
+            ) = mncs_model::BackendValueContract::resolve_nominal_spelling(spelling, composites)
+            {
+                if let Some(composite) =
+                    mncs_model::BackendValueContract::find_nominal_contract(composites, &identity)
+                {
+                    return marshal_ty(composite, composites);
+                }
+            }
+        }
+        _ => {}
     }
-    match BodyType::from_semantic_name(semantic_type) {
+    match declared {
+        BodyType::Bool => crate::wasm::MarshalTy::Bool,
         BodyType::Named(name) if name == "bool" => crate::wasm::MarshalTy::Bool,
-        BodyType::Integer(ty) => crate::wasm::MarshalTy::Int(ty),
+        BodyType::Integer(ty) => crate::wasm::MarshalTy::Int(*ty),
         // Binary64 fields marshal bit-carried through 8-byte slots; without
         // this arm they collapsed to Int(64) and every float-carrying
         // composite argument was rejected at the boundary
         // (ENG-PRESSURE-0002 WASM record-argument divergence).
-        BodyType::Float(ty) if ty.is_supported() => crate::wasm::MarshalTy::Float(ty),
+        BodyType::Float(ty) if ty.is_supported() => crate::wasm::MarshalTy::Float(*ty),
         BodyType::Byte => crate::wasm::MarshalTy::Int(IntegerType {
             bits: 8,
             signed: false,
@@ -1507,16 +1551,18 @@ fn named_marshal(
             element,
             bound: mncs_model::SequenceBound::Exact(length),
         } => crate::wasm::MarshalTy::Sequence {
-            element: Box::new(named_marshal(&element.semantic_name(), composites)),
-            length,
+            element: Box::new(named_marshal(element, composites)),
+            length: *length,
         },
         BodyType::Sequence {
             element,
             bound: mncs_model::SequenceBound::UpTo(capacity),
         } => crate::wasm::MarshalTy::View {
-            element: Box::new(named_marshal(&element.semantic_name(), composites)),
-            capacity,
+            element: Box::new(named_marshal(element, composites)),
+            capacity: *capacity,
         },
+        // Defensive default (parity with the old spelling fallback); see
+        // `marshal_ty`.
         _ => crate::wasm::MarshalTy::Int(IntegerType {
             bits: 64,
             signed: true,

@@ -426,6 +426,38 @@ fn encoding_sequence_results_agree_per_backend() {
     }
 }
 
+/// INGEST-P-003: the reusable UTF-8 substrate (`mncs.std.text_utf8.v1`)
+/// validates bounded views, steps one scalar with a progress guarantee,
+/// and folds the documented ASCII-plus-Latin-1 pairs — identically on
+/// every executable backend. The lead/continuation table is imported from
+/// `mncs.std.json_cursor.v1`, never duplicated.
+#[test]
+fn text_utf8_substrate_agrees_per_backend() {
+    let source = library("std/text_utf8.mncs");
+    let corpus = example("execution/text-utf8-corpus.json");
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_library_experiment(&source, backend, &corpus);
+        assert_value_agreement(backend, code, &result, &stderr, 17);
+    }
+}
+
+/// INGEST-P-004: deterministic finite maps (`mncs.std.text_map.v1`) are
+/// total bounded lookups with an explicit miss fallback — hits at every
+/// table position, misses, length mismatches, duplicate-last-wins, empty
+/// keys, and oversize lengths agree on every executable backend. The
+/// previously orphaned `text-map-corpus.json` is wired here; the remaining
+/// ingest friction is zero-copy composition (P-002) and distribution
+/// (P-008), not another map feature.
+#[test]
+fn text_map_contracts_agree_per_backend() {
+    let source = library("std/text_map.mncs");
+    let corpus = example("execution/text-map-corpus.json");
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_library_experiment(&source, backend, &corpus);
+        assert_value_agreement(backend, code, &result, &stderr, 14);
+    }
+}
+
 /// Vector-typed library signatures cross as canonical cells, including a
 /// vector result reconstructed from the arena image.
 #[test]

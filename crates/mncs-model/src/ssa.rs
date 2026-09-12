@@ -12,16 +12,19 @@ use thiserror::Error;
 
 use crate::canonical::sha256_hex;
 use crate::identity::{function_id, parameter_id};
-use crate::ir::{
-    CapabilityUse, HighLevelIr, IrOperationKind, IrType, MachineIntentLinks, PathKind,
-};
+use crate::ir::{CapabilityUse, HighLevelIr, IrOperationKind, MachineIntentLinks, PathKind};
 use crate::provenance::{TargetIdentity, TransformationRecord};
 use crate::{
     ArithmeticIntent, BodyOperationKind, BodyTerminator, EvidenceFreshness, FailureMode, Function,
     ObligationRecord, ObligationStatus, Program, SemanticId, VerifierResult,
 };
 
-pub const SSA_SCHEMA_VERSION: &str = "0.4";
+pub const SSA_SCHEMA_VERSION: &str = "0.5";
+/// The previous SSA schema version. Artifacts carrying `"0.4"` store
+/// non-nominal types as `IrType::Named` spellings; they deserialize via
+/// the `BodyType` tag aliases and must pass through
+/// [`SsaModule::normalize_legacy_types`] before validation or execution.
+pub const SSA_SCHEMA_VERSION_PRE_TYPED: &str = "0.4";
 
 fn trace_timing(stage: &str, started: Instant) {
     crate::record_stage(stage, started.elapsed());
@@ -38,7 +41,7 @@ fn trace_timing(stage: &str, started: Instant) {
 pub struct SsaValue {
     pub identity: SemanticId,
     pub semantic_identity: Option<SemanticId>,
-    pub ty: IrType,
+    pub ty: crate::BodyType,
     pub producer: Option<SemanticId>,
     pub block: SemanticId,
 }
@@ -47,7 +50,7 @@ pub struct SsaValue {
 pub enum SsaInstructionKind {
     Constant {
         value: i128,
-        ty: IrType,
+        ty: crate::BodyType,
     },
     Integer {
         operator: String,
@@ -318,7 +321,7 @@ pub struct SsaBoundedIteration {
     /// instead of relying only on the profile ceiling in `bound`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sequence_bound: Option<crate::SequenceBound>,
-    pub state_type: IrType,
+    pub state_type: crate::BodyType,
     pub preheader: SemanticId,
     pub header: SemanticId,
     pub body_entry: SemanticId,
@@ -351,7 +354,7 @@ pub struct SsaTraceMap {
 pub struct SsaRecordType {
     pub identity: SemanticId,
     pub name: String,
-    pub fields: Vec<(String, IrType)>,
+    pub fields: Vec<(String, crate::BodyType)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -420,6 +423,64 @@ impl SsaModule {
     pub fn identity_is_valid(&self) -> bool {
         !self.hir_fingerprint.is_empty()
             && self.identity == ssa_module_identity(&self.semantic_identity, &self.hir_fingerprint)
+    }
+
+    /// Normalize every type carried by this SSA module from its legacy
+    /// (pre-0.5) `IrType::Named` spelling to the resolved semantic type:
+    /// values, constants, iteration state, iteration domains, record-field
+    /// tables, and generic specialization arguments. Structural spellings
+    /// normalize deterministically; nominal short names that cannot resolve
+    /// stay `Named` so the lowering-boundary check rejects them explicitly.
+    /// Idempotent: current typed modules are unchanged except for the schema
+    /// upgrade stamp. [`SsaExecutionSession::from_shared`] applies this to
+    /// 0.4 modules automatically; direct [`SsaModule::validate`] callers must
+    /// normalize first (0.4 fails `SSA000` explicitly).
+    pub fn normalize_legacy_types(&mut self) {
+        fn normalize_value(value: &mut SsaValue) {
+            value.ty.normalize_legacy_ir_named();
+        }
+        for record in &mut self.record_types {
+            for (_, field_type) in &mut record.fields {
+                field_type.normalize_legacy_ir_named();
+            }
+        }
+        for function in &mut self.functions {
+            for value in function
+                .inputs
+                .iter_mut()
+                .chain(function.outputs.iter_mut())
+            {
+                normalize_value(value);
+            }
+            for iteration in &mut function.bounded_iterations {
+                iteration.state_type.normalize_legacy_ir_named();
+                if let crate::IterationDomain::OverSequence { element_type } = &mut iteration.domain
+                {
+                    element_type.normalize_legacy_ir_named();
+                }
+            }
+            for block in &mut function.blocks {
+                for value in block.parameters.iter_mut() {
+                    normalize_value(value);
+                }
+                for instruction in &mut block.instructions {
+                    for value in &mut instruction.outputs {
+                        normalize_value(value);
+                    }
+                    if let SsaInstructionKind::Constant { ty, .. } = &mut instruction.kind {
+                        ty.normalize_legacy_ir_named();
+                    }
+                }
+            }
+        }
+        for specialization in &mut self.generic_specializations {
+            for arg in &mut specialization.args {
+                if let crate::GenericArg::Type { ty } = arg {
+                    ty.normalize_legacy_ir_named();
+                }
+            }
+        }
+        self.schema_version = SSA_SCHEMA_VERSION.to_owned();
     }
 
     pub fn validate(&self) -> SsaValidationReport {
@@ -513,7 +574,7 @@ impl SsaModule {
                 .map(|param| param.name.clone())
                 .collect::<BTreeSet<_>>();
             for (value_index, value) in function.inputs.iter().enumerate() {
-                check_ir_type(
+                check_body_type(
                     &value.ty,
                     &generic_names,
                     &format!("{path}.inputs[{value_index}].type"),
@@ -521,7 +582,7 @@ impl SsaModule {
                 );
             }
             for (value_index, value) in function.outputs.iter().enumerate() {
-                check_ir_type(
+                check_body_type(
                     &value.ty,
                     &generic_names,
                     &format!("{path}.outputs[{value_index}].type"),
@@ -529,7 +590,7 @@ impl SsaModule {
                 );
             }
             for (iteration_index, iteration) in function.bounded_iterations.iter().enumerate() {
-                check_ir_type(
+                check_body_type(
                     &iteration.state_type,
                     &generic_names,
                     &format!("{path}.bounded_iterations[{iteration_index}].state_type"),
@@ -554,7 +615,7 @@ impl SsaModule {
             for (block_index, block) in function.blocks.iter().enumerate() {
                 let block_path = format!("{path}.blocks[{block_index}]");
                 for (value_index, value) in block.parameters.iter().enumerate() {
-                    check_ir_type(
+                    check_body_type(
                         &value.ty,
                         &generic_names,
                         &format!("{block_path}.parameters[{value_index}].type"),
@@ -569,7 +630,7 @@ impl SsaModule {
                         &mut errors,
                     );
                     for (value_index, value) in instruction.outputs.iter().enumerate() {
-                        check_ir_type(
+                        check_body_type(
                             &value.ty,
                             &generic_names,
                             &format!(
@@ -772,23 +833,6 @@ impl SsaModule {
     }
 }
 
-fn check_ir_type(
-    ty: &IrType,
-    generic_names: &BTreeSet<String>,
-    path: &str,
-    errors: &mut Vec<SsaDiagnostic>,
-) {
-    if let IrType::Named(name) = ty {
-        if generic_names.contains(name) {
-            errors.push(diagnostic(
-                "SSA045",
-                path,
-                "unresolved generic type reached the backend lowering boundary",
-            ));
-        }
-    }
-}
-
 fn check_bound(bound: &crate::SequenceBound, path: &str, errors: &mut Vec<SsaDiagnostic>) {
     if bound.is_generic() {
         errors.push(diagnostic(
@@ -809,12 +853,20 @@ fn check_body_type(
         crate::BodyType::GenericParam { .. } => errors.push(diagnostic(
             "SSA045",
             path,
-            "unresolved generic type reached the backend lowering boundary",
+            "unresolved type reached the backend lowering boundary",
         )),
         crate::BodyType::Named(name) if generic_names.contains(name) => errors.push(diagnostic(
             "SSA045",
             path,
-            "unresolved generic type reached the backend lowering boundary",
+            "unresolved type reached the backend lowering boundary",
+        )),
+        // Any other unresolved name (including the `"invalid"` error poison)
+        // must not reach lowering either. Legacy `Named("bool")` is the only
+        // spelling still accepted here for pre-0.3 artifacts.
+        crate::BodyType::Named(name) if name != "bool" => errors.push(diagnostic(
+            "SSA045",
+            path,
+            "unresolved type reached the backend lowering boundary",
         )),
         crate::BodyType::Sequence { element, bound } => {
             check_body_type(element, generic_names, path, errors);
@@ -834,7 +886,7 @@ fn check_instruction_types(
     errors: &mut Vec<SsaDiagnostic>,
 ) {
     match kind {
-        SsaInstructionKind::Constant { ty, .. } => check_ir_type(ty, generic_names, path, errors),
+        SsaInstructionKind::Constant { ty, .. } => check_body_type(ty, generic_names, path, errors),
         SsaInstructionKind::Select { operand_type }
         | SsaInstructionKind::SequenceReplace {
             element_type: operand_type,
@@ -1024,46 +1076,13 @@ impl Program {
                     .fields
                     .iter()
                     .map(|field| {
-                        let field_ir_type = if let Some(finite) = self
-                            .finite_types
-                            .iter()
-                            .find(|item| item.identity.0 == field.field_type)
-                        {
-                            IrType::Finite {
-                                identity: finite.identity.clone(),
-                                name: finite.name.clone(),
-                            }
-                        } else if let Some(nested) = self
-                            .record_types
-                            .iter()
-                            .find(|item| item.identity.0 == field.field_type)
-                        {
-                            IrType::Record {
-                                identity: nested.identity.clone(),
-                                name: nested.name.clone(),
-                            }
-                        } else if let Some(finite) = self
-                            .finite_types
-                            .iter()
-                            .find(|item| item.name == field.field_type)
-                        {
-                            IrType::Finite {
-                                identity: finite.identity.clone(),
-                                name: field.field_type.clone(),
-                            }
-                        } else if let Some(nested) = self
-                            .record_types
-                            .iter()
-                            .find(|item| item.name == field.field_type)
-                        {
-                            IrType::Record {
-                                identity: nested.identity.clone(),
-                                name: field.field_type.clone(),
-                            }
-                        } else {
-                            IrType::Named(field.field_type.clone())
-                        };
-                        (field.name.clone(), field_ir_type)
+                        // Single authority with every other syntax-to-type
+                        // boundary: program-aware semantic resolution. Field
+                        // spellings that name nothing stay `Named` for the
+                        // lowering-boundary check to reject explicitly.
+                        let field_type = crate::TypeSyntax::from(field.field_type.as_str())
+                            .resolve_against(self);
+                        (field.name.clone(), field_type)
                     })
                     .collect(),
             })
@@ -1107,7 +1126,7 @@ fn declaration_function(
         .map(|(index, value)| SsaValue {
             identity: ssa_identity("input", semantic_function, index),
             semantic_identity: None,
-            ty: ir_type_from_semantic(program, &value.value_type),
+            ty: crate::TypeSyntax::from(value.value_type.as_str()).resolve_against(program),
             producer: None,
             block: identity.clone(),
         })
@@ -1153,7 +1172,7 @@ fn lower_body(
             SsaValue {
                 identity: identity.clone(),
                 semantic_identity: Some(identity),
-                ty: body_type(&parameter.ty),
+                ty: parameter.ty.clone(),
                 producer: None,
                 block: function_identity.clone(),
             }
@@ -1193,7 +1212,7 @@ fn lower_body(
                 SsaValue {
                     identity: identity.clone(),
                     semantic_identity: Some(identity),
-                    ty: body_type(&parameter.ty),
+                    ty: parameter.ty.clone(),
                     producer: None,
                     block: block_identity.clone(),
                 }
@@ -1229,7 +1248,7 @@ fn lower_body(
                     SsaValue {
                         identity: identity.clone(),
                         semantic_identity: Some(identity),
-                        ty: body_type(&result.ty),
+                        ty: result.ty.clone(),
                         producer: Some(instruction_identity.clone()),
                         block: block_identity.clone(),
                     }
@@ -1379,7 +1398,7 @@ fn lower_body(
                 sequence_bound: iteration.sequence_bound.clone(),
                 identity,
                 bound: iteration.bound,
-                state_type: body_type(&iteration.state_type),
+                state_type: iteration.state_type.clone(),
                 preheader: block_identity(&iteration.preheader),
                 header: block_identity(&iteration.header),
                 body_entry: block_identity(&iteration.body_entry),
@@ -1589,7 +1608,11 @@ fn validate_function(
         if !header.is_some_and(|block| {
             block.parameters.len() == 2
                 && block.parameters[0].ty == iteration.state_type
-                && block.parameters[1].ty == IrType::Named("u64".to_owned())
+                && block.parameters[1].ty
+                    == crate::BodyType::Integer(crate::IntegerType {
+                        bits: 64,
+                        signed: false,
+                    })
         }) {
             errors.push(diagnostic(
                 "SSA021",
@@ -1637,7 +1660,7 @@ fn validate_function(
             ));
         }
     }
-    let mut definitions = BTreeMap::<SemanticId, (Option<SemanticId>, IrType)>::new();
+    let mut definitions = BTreeMap::<SemanticId, (Option<SemanticId>, crate::BodyType)>::new();
     for value in &function.inputs {
         if definitions
             .insert(value.identity.clone(), (None, value.ty.clone()))
@@ -1776,7 +1799,7 @@ fn validate_function(
 fn validate_terminator(
     function: &SsaFunction,
     block: &SsaBlock,
-    available: &BTreeMap<SemanticId, IrType>,
+    available: &BTreeMap<SemanticId, crate::BodyType>,
     block_ids: &BTreeSet<SemanticId>,
     path: &str,
     errors: &mut Vec<SsaDiagnostic>,
@@ -2182,7 +2205,7 @@ fn ssa_kind_from_body(kind: &BodyOperationKind) -> SsaInstructionKind {
     match kind {
         BodyOperationKind::Constant { value, ty } => SsaInstructionKind::Constant {
             value: *value,
-            ty: body_type(ty),
+            ty: ty.clone(),
         },
         BodyOperationKind::Integer {
             operator,
@@ -2446,54 +2469,6 @@ fn body_failure(kind: &BodyOperationKind) -> Option<FailureMode> {
         } => Some(failure.clone()),
         _ => None,
     }
-}
-
-fn body_type(ty: &crate::BodyType) -> IrType {
-    match ty {
-        crate::BodyType::Finite { identity, name } => IrType::Finite {
-            identity: identity.clone(),
-            name: name.clone(),
-        },
-        crate::BodyType::Record { identity, name } => IrType::Record {
-            identity: identity.clone(),
-            name: name.clone(),
-        },
-        _ => IrType::Named(ty.semantic_name()),
-    }
-}
-
-fn ir_type_from_semantic(program: &Program, name: &str) -> IrType {
-    if let Some(finite_type) = program
-        .finite_types
-        .iter()
-        .find(|finite_type| finite_type.identity.0 == name)
-    {
-        return IrType::Finite {
-            identity: finite_type.identity.clone(),
-            name: finite_type.name.clone(),
-        };
-    }
-    if let Some(record_type) = program
-        .record_types
-        .iter()
-        .find(|record_type| record_type.identity.0 == name)
-    {
-        return IrType::Record {
-            identity: record_type.identity.clone(),
-            name: record_type.name.clone(),
-        };
-    }
-    program
-        .finite_types
-        .iter()
-        .find(|finite_type| finite_type.name == name)
-        .map_or_else(
-            || IrType::Named(name.to_owned()),
-            |finite_type| IrType::Finite {
-                identity: finite_type.identity.clone(),
-                name: finite_type.name.clone(),
-            },
-        )
 }
 
 fn ssa_identity(kind: &str, subject: &SemanticId, ordinal: usize) -> SemanticId {

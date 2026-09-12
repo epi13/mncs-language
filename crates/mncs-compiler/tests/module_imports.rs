@@ -1294,6 +1294,181 @@ fn imported_nominal_types_resolve_in_signatures_projection_and_match() {
     );
 }
 
+fn elaborate_full(
+    resolver: &MapResolver,
+    text: &str,
+) -> Result<mncs_model::Program, Vec<mncs_syntax::SourceDiagnostic>> {
+    let envelope = resolver.envelope("root", text.to_owned());
+    let parsed = parse(&envelope);
+    assert!(
+        parsed.is_valid(),
+        "fixture parses: {:?}",
+        parsed.diagnostics
+    );
+    let ast = parsed.ast.expect("fixture parses");
+    elaborate_program_with_resolver(&ast, resolver).0
+}
+
+/// INGEST-P-007: a leaf parse failure (the ingest `over`-field shape)
+/// must surface through the root compile with the leaf diagnostic
+/// preserved — module identity, original code, message, and leaf-relative
+/// span — not reduced to bare codes.
+#[test]
+fn imported_parse_failure_preserves_leaf_diagnostics() {
+    let resolver = MapResolver::default().with(
+        "mncs.ingest.parse",
+        "mncs 0.10;\nmodule mncs.ingest.parse;\nrecord Transfer { over: u64 }\nfn get(t: Transfer) -> (result: u64) {\n    return t.over;\n}\n",
+    );
+    let errors = elaborate_full(
+        &resolver,
+        "mncs 0.10;\nmodule app.root;\nuse mncs.ingest.parse;\nfn entry(t: u64) -> (r: u64) { return t; }\n",
+    )
+    .unwrap_err();
+    assert_eq!(
+        errors.len(),
+        1,
+        "one import-edge diagnostic, got {errors:?}"
+    );
+    let outer = &errors[0];
+    assert_eq!(
+        outer.code, "MNE172",
+        "outer context is preserved, got {outer:?}"
+    );
+    assert!(
+        outer.message.contains("mncs.ingest.parse") && outer.message.contains("failed to parse"),
+        "outer names the module and the failure, got {}",
+        outer.message
+    );
+    assert_eq!(
+        (outer.span.line, outer.span.column),
+        (3, 5),
+        "outer span is the root use-site, got {:?}",
+        outer.span
+    );
+    assert!(
+        !outer.related.is_empty(),
+        "leaf diagnostics must travel with the wrapper, got {outer:?}"
+    );
+    assert!(
+        outer
+            .related
+            .iter()
+            .any(|diagnostic| diagnostic.code == "MNP127"),
+        "leaf MNP127 is preserved, got {:?}",
+        outer
+            .related
+            .iter()
+            .map(|diagnostic| &diagnostic.code)
+            .collect::<Vec<_>>()
+    );
+    for diagnostic in &outer.related {
+        assert!(
+            !diagnostic.message.is_empty(),
+            "leaf message is preserved, got {diagnostic:?}"
+        );
+        assert!(
+            diagnostic.span.line >= 1,
+            "leaf span is preserved, got {diagnostic:?}"
+        );
+    }
+}
+
+/// INGEST-P-007: the same preservation holds for leaf elaboration
+/// failures, not just parse failures.
+#[test]
+fn imported_elaboration_failure_preserves_leaf_diagnostics() {
+    let resolver = MapResolver::default().with(
+        "lib.broken",
+        "mncs 0.6;\nmodule lib.broken;\nfn get(t: u64) -> (result: u64) {\n    return missing;\n}\n",
+    );
+    let errors = elaborate_full(
+        &resolver,
+        "mncs 0.6;\nmodule app.root;\nuse lib.broken;\nfn entry(t: u64) -> (r: u64) { return t; }\n",
+    )
+    .unwrap_err();
+    assert_eq!(
+        errors.len(),
+        1,
+        "one import-edge diagnostic, got {errors:?}"
+    );
+    let outer = &errors[0];
+    assert_eq!(
+        outer.code, "MNE172",
+        "outer context is preserved, got {outer:?}"
+    );
+    assert!(
+        outer.message.contains("lib.broken") && outer.message.contains("failed to elaborate"),
+        "outer names the module and the failure, got {}",
+        outer.message
+    );
+    assert!(
+        !outer.related.is_empty(),
+        "leaf diagnostics must travel with the wrapper, got {outer:?}"
+    );
+    assert!(
+        outer
+            .related
+            .iter()
+            .all(|diagnostic| diagnostic.code.starts_with("MNE")),
+        "leaf elaboration codes are preserved, got {:?}",
+        outer
+            .related
+            .iter()
+            .map(|diagnostic| &diagnostic.code)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// INGEST-P-007: a failure two hops down records every import edge —
+/// root -> mid -> leaf — so the consumer can trace the causal path
+/// without recompiling each leaf as its own root.
+#[test]
+fn nested_import_failure_records_every_edge() {
+    let resolver = MapResolver::default()
+        .with(
+            "mid.level",
+            "mncs 0.10;\nmodule mid.level;\nuse mncs.ingest.parse;\nfn mid(t: u64) -> (r: u64) { return t; }\n",
+        )
+        .with(
+            "mncs.ingest.parse",
+            "mncs 0.10;\nmodule mncs.ingest.parse;\nrecord Transfer { over: u64 }\nfn get(t: Transfer) -> (result: u64) {\n    return t.over;\n}\n",
+        );
+    let errors = elaborate_full(
+        &resolver,
+        "mncs 0.10;\nmodule app.root;\nuse mid.level;\nfn entry(t: u64) -> (r: u64) { return t; }\n",
+    )
+    .unwrap_err();
+    assert_eq!(
+        errors.len(),
+        1,
+        "one import-edge diagnostic, got {errors:?}"
+    );
+    let outer = &errors[0];
+    assert_eq!(outer.code, "MNE172", "got {outer:?}");
+    assert!(
+        outer.message.contains("mid.level") && outer.message.contains("failed to load"),
+        "outer names the direct edge, got {}",
+        outer.message
+    );
+    assert_eq!(outer.related.len(), 1, "one mid-level cause, got {outer:?}");
+    let mid = &outer.related[0];
+    assert_eq!(
+        mid.code, "MNE172",
+        "mid edge keeps its wrapper, got {mid:?}"
+    );
+    assert!(
+        mid.message.contains("mncs.ingest.parse"),
+        "mid names the leaf edge, got {}",
+        mid.message
+    );
+    assert!(
+        mid.related
+            .iter()
+            .any(|diagnostic| diagnostic.code == "MNP127"),
+        "leaf parse code survives both hops, got {mid:?}"
+    );
+}
+
 #[test]
 fn projection_from_a_non_record_value_is_rejected() {
     let resolver = MapResolver::default();

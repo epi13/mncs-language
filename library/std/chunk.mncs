@@ -1,6 +1,13 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.std.chunk — bounded chunk cursors with cross-chunk span identities.
+//
+// Profile note: this module declares 0.13 (raised from 0.10 for
+// INGEST-P-011). Generic specializations are checked against the defining
+// module's ceiling, so the capacity-generic scans can only serve 256- and
+// ~392-byte stages when the module itself admits bounds past 64.
+// Narrow-profile roots are unaffected: each module is admitted under its
+// own profile, and the 64-byte entry points keep their exact shapes.
 //
 // Large inputs arrive as a sequence of ≤64-byte views (one filesystem
 // chunk, one grant, one view per call). This module owns the cursor and
@@ -26,10 +33,11 @@ record Span { chunk: u64, start: u64, length: u64 }
 // `offset` the position inside it.
 record Cursor { chunk: u64, offset: u64 }
 
-// Index of the first `\n` at or after `from` in the view's live window,
-// or -1 when the window holds no newline. Total: overlong `from` simply
-// matches nothing.
-fn find_newline(view: [byte; up_to 64], view_length: u64, from: u64) -> (result: i64) {
+// Capacity-generic newline scan (INGEST-P-011): one implementation serves
+// every stage width (64-, 256-, ~392-byte views). `N` is the static view
+// capacity; the live window is still `min(view_length, view.len)` scanned
+// from `from`. Total: overlong `from` simply matches nothing.
+fn find_newline_generic<N: Nat>(view: [byte; up_to N], view_length: u64, from: u64) -> (result: i64) {
     let vlen: u64 = select(view_length <= view.len, view_length, view.len);
     iterate i over view carrying found: i64 = 0 - 1 {
         let live: bool = i < vlen && i >= from;
@@ -39,25 +47,37 @@ fn find_newline(view: [byte; up_to 64], view_length: u64, from: u64) -> (result:
     return found;
 }
 
+// Index of the first `\n` at or after `from` in the view's live window,
+// or -1 when the window holds no newline. The 64-byte historical shape is
+// preserved exactly; it delegates to the generic scan.
+fn find_newline(view: [byte; up_to 64], view_length: u64, from: u64) -> (result: i64) {
+    return find_newline_generic<64>(view, view_length, from);
+}
+
 // Length of the line starting at `from`, excluding the newline: the
 // newline index minus `from`, or the rest of the window when no newline
 // follows. Callers detect an unterminated tail (the line may continue in
 // the next chunk) by comparing `from + length` against the view length.
-fn line_length(view: [byte; up_to 64], view_length: u64, from: u64) -> (result: u64) {
+fn line_length_generic<N: Nat>(view: [byte; up_to N], view_length: u64, from: u64) -> (result: u64) {
     let vlen: u64 = select(view_length <= view.len, view_length, view.len);
     let start: u64 = select(from <= vlen, from, vlen);
-    let end: i64 = find_newline(view, view_length, start);
+    let end: i64 = find_newline_generic<N>(view, view_length, start);
     return select(end == 0 - 1, vlen -% start, (end as u64) -% start);
+}
+
+fn line_length(view: [byte; up_to 64], view_length: u64, from: u64) -> (result: u64) {
+    return line_length_generic<64>(view, view_length, from);
 }
 
 // Advance a cursor past one line: the span of the line content plus the
 // cursor at the next line start (past the newline when one was found).
+// Capacity-generic (INGEST-P-011); the 64-byte `next_line` delegates.
 record LineStep { span: Span, after: Cursor, terminated: bool }
 
-fn next_line(view: [byte; up_to 64], view_length: u64, cursor: Cursor) -> (result: LineStep) {
+fn next_line_generic<N: Nat>(view: [byte; up_to N], view_length: u64, cursor: Cursor) -> (result: LineStep) {
     let vlen: u64 = select(view_length <= view.len, view_length, view.len);
     let start: u64 = select(cursor.offset <= vlen, cursor.offset, vlen);
-    let length: u64 = line_length(view, view_length, start);
+    let length: u64 = line_length_generic<N>(view, view_length, start);
     let end: u64 = start +% length;
     let terminated: bool = end < vlen;
     let after: u64 = select(terminated, end +% 1, end);
@@ -68,6 +88,10 @@ fn next_line(view: [byte; up_to 64], view_length: u64, cursor: Cursor) -> (resul
     };
 }
 
+fn next_line(view: [byte; up_to 64], view_length: u64, cursor: Cursor) -> (result: LineStep) {
+    return next_line_generic<64>(view, view_length, cursor);
+}
+
 // Measure a line that starts in an earlier chunk: `prefix_length` bytes
 // were already observed (the unterminated tail), and this view holds the
 // rest up to its first newline (or the whole view when unterminated).
@@ -75,11 +99,15 @@ fn next_line(view: [byte; up_to 64], view_length: u64, cursor: Cursor) -> (resul
 // chunk terminated it.
 record JoinedLine { total_length: u64, terminated: bool }
 
-fn continue_line(view: [byte; up_to 64], view_length: u64, prefix_length: u64) -> (result: JoinedLine) {
-    let end: i64 = find_newline(view, view_length, 0);
+fn continue_line_generic<N: Nat>(view: [byte; up_to N], view_length: u64, prefix_length: u64) -> (result: JoinedLine) {
+    let end: i64 = find_newline_generic<N>(view, view_length, 0);
     let terminated: bool = logic.bool_not(end == 0 - 1);
     let tail: u64 = select(terminated, end as u64, select(view_length <= view.len, view_length, view.len));
     return JoinedLine { total_length: prefix_length +% tail, terminated: terminated };
+}
+
+fn continue_line(view: [byte; up_to 64], view_length: u64, prefix_length: u64) -> (result: JoinedLine) {
+    return continue_line_generic<64>(view, view_length, prefix_length);
 }
 
 // --- Executable entry points (scalar shapes for backend corpora) ---
@@ -106,3 +134,8 @@ fn candidate_continue_line(view: [byte; up_to 64], view_length: u64, prefix_leng
     let joined: JoinedLine = continue_line(view, view_length, prefix_length);
     return joined.total_length as i64 * 10 + select(joined.terminated, 1, 0);
 }
+
+// NOTE (INGEST-P-011): 256-/392-byte stage entry points live in
+// `examples/source/pressure-wide-stage-scans.mncs`, not here: this module
+// stays width-agnostic while the probe example owns the width-specific
+// cross-backend proof.

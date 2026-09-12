@@ -18,8 +18,8 @@ use crate::identity::{function_id, program_id};
 use crate::{
     execute_with_policy, BodyType, EvidenceReceipt, EvidenceReceiptOutcome, ExecutionCorpus,
     ExecutionFailure, ExecutionResult, ExecutionStatus, ExecutionSubject, ExecutionValue,
-    IntegerType, IrType, Program, SemanticId, SsaBlock, SsaFunction, SsaInstruction,
-    SsaInstructionKind, SsaModule, SsaTerminator, MAX_EXECUTION_BUDGET,
+    IntegerType, Program, SemanticId, SsaBlock, SsaFunction, SsaInstruction, SsaInstructionKind,
+    SsaModule, SsaTerminator, MAX_EXECUTION_BUDGET,
 };
 
 pub const SSA_EXECUTION_RESULT_SCHEMA_VERSION: &str = "0.1";
@@ -236,6 +236,18 @@ impl SsaExecutionSession {
     /// This is used by decoded backend payloads so the payload and session
     /// share one allocation for the validated pair.
     pub fn from_shared(program: Arc<Program>, module: Arc<SsaModule>) -> Result<Self, String> {
+        // Legacy (0.4) modules normalize deterministically on the owned
+        // clone: structural spellings become typed, unresolvable nominals
+        // stay `Named` for validation to reject explicitly. Anything else
+        // fails closed here, never by guessing.
+        let module: Arc<SsaModule> = if module.schema_version == crate::SSA_SCHEMA_VERSION_PRE_TYPED
+        {
+            let mut owned = (*module).clone();
+            owned.normalize_legacy_types();
+            Arc::new(owned)
+        } else {
+            module
+        };
         if module.schema_version != crate::SSA_SCHEMA_VERSION {
             return Err("unsupported SSA schema version".to_owned());
         }
@@ -852,10 +864,7 @@ fn execute_instruction(
                 fields.push((name.clone(), value.clone()));
             }
             fields.sort_by(|left, right| left.0.cmp(&right.0));
-            let name = match &output.ty {
-                IrType::Record { name, .. } | IrType::Named(name) => name.clone(),
-                IrType::Finite { name, .. } => name.clone(),
-            };
+            let name = output.ty.semantic_name();
             values.insert(
                 output.identity.clone(),
                 ExecutionValue::Record {
@@ -929,12 +938,7 @@ fn execute_instruction(
                     ExecutionValue::Integer {
                         value,
                         ty: match &output.ty {
-                            crate::IrType::Named(name) => {
-                                match crate::BodyType::from_semantic_name(name) {
-                                    crate::BodyType::Integer(ty) => ty,
-                                    _ => *operand_type,
-                                }
-                            }
+                            crate::BodyType::Integer(ty) => *ty,
                             _ => *operand_type,
                         },
                     },
@@ -2871,14 +2875,7 @@ fn initialize_inputs(
         owned_arguments.map(|arguments| arguments.into_iter().map(Some).collect::<Vec<_>>());
     let mut values = BTreeMap::new();
     for (index, input) in function.inputs.iter().enumerate() {
-        let Some(ty) = ssa_input_type(program, &input.ty) else {
-            result.fail(
-                ExecutionStatus::Unsupported,
-                Some(input.identity.clone()),
-                "SSA input type is outside the scalar reference subset",
-            );
-            return None;
-        };
+        let ty = ssa_input_type(program, &input.ty);
         if owned_arguments.is_some() {
             let argument = owned_arguments
                 .as_ref()
@@ -3153,9 +3150,8 @@ fn output_sentinel() -> SemanticId {
     SemanticId("mncs:ssa-execution:sentinel".to_owned())
 }
 
-fn constant_value(value: i128, ty: &IrType) -> Option<ExecutionValue> {
-    let ty = body_type(ty)?;
-    match ty {
+fn constant_value(value: i128, ty: &BodyType) -> Option<ExecutionValue> {
+    match ty.clone() {
         BodyType::Integer(integer)
             if integer.bits == 1 && !integer.signed && matches!(value, 0 | 1) =>
         {
@@ -3163,6 +3159,9 @@ fn constant_value(value: i128, ty: &IrType) -> Option<ExecutionValue> {
         }
         BodyType::Integer(integer) if in_range(value, integer) => {
             Some(ExecutionValue::Integer { value, ty: integer })
+        }
+        BodyType::Bool if matches!(value, 0 | 1) => {
+            Some(ExecutionValue::Boolean { value: value == 1 })
         }
         BodyType::Named(name) if name == "bool" && matches!(value, 0 | 1) => {
             Some(ExecutionValue::Boolean { value: value == 1 })
@@ -3173,36 +3172,25 @@ fn constant_value(value: i128, ty: &IrType) -> Option<ExecutionValue> {
     }
 }
 
-/// Resolves an SSA input type against the module's declarations. Sequences
-/// of records keep only their spelling (`[Point; 4]`) in SSA type positions,
-/// so nested composite elements are resolved through the program before any
-/// argument is admitted.
-fn ssa_input_type(program: &Program, ty: &IrType) -> Option<BodyType> {
-    Some(match ty {
-        IrType::Named(name) => BodyType::from_program(program, name),
-        IrType::Finite { identity, name } => BodyType::Finite {
-            identity: identity.clone(),
-            name: name.clone(),
+/// Rehydrates nominal leaves of an SSA input type against the module's
+/// declarations. Current typed SSA already carries identity-bearing nominals;
+/// this only affects legacy (pre-0.5) artifacts whose nominal references
+/// survived normalization as `Named` spellings, resolving them through the
+/// program exactly as declaration-time resolution would. Anything still
+/// unresolvable stays `Named` for value matching to reject explicitly.
+fn ssa_input_type(program: &Program, ty: &BodyType) -> BodyType {
+    match ty {
+        BodyType::Named(name) => BodyType::from_program(program, name),
+        BodyType::Sequence { element, bound } => BodyType::Sequence {
+            element: Box::new(ssa_input_type(program, element)),
+            bound: bound.clone(),
         },
-        IrType::Record { identity, name } => BodyType::Record {
-            identity: identity.clone(),
-            name: name.clone(),
+        BodyType::Vector { element, lanes } => BodyType::Vector {
+            element: Box::new(ssa_input_type(program, element)),
+            lanes: *lanes,
         },
-    })
-}
-
-fn body_type(ty: &IrType) -> Option<BodyType> {
-    Some(match ty {
-        IrType::Named(name) => BodyType::from_semantic_name(name),
-        IrType::Finite { identity, name } => BodyType::Finite {
-            identity: identity.clone(),
-            name: name.clone(),
-        },
-        IrType::Record { identity, name } => BodyType::Record {
-            identity: identity.clone(),
-            name: name.clone(),
-        },
-    })
+        other => other.clone(),
+    }
 }
 
 fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) -> bool {
@@ -3210,6 +3198,7 @@ fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) 
         (ExecutionValue::Integer { value, ty: actual }, BodyType::Integer(expected)) => {
             actual == expected && in_range(*value, *expected)
         }
+        (ExecutionValue::Boolean { .. }, BodyType::Bool) => true,
         (ExecutionValue::Boolean { .. }, BodyType::Named(name)) if name == "bool" => true,
         (ExecutionValue::Boolean { .. }, BodyType::Integer(integer)) => {
             integer.bits == 1 && !integer.signed
@@ -3472,6 +3461,9 @@ fn normalize_value(
                 value: *value,
                 ty: *actual,
             })
+        }
+        (ExecutionValue::Boolean { value }, BodyType::Bool) => {
+            Some(ExecutionValue::Boolean { value: *value })
         }
         (ExecutionValue::Boolean { value }, BodyType::Named(name)) if name == "bool" => {
             Some(ExecutionValue::Boolean { value: *value })

@@ -489,7 +489,7 @@ fn ir_obligations_verifier_and_compare_commands_are_traceable() {
     let ir = binary().args(["ir", &manifest]).output().expect("run IR");
     assert!(ir.status.success());
     let ir_json: Value = serde_json::from_slice(&ir.stdout).expect("IR JSON");
-    assert_eq!(ir_json["schema_version"], "0.4");
+    assert_eq!(ir_json["schema_version"], "0.5");
     assert!(!ir_json["functions"][0]["blocks"]
         .as_array()
         .unwrap()
@@ -597,7 +597,7 @@ fn executable_body_trace_and_verifier_artifact_commands_are_bound() {
         .expect("run body SSA");
     assert!(ssa.status.success());
     let ssa_json: Value = serde_json::from_slice(&ssa.stdout).expect("SSA JSON");
-    assert_eq!(ssa_json["schema_version"], "0.4");
+    assert_eq!(ssa_json["schema_version"], "0.5");
     assert_eq!(ssa_json["functions"].as_array().unwrap().len(), 1);
     assert!(!ssa_json["trace"]["entries"].as_array().unwrap().is_empty());
 

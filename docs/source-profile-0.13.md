@@ -51,6 +51,31 @@ Evidence: `examples/source/pressure-scalar-match.mncs`,
 `examples/execution/pressure-scalar-match-corpus.json`,
 `crates/mncs-cli/tests/pressure_scalar_match.rs`.
 
+## Uniform lazy `match` (INGEST-P-005/P-006)
+
+`match` is uniformly lazy across bool, integer, and finite subjects:
+only the taken arm evaluates. Bool arms previously elaborated both sides
+through `Select`, so a trapping projection in the untaken arm fired
+anyway; they now dispatch through the same branch-chain shape as
+finite/integer arms, with no new operation, obligation, or proof burden
+(the backends already realize branches). No profile change: bool `match`
+was already admitted, and its values are unchanged — only untaken-arm
+evaluation is skipped.
+
+The distinction from strict `select` is now load-bearing and pinned:
+`select(cond, a, b)` evaluates both sides (use it where timing uniformity
+or totality is wanted); `match flag { true => a, false => b }` evaluates
+exactly one side (use it wherever the untaken side may trap). The shared
+guarded-iteration idiom `next acc = match live { true => update, false =>
+acc }` makes dead lanes skip the update expression and keep the carried
+state, and deleting the keep arm is `MNE140` (non-exhaustive match).
+
+Evidence: `examples/source/pressure-guarded-match.mncs`,
+`examples/execution/pressure-guarded-match-corpus.json` (8 cases
+including a taken-trap escape, all five executable backends),
+`crates/mncs-cli/tests/pressure_guarded_match.rs` (plus the MNE140
+deletion cases).
+
 ## Sequential iteration-name reuse (CP-0009)
 
 Iteration identities are unique over their live lexical scope: two

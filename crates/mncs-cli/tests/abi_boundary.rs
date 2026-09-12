@@ -295,6 +295,75 @@ fn view_return_traps_fail_at_runtime_consistently() {
 }
 
 #[test]
+fn view_subslices_agree_per_backend() {
+    // INGEST-P-002: dynamic `view[a..b]` sub-slices are
+    // provenance-relative and fail closed. Valid cases return the
+    // sub-view's head/length; `*_escape` cases trap deterministically on
+    // every executable backend.
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_experiment(
+            &example("source/pressure-view-subslice.mncs"),
+            backend,
+            &example("execution/pressure-view-subslice-corpus.json"),
+        );
+        assert_eq!(
+            code,
+            Some(0),
+            "{backend}: subslice corpus must execute; stderr={stderr}; result={result:#}"
+        );
+        let cases = result["cases"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{backend}: missing cases; {result:#}"));
+        assert_eq!(cases.len(), 12, "{backend}: expected 12 subslice cases");
+        for case in cases {
+            let id = case["case_id"].as_str().unwrap_or("?");
+            if id.ends_with("_escape") {
+                assert_eq!(
+                    case["status"], "runtime_failure",
+                    "{backend} {id}: escaping the source view must fail deterministically; case={case:#}"
+                );
+            } else {
+                assert_eq!(
+                    case["status"], "returned",
+                    "{backend} {id}: status {case:#}"
+                );
+                assert_eq!(
+                    case["expectation_met"], true,
+                    "{backend} {id}: logical value mismatch; returned={:#}",
+                    case["returned"]
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn validated_spellings_cross_as_values() {
+    // INGEST-P-001: the classifier returns WHAT matched — the carved
+    // sub-view plus an MNCS-observed UTF-8 verdict in one value — instead
+    // of a code/span triple. Covers keyword hits, mid-window carves,
+    // unknown words, the [0xC3, 0x28] rejection, non-ASCII identity
+    // ("Zoë" survives byte-exact), and the empty word.
+    run_module_corpus(
+        &example("source/pressure-validated-spelling.mncs"),
+        &example("execution/pressure-validated-spelling-corpus.json"),
+        7,
+    );
+}
+
+#[test]
+fn view_length_carries_without_a_second_parameter() {
+    // INGEST-P-009: a host-called entrypoint taking a single bounded view
+    // observes the actual runtime length (0/256/1000) with no `length`
+    // argument, identically on every executable backend.
+    run_module_corpus(
+        &example("source/pressure-view-length-carries.mncs"),
+        &example("execution/pressure-view-length-carries-corpus.json"),
+        7,
+    );
+}
+
+#[test]
 fn abi_report_carries_the_host_abi_version() {
     // Hosts must not guess the calling contract: `mncs abi` binds every
     // report to spec/host-abi.md via host_abi_version, and exposes the

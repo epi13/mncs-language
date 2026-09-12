@@ -1,0 +1,55 @@
+mncs 0.14;
+
+// INGEST-P-001 regression: the classifier returns WHAT matched, not just
+// THAT it matched. A keyword hit travels as a bounded validated spelling —
+// the carved sub-view itself plus an MNCS-observed UTF-8 verdict — instead
+// of a `(code, start, length)` triple that forces the host to slice spans
+// and mirror vocabulary tables (the old `ingest_codes_equal` AND
+// `ingest_spell_equal` bifurcation).
+//
+// No unbounded string type is introduced: the spelling is a
+// capacity-bounded view (length carried at runtime), validation is
+// `mncs.std.text_utf8.v1::validate_generic` over that view, and nominal
+// generic text types stay inexpressible on purpose (generic records do not
+// exist). The view IS the bounded text value.
+//
+// Corpus: examples/execution/pressure-validated-spelling-corpus.json.
+module examples.pressure_validated_spelling;
+
+use mncs.std.text_utf8.v1;
+
+// A matched word carried as a value: classifier code, source spelling,
+// and MNCS-observed validity together.
+record CheckedWord { code: i64, text: [byte; up_to 16], valid: bool }
+
+fn is_over(w: [byte; up_to 16]) -> (result: bool) {
+    if w.len != 4 {
+        return false;
+    }
+    return w[0] == 111 && w[1] == 118 && w[2] == 101 && w[3] == 114;
+}
+
+fn is_and(w: [byte; up_to 16]) -> (result: bool) {
+    if w.len != 3 {
+        return false;
+    }
+    return w[0] == 97 && w[1] == 110 && w[2] == 100;
+}
+
+fn is_the(w: [byte; up_to 16]) -> (result: bool) {
+    if w.len != 3 {
+        return false;
+    }
+    return w[0] == 116 && w[1] == 104 && w[2] == 101;
+}
+
+// Classify the word `buf[0..n][a..b]`: 1 = over, 2 = and, 3 = the,
+// -1 = unknown. The spelling crosses as the carved sub-view; `valid`
+// reports MNCS-observed UTF-8 validity of exactly that span.
+fn classify_word(buf: [byte; 16], n: u64, a: u64, b: u64) -> (result: CheckedWord) {
+    let v: [byte; up_to 16] = buf[0..n];
+    let w: [byte; up_to 16] = v[a..b];
+    let code: i64 = select(is_over(w), 1, select(is_and(w), 2, select(is_the(w), 3, 0 - 1)));
+    let verdict: i64 = validate_generic<16>(w, w.len);
+    return CheckedWord { code: code, text: w, valid: verdict == 0 - 1 };
+}
