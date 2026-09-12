@@ -4,11 +4,11 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use mncs_model::{
-    ArtifactRepresentation, BackendArtifact, BackendFunctionValueContract, BackendIdentity,
-    BackendResult, BackendValueContract, BodyType, CompilerArtifactRef, CompilerDiagnostic,
-    CompilerDiagnosticKind, ExecutionFailure, ExecutionRequest, ExecutionStatus, ExecutionValue,
-    IntegerType, Program, SequenceBound, SsaModule, TransformationStatus,
-    BACKEND_ARTIFACT_SCHEMA_VERSION,
+    AbiTypeRef, ArtifactRepresentation, BackendArtifact, BackendFunctionValueContract,
+    BackendIdentity, BackendResult, BackendValueContract, BodyType, CompilerArtifactRef,
+    CompilerDiagnostic, CompilerDiagnosticKind, ExecutionFailure, ExecutionRequest,
+    ExecutionStatus, ExecutionValue, IntegerType, Program, SequenceBound, SsaModule,
+    TransformationStatus, TypeSyntax, BACKEND_ARTIFACT_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 
@@ -276,7 +276,14 @@ pub(crate) fn composite_value_contracts(
             fields: record
                 .fields
                 .iter()
-                .map(|field| (field.name.clone(), field.field_type.clone()))
+                .map(|field| {
+                    (
+                        field.name.clone(),
+                        AbiTypeRef(
+                            TypeSyntax::from(field.field_type.as_str()).resolve_against(program),
+                        ),
+                    )
+                })
                 .collect(),
         };
         composites.insert(record.name.clone(), contract.clone());
@@ -285,7 +292,7 @@ pub(crate) fn composite_value_contracts(
     for finite in &program.finite_types {
         // Include every declared finite type: payload-free ones are needed as
         // field-type references inside other composites.
-        let payloads: BTreeMap<u32, Vec<(String, String)>> = finite
+        let payloads: BTreeMap<u32, Vec<(String, AbiTypeRef)>> = finite
             .variants
             .iter()
             .map(|variant| {
@@ -294,7 +301,15 @@ pub(crate) fn composite_value_contracts(
                     variant
                         .payload
                         .iter()
-                        .map(|field| (field.name.clone(), field.field_type.clone()))
+                        .map(|field| {
+                            (
+                                field.name.clone(),
+                                AbiTypeRef(
+                                    TypeSyntax::from(field.field_type.as_str())
+                                        .resolve_against(program),
+                                ),
+                            )
+                        })
                         .collect(),
                 )
             })
@@ -334,7 +349,14 @@ pub(crate) fn value_contract_for(program: &Program, name: &str) -> BackendValueC
             fields: record_type
                 .fields
                 .iter()
-                .map(|field| (field.name.clone(), field.field_type.clone()))
+                .map(|field| {
+                    (
+                        field.name.clone(),
+                        AbiTypeRef(
+                            TypeSyntax::from(field.field_type.as_str()).resolve_against(program),
+                        ),
+                    )
+                })
                 .collect(),
         };
     }
@@ -360,7 +382,15 @@ pub(crate) fn value_contract_for(program: &Program, name: &str) -> BackendValueC
                     variant
                         .payload
                         .iter()
-                        .map(|field| (field.name.clone(), field.field_type.clone()))
+                        .map(|field| {
+                            (
+                                field.name.clone(),
+                                AbiTypeRef(
+                                    TypeSyntax::from(field.field_type.as_str())
+                                        .resolve_against(program),
+                                ),
+                            )
+                        })
                         .collect::<Vec<_>>(),
                 )
             })
@@ -390,7 +420,7 @@ pub(crate) fn value_contract_for(program: &Program, name: &str) -> BackendValueC
             bound: SequenceBound::Exact(length),
         } => BackendValueContract::Sequence {
             semantic_type: name.to_owned(),
-            element: element.semantic_name(),
+            element: AbiTypeRef(*element),
             length,
         },
         BodyType::Sequence {
@@ -398,21 +428,19 @@ pub(crate) fn value_contract_for(program: &Program, name: &str) -> BackendValueC
             bound: SequenceBound::UpTo(capacity),
         } => BackendValueContract::View {
             semantic_type: name.to_owned(),
-            element: element.semantic_name(),
+            element: AbiTypeRef(*element),
             capacity,
         },
         BodyType::Vector { element, lanes } => BackendValueContract::Vector {
             semantic_type: name.to_owned(),
-            element: element.semantic_name(),
+            element: AbiTypeRef(*element),
             lanes,
         },
         BodyType::Mask { lanes } => BackendValueContract::Mask {
             semantic_type: name.to_owned(),
             lanes,
         },
-        _ => BackendValueContract::Scalar {
-            semantic_type: name.to_owned(),
-        },
+        resolved => BackendValueContract::scalar_from_body_type(&resolved),
     }
 }
 
@@ -789,40 +817,87 @@ pub(crate) fn check_contract_value(
     }
 }
 
-/// Resolve one declared field/element semantic type: named composites
-/// recurse through the artifact registry; structural spellings (exact
-/// sequences, views, vectors, masks) recurse structurally; anything else is
-/// a scalar domain check.
+/// Resolve one declared field/element semantic type: nominal composites
+/// recurse through the artifact registry by identity (never by a bare
+/// spelling that could collide across modules); structural types recurse
+/// structurally through the carried element type; anything else is a scalar
+/// domain check. A `Named` spelling that matches nothing fails explicitly —
+/// it is either an unnormalized legacy artifact (normalize first) or an
+/// unknown type, never a guess.
 fn check_declared_type(
-    semantic_type: &str,
+    declared: &BodyType,
     value: &ExecutionValue,
     composites: &BTreeMap<String, BackendValueContract>,
     path: &str,
 ) -> Result<(), String> {
-    if let Some(contract) = composites.get(semantic_type) {
-        return check_contract_value(contract, value, composites, path);
+    match declared {
+        BodyType::Finite { identity, .. } | BodyType::Record { identity, .. } => {
+            if let Some(contract) =
+                mncs_model::BackendValueContract::find_nominal_contract(composites, identity)
+            {
+                return check_contract_value(contract, value, composites, path);
+            }
+            return Err(format!(
+                "MNCS_VALUE_CONTRACT {path}: unidentified nominal type: expected {} ({identity:?}), received {}",
+                declared.semantic_name(),
+                value_shape(value)
+            ));
+        }
+        BodyType::Named(spelling) => {
+            // One authority for legacy spellings: identity keys and unique
+            // short names resolve; shared short names refuse explicitly
+            // instead of inheriting whichever entry won the name slot.
+            match mncs_model::BackendValueContract::resolve_nominal_spelling(spelling, composites) {
+                mncs_model::NominalResolution::Resolved(resolved) => {
+                    let identity = match &resolved {
+                        BodyType::Finite { identity, .. } | BodyType::Record { identity, .. } => {
+                            Some(identity)
+                        }
+                        _ => None,
+                    };
+                    if let Some(contract) = identity.and_then(|identity| {
+                        mncs_model::BackendValueContract::find_nominal_contract(
+                            composites, identity,
+                        )
+                    }) {
+                        return check_contract_value(contract, value, composites, path);
+                    }
+                }
+                mncs_model::NominalResolution::Ambiguous => {
+                    return Err(format!(
+                        "MNCS_VALUE_CONTRACT {path}: ambiguous nominal spelling {spelling:?}: several distinct types share the name; identity required"
+                    ));
+                }
+                mncs_model::NominalResolution::Unknown => {}
+            }
+            let parsed = BodyType::from_semantic_name(spelling);
+            if parsed != *declared {
+                return check_declared_type(&parsed, value, composites, path);
+            }
+        }
+        _ => {}
     }
-    match BodyType::from_semantic_name(semantic_type) {
+    match declared {
         BodyType::Sequence {
             element,
             bound: SequenceBound::Exact(length),
         } => {
             let ExecutionValue::Sequence { values } = value else {
                 return Err(format!(
-                    "MNCS_VALUE_CONTRACT {path}: value shape mismatch: expected {semantic_type}, received {}",
+                    "MNCS_VALUE_CONTRACT {path}: value shape mismatch: expected {}, received {}",
+                    declared.semantic_name(),
                     value_shape(value)
                 ));
             };
-            if values.len() != length as usize {
+            if values.len() != *length as usize {
                 return Err(format!(
                     "MNCS_VALUE_CONTRACT {path}: sequence length mismatch: expected {length} element(s), received {}",
                     values.len()
                 ));
             }
-            let element_name = element.semantic_name();
             for (index, element_value) in values.iter().enumerate() {
                 check_declared_type(
-                    &element_name,
+                    element,
                     element_value,
                     composites,
                     &format!("{path}[{index}]"),
@@ -836,20 +911,20 @@ fn check_declared_type(
         } => {
             let ExecutionValue::Sequence { values } = value else {
                 return Err(format!(
-                    "MNCS_VALUE_CONTRACT {path}: value shape mismatch: expected {semantic_type}, received {}",
+                    "MNCS_VALUE_CONTRACT {path}: value shape mismatch: expected {}, received {}",
+                    declared.semantic_name(),
                     value_shape(value)
                 ));
             };
-            if values.len() > capacity as usize {
+            if values.len() > *capacity as usize {
                 return Err(format!(
                     "MNCS_VALUE_CONTRACT {path}: view length exceeds capacity: capacity {capacity}, received {}",
                     values.len()
                 ));
             }
-            let element_name = element.semantic_name();
             for (index, element_value) in values.iter().enumerate() {
                 check_declared_type(
-                    &element_name,
+                    element,
                     element_value,
                     composites,
                     &format!("{path}[{index}]"),
@@ -860,30 +935,31 @@ fn check_declared_type(
         BodyType::Vector { element, lanes } => {
             let ExecutionValue::Vector { values } = value else {
                 return Err(format!(
-                    "MNCS_VALUE_CONTRACT {path}: value shape mismatch: expected {semantic_type}, received {}",
+                    "MNCS_VALUE_CONTRACT {path}: value shape mismatch: expected {}, received {}",
+                    declared.semantic_name(),
                     value_shape(value)
                 ));
             };
-            if values.len() != lanes as usize {
+            if values.len() != *lanes as usize {
                 return Err(format!(
                     "MNCS_VALUE_CONTRACT {path}: vector lane mismatch: expected {lanes} lane(s), received {}",
                     values.len()
                 ));
             }
-            let element_name = element.semantic_name();
             for (index, lane) in values.iter().enumerate() {
-                check_declared_type(&element_name, lane, composites, &format!("{path}[{index}]"))?;
+                check_declared_type(element, lane, composites, &format!("{path}[{index}]"))?;
             }
             Ok(())
         }
         BodyType::Mask { lanes } => {
             let ExecutionValue::Mask { lanes: bits } = value else {
                 return Err(format!(
-                    "MNCS_VALUE_CONTRACT {path}: value shape mismatch: expected {semantic_type}, received {}",
+                    "MNCS_VALUE_CONTRACT {path}: value shape mismatch: expected {}, received {}",
+                    declared.semantic_name(),
                     value_shape(value)
                 ));
             };
-            if bits.len() != lanes as usize {
+            if bits.len() != *lanes as usize {
                 return Err(format!(
                     "MNCS_VALUE_CONTRACT {path}: mask lane mismatch: expected {lanes} lane(s), received {}",
                     bits.len()
@@ -891,7 +967,7 @@ fn check_declared_type(
             }
             Ok(())
         }
-        _ => check_scalar_value(semantic_type, value, path),
+        _ => check_scalar_value(declared, value, path),
     }
 }
 
@@ -899,19 +975,19 @@ fn check_declared_type(
 /// booleans by name, integers by type and range, bytes by domain, binary64
 /// by supported type (finiteness stays a runtime trap, not a rejection).
 fn check_scalar_value(
-    semantic_type: &str,
+    declared: &BodyType,
     value: &ExecutionValue,
     path: &str,
 ) -> Result<(), String> {
-    let matches = match (BodyType::from_semantic_name(semantic_type), value) {
+    let matches = match (declared, value) {
         (BodyType::Bool, ExecutionValue::Boolean { .. }) => true,
         (BodyType::Named(name), ExecutionValue::Boolean { .. }) => name == "bool",
         (BodyType::Integer(expected), ExecutionValue::Integer { value, ty }) => {
-            expected == *ty && integer_fits(*value, expected)
+            expected == ty && integer_fits(*value, *expected)
         }
         (BodyType::Byte, ExecutionValue::Byte { value }) => (0..=255).contains(value),
         (BodyType::Float(expected), ExecutionValue::Float { ty: actual, .. }) => {
-            expected.is_supported() && actual.is_supported() && expected == *actual
+            expected.is_supported() && actual.is_supported() && expected == actual
         }
         _ => false,
     };
@@ -919,7 +995,8 @@ fn check_scalar_value(
         Ok(())
     } else {
         Err(format!(
-            "MNCS_VALUE_CONTRACT {path}: scalar mismatch: expected {semantic_type}, received {}",
+            "MNCS_VALUE_CONTRACT {path}: scalar mismatch: expected {}, received {}",
+            declared.semantic_name(),
             value_shape(value)
         ))
     }
@@ -928,7 +1005,7 @@ fn check_scalar_value(
 /// One-line expected-shape summary for value-contract diagnostics.
 fn contract_shape(contract: &BackendValueContract) -> String {
     match contract {
-        BackendValueContract::Scalar { semantic_type } => semantic_type.clone(),
+        BackendValueContract::Scalar { semantic_type } => semantic_type.semantic_name(),
         BackendValueContract::Finite { type_identity, .. } => format!("finite {type_identity:?}"),
         BackendValueContract::Record {
             type_identity,
@@ -1138,7 +1215,7 @@ pub(crate) fn contract_is_float(contract: &BackendValueContract) -> bool {
         contract,
         BackendValueContract::Scalar { semantic_type }
             if matches!(
-                mncs_model::BodyType::from_semantic_name(semantic_type),
+                semantic_type.get(),
                 mncs_model::BodyType::Float(float) if float.is_supported()
             )
     )
@@ -1491,7 +1568,12 @@ fn process_driver_scalar_only(
     fn scalar_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
         match contract {
             mncs_model::BackendValueContract::Scalar { semantic_type } => {
-                match mncs_model::BodyType::from_semantic_name(semantic_type) {
+                // Defensive default: contracts reaching driver generation
+                // already passed value-contract validation, so an untyped
+                // `Named` here cannot denote a 64-bit or float cell. The
+                // `int32_t` fallback preserves the historical shape, never a
+                // semantic decision.
+                match semantic_type.get() {
                     mncs_model::BodyType::Integer(ty) if ty.bits == 64 => "int64_t",
                     mncs_model::BodyType::Float(ty) if ty.is_supported() => "double",
                     _ => "int32_t",
@@ -1508,7 +1590,7 @@ fn process_driver_scalar_only(
             contract,
             mncs_model::BackendValueContract::Scalar { semantic_type }
                 if matches!(
-                    mncs_model::BodyType::from_semantic_name(semantic_type),
+                    semantic_type.get(),
                     mncs_model::BodyType::Float(ty) if ty.is_supported()
                 )
         )
@@ -1596,7 +1678,12 @@ fn process_driver_full(
     fn scalar_c_type(contract: &mncs_model::BackendValueContract) -> &'static str {
         match contract {
             mncs_model::BackendValueContract::Scalar { semantic_type } => {
-                match mncs_model::BodyType::from_semantic_name(semantic_type) {
+                // Defensive default: contracts reaching driver generation
+                // already passed value-contract validation, so an untyped
+                // `Named` here cannot denote a 64-bit or float cell. The
+                // `int32_t` fallback preserves the historical shape, never a
+                // semantic decision.
+                match semantic_type.get() {
                     mncs_model::BodyType::Integer(ty) if ty.bits == 64 => "int64_t",
                     mncs_model::BodyType::Float(ty) if ty.is_supported() => "double",
                     _ => "int32_t",
@@ -1615,7 +1702,7 @@ fn process_driver_full(
             contract,
             mncs_model::BackendValueContract::Scalar { semantic_type }
                 if matches!(
-                    mncs_model::BodyType::from_semantic_name(semantic_type),
+                    semantic_type.get(),
                     mncs_model::BodyType::Float(ty) if ty.is_supported()
                 )
         )
@@ -1827,8 +1914,20 @@ mod contract_tests {
             type_identity: sid("mncs:0.2:record-type:example::WordPair"),
             name: "WordPair".to_owned(),
             fields: vec![
-                ("hi".to_owned(), "u64".to_owned()),
-                ("lo".to_owned(), "u64".to_owned()),
+                (
+                    "hi".to_owned(),
+                    AbiTypeRef(BodyType::Integer(IntegerType {
+                        bits: 64,
+                        signed: false,
+                    })),
+                ),
+                (
+                    "lo".to_owned(),
+                    AbiTypeRef(BodyType::Integer(IntegerType {
+                        bits: 64,
+                        signed: false,
+                    })),
+                ),
             ],
         }
     }
@@ -1844,7 +1943,16 @@ mod contract_tests {
             variant_names: BTreeMap::from([(0, "Pass".to_owned()), (1, "Fail".to_owned())]),
             payloads: BTreeMap::from([
                 (0, Vec::new()),
-                (1, vec![("code".to_owned(), "u64".to_owned())]),
+                (
+                    1,
+                    vec![(
+                        "code".to_owned(),
+                        AbiTypeRef(BodyType::Integer(IntegerType {
+                            bits: 64,
+                            signed: false,
+                        })),
+                    )],
+                ),
             ]),
         }
     }
@@ -1928,8 +2036,20 @@ mod contract_tests {
             type_identity: sid("mncs:0.2:record-type:example::WordPair"),
             name: String::new(),
             fields: vec![
-                ("hi".to_owned(), "u64".to_owned()),
-                ("lo".to_owned(), "u64".to_owned()),
+                (
+                    "hi".to_owned(),
+                    AbiTypeRef(BodyType::Integer(IntegerType {
+                        bits: 64,
+                        signed: false,
+                    })),
+                ),
+                (
+                    "lo".to_owned(),
+                    AbiTypeRef(BodyType::Integer(IntegerType {
+                        bits: 64,
+                        signed: false,
+                    })),
+                ),
             ],
         };
         let vacuous = ExecutionValue::Record {
@@ -2001,6 +2121,227 @@ mod contract_tests {
         let refused =
             check_contract_value(&status_contract(), &unknown_variant, &composites(), "arg")
                 .unwrap_err();
+        assert!(refused.contains("MNCS_VALUE_CONTRACT"), "{refused}");
+    }
+
+    fn left_point() -> (SemanticId, BackendValueContract) {
+        let identity = sid("mncs:0.2:record-type:lib.left::Point::x%3Ai64%3B");
+        (
+            identity.clone(),
+            BackendValueContract::Record {
+                type_identity: identity,
+                name: "Point".to_owned(),
+                fields: vec![(
+                    "x".to_owned(),
+                    AbiTypeRef(BodyType::Integer(IntegerType {
+                        bits: 64,
+                        signed: true,
+                    })),
+                )],
+            },
+        )
+    }
+
+    fn right_point() -> (SemanticId, BackendValueContract) {
+        let identity = sid("mncs:0.2:record-type:lib.right::Point::x%3Ai64%3B");
+        (
+            identity.clone(),
+            BackendValueContract::Record {
+                type_identity: identity,
+                name: "Point".to_owned(),
+                fields: vec![(
+                    "x".to_owned(),
+                    AbiTypeRef(BodyType::Integer(IntegerType {
+                        bits: 64,
+                        signed: true,
+                    })),
+                )],
+            },
+        )
+    }
+
+    fn point_value(identity: &SemanticId, x: i128) -> ExecutionValue {
+        ExecutionValue::Record {
+            type_identity: identity.clone(),
+            name: "Point".to_owned(),
+            fields: Arc::new(vec![(
+                "x".to_owned(),
+                ExecutionValue::Integer {
+                    value: x,
+                    ty: IntegerType {
+                        bits: 64,
+                        signed: true,
+                    },
+                },
+            )]),
+        }
+    }
+
+    fn sequence_of(record: &BackendValueContract, length: u32) -> BackendValueContract {
+        let (identity, name) = match record {
+            BackendValueContract::Record {
+                type_identity,
+                name,
+                ..
+            } => (type_identity.clone(), name.clone()),
+            _ => panic!("expected a record contract"),
+        };
+        BackendValueContract::Sequence {
+            semantic_type: "[Point; 2]".to_owned(),
+            element: AbiTypeRef(BodyType::Record { identity, name }),
+            length,
+        }
+    }
+
+    #[test]
+    fn same_named_sequences_carry_distinct_identities_end_to_end() {
+        // TYPE-P-001: two structurally identical `Point` records from
+        // different modules must not collapse anywhere on the ABI path.
+        let (left_id, left) = left_point();
+        let (right_id, right) = right_point();
+        let left_seq = sequence_of(&left, 2);
+        let right_seq = sequence_of(&right, 2);
+        assert_ne!(left_seq.logical_type(), right_seq.logical_type());
+        // Wire form carries the identity structurally, not as a bare name.
+        let json = serde_json::to_string(&left_seq).expect("contract serializes");
+        assert!(json.contains("lib.left"), "{json}");
+        let decoded: BackendValueContract =
+            serde_json::from_str(&json).expect("contract deserializes");
+        assert_eq!(decoded, left_seq);
+        // Values admit only their own identity.
+        let composites = BTreeMap::from([
+            ("Point".to_owned(), left.clone()),
+            (left_id.0.clone(), left.clone()),
+        ]);
+        let left_values = ExecutionValue::Sequence {
+            values: Arc::new(vec![point_value(&left_id, 1), point_value(&left_id, 2)]),
+        };
+        assert!(check_contract_value(&left_seq, &left_values, &composites, "arg").is_ok());
+        let right_values = ExecutionValue::Sequence {
+            values: Arc::new(vec![point_value(&right_id, 1), point_value(&right_id, 2)]),
+        };
+        let refused =
+            check_contract_value(&left_seq, &right_values, &composites, "arg").unwrap_err();
+        assert!(refused.contains("identity mismatch"), "{refused}");
+    }
+
+    #[test]
+    fn legacy_string_elements_rehydrate_by_identity() {
+        // Pre-0.5 wire form: the element travels as a bare string. An
+        // identity spelling rehydrates exactly; normalization is what makes
+        // the detached fragment unambiguous again.
+        let (left_id, left) = left_point();
+        let legacy_json = serde_json::json!({
+            "sequence": {
+                "semantic_type": "[Point; 2]",
+                "element": left_id.0.clone(),
+                "length": 2,
+            }
+        });
+        let mut contract: BackendValueContract =
+            serde_json::from_value(legacy_json).expect("legacy contract deserializes");
+        let composites = BTreeMap::from([
+            ("Point".to_owned(), left.clone()),
+            (left_id.0.clone(), left.clone()),
+        ]);
+        contract.normalize_legacy_refs(&composites);
+        match &contract {
+            BackendValueContract::Sequence { element, .. } => {
+                assert_eq!(
+                    element.get(),
+                    &BodyType::Record {
+                        identity: left_id.clone(),
+                        name: "Point".to_owned()
+                    }
+                );
+            }
+            _ => panic!("expected a sequence contract"),
+        }
+    }
+
+    #[test]
+    fn legacy_unique_short_name_rehydrates_nested() {
+        // A nested legacy spelling parses structurally, then the nominal
+        // leaf rehydrates against the artifact's own composites.
+        let (left_id, left) = left_point();
+        let legacy_json = serde_json::json!({
+            "sequence": {
+                "semantic_type": "[[Point; 2]; 8]",
+                "element": "[Point; 2]",
+                "length": 8,
+            }
+        });
+        let mut contract: BackendValueContract =
+            serde_json::from_value(legacy_json).expect("legacy contract deserializes");
+        let composites = BTreeMap::from([
+            ("Point".to_owned(), left.clone()),
+            (left_id.0.clone(), left.clone()),
+        ]);
+        contract.normalize_legacy_refs(&composites);
+        match contract.logical_type() {
+            BodyType::Sequence { element, bound } => {
+                assert_eq!(bound, SequenceBound::Exact(8));
+                match *element {
+                    BodyType::Sequence {
+                        element: inner,
+                        bound: inner_bound,
+                    } => {
+                        assert_eq!(inner_bound, SequenceBound::Exact(2));
+                        assert_eq!(
+                            *inner,
+                            BodyType::Record {
+                                identity: left_id.clone(),
+                                name: "Point".to_owned()
+                            }
+                        );
+                    }
+                    _ => panic!("expected a nested sequence"),
+                }
+            }
+            _ => panic!("expected a sequence contract"),
+        }
+    }
+
+    #[test]
+    fn legacy_shared_short_name_stays_unresolved_and_refused() {
+        // Two distinct `Point` nominals share the short name: the legacy
+        // spelling is genuinely ambiguous, so normalization must not pick
+        // one — and the contract check must refuse explicitly.
+        let (left_id, left) = left_point();
+        let (right_id, right) = right_point();
+        let legacy_json = serde_json::json!({
+            "sequence": {
+                "semantic_type": "[Point; 2]",
+                "element": "Point",
+                "length": 2,
+            }
+        });
+        let mut contract: BackendValueContract =
+            serde_json::from_value(legacy_json).expect("legacy contract deserializes");
+        // Name-key collision: the second insert wins the short-name slot,
+        // exactly as current builders emit — the ambiguity is real.
+        let composites = BTreeMap::from([
+            ("Point".to_owned(), left.clone()),
+            (left_id.0.clone(), left.clone()),
+            (right_id.0.clone(), right.clone()),
+        ]);
+        let mut ambiguous = composites.clone();
+        ambiguous.insert("Point".to_owned(), right.clone());
+        contract.normalize_legacy_refs(&ambiguous);
+        match &contract {
+            BackendValueContract::Sequence { element, .. } => {
+                assert!(
+                    matches!(element.get(), BodyType::Named(name) if name == "Point"),
+                    "ambiguous short name must stay unresolved, got {:?}",
+                    element.get()
+                );
+            }
+            _ => panic!("expected a sequence contract"),
+        }
+        let values = ExecutionValue::Sequence {
+            values: Arc::new(vec![point_value(&left_id, 1), point_value(&left_id, 2)]),
+        };
+        let refused = check_contract_value(&contract, &values, &ambiguous, "arg").unwrap_err();
         assert!(refused.contains("MNCS_VALUE_CONTRACT"), "{refused}");
     }
 

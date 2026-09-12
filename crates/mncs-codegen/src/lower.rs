@@ -4670,9 +4670,7 @@ fn wasm_type(ty: &BodyType) -> Result<(ValType, Option<IntegerType>), String> {
         BodyType::Sequence {
             bound: mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_),
             ..
-        } => {
-            Err("generic SequenceBound must be specialized before backend lowering".to_owned())
-        }
+        } => Err("generic SequenceBound must be specialized before backend lowering".to_owned()),
         BodyType::Vector { .. } => Ok((ValType::I32, None)),
         BodyType::Mask { .. } => Ok((ValType::I64, None)),
         BodyType::Named(name) => Err(format!("unsupported SSA type {name}")),

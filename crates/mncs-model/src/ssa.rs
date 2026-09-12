@@ -445,13 +445,16 @@ impl SsaModule {
             }
         }
         for function in &mut self.functions {
-            for value in function.inputs.iter_mut().chain(function.outputs.iter_mut()) {
+            for value in function
+                .inputs
+                .iter_mut()
+                .chain(function.outputs.iter_mut())
+            {
                 normalize_value(value);
             }
             for iteration in &mut function.bounded_iterations {
                 iteration.state_type.normalize_legacy_ir_named();
-                if let crate::IterationDomain::OverSequence { element_type } =
-                    &mut iteration.domain
+                if let crate::IterationDomain::OverSequence { element_type } = &mut iteration.domain
                 {
                     element_type.normalize_legacy_ir_named();
                 }
@@ -1077,9 +1080,8 @@ impl Program {
                         // boundary: program-aware semantic resolution. Field
                         // spellings that name nothing stay `Named` for the
                         // lowering-boundary check to reject explicitly.
-                        let field_type =
-                            crate::TypeSyntax::from(field.field_type.as_str())
-                                .resolve_against(self);
+                        let field_type = crate::TypeSyntax::from(field.field_type.as_str())
+                            .resolve_against(self);
                         (field.name.clone(), field_type)
                     })
                     .collect(),
@@ -1607,10 +1609,10 @@ fn validate_function(
             block.parameters.len() == 2
                 && block.parameters[0].ty == iteration.state_type
                 && block.parameters[1].ty
-                == crate::BodyType::Integer(crate::IntegerType {
-                    bits: 64,
-                    signed: false,
-                })
+                    == crate::BodyType::Integer(crate::IntegerType {
+                        bits: 64,
+                        signed: false,
+                    })
         }) {
             errors.push(diagnostic(
                 "SSA021",
@@ -1658,8 +1660,7 @@ fn validate_function(
             ));
         }
     }
-    let mut definitions =
-        BTreeMap::<SemanticId, (Option<SemanticId>, crate::BodyType)>::new();
+    let mut definitions = BTreeMap::<SemanticId, (Option<SemanticId>, crate::BodyType)>::new();
     for value in &function.inputs {
         if definitions
             .insert(value.identity.clone(), (None, value.ty.clone()))

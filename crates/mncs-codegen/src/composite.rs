@@ -21,7 +21,7 @@
 
 use std::collections::BTreeMap;
 
-use mncs_model::{IntegerType, Program, SemanticId};
+use mncs_model::{AbiTypeRef, BodyType, IntegerType, Program, SemanticId};
 
 /// Reconstruct a logical integer from a stored slot bit pattern.
 /// Unsigned values keep their full domain; signed values sign-extend
@@ -124,7 +124,9 @@ impl CompositeLayout {
 
 /// A finite type is boxed exactly when some variant declares payload
 /// fields; per-variant entries exist even for payload-free variants.
-pub fn finite_payloads_declare_payloads(payloads: &BTreeMap<u32, Vec<(String, String)>>) -> bool {
+pub fn finite_payloads_declare_payloads(
+    payloads: &BTreeMap<u32, Vec<(String, AbiTypeRef)>>,
+) -> bool {
     payloads.values().any(|fields| !fields.is_empty())
 }
 
@@ -169,33 +171,38 @@ fn slot_width(semantic_type: &str, program: &mncs_model::Program) -> SlotWidth {
     }
 }
 
-fn slot_width_registry(
-    semantic_type: &str,
+/// Structural slot width for a resolved semantic type. Nominal record and
+/// finite widths still consult the registry (boxed vs bare); everything
+/// else follows from the type structure. This replaced the old
+/// spelling-plus-registry hybrid: typed values never re-parse here.
+fn slot_width_of(
+    ty: &BodyType,
     registry: &BTreeMap<String, mncs_model::BackendValueContract>,
 ) -> SlotWidth {
-    if let Some(contract) = registry.get(semantic_type) {
-        match contract {
-            mncs_model::BackendValueContract::Record { .. }
-            | mncs_model::BackendValueContract::Sequence { .. }
-            | mncs_model::BackendValueContract::View { .. }
-            | mncs_model::BackendValueContract::Vector { .. }
-            | mncs_model::BackendValueContract::Mask { .. } => return SlotWidth::W64,
-            mncs_model::BackendValueContract::Finite { payloads, .. } => {
-                return if finite_payloads_declare_payloads(payloads) {
-                    SlotWidth::W64
-                } else {
-                    SlotWidth::W32
-                };
+    match ty {
+        BodyType::Record { .. }
+        | BodyType::Sequence { .. }
+        | BodyType::Vector { .. }
+        | BodyType::Mask { .. } => SlotWidth::W64,
+        BodyType::Finite { identity, .. } => {
+            let boxed = registry.values().any(|contract| {
+                matches!(
+                    contract,
+                    mncs_model::BackendValueContract::Finite {
+                        type_identity,
+                        payloads,
+                        ..
+                    } if type_identity == identity && finite_payloads_declare_payloads(payloads)
+                )
+            });
+            if boxed {
+                SlotWidth::W64
+            } else {
+                SlotWidth::W32
             }
-            mncs_model::BackendValueContract::Scalar { .. } => {}
         }
-    }
-    match mncs_model::BodyType::from_semantic_name(semantic_type) {
-        mncs_model::BodyType::Integer(ty) if ty.bits == 64 => SlotWidth::W64,
-        mncs_model::BodyType::Float(ty) if ty.is_supported() => SlotWidth::W64,
-        mncs_model::BodyType::Sequence { .. }
-        | mncs_model::BodyType::Vector { .. }
-        | mncs_model::BodyType::Mask { .. } => SlotWidth::W64,
+        BodyType::Integer(ty) if ty.bits == 64 => SlotWidth::W64,
+        BodyType::Float(ty) if ty.is_supported() => SlotWidth::W64,
         _ => SlotWidth::W32,
     }
 }
@@ -441,11 +448,13 @@ impl ArenaWriter {
             }
             Value::Sequence { values } => {
                 let elements = values.clone();
-                self.encode_sequence_typed(&elements, inferred_element_type(&elements))
+                let inferred = inferred_element_type(&elements);
+                self.encode_sequence_typed(&elements, &inferred)
             }
             Value::Vector { values } => {
                 let elements = values.clone();
-                self.encode_vector_native(&elements, inferred_element_type(&elements))
+                let inferred = inferred_element_type(&elements);
+                self.encode_vector_native(&elements, &inferred)
             }
             Value::Finite {
                 discriminant,
@@ -483,18 +492,20 @@ impl ArenaWriter {
     }
 
     /// Store one field at an exact byte offset; nested composites allocate
-    /// their own cells first and store the resulting reference.
+    /// their own cells first and store the resulting reference. The declared
+    /// type is the resolved semantic type from the contract — matched
+    /// structurally, never re-parsed from a spelling.
     fn store_field(
         &mut self,
         offset: u64,
         value: &mncs_model::ExecutionValue,
-        declared_type: &str,
+        declared_type: &BodyType,
     ) -> Result<(), String> {
         use mncs_model::ExecutionValue as Value;
         // Composite-typed fields always cross as cell references.
         let width = match value {
             Value::Record { .. } | Value::Sequence { .. } => SlotWidth::W64,
-            _ => slot_width_registry(declared_type, &self.registry),
+            _ => slot_width_of(declared_type, &self.registry),
         };
         match value {
             Value::Record { .. } => {
@@ -524,17 +535,19 @@ impl ArenaWriter {
                 // already established the shape, but any future caller
                 // reaching this writer directly must still fail closed
                 // instead of truncating a mistyped scalar into a slot.
-                match mncs_model::BodyType::from_semantic_name(declared_type) {
-                    mncs_model::BodyType::Integer(expected) if expected == *ty => {
-                        if !crate::support::integer_fits(*value, expected) {
+                match declared_type {
+                    BodyType::Integer(expected) if expected == ty => {
+                        if !crate::support::integer_fits(*value, *expected) {
                             return Err(format!(
-                                "integer field value {value} is outside the declared {declared_type} domain"
+                                "integer field value {value} is outside the declared {} domain",
+                                declared_type.semantic_name()
                             ));
                         }
                     }
                     _ => {
                         return Err(format!(
-                            "integer value does not match the declared field type {declared_type:?}"
+                            "integer value does not match the declared field type {:?}",
+                            declared_type.semantic_name()
                         ));
                     }
                 }
@@ -545,12 +558,13 @@ impl ArenaWriter {
                 Ok(())
             }
             Value::Boolean { value } => {
-                match mncs_model::BodyType::from_semantic_name(declared_type) {
-                    mncs_model::BodyType::Bool => {}
-                    mncs_model::BodyType::Named(name) if name == "bool" => {}
+                match declared_type {
+                    BodyType::Bool => {}
+                    BodyType::Named(name) if name == "bool" => {}
                     _ => {
                         return Err(format!(
-                            "boolean value does not match the declared field type {declared_type:?}"
+                            "boolean value does not match the declared field type {:?}",
+                            declared_type.semantic_name()
                         ));
                     }
                 }
@@ -558,21 +572,23 @@ impl ArenaWriter {
                 Ok(())
             }
             Value::Byte { value } => {
-                if declared_type != "byte" || !(0..=255).contains(value) {
+                if !matches!(declared_type, BodyType::Byte) || !(0..=255).contains(value) {
                     return Err(format!(
-                        "byte value {value} does not match the declared field type {declared_type:?}"
+                        "byte value {value} does not match the declared field type {:?}",
+                        declared_type.semantic_name()
                     ));
                 }
                 self.put32(offset, *value as u32);
                 Ok(())
             }
             Value::Float { bits, ty } => {
-                match mncs_model::BodyType::from_semantic_name(declared_type) {
-                    mncs_model::BodyType::Float(expected)
-                        if expected.is_supported() && ty.is_supported() && expected == *ty => {}
+                match declared_type {
+                    BodyType::Float(expected)
+                        if expected.is_supported() && ty.is_supported() && expected == ty => {}
                     _ => {
                         return Err(format!(
-                            "float value does not match the declared field type {declared_type:?}"
+                            "float value does not match the declared field type {:?}",
+                            declared_type.semantic_name()
                         ));
                     }
                 }
@@ -580,17 +596,15 @@ impl ArenaWriter {
                 Ok(())
             }
             Value::Sequence { values } => {
-                let (element, view_capacity) =
-                    match mncs_model::BodyType::from_semantic_name(declared_type) {
-                        mncs_model::BodyType::Sequence {
-                            element,
-                            bound: mncs_model::SequenceBound::UpTo(capacity),
-                        } => (element.semantic_name(), Some(capacity)),
-                        mncs_model::BodyType::Sequence { element, .. } => {
-                            (element.semantic_name(), None)
-                        }
-                        _ => (inferred_element_type(values).to_owned(), None),
-                    };
+                let inferred = inferred_element_type(values);
+                let (element, view_capacity): (&BodyType, Option<u32>) = match declared_type {
+                    BodyType::Sequence {
+                        element,
+                        bound: mncs_model::SequenceBound::UpTo(capacity),
+                    } => (element, Some(*capacity)),
+                    BodyType::Sequence { element, .. } => (element, None),
+                    _ => (&inferred, None),
+                };
                 if let Some(capacity) = view_capacity {
                     if values.len() > capacity as usize {
                         return Err("view field exceeds its declared capacity".to_owned());
@@ -599,23 +613,24 @@ impl ArenaWriter {
                         self.put64(offset, pack_view(0, 0));
                         return Ok(());
                     }
-                    let cell = self.encode_sequence_typed(values, &element)?;
+                    let cell = self.encode_sequence_typed(values, element)?;
                     self.put64(
                         offset,
                         pack_view(cell, u32::try_from(values.len()).unwrap_or(0)),
                     );
                     return Ok(());
                 }
-                let cell = self.encode_sequence_typed(values, &element)?;
+                let cell = self.encode_sequence_typed(values, element)?;
                 self.put64(offset, cell);
                 Ok(())
             }
             Value::Vector { values } => {
-                let element = match mncs_model::BodyType::from_semantic_name(declared_type) {
-                    mncs_model::BodyType::Vector { element, .. } => element.semantic_name(),
-                    _ => inferred_element_type(values).to_owned(),
+                let inferred = inferred_element_type(values);
+                let element: &BodyType = match declared_type {
+                    BodyType::Vector { element, .. } => element,
+                    _ => &inferred,
                 };
-                let cell = self.encode_vector_native(values, &element)?;
+                let cell = self.encode_vector_native(values, element)?;
                 self.put64(offset, cell);
                 Ok(())
             }
@@ -631,7 +646,7 @@ impl ArenaWriter {
     fn encode_sequence_typed(
         &mut self,
         elements: &[mncs_model::ExecutionValue],
-        element_type: &str,
+        element_type: &BodyType,
     ) -> Result<u64, String> {
         let base = self.align8();
         self.image.resize(base as usize + elements.len() * 8, 0);
@@ -645,34 +660,43 @@ impl ArenaWriter {
     fn encode_vector_native(
         &mut self,
         lanes: &[mncs_model::ExecutionValue],
-        element_type: &str,
+        element_type: &BodyType,
     ) -> Result<u64, String> {
         self.encode_sequence_typed(lanes, element_type)
     }
 }
 
-fn inferred_element_type(values: &[mncs_model::ExecutionValue]) -> &'static str {
+/// Best-effort element type inferred from runtime values for the
+/// contract-less encoding path. Structural and exact (integer widths come
+/// from the value itself); nominal values resolve through their declared
+/// identity, never a short-name guess.
+fn inferred_element_type(values: &[mncs_model::ExecutionValue]) -> BodyType {
+    use mncs_model::ExecutionValue as Value;
     match values.first() {
-        Some(mncs_model::ExecutionValue::Byte { .. }) => "byte",
-        Some(mncs_model::ExecutionValue::Boolean { .. }) => "bool",
-        Some(mncs_model::ExecutionValue::Integer { ty, .. }) => {
-            if ty.bits == 32 && ty.signed {
-                "i32"
-            } else if ty.bits == 32 && !ty.signed {
-                "u32"
-            } else if ty.bits == 16 && ty.signed {
-                "i16"
-            } else if ty.bits == 16 && !ty.signed {
-                "u16"
-            } else if ty.bits == 8 && !ty.signed {
-                "u8"
-            } else if !ty.signed {
-                "u64"
-            } else {
-                "i64"
-            }
-        }
-        _ => "i64",
+        Some(Value::Byte { .. }) => BodyType::Byte,
+        Some(Value::Boolean { .. }) => BodyType::Bool,
+        Some(Value::Integer { ty, .. }) => BodyType::Integer(*ty),
+        Some(Value::Float { ty, .. }) => BodyType::Float(*ty),
+        Some(Value::Record {
+            type_identity,
+            name,
+            ..
+        }) => BodyType::Record {
+            identity: type_identity.clone(),
+            name: name.clone(),
+        },
+        // Finite values carry their type identity but not the type's display
+        // name; the contract-less writer keys off identity only
+        // (`store_field` ignores the declared type for finite values), so the
+        // name stays empty rather than guessed.
+        Some(Value::Finite { type_identity, .. }) => BodyType::Finite {
+            identity: type_identity.clone(),
+            name: String::new(),
+        },
+        _ => BodyType::Integer(mncs_model::IntegerType {
+            bits: 64,
+            signed: true,
+        }),
     }
 }
 
@@ -694,7 +718,7 @@ fn value_record_contract<'a>(
 fn value_finite_payloads<'a>(
     value: &mncs_model::ExecutionValue,
     registry: &'a BTreeMap<String, mncs_model::BackendValueContract>,
-) -> Option<&'a Vec<(String, String)>> {
+) -> Option<&'a Vec<(String, AbiTypeRef)>> {
     let mncs_model::ExecutionValue::Finite {
         type_identity,
         discriminant,
@@ -837,22 +861,45 @@ impl<'a> ArenaReader<'a> {
         }
     }
 
+    /// Find the decoding contract for a declared field type: typed
+    /// nominal declarations resolve by identity only — the identity key,
+    /// then an identity scan for hand-built maps — so a same-named
+    /// contract under the short-name key is never consulted and can never
+    /// collide across modules. Structural types decode structurally and
+    /// need no registry entry; legacy `bool` spellings and scalars need
+    /// none either. An unresolvable declaration fails in the caller,
+    /// never by guessing.
     fn resolve_contract(
-        declared_type: &str,
+        declared_type: &BodyType,
         registry: &'a BTreeMap<String, mncs_model::BackendValueContract>,
     ) -> Option<&'a mncs_model::BackendValueContract> {
-        match mncs_model::BodyType::from_semantic_name(declared_type) {
-            mncs_model::BodyType::Integer(_) => None,
-            mncs_model::BodyType::Bool => None,
-            mncs_model::BodyType::Named(name) if name == "bool" => None,
-            _ => registry.get(declared_type),
+        match declared_type {
+            BodyType::Integer(_) | BodyType::Float(_) | BodyType::Byte | BodyType::Bool => None,
+            BodyType::Named(name) if name == "bool" => None,
+            BodyType::Finite { identity, .. } | BodyType::Record { identity, .. } => {
+                mncs_model::BackendValueContract::find_nominal_contract(registry, identity)
+            }
+            // Legacy spellings share the single resolution authority:
+            // unique names resolve, shared names refuse in the caller.
+            BodyType::Named(spelling) => {
+                match mncs_model::BackendValueContract::resolve_nominal_spelling(spelling, registry)
+                {
+                    mncs_model::NominalResolution::Resolved(
+                        BodyType::Finite { identity, .. } | BodyType::Record { identity, .. },
+                    ) => {
+                        mncs_model::BackendValueContract::find_nominal_contract(registry, &identity)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
         }
     }
 
     fn decode_field(
         &self,
         offset: u64,
-        declared_type: &str,
+        declared_type: &BodyType,
     ) -> Result<mncs_model::ExecutionValue, String> {
         use mncs_model::{BackendValueContract as Contract, BodyType};
         // Boxed finite fields hold cell references; unboxed finite fields
@@ -895,15 +942,15 @@ impl<'a> ArenaReader<'a> {
             let reference = self.get64(offset)?;
             return self.decode(reference, contract);
         }
-        match BodyType::from_semantic_name(declared_type) {
+        match declared_type {
             BodyType::Integer(ty) => {
-                let raw = match slot_width_registry(declared_type, self.registry) {
+                let raw = match slot_width_of(declared_type, self.registry) {
                     SlotWidth::W32 => u64::from(self.get32(offset)?),
                     SlotWidth::W64 => self.get64(offset)?,
                 };
                 Ok(mncs_model::ExecutionValue::Integer {
-                    value: integer_from_slot_bits(raw, ty),
-                    ty,
+                    value: integer_from_slot_bits(raw, *ty),
+                    ty: *ty,
                 })
             }
             BodyType::Float(ty) if ty.is_supported() => {
@@ -911,7 +958,7 @@ impl<'a> ArenaReader<'a> {
                 if !f64::from_bits(bits).is_finite() {
                     return Err("decoded float field is not finite".to_owned());
                 }
-                Ok(mncs_model::ExecutionValue::Float { bits, ty })
+                Ok(mncs_model::ExecutionValue::Float { bits, ty: *ty })
             }
             BodyType::Bool => Ok(mncs_model::ExecutionValue::Boolean {
                 value: self.get32(offset)? == 1,
@@ -927,8 +974,7 @@ impl<'a> ArenaReader<'a> {
                 bound: mncs_model::SequenceBound::Exact(length),
             } => {
                 let reference = self.get64(offset)?;
-                let element_name = element.semantic_name();
-                self.decode_sequence_at(reference, length, &element_name)
+                self.decode_sequence_at(reference, *length, element)
             }
             BodyType::Sequence {
                 element,
@@ -936,25 +982,24 @@ impl<'a> ArenaReader<'a> {
             } => {
                 let descriptor = self.get64(offset)?;
                 let (cell, length) = unpack_view(descriptor);
-                if length > capacity {
+                if length > *capacity {
                     return Err("decoded view length exceeds its declared capacity".to_owned());
                 }
-                let element_name = element.semantic_name();
-                self.decode_sequence_at(cell, length, &element_name)
+                self.decode_sequence_at(cell, length, element)
             }
             BodyType::Vector { element, lanes } => {
                 let reference = self.get64(offset)?;
-                let element_name = element.semantic_name();
-                match self.decode_sequence_at(reference, lanes, &element_name)? {
+                match self.decode_sequence_at(reference, *lanes, element)? {
                     mncs_model::ExecutionValue::Sequence { values } => {
                         Ok(mncs_model::ExecutionValue::Vector { values })
                     }
                     other => Ok(other),
                 }
             }
-            BodyType::Mask { lanes } => Ok(unpack_mask(self.get64(offset)?, lanes)),
-            _ => Err(format!(
-                "field type {declared_type} has no contract for decoding"
+            BodyType::Mask { lanes } => Ok(unpack_mask(self.get64(offset)?, *lanes)),
+            other => Err(format!(
+                "field type {} has no contract for decoding",
+                other.semantic_name()
             )),
         }
     }
@@ -963,7 +1008,7 @@ impl<'a> ArenaReader<'a> {
         &self,
         root: u64,
         length: u32,
-        element: &str,
+        element: &BodyType,
     ) -> Result<mncs_model::ExecutionValue, String> {
         let mut values = Vec::with_capacity(length as usize);
         for index in 0..length {
@@ -1005,8 +1050,14 @@ mod codec_tests {
             type_identity: sid("T:StatusPair"),
             name: "StatusPair".to_owned(),
             fields: vec![
-                ("left".to_owned(), "Status".to_owned()),
-                ("right".to_owned(), "Status".to_owned()),
+                (
+                    "left".to_owned(),
+                    AbiTypeRef(BodyType::Named("Status".to_owned())),
+                ),
+                (
+                    "right".to_owned(),
+                    AbiTypeRef(BodyType::Named("Status".to_owned())),
+                ),
             ],
         };
         let registry = BTreeMap::from([
@@ -1060,8 +1111,14 @@ mod codec_tests {
                         type_identity: sid("T:StatusPair"),
                         name: "StatusPair".to_owned(),
                         fields: vec![
-                            ("left".to_owned(), "Status".to_owned()),
-                            ("right".to_owned(), "Status".to_owned()),
+                            (
+                                "left".to_owned(),
+                                AbiTypeRef(BodyType::Named("Status".to_owned())),
+                            ),
+                            (
+                                "right".to_owned(),
+                                AbiTypeRef(BodyType::Named("Status".to_owned())),
+                            ),
                         ],
                     },
                 ),
@@ -1075,8 +1132,14 @@ mod codec_tests {
             type_identity: sid("T:StatusPair"),
             name: "StatusPair".to_owned(),
             fields: vec![
-                ("left".to_owned(), "Status".to_owned()),
-                ("right".to_owned(), "Status".to_owned()),
+                (
+                    "left".to_owned(),
+                    AbiTypeRef(BodyType::Named("Status".to_owned())),
+                ),
+                (
+                    "right".to_owned(),
+                    AbiTypeRef(BodyType::Named("Status".to_owned())),
+                ),
             ],
         };
         // Without a Status contract the reader cannot decode fields; with
@@ -1111,11 +1174,137 @@ mod codec_tests {
         }
     }
 
+    /// Same-short-name distractor: typed field declarations carry the
+    /// authoritative identity, so decode must follow the identity and
+    /// never the short-name key. TYPE-P-001 guard: with only a
+    /// same-named impostor under `"Status"`, typed decode of identity
+    /// `T:Status` fails closed (the old name-fallback decoded the
+    /// impostor silently); with the true contract under the identity
+    /// key, decode succeeds and still ignores the impostor.
+    #[test]
+    fn typed_decode_prefers_identity_over_same_short_name() {
+        let finite = BackendValueContract::Finite {
+            type_identity: sid("T:Status"),
+            name: "Status".to_owned(),
+            variants: BTreeMap::from([(0, sid("V:PASS")), (1, sid("V:FAIL"))]),
+            variant_names: BTreeMap::from([(0, "PASS".to_owned()), (1, "FAIL".to_owned())]),
+            payloads: BTreeMap::from([(0, Vec::new()), (1, Vec::new())]),
+        };
+        let typed_field = || {
+            AbiTypeRef(BodyType::Finite {
+                name: "Status".to_owned(),
+                identity: sid("T:Status"),
+            })
+        };
+        let typed_pair = BackendValueContract::Record {
+            type_identity: sid("T:StatusPair"),
+            name: "StatusPair".to_owned(),
+            fields: vec![
+                ("left".to_owned(), typed_field()),
+                ("right".to_owned(), typed_field()),
+            ],
+        };
+        // Image written against the true contracts under short-name keys.
+        let image = {
+            let legacy_pair = BackendValueContract::Record {
+                type_identity: sid("T:StatusPair"),
+                name: "StatusPair".to_owned(),
+                fields: vec![
+                    (
+                        "left".to_owned(),
+                        AbiTypeRef(BodyType::Named("Status".to_owned())),
+                    ),
+                    (
+                        "right".to_owned(),
+                        AbiTypeRef(BodyType::Named("Status".to_owned())),
+                    ),
+                ],
+            };
+            let mut writer = ArenaWriter::new(BTreeMap::from([
+                ("Status".to_owned(), finite.clone()),
+                ("StatusPair".to_owned(), legacy_pair),
+            ]));
+            let value = ExecutionValue::Record {
+                type_identity: sid("T:StatusPair"),
+                name: "StatusPair".to_owned(),
+                fields: vec![
+                    (
+                        "left".to_owned(),
+                        ExecutionValue::Finite {
+                            type_identity: sid("T:Status"),
+                            variant_identity: sid("V:FAIL"),
+                            discriminant: 1,
+                            payload: vec![].into(),
+                        },
+                    ),
+                    (
+                        "right".to_owned(),
+                        ExecutionValue::Finite {
+                            type_identity: sid("T:Status"),
+                            variant_identity: sid("V:FAIL"),
+                            discriminant: 1,
+                            payload: vec![].into(),
+                        },
+                    ),
+                ]
+                .into(),
+            };
+            let _ = writer.encode_argument(&value).expect("encodes");
+            writer.into_image()
+        };
+        let impostor = BackendValueContract::Finite {
+            type_identity: sid("other.Status"),
+            name: "Status".to_owned(),
+            variants: BTreeMap::from([(0, sid("other:OK"))]),
+            variant_names: BTreeMap::from([(0, "OK".to_owned())]),
+            payloads: BTreeMap::from([(0, Vec::new())]),
+        };
+        // Distractor only: no contract carries identity `T:Status`, so
+        // typed decode must fail rather than decode the impostor.
+        let distractor_only = BTreeMap::from([("Status".to_owned(), impostor.clone())]);
+        let reader = ArenaReader::new(&image, &distractor_only);
+        let err = reader
+            .decode(0, &typed_pair)
+            .expect_err("typed decode must not fall back to the same-named impostor");
+        // No-contract: the impostor was never consulted. (The old
+        // name-fallback reached the impostor and failed later with an
+        // "undeclared discriminant" error instead.)
+        assert!(
+            err.contains("no contract"),
+            "must fail closed before touching the impostor, got: {err}"
+        );
+        // True contract under the identity key: decode succeeds and the
+        // short-name impostor stays ignored.
+        let identity_keyed = BTreeMap::from([
+            ("Status".to_owned(), impostor),
+            ("T:Status".to_owned(), finite),
+        ]);
+        let reader2 = ArenaReader::new(&image, &identity_keyed);
+        let decoded = reader2
+            .decode(0, &typed_pair)
+            .expect("identity-keyed contract decodes");
+        let ExecutionValue::Record { fields, .. } = decoded else {
+            panic!("decodes to a record");
+        };
+        for (_name, field) in fields.as_ref() {
+            let ExecutionValue::Finite {
+                discriminant,
+                type_identity,
+                ..
+            } = field
+            else {
+                panic!("field decodes to a finite");
+            };
+            assert_eq!(*discriminant, 1);
+            assert_eq!(type_identity, &sid("T:Status"));
+        }
+    }
+
     #[test]
     fn exact_byte_sequence_round_trips_through_the_canonical_cell() {
         let contract = BackendValueContract::Sequence {
             semantic_type: "[byte; 4]".to_owned(),
-            element: "byte".to_owned(),
+            element: AbiTypeRef(BodyType::Byte),
             length: 4,
         };
         let value = ExecutionValue::Sequence {
@@ -1192,7 +1381,10 @@ mod codec_tests {
     fn exact_u64_sequence_preserves_high_bit_values() {
         let contract = BackendValueContract::Sequence {
             semantic_type: "[u64; 4]".to_owned(),
-            element: "u64".to_owned(),
+            element: AbiTypeRef(BodyType::Integer(IntegerType {
+                bits: 64,
+                signed: false,
+            })),
             length: 4,
         };
         let u64_ty = IntegerType {

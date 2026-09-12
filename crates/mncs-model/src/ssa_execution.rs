@@ -18,8 +18,8 @@ use crate::identity::{function_id, program_id};
 use crate::{
     execute_with_policy, BodyType, EvidenceReceipt, EvidenceReceiptOutcome, ExecutionCorpus,
     ExecutionFailure, ExecutionResult, ExecutionStatus, ExecutionSubject, ExecutionValue,
-    IntegerType, Program, SemanticId, SsaBlock, SsaFunction, SsaInstruction,
-    SsaInstructionKind, SsaModule, SsaTerminator, MAX_EXECUTION_BUDGET,
+    IntegerType, Program, SemanticId, SsaBlock, SsaFunction, SsaInstruction, SsaInstructionKind,
+    SsaModule, SsaTerminator, MAX_EXECUTION_BUDGET,
 };
 
 pub const SSA_EXECUTION_RESULT_SCHEMA_VERSION: &str = "0.1";
@@ -240,8 +240,7 @@ impl SsaExecutionSession {
         // clone: structural spellings become typed, unresolvable nominals
         // stay `Named` for validation to reject explicitly. Anything else
         // fails closed here, never by guessing.
-        let module: Arc<SsaModule> = if module.schema_version
-            == crate::SSA_SCHEMA_VERSION_PRE_TYPED
+        let module: Arc<SsaModule> = if module.schema_version == crate::SSA_SCHEMA_VERSION_PRE_TYPED
         {
             let mut owned = (*module).clone();
             owned.normalize_legacy_types();

@@ -290,8 +290,7 @@ fn take_byte(b: byte) -> (result: byte) { return b; }
 fn demo(x: u8) -> (result: byte) { return take_byte(x); }
 "#,
     )
-    .err()
-    .expect("byte/u8 confusion is rejected");
+    .expect_err("byte/u8 confusion is rejected");
     assert!(
         errors.iter().any(|e| e.contains("MNE")),
         "rejection carries a coded diagnostic: {errors:?}"
@@ -301,8 +300,8 @@ fn demo(x: u8) -> (result: byte) { return take_byte(x); }
 #[test]
 fn declaration_only_record_short_name_keeps_identity_in_ssa() {
     use mncs_model::{
-        record_type_id, FailureMode, Function, Program, RecordField, RecordType,
-        SUPPORTED_SCHEMA_VERSION, Value,
+        record_type_id, FailureMode, Function, Program, RecordField, RecordType, Value,
+        SUPPORTED_SCHEMA_VERSION,
     };
     let identity = record_type_id("app.decl", "R", &[("x", "i64")]);
     let program = Program {
@@ -346,12 +345,18 @@ fn declaration_only_record_short_name_keeps_identity_in_ssa() {
     };
     // HIR resolves the short name (control case).
     let hir = program.lower_to_ir().expect("HIR lowers");
-    assert_eq!(hir.functions[0].inputs[0].ty, expected, "HIR keeps nominal identity");
+    assert_eq!(
+        hir.functions[0].inputs[0].ty, expected,
+        "HIR keeps nominal identity"
+    );
     assert_eq!(hir.schema_version, "0.5");
     // SSA must agree: a short-name record reference is the same type, and
     // both layers now carry the resolved semantic type directly.
     let ssa = program.lower_to_ssa().expect("SSA lowers");
-    assert_eq!(ssa.functions[0].inputs[0].ty, expected, "SSA keeps nominal identity");
+    assert_eq!(
+        ssa.functions[0].inputs[0].ty, expected,
+        "SSA keeps nominal identity"
+    );
     assert_eq!(ssa.schema_version, "0.5");
     assert!(ssa.validate().valid);
     assert!(ssa.validate_lowering_boundary(&program).valid);
@@ -384,7 +389,10 @@ fn both(a: i32, flag: bool) -> (result: i32) {
     assert_eq!(legacy.schema_version, "0.4");
     legacy.normalize_legacy_types();
     assert_eq!(legacy.schema_version, "0.5");
-    assert_eq!(legacy, module, "normalization round-trips to the emitted module");
+    assert_eq!(
+        legacy, module,
+        "normalization round-trips to the emitted module"
+    );
     assert!(legacy.validate().valid);
     assert!(legacy.validate_lowering_boundary(&program).valid);
     // Normalization is idempotent on current modules.
@@ -435,8 +443,7 @@ module app.unknown;
 fn id(x: Mystery) -> (result: Mystery) { return x; }
 "#,
     )
-    .err()
-    .expect("unknown nominal is rejected");
+    .expect_err("unknown nominal is rejected");
     assert!(
         errors.iter().any(|e| e.contains("MNE105")),
         "unknown type carries MNE105: {errors:?}"

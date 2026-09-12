@@ -1171,7 +1171,7 @@ pub fn reference_compiler_architecture() -> CompilerArchitectureContract {
             availability: Availability::Experimental,
             integration: Integration::CompilerDriver,
             input_contracts: vec!["canonical semantic artifact".to_owned()],
-            output_contracts: vec!["HighLevelIr 0.4".to_owned()],
+            output_contracts: vec!["HighLevelIr 0.5".to_owned()],
             deterministic_output_required: true,
             owner: "mncs-model HIR contract".to_owned(),
             decisions: vec!["effects, obligations, and provenance remain explicit".to_owned()],

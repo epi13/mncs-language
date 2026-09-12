@@ -465,20 +465,26 @@ impl HighLevelIr {
             value.ty.normalize_legacy_ir_named();
         }
         for function in &mut self.functions {
-            for value in function.inputs.iter_mut().chain(function.outputs.iter_mut()) {
+            for value in function
+                .inputs
+                .iter_mut()
+                .chain(function.outputs.iter_mut())
+            {
                 normalize_value(value);
             }
             for iteration in &mut function.bounded_iterations {
                 iteration.state_type.normalize_legacy_ir_named();
-                if let crate::IterationDomain::OverSequence { element_type } =
-                    &mut iteration.domain
+                if let crate::IterationDomain::OverSequence { element_type } = &mut iteration.domain
                 {
                     element_type.normalize_legacy_ir_named();
                 }
             }
             for block in &mut function.blocks {
                 for operation in &mut block.operations {
-                    for value in operation.inputs.iter_mut().chain(operation.outputs.iter_mut())
+                    for value in operation
+                        .inputs
+                        .iter_mut()
+                        .chain(operation.outputs.iter_mut())
                     {
                         normalize_value(value);
                     }

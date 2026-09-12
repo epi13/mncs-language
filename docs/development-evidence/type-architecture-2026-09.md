@@ -150,3 +150,134 @@ representation for `IrType` (or collapse the `BodyType → IrType::Named →
 BodyType` round-trip), remove the `MNB094/MNB095` tolerance after a full
 corpus run, and resolve TYPE-P-001 by carrying nominal identity in
 sequence/view ABI contracts (versioned wire change with compat path).
+
+---
+
+# Type-transport campaign (same date, branch `feat/type-transport-2026-09-12`)
+
+## Scope
+
+Close TYPE-P-001/002/003 by finishing semantic type transport through
+HIR/SSA/ABI: `BodyType` is now the single resolved type in persisted IR,
+ABI contracts carry `AbiTypeRef(BodyType)` instead of bare strings, and
+every nominal reader resolves by identity, failing closed on ambiguity.
+No traits, subtyping, coercion, or dependent types; valid semantics and
+compat preserved.
+
+## What changed
+
+- **TYPE-P-002 closed**: `IrType::Named` stringly transport removed.
+  HIR (`HighLevelIr`) and SSA (`SsaModule`) carry `BodyType` directly;
+  both schemas versioned `0.4 → 0.5` with deterministic
+  `normalize_legacy_*` upgrades for pre-0.5 documents
+  (`mncs-model` `ir.rs`, `ssa.rs`, `ssa_execution.rs`, `lib.rs`).
+- **Backend artifact `0.4 → 0.5`**: contract element/field types are
+  `AbiTypeRef(BodyType)`, which serializes transparently as the resolved
+  type and deserializes from the typed shape or a legacy bare spelling.
+  `BackendArtifact::normalize_legacy_contracts` upgrades pre-0.5
+  artifacts deterministically and reseals the identity; `mncs-embed`
+  normalizes after the identity check passes and re-validates before
+  admission, so tampering is still refused on the original bytes.
+- **TYPE-P-003 closed**: the `MNB094/MNB095` broad-`Named` tolerance no
+  longer excuses anything — the committed test
+  `view_result_with_unresolved_name_reports_mismatch_and_invariant`
+  requires both the mismatch and `MNB122` to fire.
+- **TYPE-P-001 readers hardened (this pass)**: every nominal
+  contract/map lookup that fell back to the short-name key now resolves
+  by identity only, via the single authority
+  `BackendValueContract::find_nominal_contract` (identity key, then an
+  identity scan for hand-built maps) and
+  `resolve_nominal_spelling` (unique short names resolve, shared names
+  refuse). Touched: `mncs-codegen` `composite.rs` (`resolve_contract`,
+  field decode), `support.rs` (`check_declared_type`, contract-value
+  check), `lib.rs` (`named_marshal`, including the legacy-`Named` arm
+  which previously inherited whichever entry won the name slot).
+- **Single-authority bare-spelling parse (this pass, incident-driven)**:
+  `AbiTypeRef::visit_str` now resolves through
+  `BodyType::from_semantic_name` instead of wrapping every bare string
+  in `Named`. See incident below.
+
+## Incident: scalar elements broke frozen execution
+
+Staged testing caught two failures in
+`mncs-cli/tests/host_generic_entrypoints.rs`
+(`frozen_artifacts_serve_generic_entrypoints`,
+`repeated_instantiation_calls_agree_without_cross_talk`): frozen
+`experiment execute` refused fresh artifacts with
+`backend artifact identity is stale or laundered`. Bisect (`git stash`
+→ test passes at committed `9002027`) proved the cause was uncommitted
+campaign work, and a round-trip probe pinned it: a `View` element
+`Byte` serializes as the bare string `"byte"` (derived `Serialize` on
+the `BodyType` unit variant) but deserialized as `Named("byte")`, so
+the reloaded `function_value_contracts` differed from the sealed
+material and the artifact identity no longer validated. Fix: parse bare
+spellings with the one ABI spelling authority (`from_semantic_name` —
+scalars denote scalars, anything else stays a `Named` carrier for
+composite rehydration). Both CLI tests pass after the fix.
+
+## Tests (all observed this pass)
+
+- `cargo test -p mncs-model --lib`: 186 passed, including new
+  `compiler::tests::scalar_element_contracts_survive_a_serde_round_trip_with_identity_intact`
+  (Byte view element → bare `"byte"` wire form → identical reload,
+  identity valid).
+- `cargo test -p mncs-codegen --lib`: 61 passed, including new
+  `typed_decode_prefers_identity_over_same_short_name` (same-named
+  impostor under the short-name key: typed decode fails closed with a
+  no-contract error instead of decoding the impostor; true contract
+  under the identity key decodes, impostor ignored).
+- `cargo test -p mncs-cli --test host_generic_entrypoints`: 10/10
+  (both incident tests green).
+- `cargo test --workspace` (plus per-package reruns past the one
+  failure cargo stops at): 87 `mncs-cli` targets ok, 24 targets ok
+  across `mncs-model`/`mncs-compiler`/`mncs-codegen`/`mncs-embed`/
+  `mncs-conformance`/`mncs-syntax`/`mncs-translation-check`, zero
+  failures — except one pre-existing, out-of-scope failure —
+  `library_core::ravel_snapshot_is_canonically_identical_to_upstream`
+  expects `1cc17f37…` but canonicalization yields `346e6342…`. Proven
+  unrelated: it fails identically at committed `9002027` with this
+  branch's work stashed, and the `origin/main` (`e72d916`) binary
+  produces the same `346e6342…` output for the untouched snapshot file
+  (last touched pre-campaign). The drift predates this campaign; the
+  hash was recorded by an earlier tranche and never rotated. Left
+  untouched deliberately — rotating a witness hash belongs with the
+  delta verification, not this branch.
+- `cargo fmt --all -- --check` clean;
+  `cargo clippy --workspace --all-targets -- -D warnings` clean.
+
+## Remaining weaknesses (explicit)
+
+- `composite_value_contracts` is NOT covered by the backend-artifact
+  identity material (`BackendArtifactMaterial` omits it), so two
+  artifacts differing only in composite contracts share an identity.
+  Mitigated in practice today because the compiled bytes (which embody
+  the contracts) ARE covered via `bytes_sha256`; still, any future
+  post-hoc contract attachment should reseal explicitly. Adding the map
+  to the material would churn every artifact fingerprint — a deliberate
+  versioning decision, not taken here.
+- `TypeSyntax` strings remain at the persisted `Program` schema (syntax
+  layer by design); `Value.value_type` / `RecordField.field_type`
+  likewise.
+- Legacy `0.4` compat paths (`normalize_legacy_*`,
+  `AbiTypeRef` string arm, `Named("bool")` aliases) are load-bearing
+  for old artifacts; removal needs a full-corpus migration window.
+- A nominal literally named like a scalar spelling (`"byte"`) resolves
+  as the scalar in ABI-only positions — consistent with every other ABI
+  classifier (`from_semantic_name` is used exactly once per position),
+  but worth a reserved-name rule if nominal namespaces ever widen.
+
+## Performance / artifact impact
+
+No meaningful change observed: contract payloads carry the same type
+facts in typed rather than string form (comparable serialized size);
+identity recomputation is unchanged work; compile cost and runtime
+unmeasured but no new passes were added (normalization runs only on
+legacy load).
+
+## Recommended next campaign
+
+Attach `composite_value_contracts` to the artifact identity material as
+a deliberate versioned change (with the fingerprint-churn migration it
+implies); then pursue the consumer work named in the campaign brief
+(`mncs-compiler`, `mncs-numerics`, `mncs-ingest`, `mncs-store`) on the
+now-stable typed transport.

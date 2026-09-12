@@ -61,9 +61,13 @@ pub struct Artifact {
 impl Artifact {
     /// Load frozen artifact bytes (the `backend-artifact.json` document).
     /// Refuses artifacts whose identity does not validate: a tampered or
-    /// truncated artifact never becomes a session.
+    /// truncated artifact never becomes a session. Pre-0.5 artifacts whose
+    /// contract type references traveled as bare strings normalize
+    /// deterministically after the identity check passes (so tampering is
+    /// still refused on the original bytes) and re-validate under the
+    /// upgraded schema before admission.
     pub fn from_json(bytes: &[u8]) -> Result<Self, EmbedError> {
-        let artifact: BackendArtifact = serde_json::from_slice(bytes).map_err(|error| {
+        let mut artifact: BackendArtifact = serde_json::from_slice(bytes).map_err(|error| {
             EmbedError::new(
                 "invalid_artifact",
                 format!("artifact JSON rejected: {error}"),
@@ -73,6 +77,13 @@ impl Artifact {
             return Err(EmbedError::new(
                 "invalid_identity",
                 "backend artifact identity does not validate; refusing",
+            ));
+        }
+        artifact.normalize_legacy_contracts();
+        if !artifact.identity_is_valid() {
+            return Err(EmbedError::new(
+                "invalid_identity",
+                "backend artifact identity does not validate after normalization; refusing",
             ));
         }
         Ok(Self { inner: artifact })
