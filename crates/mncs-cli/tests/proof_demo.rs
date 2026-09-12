@@ -20,9 +20,9 @@ use mncs_codegen::{integer_no_overflow_promise, proof_backed_no_overflow_certifi
 use mncs_compiler::elaborate_program;
 use mncs_model::{
     kernel_backed_range_result, parse_proof_corpus, reference_check, ArithmeticIntent,
-    BackendPromise, EvidenceAuthorityClass, EvidenceFreshness, IntegerOperation, IntegerType,
-    MicroVerifier as _, ObligationStatus, ProofArtifact, ProofBinding, ProofCell, ProofTag,
-    ProofVerdict, SemanticId, SsaInstructionKind, VerifierMethod, VerifierRequest, PROOF_KERNEL_ID,
+    EvidenceAuthorityClass, EvidenceFreshness, IntegerOperation, IntegerType, MicroVerifier as _,
+    ObligationStatus, ProofArtifact, ProofBinding, ProofCell, ProofTag, ProofVerdict, SemanticId,
+    SsaInstructionKind, VerifierMethod, VerifierRequest, PROOF_KERNEL_ID,
 };
 use mncs_syntax::{parse, SourceArtifactKind, SourceEnvelope};
 
@@ -164,7 +164,7 @@ fn setup_demo() -> Demo {
                 candidate
                     .outputs
                     .iter()
-                    .any(|output| &output.identity == &producer.inputs[0])
+                    .any(|output| output.identity == producer.inputs[0])
             })
             .expect("constant argument");
         if let SsaInstructionKind::Constant { value, .. } = &argument.kind {
@@ -208,7 +208,7 @@ fn setup_demo() -> Demo {
                 candidate
                     .outputs
                     .iter()
-                    .any(|output| &output.identity == &producer.inputs[0])
+                    .any(|output| output.identity == producer.inputs[0])
             })
             .expect("constant argument");
         trace.push(argument.identity.clone());

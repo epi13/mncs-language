@@ -1203,7 +1203,6 @@ pub(crate) fn backend_output_value(
         BackendValueContract::Finite {
             type_identity,
             variants,
-            payloads: _,
             ..
         } => {
             // Typed realizations return fully materialized finite values
