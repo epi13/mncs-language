@@ -105,6 +105,22 @@ impl LlvmStatefulSession<'_> {
                 "LLVM execution requires a language-owned function value contract",
             );
         };
+        // Arity gate (P-006): the one-shot `execute_llvm` path already
+        // refuses miscounted requests; the retained session must refuse
+        // identically instead of driving clang with a miscounted
+        // argument vector (missing arguments surface as unattributed
+        // driver failures, extra arguments are silently ignored).
+        if contract.inputs.len() != request.arguments.len() {
+            return execution_failure(
+                result,
+                ExecutionStatus::InvalidRequest,
+                format!(
+                    "backend request violates the language-owned value contract: expected {} argument(s), received {}",
+                    contract.inputs.len(),
+                    request.arguments.len()
+                ),
+            );
+        }
         // The entry symbol is module-qualified (ENG-PRESSURE-0017). Refused
         // entrypoints (P1-B02 admission) fail closed as Unsupported.
         let Some(entry) = crate::support::resolve_entry_export(
@@ -975,7 +991,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             function,
             src,
         } => {
-            if !matches!(function.as_str(), "sin" | "cos") {
+            if !matches!(function.as_str(), "sin" | "cos" | "neg") {
                 let _ = writeln!(out, "  br label %mncs_fail");
                 return;
             }
@@ -983,12 +999,20 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             emit_float_finite_guard(out, &input, split);
             *split += 1;
             let tmp = format!("fintrin{split}");
-            let _ = writeln!(
-                out,
-                "  %{tmp} = call double @llvm.{function}.f64(double %{input})"
-            );
-            store_dest(out, names, dest, &tmp);
-            emit_float_finite_guard(out, &tmp, split);
+            if function == "neg" {
+                // Exact IEEE-754 negation is one instruction, not a
+                // libm call — and the result of negating a finite
+                // input is finite, so no result guard is needed.
+                let _ = writeln!(out, "  %{tmp} = fneg double %{input}");
+                store_dest(out, names, dest, &tmp);
+            } else {
+                let _ = writeln!(
+                    out,
+                    "  %{tmp} = call double @llvm.{function}.f64(double %{input})"
+                );
+                store_dest(out, names, dest, &tmp);
+                emit_float_finite_guard(out, &tmp, split);
+            }
         }
         ScalarInst::FloatCompare {
             dest,
@@ -1565,7 +1589,21 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                     "  store {raw_ty} %rslot{tag}_{lane}, ptr %rdgep{tag}_{lane}"
                 );
             }
+            // Float lanes are bit-carried through the i64 arena: the
+            // SSA element value is `double`, so bitcast (never convert)
+            // it to the raw slot word before storing. The bulk lane
+            // copies above are already bitwise `i64` moves, which are
+            // exact for doubles.
+            let elem_is_float = matches!(names.ty(element), ScalarTy::Float);
             let element = load_value(out, names, element, "relem", split);
+            let element = if elem_is_float {
+                *split += 1;
+                let bits = format!("relembits{split}");
+                let _ = writeln!(out, "  %{bits} = bitcast double %{element} to i64");
+                bits
+            } else {
+                element
+            };
             *split += 1;
             let store_tag = *split;
             let _ = writeln!(out, "  %rioff{store_tag} = shl i64 %{idx}, 3");

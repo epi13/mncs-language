@@ -6076,10 +6076,12 @@ impl<'a> BodyBuilder<'a> {
         Some(ResolvedBinding::plain(id, result_ty))
     }
 
-    /// Elaborate the `sin(x)` / `cos(x)` float intrinsics (Profile
-    /// 0.12). The operand and result are binary64; a non-float operand
-    /// is refused, and the non-finite trap obligation is recorded with
-    /// the operation like arithmetic.
+    /// Elaborate the `sin(x)` / `cos(x)` / `neg(x)` float intrinsics
+    /// (Profile 0.12). The operand and result are binary64; a non-float
+    /// operand is refused, and the non-finite trap obligation is
+    /// recorded with the operation like arithmetic. `neg` is exact and
+    /// total on finite inputs (IEEE-754 negation, including signed
+    /// zeros); unlike the transcendental pair it needs no host libm.
     fn elaborate_float_intrinsic(
         &mut self,
         name: &str,
@@ -6089,7 +6091,7 @@ impl<'a> BodyBuilder<'a> {
         env: &mut BindingEnv,
         diagnostics: &mut Vec<SourceDiagnostic>,
     ) -> Option<ResolvedBinding> {
-        if !matches!(name, "sin" | "cos") {
+        if !matches!(name, "sin" | "cos" | "neg") {
             diagnostics.push(elaboration_diagnostic(
                 "MNE250",
                 format!("unsupported float intrinsic {name:?}"),
@@ -6287,6 +6289,55 @@ impl<'a> BodyBuilder<'a> {
                 Some(resolved)
             }
             AstExpr::Integer { value, text } => {
+                // Exact float adaptation (Profile 0.12): an integer
+                // literal in a binary64 position becomes that value when
+                // exactly representable (|v| <= 2^53, so the conversion
+                // is lossless); anything wider stays refused with an
+                // explicit-`as` remedy instead of silently rounding.
+                // This mirrors the integer/byte adaptation above and
+                // flows through the same symmetric operand threading,
+                // so `xs[i] * 2` and `2 * xs[i]` both mean `2.0`.
+                if let Some(BodyType::Float(float)) = expected {
+                    if !float.is_supported() || !self.profile_float() {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE118",
+                            "integer literal cannot satisfy a non-integer type",
+                            text.span,
+                        ));
+                        return None;
+                    }
+                    if (-9_007_199_254_740_992..=9_007_199_254_740_992).contains(value) {
+                        let bits = (*value as f64).to_bits();
+                        let ty = BodyType::Float(FloatType::f64());
+                        let id = self.new_value("fc");
+                        self.blocks[self.current].operations.push(BodyOperation {
+                            id: id.clone(),
+                            kind: BodyOperationKind::FloatConstant {
+                                bits,
+                                ty: FloatType::f64(),
+                            },
+                            operands: Vec::new(),
+                            results: vec![BodyValue {
+                                id: id.clone(),
+                                ty: ty.clone(),
+                            }],
+                            contracts: Vec::new(),
+                            assumptions: Vec::new(),
+                            machine_intent: None,
+                            lowering: None,
+                            portability: None,
+                        });
+                        return Some(ResolvedBinding::plain(id, ty));
+                    }
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE118",
+                        format!(
+                            "integer literal {value} is not exactly representable as binary64; convert explicitly with `as`"
+                        ),
+                        text.span,
+                    ));
+                    return None;
+                }
                 let ty = match expected {
                     Some(BodyType::Integer(integer)) => BodyType::Integer(*integer),
                     // Byte-typed literals adapt to the unsigned 8-bit domain.
@@ -8233,6 +8284,33 @@ impl<'a> BodyBuilder<'a> {
                 count,
                 span,
             } => {
+                // Numerics P-003: validate the count text before the
+                // expected-type check, so `[x; N]` names the repeat-count
+                // rule (MNE256) rather than whichever contextual check
+                // would fire first. The count rule is local to the
+                // literal; the expected bound is contextual.
+                let parsed: u32 = count.text.parse().map_or_else(
+                    |_| {
+                        // A bare identifier reaches here through the
+                        // parser's recovery path, so name the actual rule
+                        // instead of the generic bad-length message.
+                        let symbolic = count
+                            .text
+                            .starts_with(|c: char| c.is_alphabetic() || c == '_');
+                        let message = if symbolic {
+                            format!(
+                                "symbolic repeat count `{}` is not supported; \
+                                 repeat counts must be Nat literals",
+                                count.text
+                            )
+                        } else {
+                            "repeat count is not a valid sequence length".to_owned()
+                        };
+                        diagnostics.push(elaboration_diagnostic("MNE256", message, count.span));
+                        None
+                    },
+                    Some,
+                )?;
                 let BodyType::Sequence {
                     element: element_type,
                     bound: mncs_model::SequenceBound::Exact(length),
@@ -8253,17 +8331,6 @@ impl<'a> BodyBuilder<'a> {
                 // `[value; N]`). Length agreement with the expected exact
                 // bound is checked statically; the declared bound itself
                 // already passed the sequence-length ceiling.
-                let parsed: u32 = count.text.parse().map_or_else(
-                    |_| {
-                        diagnostics.push(elaboration_diagnostic(
-                            "MNE256",
-                            "repeat count is not a valid sequence length",
-                            count.span,
-                        ));
-                        None
-                    },
-                    Some,
-                )?;
                 if parsed != length {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE184",
@@ -8989,9 +9056,26 @@ impl<'a> BodyBuilder<'a> {
                     | AstBinaryOp::SubSat
                     | AstBinaryOp::MulSat => {
                         let BodyType::Integer(operand_type) = left_value.ty else {
+                            // Name the actual operand type: a bare "must
+                            // have an integer type" misleads when the
+                            // operand is a generic `T` (Profile 0.10 has
+                            // no arithmetic-capability constraints, so
+                            // `T + T` cannot elaborate whatever `T`
+                            // becomes — monomorphize at a concrete
+                            // integer type or write the operation per
+                            // type instead).
+                            let message = match &left_value.ty {
+                                BodyType::GenericParam { name } => format!(
+                                    "arithmetic operands must have an integer type, but this operand has the generic type parameter `{name}`, which carries no arithmetic capability; call the function at a concrete integer type"
+                                ),
+                                other => format!(
+                                    "arithmetic operands must have an integer type, but this operand has type `{}`",
+                                    other.semantic_name()
+                                ),
+                            };
                             diagnostics.push(elaboration_diagnostic(
                                 "MNE120",
-                                "arithmetic operands must have an integer type",
+                                message,
                                 expr.span(),
                             ));
                             return None;

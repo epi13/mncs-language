@@ -70,7 +70,12 @@ pub fn specialize_program_with_seeds(
         args: Vec<GenericArg>,
         canonical: String,
         key: String,
-        host_spellings: Vec<String>,
+        /// Every distinct positional host-spelling address that named
+        /// this instantiation, first-seen order. Positions are
+        /// significant (`["2", "2"]` and `["3", "2"]` are different
+        /// addresses for different instantiations, and neither may be
+        /// sorted or deduplicated across positions).
+        host_spellings: Vec<Vec<String>>,
     }
 
     let mut specialization_by_key: BTreeMap<String, Function> = BTreeMap::new();
@@ -80,15 +85,21 @@ pub fn specialize_program_with_seeds(
     let mut seen_keys: BTreeSet<String> = BTreeSet::new();
 
     // Host seeds queue before the in-language call-site scan, merged by
-    // instantiation key with spellings unioned: different spellings of
-    // one instantiation (a nominal by name vs by identity) still produce
-    // one function, while every spelling stays host-addressable. Seeds
-    // that fail the same checks an in-language call would fail report
-    // the same diagnostics (MNE131/MNE221/MNE222) instead of queueing.
+    // instantiation key with spelling addresses unioned: different
+    // spellings of one instantiation (a nominal by name vs by identity)
+    // still produce one function, while every spelling stays
+    // host-addressable. Spellings are positional addresses — one entry
+    // per type argument, in order — so the union keeps distinct
+    // positional vectors whole and never sorts or deduplicates across
+    // positions (`["2", "2"]` must not collapse to `["2"]`, and
+    // `["3", "2"]` must not reorder to `["2", "3"]`). Seeds that fail
+    // the same checks an in-language call would fail report the same
+    // diagnostics (MNE131/MNE221/MNE222) instead of queueing.
     {
         /// Seeds merged by (generic identity, canonical args): different
-        /// spellings of one instantiation union their spellings.
-        type MergedSeed = (SemanticId, Vec<GenericArg>, Vec<String>);
+        /// positional spelling addresses of one instantiation union as
+        /// whole vectors, first-seen order.
+        type MergedSeed = (SemanticId, Vec<GenericArg>, Vec<Vec<String>>);
         let mut merged: BTreeMap<(String, String), MergedSeed> = BTreeMap::new();
         for seed in seeds {
             let canonical = seed
@@ -99,20 +110,20 @@ pub fn specialize_program_with_seeds(
                 .join("|");
             merged
                 .entry((seed.generic_id.0.clone(), canonical))
-                .and_modify(|(_, _, spellings)| {
-                    spellings.extend(seed.host_spellings.iter().cloned());
+                .and_modify(|(_, _, addresses)| {
+                    if !addresses.contains(&seed.host_spellings) {
+                        addresses.push(seed.host_spellings.clone());
+                    }
                 })
                 .or_insert_with(|| {
                     (
                         seed.generic_id.clone(),
                         seed.args.clone(),
-                        seed.host_spellings.clone(),
+                        vec![seed.host_spellings.clone()],
                     )
                 });
         }
-        for ((_, canonical), (generic_id, args, mut spellings)) in merged {
-            spellings.sort();
-            spellings.dedup();
+        for ((_, canonical), (generic_id, args, spellings)) in merged {
             let Some(generic_fn) = generic_by_id.get(&generic_id) else {
                 diagnostics.push(Diagnostic {
                     code: "MNE131".to_owned(),

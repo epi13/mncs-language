@@ -89,6 +89,27 @@ fn general_negation_stays_refused() {
 }
 
 #[test]
+fn generic_arithmetic_names_the_type_parameter() {
+    // MNE120: `T + T` names the generic parameter and the missing
+    // capability instead of a bare "must have an integer type".
+    let bad = study("mne120",
+        "mncs 0.10;\nmodule probe.mne120_v1;\nfn gadd<T>(a: T, b: T) -> (result: T) {\n    return a + b;\n}\n",
+    );
+    let diags = bad["diagnostics"].as_array().cloned().unwrap_or_default();
+    let messages: Vec<String> = diags
+        .iter()
+        .filter(|d| d["code"] == "MNE120")
+        .filter_map(|d| d["message"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(messages.len(), 1, "expected one MNE120, got: {diags:?}");
+    assert!(
+        messages[0].contains("`T`") && messages[0].contains("no arithmetic capability"),
+        "MNE120 must name the parameter: {}",
+        messages[0]
+    );
+}
+
+#[test]
 fn nested_call_composition_elaborates() {
     // MNE133/135 negative result: sub(x, mul(a,b)) is composition, not a ban.
     let ok = study("nest", 

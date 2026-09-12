@@ -1224,12 +1224,33 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
         } else if current.is_ascii_digit() {
             offset += current.len_utf8();
             let mut dotted = false;
+            // A trailing `[eE][+-]?digits` exponent continues the number
+            // (`1e300`, `1.5e-3`): binary64 literals need exponent
+            // notation for magnitudes no dotted spelling can reach. The
+            // exponent is consumed only on a full match; a bare `e`
+            // (`2e`, `2e-x`) stays an identifier tail exactly as today.
             while offset < source.len() {
                 let Some(next) = source[offset..].chars().next() else {
                     break;
                 };
                 if next.is_ascii_digit() {
                     offset += 1;
+                } else if next == 'e' || next == 'E' {
+                    let mut end = offset + 1;
+                    if source[end..].starts_with(['+', '-']) {
+                        end += 1;
+                    }
+                    let digits = source[end..]
+                        .chars()
+                        .take_while(|digit| digit.is_ascii_digit())
+                        .map(|digit| digit.len_utf8())
+                        .sum::<usize>();
+                    if digits == 0 {
+                        break;
+                    }
+                    offset = end + digits;
+                    dotted = true;
+                    break;
                 } else if next == '.' {
                     // A single dot followed by a digit continues a version
                     // literal (`mncs 0.7`); a doubled dot closes the number
@@ -1719,6 +1740,23 @@ impl<'a> Parser<'a> {
         let start = self.current_token_index();
         self.expect(TokenKind::EnumKeyword, "MNP070", "expected 'enum'");
         let name = self.spanned(TokenKind::Identifier, "MNP071", "expected finite type name");
+        // Numerics P-004: like generic records (see `record_decl`), a
+        // `<...>` parameter list after an enum name is refused precisely
+        // at the `<`, then the balanced body is skipped so parsing
+        // resynchronizes without the MNP074/MNP075/MNP006/MNP007
+        // cascade.
+        if self.current_kind() == Some(TokenKind::Lt) {
+            self.error(
+                "MNP214",
+                "generic enum declarations are not supported; enums cannot take type parameters",
+                vec![TokenKind::LeftBrace],
+            );
+            let _ = self.generic_params();
+            self.skip_balanced_block();
+            let end = self.previous_token_index(start);
+            let node = self.node(CstKind::FiniteTypeDeclaration, start, end, Vec::new());
+            return (node, None);
+        }
         self.expect(
             TokenKind::LeftBrace,
             "MNP072",
@@ -1821,6 +1859,25 @@ impl<'a> Parser<'a> {
         let start = self.current_token_index();
         self.expect(TokenKind::RecordKeyword, "MNP121", "expected 'record'");
         let name = self.spanned(TokenKind::Identifier, "MNP122", "expected record name");
+        // Numerics P-004: a `<...>` parameter list after the record name
+        // is a generic record, which the type system does not offer.
+        // Refuse precisely at the `<` (reusing the shared parameter
+        // parser so malformed lists still get parameter diagnostics),
+        // then skip the balanced body so the declaration loop
+        // resynchronizes without the MNP127/MNP128/MNP006/MNP007
+        // cascade that used to bury the real rule.
+        if self.current_kind() == Some(TokenKind::Lt) {
+            self.error(
+                "MNP213",
+                "generic record declarations are not supported; records cannot take type parameters",
+                vec![TokenKind::LeftBrace],
+            );
+            let _ = self.generic_params();
+            self.skip_balanced_block();
+            let end = self.previous_token_index(start);
+            let node = self.node(CstKind::RecordTypeDeclaration, start, end, Vec::new());
+            return (node, None);
+        }
         self.expect(
             TokenKind::LeftBrace,
             "MNP123",
@@ -2547,19 +2604,10 @@ impl<'a> Parser<'a> {
                         );
                         return None;
                     }
-                    let mut parts = lit.text.split('.');
-                    let shape = matches!(
-                        (parts.next(), parts.next(), parts.next()),
-                        (Some(whole), Some(frac), None)
-                            if !whole.is_empty()
-                                && !frac.is_empty()
-                                && whole.bytes().all(|byte| byte.is_ascii_digit())
-                                && frac.bytes().all(|byte| byte.is_ascii_digit())
-                    );
-                    if !shape {
+                    if !float_literal_shape(&lit.text) {
                         self.error(
                             "MNP197",
-                            "float literal requires digits on both sides of one dot",
+                            "float literal requires digits on both sides of one dot, with an optional exponent (`1e300`, `1.5e-3`)",
                             vec![TokenKind::Version],
                         );
                         return None;
@@ -2737,19 +2785,10 @@ impl<'a> Parser<'a> {
                     );
                     return None;
                 }
-                let mut parts = text.text.split('.');
-                let shape = matches!(
-                    (parts.next(), parts.next(), parts.next()),
-                    (Some(whole), Some(frac), None)
-                        if !whole.is_empty()
-                            && !frac.is_empty()
-                            && whole.bytes().all(|byte| byte.is_ascii_digit())
-                            && frac.bytes().all(|byte| byte.is_ascii_digit())
-                );
-                if !shape {
+                if !float_literal_shape(&text.text) {
                     self.error(
                         "MNP197",
-                        "float literal requires digits on both sides of one dot",
+                        "float literal requires digits on both sides of one dot, with an optional exponent (`1e300`, `1.5e-3`)",
                         vec![TokenKind::Version],
                     );
                     return None;
@@ -3072,8 +3111,8 @@ impl<'a> Parser<'a> {
     /// Parse the Profile 0.8 selection intrinsics `select(c, t, f)` and
     /// `replace(seq, index, element)`, plus the host intrinsics
     /// `host_read()` and `clock_read()`, plus the Profile 0.12 float
-    /// intrinsics `sin(x)` and `cos(x)`. `name` is the already-consumed
-    /// intrinsic identifier.
+    /// intrinsics `sin(x)`, `cos(x)`, and `neg(x)`. `name` is the
+    /// already-consumed intrinsic identifier.
     fn intrinsic_selection(&mut self, name: SpannedText) -> Option<AstExpr> {
         self.expect(
             TokenKind::LeftParen,
@@ -3218,7 +3257,7 @@ impl<'a> Parser<'a> {
                 );
                 None
             }
-            ("sin", 1) | ("cos", 1) => {
+            ("sin", 1) | ("cos", 1) | ("neg", 1) => {
                 if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_12) {
                     self.error(
                         "MNP201",
@@ -3249,6 +3288,14 @@ impl<'a> Parser<'a> {
                 self.error(
                     "MNP200",
                     "cos takes exactly one float argument",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("neg", _) => {
+                self.error(
+                    "MNP212",
+                    "neg takes exactly one float argument",
                     vec![TokenKind::RightParen],
                 );
                 None
@@ -3733,17 +3780,33 @@ impl<'a> Parser<'a> {
 
     /// Repeat tail of [`Self::sequence_literal`] after `[value ;`: parses
     /// the Nat count and the closing bracket (ENG-PRESSURE-0020).
+    /// A bare identifier in count position (numerics P-003: `[x; N]`)
+    /// is carried through as the count text instead of refusing with
+    /// `MNP203`: the parser recovers (the `]` still parses, so no
+    /// cascade), and elaboration reports the precise rule once via
+    /// `MNE256` (symbolic repeat counts are not supported; counts
+    /// must be Nat literals).
     fn repeat_literal(
         &mut self,
         open_span: SourceSpan,
         element: Option<AstExpr>,
     ) -> Option<AstExpr> {
         let element = element?;
-        let count = self.spanned(
-            TokenKind::IntegerLiteral,
-            "MNP203",
-            "expected repeat count after ';'",
-        )?;
+        let count = if self.current_kind() == Some(TokenKind::Identifier) {
+            let index = self.significant[self.cursor];
+            self.cursor += 1;
+            let token = &self.tokens[index];
+            SpannedText {
+                text: token.text.clone(),
+                span: token.span,
+            }
+        } else {
+            self.spanned(
+                TokenKind::IntegerLiteral,
+                "MNP203",
+                "expected repeat count after ';'",
+            )?
+        };
         let close = self.expect(
             TokenKind::RightBracket,
             "MNP157",
@@ -4825,6 +4888,32 @@ impl<'a> Parser<'a> {
             .unwrap_or(self.tokens.len())
     }
 
+    /// Skip a balanced `{ ... }` block for error recovery (numerics
+    /// P-004): consumes the opening brace and everything through its
+    /// match, tolerating nesting; when the cursor is not on `{` (or
+    /// input ends first) it stops without consuming, leaving further
+    /// recovery to the caller.
+    fn skip_balanced_block(&mut self) {
+        if self.current_kind() != Some(TokenKind::LeftBrace) {
+            return;
+        }
+        let mut depth = 0usize;
+        while self.cursor < self.significant.len() {
+            match self.current_kind() {
+                Some(TokenKind::LeftBrace) => depth += 1,
+                Some(TokenKind::RightBrace) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        self.cursor += 1;
+                        return;
+                    }
+                }
+                _ => {}
+            }
+            self.cursor += 1;
+        }
+    }
+
     fn previous_token_index(&self, fallback: usize) -> usize {
         self.cursor
             .checked_sub(1)
@@ -4902,6 +4991,49 @@ fn is_identifier_continue(value: char) -> bool {
 // `source_profile_supported` is registry-driven (`profile.rs`) and
 // re-exported above; internal callers resolve to that predicate.
 
+/// Shape check for a `Version`-lexed float literal: digits on both
+/// sides of one dot, with an optional `[eE][+-]?digits` exponent
+/// (`1e300`, `1.5e-3`, `5e-324`). The scanner only produces the token
+/// on a full exponent match, so one split is authoritative. A dotless
+/// mantissa is valid only with an exponent (`1e5`, never bare `1`,
+/// which lexes as an integer). Finiteness is checked separately
+/// (MNP198) after `f64` parsing, which rounds the accepted shapes.
+fn float_literal_shape(text: &str) -> bool {
+    let (mantissa, exponent) = match text.split_once(['e', 'E']) {
+        Some((mantissa, exponent)) => (mantissa, Some(exponent)),
+        None => (text, None),
+    };
+    let exponent_shape = exponent.is_none_or(|digits| {
+        let digits = digits.strip_prefix(['+', '-']).unwrap_or(digits);
+        !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+    });
+    if !exponent_shape {
+        return false;
+    }
+    let mut parts = mantissa.split('.');
+    if matches!(
+        (parts.next(), parts.next(), parts.next()),
+        (Some(whole), Some(frac), None)
+            if !whole.is_empty()
+                && !frac.is_empty()
+                && whole.bytes().all(|byte| byte.is_ascii_digit())
+                && frac.bytes().all(|byte| byte.is_ascii_digit())
+    ) {
+        return true;
+    }
+    // Dotless mantissa with an exponent (`1e5`).
+    if exponent.is_some() {
+        let mut solo = mantissa.split('.');
+        if matches!((solo.next(), solo.next()), (Some(whole), None)
+            if !whole.is_empty()
+                && whole.bytes().all(|byte| byte.is_ascii_digit()))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn is_profile08_intrinsic(name: &str) -> bool {
     matches!(
         name,
@@ -4965,6 +5097,7 @@ fn is_profile08_intrinsic(name: &str) -> bool {
             | "reduce_max"
             | "sin"
             | "cos"
+            | "neg"
     )
 }
 
@@ -5338,6 +5471,50 @@ mod tests {
             !has_code(&parsed, "MNP206"),
             "20-deep parens must not trip the bound: {:#?}",
             parsed.diagnostics
+        );
+        assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+    }
+
+    /// Exponent float literals: dotted, dotless-with-exponent, signed
+    /// exponents, and subnormal magnitudes are well-shaped; bare
+    /// integers, dangling exponents, and multi-dot versions are not.
+    #[test]
+    fn float_literal_exponent_shapes() {
+        for text in [
+            "1.0", "0.16", "1e5", "1E5", "1e+5", "1e-5", "1.5e-3", "1.5E+3", "5e-324", "0e0",
+            "10.0e10",
+        ] {
+            assert!(float_literal_shape(text), "{text} must be well-shaped");
+        }
+        for text in [
+            "1", "16", "1.", ".5", "1e", "1e+", "1e-", "1.2.3", "e5", "1ee5", "",
+        ] {
+            assert!(!float_literal_shape(text), "{text} must be ill-shaped");
+        }
+    }
+
+    /// The scanner folds a full `[eE][+-]?digits` exponent into the
+    /// number token; a bare `e` stays an identifier tail.
+    #[test]
+    fn exponent_scanning_folds_full_matches_only() {
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "exponent",
+            "mncs 0.12;\nmodule example.exponent;\nfn big() -> (result: f64) { return 1e300; }\nfn small() -> (result: f64) { return 1.5e-3; }\n",
+        );
+        let parsed = parse(&envelope);
+        let versions: Vec<String> = parsed
+            .lexical
+            .tokens
+            .iter()
+            .filter(|token| token.kind == TokenKind::Version)
+            .map(|token| token.text.clone())
+            .collect();
+        // The `0.12` profile header lexes as a version too; the point
+        // is that each exponent literal is ONE token.
+        assert_eq!(
+            versions,
+            vec!["0.12".to_owned(), "1e300".to_owned(), "1.5e-3".to_owned()]
         );
         assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
     }

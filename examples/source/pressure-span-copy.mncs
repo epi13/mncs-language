@@ -77,6 +77,16 @@ fn copy_u16() -> (result: u64) {
     return (out[5] as u64) + (out[6] as u64) + (out[7] as u64);
 }
 
+// Float lanes copy bit-exactly: the bulk move carries payload bits,
+// so every lane of the window survives unchanged. The whole sequence
+// is returned (rather than summed) so no float-finite obligation can
+// pollute the verdict: this case pins the move, not arithmetic.
+fn copy_f64() -> (result: [f64; 4]) {
+    let dst: [f64; 4] = [1.0, 2.0, 3.0, 4.0];
+    let src: [f64; 4] = [10.0, 20.0, 30.0, 40.0];
+    return copy_span(dst, 1, src, 0, 2);
+}
+
 // Boolean elements.
 fn copy_bool() -> (result: u64) {
     let dst: [bool; 8] = [false; 8];

@@ -1,0 +1,15 @@
+mncs 0.12;
+
+// Stage C2 exact negation: `neg(x)` is IEEE-754 negation, exact and
+// total on finite inputs. Unlike `0.0 - x` (which rounds +0.0 to
+// +0.0), `neg(+0.0)` is `-0.0`. Non-finite inputs trap (the float
+// trap rule), like every other float operation.
+module stage.c2_neg;
+
+fn fneg_exact(x: f64) -> (result: f64) {
+    return neg(x);
+}
+
+fn negneg(x: f64) -> (result: f64) {
+    return neg(neg(x));
+}

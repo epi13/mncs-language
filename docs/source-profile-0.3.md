@@ -30,6 +30,7 @@ Concept Reconstruction Experiments executable; it is not the final MNCS grammar 
 | caller lacks callee authority/effect closure | `MNE134` |
 | effect lacks a declared capability | `MNE111` |
 | invalid runtime variant/discriminant | `invalid_request` before candidate execution |
+| parameterized enum declaration (`enum Name<...>`) | `MNP214` (one precise refusal; the body is skipped for recovery) |
 
 The profile intentionally rejects general sum payloads, heap objects, records, polymorphism,
 cross-module calls, higher-order functions, general recursion, and source-level iteration. Named

@@ -458,12 +458,13 @@ pub(crate) fn function_value_contracts(
 }
 
 /// Build the host-addressable generic entrypoint map for an artifact
-/// (P1-013/P2-003): one row per compiled specialization that carries host
-/// seed spellings, resolved to the concrete `(module, function)` entry the
-/// backend emitted. In-language-only instantiations (empty spellings) are
-/// not host-addressable: the host must name its instantiation in the
-/// corpus so the seed spellings are recorded at elaboration. Callers pass
-/// the rows into [`mncs_model::BackendArtifact::with_generic_entrypoints`],
+/// (P1-013/P2-003): one row per distinct positional host-spelling
+/// address that named a compiled specialization, resolved to the
+/// concrete `(module, function)` entry the backend emitted.
+/// In-language-only instantiations (no addresses) are not
+/// host-addressable: the host must name its instantiation in the
+/// corpus so the seed spellings are recorded at elaboration. Callers
+/// pass the rows into [`mncs_model::BackendArtifact::with_generic_entrypoints`],
 /// which sorts them into the artifact identity.
 pub(crate) fn generic_entrypoint_records(
     program: &Program,
@@ -484,16 +485,22 @@ pub(crate) fn generic_entrypoint_records(
         let (Some(generic), Some(specialization)) = (generic, specialization) else {
             continue;
         };
-        rows.push(mncs_model::GenericEntrypointRecord {
-            generic_module: generic.identity_namespace(&program.module).to_owned(),
-            generic_function: generic.name.clone(),
-            args_spellings: record.host_spellings.clone(),
-            canonical_args: record.canonical_args.clone(),
-            entry_module: specialization
-                .identity_namespace(&program.module)
-                .to_owned(),
-            entry_function: specialization.name.clone(),
-        });
+        // One row per positional spelling address: `["2", "2"]` and
+        // `["3", "2"]` address different instantiations, and two
+        // spellings of one instantiation (nominal by name vs by
+        // identity) each stay addressable while sharing the entry.
+        for spellings in &record.host_spellings {
+            rows.push(mncs_model::GenericEntrypointRecord {
+                generic_module: generic.identity_namespace(&program.module).to_owned(),
+                generic_function: generic.name.clone(),
+                args_spellings: spellings.clone(),
+                canonical_args: record.canonical_args.clone(),
+                entry_module: specialization
+                    .identity_namespace(&program.module)
+                    .to_owned(),
+                entry_function: specialization.name.clone(),
+            });
+        }
     }
     rows
 }

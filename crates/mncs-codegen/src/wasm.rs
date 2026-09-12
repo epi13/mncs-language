@@ -136,6 +136,10 @@ pub enum Instr {
     F64Sub,
     F64Mul,
     F64Div,
+    /// Exact IEEE-754 negation for the `neg(x)` intrinsic (Profile
+    /// 0.12). Like every F64 op the interpreter carries the payload
+    /// as bits; the trap rule is enforced by lowering-time guards.
+    F64Neg,
     F64Eq,
     F64Ne,
     F64Lt,
@@ -1127,6 +1131,7 @@ fn execute_raw(
             Instr::F64Sub => bin_f64(&mut stack, |left, right| left - right)?,
             Instr::F64Mul => bin_f64(&mut stack, |left, right| left * right)?,
             Instr::F64Div => bin_f64(&mut stack, |left, right| left / right)?,
+            Instr::F64Neg => un_f64(&mut stack, |value| -value)?,
             Instr::F64Eq => cmp_f64(&mut stack, |left, right| left == right)?,
             Instr::F64Ne => cmp_f64(&mut stack, |left, right| left != right)?,
             Instr::F64Lt => cmp_f64(&mut stack, |left, right| left < right)?,
@@ -1284,6 +1289,13 @@ fn bin_f64(stack: &mut Vec<i64>, op: impl Fn(f64, f64) -> f64) -> Result<(), Was
     let right = pop(stack)?;
     let left = pop(stack)?;
     let value = op(f64::from_bits(left as u64), f64::from_bits(right as u64));
+    stack.push(value.to_bits() as i64);
+    Ok(())
+}
+
+fn un_f64(stack: &mut Vec<i64>, op: impl Fn(f64) -> f64) -> Result<(), WasmTrap> {
+    let operand = pop(stack)?;
+    let value = op(f64::from_bits(operand as u64));
     stack.push(value.to_bits() as i64);
     Ok(())
 }
@@ -2136,6 +2148,8 @@ fn encode_instr(out: &mut Vec<u8>, instr: &Instr) {
         Instr::F64Sub => out.push(0xa1),
         Instr::F64Mul => out.push(0xa2),
         Instr::F64Div => out.push(0xa3),
+        // Canonical `f64.neg` opcode.
+        Instr::F64Neg => out.push(0x8c),
         Instr::I32Add => out.push(0x6a),
         Instr::I32Sub => out.push(0x6b),
         Instr::I32Mul => out.push(0x6c),
@@ -2578,6 +2592,7 @@ fn decode_instr(payload: &[u8], cursor: usize) -> Result<(Instr, usize), WasmTra
         0xa1 => Instr::F64Sub,
         0xa2 => Instr::F64Mul,
         0xa3 => Instr::F64Div,
+        0x8c => Instr::F64Neg,
         0x44 => {
             let raw = payload.get(cursor..cursor + 8).ok_or_else(|| {
                 trap(

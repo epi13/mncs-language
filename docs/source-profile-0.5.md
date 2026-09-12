@@ -76,6 +76,9 @@ A backend limitation never redefines the language: `SUPPORTED`,
 ## Diagnostics added
 
 Parser: MNP120–MNP133 (profile gate, declaration/literal/projection syntax).
+A parameterized record declaration (`record Name<...>`) is refused once
+with `MNP213`; the balanced body is skipped so following declarations
+still parse.
 Elaboration: MNE150–MNE163 (duplicate/colliding record names, duplicate
 fields, unknown field types, literal coverage/type errors, projection errors).
 Body validation: MNB048–MNB057.

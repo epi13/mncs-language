@@ -553,12 +553,15 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
             src,
         } => {
             // Text form only; the JIT/AOT builder lowers the same guard
-            // and call shape through the declared `sin`/`cos` import.
+            // and call shape through the declared `sin`/`cos` import
+            // (`neg` is an inline `fneg`: no import, and no result
+            // guard since negating a finite input is finite).
             let dest_n = names.value(&dest.id);
             let src_n = names.value(src);
             let call = match function.as_str() {
                 "sin" => "call sin",
                 "cos" => "call cos",
+                "neg" => "fneg",
                 _ => "call mncs_unknown_float_intrinsic",
             };
             let _ = writeln!(out, "        {dest_n}_l = bitcast.f64 {src_n}");
@@ -567,12 +570,14 @@ fn emit_clif_inst(out: &mut String, inst: &ScalarInst, names: &ClifNames) {
             let _ = writeln!(out, "        {dest_n}_b = fcmp une {dest_n}_d, {dest_n}_z");
             let _ = writeln!(out, "        brnz {dest_n}_b, fail_fl_{dest_n}");
             let _ = writeln!(out, "        {dest_n}_f = {call} {dest_n}_l");
-            let _ = writeln!(out, "        {dest_n}_dr = fsub {dest_n}_f, {dest_n}_f");
-            let _ = writeln!(
-                out,
-                "        {dest_n}_br = fcmp une {dest_n}_dr, {dest_n}_z"
-            );
-            let _ = writeln!(out, "        brnz {dest_n}_br, fail_fl_{dest_n}");
+            if function != "neg" {
+                let _ = writeln!(out, "        {dest_n}_dr = fsub {dest_n}_f, {dest_n}_f");
+                let _ = writeln!(
+                    out,
+                    "        {dest_n}_br = fcmp une {dest_n}_dr, {dest_n}_z"
+                );
+                let _ = writeln!(out, "        brnz {dest_n}_br, fail_fl_{dest_n}");
+            }
             let _ = writeln!(out, "        {dest_n} = bitcast.i64 {dest_n}_f");
             let _ = writeln!(out, "        jump ok_fl_{dest_n}");
             let _ = writeln!(out, "    fail_fl_{dest_n}:");
@@ -1906,6 +1911,16 @@ fn aot_fallback_execute(
             "Cranelift AOT execution requires a language-owned function value contract".to_owned(),
         );
     };
+    // Arity gate (P-006), mirroring the JIT path and the LLVM gate: a
+    // miscounted argv would otherwise reach the linked driver, whose
+    // failure would be unattributed to the request.
+    if contract.inputs.len() != request.arguments.len() {
+        return Err(format!(
+            "backend request violates the language-owned value contract: expected {} argument(s), received {}",
+            contract.inputs.len(),
+            request.arguments.len()
+        ));
+    }
     if arena_image.is_none() && contract.inputs.iter().any(crate::support::contract_is_cell) {
         return Err(
             "composite parameters require a canonical call file for this request".to_owned(),
@@ -2437,7 +2452,10 @@ where
                             // block. The call reaches same-process libm
                             // through the declared import (JIT shims; AOT
                             // resolves `sin`/`cos` from libm at link time).
-                            if !matches!(function.as_str(), "sin" | "cos") {
+                            // `neg` is an inline `fneg`: no import, and no
+                            // result guard since negating a finite input
+                            // is finite.
+                            if !matches!(function.as_str(), "sin" | "cos" | "neg") {
                                 let always = builder.ins().iconst(types::I8, 1);
                                 let dead = builder.create_block();
                                 builder.ins().brif(
@@ -2464,21 +2482,30 @@ where
                             );
                             builder.switch_to_block(cont);
                             builder.seal_block(cont);
-                            let callee = trig_libcall(module, builder.func, function.as_str());
-                            let call = builder.ins().call(callee, &[input]);
-                            let computed = builder.inst_results(call)[0];
-                            let diff = builder.ins().fsub(computed, computed);
-                            let bad = builder.ins().fcmp(FloatCC::NotEqual, diff, zero);
-                            let cont = builder.create_block();
-                            builder.ins().brif(
-                                bad,
-                                fail,
-                                &[] as &[BlockArg],
-                                cont,
-                                &[] as &[BlockArg],
-                            );
-                            builder.switch_to_block(cont);
-                            builder.seal_block(cont);
+                            let computed = if function == "neg" {
+                                builder.ins().fneg(input)
+                            } else {
+                                let callee = trig_libcall(module, builder.func, function.as_str());
+                                let call = builder.ins().call(callee, &[input]);
+                                builder.inst_results(call)[0]
+                            };
+                            // No result guard for `neg`: exact on finite
+                            // inputs, and the input guard above already
+                            // established finiteness.
+                            if function != "neg" {
+                                let diff = builder.ins().fsub(computed, computed);
+                                let bad = builder.ins().fcmp(FloatCC::NotEqual, diff, zero);
+                                let cont = builder.create_block();
+                                builder.ins().brif(
+                                    bad,
+                                    fail,
+                                    &[] as &[BlockArg],
+                                    cont,
+                                    &[] as &[BlockArg],
+                                );
+                                builder.switch_to_block(cont);
+                                builder.seal_block(cont);
+                            }
                             let produced = jit_f64_to_bits(&mut builder, f64slot, computed);
                             values.insert(dest.id.clone(), produced);
                         }
@@ -3795,6 +3822,19 @@ fn jit_boundary_arguments_for_request(
     composite_contracts: &std::collections::BTreeMap<String, mncs_model::BackendValueContract>,
     request: &ExecutionRequest,
 ) -> Result<(Vec<i64>, Option<Vec<u8>>), String> {
+    // Arity gate (P-006): a request whose argument count disagrees with
+    // the entrypoint value contract must fail closed here, before any
+    // raw trampoline dispatch. Without this check the scalar path calls
+    // the compiled N-argument function through a wrong-arity pointer
+    // type, which kills the compiler process (SIGSEGV) instead of
+    // refusing. Same message as the C11/LLVM gates.
+    if request.arguments.len() != input_contracts.len() {
+        return Err(format!(
+            "backend request violates the language-owned value contract: expected {} argument(s), received {}",
+            input_contracts.len(),
+            request.arguments.len()
+        ));
+    }
     let needs_call_file = uses_cells
         || request
             .arguments
