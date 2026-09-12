@@ -1,0 +1,52 @@
+mncs 0.13;
+
+// INGEST-P-005/P-006 regression: `match` is uniformly lazy — only the
+// taken arm evaluates — across bool, integer, and finite subjects, while
+// `select` stays strict. The two pressures share this one solution:
+//
+// - P-006 (lazy conditional): `match flag { true => projection, false =>
+//   fallback }` evaluates exactly one side, so a correctness-sensitive
+//   projection that would trap (out-of-window index, division by zero)
+//   can be guarded away. Previously bool-match elaborated both arms
+//   through `Select` and the untaken trap fired anyway; bool arms now
+//   dispatch through the same branch-chain shape as finite/integer arms.
+// - P-005 (guarded iteration): `next acc = match live { true => update,
+//   false => acc }` makes liveness explicit and machine-enforced. Dead
+//   lanes neither execute the update expression (no trap, no dead-lane
+//   arithmetic) nor clobber the carried state (the keep arm carries the
+//   previous value). Deleting the `false => acc` keep arm is a compile
+//   error (MNE140, non-exhaustive match): the guard cannot silently
+//   disappear the way a dropped `select(..., keep)` could.
+//
+// `select(cond, a, b)` intentionally stays strict (both sides evaluate);
+// use `match` wherever only one side may execute.
+//
+// Corpus: examples/execution/pressure-guarded-match-corpus.json. The
+// `*_escape` case must report `runtime_failure`: laziness skips untaken
+// arms, it never suppresses a taken trap.
+module examples.pressure_guarded_match;
+
+// Lazy value branch: the untaken division never executes.
+fn lazy_branch(flag: bool, x: i64) -> (result: i64) {
+    return match flag { true => 10 / x, false => 0 };
+}
+
+// Guarded carried-state update over a live window: lanes at/after `m`
+// keep `acc` and skip `v[i]`, which would trap past the live window.
+fn guarded_sum(buf: [byte; 8], n: u64, m: u64) -> (result: i64) {
+    let v: [byte; up_to 8] = buf[0..n];
+    iterate i over v carrying acc: i64 = 0 {
+        next acc = match i < m { true => acc + (v[i] as i64), false => acc };
+    }
+    return acc;
+}
+
+// Guarded division fold over exact storage: lanes at/after `n` keep the
+// accumulator instead of dividing — and instead of clobbering it with
+// dead-lane arithmetic (the INGEST-P-005 word-class failure shape).
+fn guarded_div(divisors: [i64; 4], n: u64) -> (result: i64) {
+    iterate i over divisors carrying acc: i64 = 100 {
+        next acc = match i < n { true => acc / divisors[i], false => acc };
+    }
+    return acc;
+}

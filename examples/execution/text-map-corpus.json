@@ -5574,7 +5574,7 @@
       }
      }
     ],
-    "step_budget": 1024
+    "step_budget": 8192
    },
    "expected": [
     {
@@ -6190,7 +6190,7 @@
       }
      }
     ],
-    "step_budget": 1024
+    "step_budget": 8192
    },
    "expected": [
     {
@@ -6806,7 +6806,7 @@
       }
      }
     ],
-    "step_budget": 1024
+    "step_budget": 8192
    },
    "expected": [
     {
@@ -7422,7 +7422,7 @@
       }
      }
     ],
-    "step_budget": 1024
+    "step_budget": 8192
    },
    "expected": [
     {

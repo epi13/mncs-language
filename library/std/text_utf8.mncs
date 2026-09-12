@@ -1,0 +1,207 @@
+mncs 0.13;
+
+// mncs.std.text_utf8 — bounded UTF-8 validation, scalar stepping, and a
+// deliberately small case fold over byte views.
+//
+// INGEST-P-003: `text_view`/`text_scan` trade in producer-attested validity
+// flags, while `json_cursor` performs real lead/continuation validation
+// internally. This module is the coherent reusable substrate extracted
+// from that in-tree material: it imports the three lead/continuation
+// predicates from `mncs.std.json_cursor.v1` (no second decoder) and layers
+// the total bounded operations ingest needs on top.
+//
+// Scope discipline (explicit non-goals):
+// - validation reports the first bad byte index (`-1` = valid); it never
+//   repairs, skips, or normalizes;
+// - the scalar step decodes one scalar with a progress guarantee
+//   (`next = at + 1` on malformed input, `next = at` past the window) but
+//   performs no normalization (no NFC/NFD, no grapheme logic);
+// - `fold_scalar` covers ASCII A-Z plus Latin-1 capitals U+00C0-U+00DE
+//   except U+00D7 (multiplication sign, caseless). It is NOT full Unicode
+//   case folding: no multi-scalar mappings (German ß stays ß, it never
+//   becomes "SS"), no context sensitivity (Greek sigma), no Turkic
+//   dotless-I, nothing above U+00DE. Anything outside the covered pairs is
+//   identity, loudly documented here rather than silently approximated.
+//
+// Corpus: examples/execution/text-utf8-corpus.json (kept next to the
+// module's candidates, following the `text_scan`/`text_map` convention).
+module mncs.std.text_utf8.v1;
+
+use mncs.std.json_cursor.v1;
+
+// One decoded scalar: the scalar value, the position after it, and whether
+// position `at` started a well-formed scalar inside the live window.
+record ScalarStep { scalar: u32, next: u64, valid: bool }
+
+// Fold state for window validation: outstanding continuation bytes, the
+// lead awaiting its range-checked first continuation (`0` = none), and the
+// first bad byte index (`-1` = clean so far).
+record ValidateState { remaining: u64, lead: byte, error: i64 }
+
+// Keep the first recorded error index; later lanes must not overwrite it.
+fn first_error(current: i64, index: u64) -> (result: i64) {
+    return select(current == 0 - 1, index as i64, current);
+}
+
+// One validation lane: total over every byte value. Dead lanes (past the
+// live window) return the state unchanged, so narrowing the window never
+// corrupts the verdict.
+fn validate_step(state: ValidateState, value: byte, index: u64, live: bool) -> (result: ValidateState) {
+    if !live {
+        return state;
+    }
+    if state.remaining > 0 {
+        if !is_utf8_continuation(value) {
+            return ValidateState { remaining: 0, lead: 0, error: first_error(state.error, index) };
+        }
+        if state.lead != 0 {
+            if !utf8_first_continuation_valid(state.lead, value) {
+                return ValidateState { remaining: 0, lead: 0, error: first_error(state.error, index) };
+            }
+        }
+        return ValidateState { remaining: state.remaining - 1, lead: 0, error: state.error };
+    }
+    let need: u64 = utf8_lead_need(value) as u64;
+    if (value as i64) >= 128 && need == 0 {
+        return ValidateState { remaining: 0, lead: 0, error: first_error(state.error, index) };
+    }
+    if need == 0 {
+        return state;
+    }
+    return ValidateState { remaining: need, lead: value, error: state.error };
+}
+
+// Validate the live window `min(view_length, view.len)`: `-1` when every
+// live byte forms complete well-formed UTF-8 sequences, otherwise the byte
+// index of the first stray continuation, impossible lead, range-violating
+// first continuation, or truncated tail. The empty window is valid.
+fn validate_generic<N: Nat>(view: [byte; up_to N], view_length: u64) -> (result: i64) {
+    let window: u64 = select(view_length <= view.len, view_length, view.len);
+    iterate i over view carrying state: ValidateState = ValidateState { remaining: 0, lead: 0, error: 0 - 1 } {
+        next state = validate_step(state, view[i], i, i < window);
+    }
+    if state.error != 0 - 1 {
+        return state.error;
+    }
+    if state.remaining != 0 {
+        return window as i64;
+    }
+    return 0 - 1;
+}
+
+// Decode the scalar starting at `at`: ASCII passes through, 2-/3-/4-byte
+// leads decode through the same range table the validator uses (overlongs,
+// surrogates, and >U+10FFFF fail closed). Malformed input yields
+// `valid = false` with `next = at + 1` so callers always make progress;
+// `at` past the window yields `valid = false` with `next = at`.
+fn step_scalar_generic<N: Nat>(view: [byte; up_to N], view_length: u64, at: u64) -> (result: ScalarStep) {
+    let window: u64 = select(view_length <= view.len, view_length, view.len);
+    if at >= window {
+        return ScalarStep { scalar: 0, next: at, valid: false };
+    }
+    let b0: u64 = view[at] as u64;
+    if b0 < 128 {
+        return ScalarStep { scalar: b0 as u32, next: at + 1, valid: true };
+    }
+    let need: u64 = utf8_lead_need(view[at]) as u64;
+    if need == 0 {
+        return ScalarStep { scalar: 0, next: at + 1, valid: false };
+    }
+    if need == 1 {
+        if at + 1 >= window {
+            return ScalarStep { scalar: 0, next: at + 1, valid: false };
+        }
+        let b1: u64 = view[at + 1] as u64;
+        if !utf8_first_continuation_valid(view[at], view[at + 1]) {
+            return ScalarStep { scalar: 0, next: at + 1, valid: false };
+        }
+        let scalar: u64 = (b0 - 192) * 64 + b1 % 64;
+        return ScalarStep { scalar: scalar as u32, next: at + 2, valid: true };
+    }
+    if need == 2 {
+        if at + 2 >= window {
+            return ScalarStep { scalar: 0, next: at + 1, valid: false };
+        }
+        if !utf8_first_continuation_valid(view[at], view[at + 1]) {
+            return ScalarStep { scalar: 0, next: at + 1, valid: false };
+        }
+        let b1: u64 = view[at + 1] as u64;
+        let b2: u64 = view[at + 2] as u64;
+        if !is_utf8_continuation(view[at + 2]) {
+            return ScalarStep { scalar: 0, next: at + 1, valid: false };
+        }
+        let scalar: u64 = (b0 - 224) * 4096 + (b1 % 64) * 64 + b2 % 64;
+        return ScalarStep { scalar: scalar as u32, next: at + 3, valid: true };
+    }
+    if at + 3 >= window {
+        return ScalarStep { scalar: 0, next: at + 1, valid: false };
+    }
+    if !utf8_first_continuation_valid(view[at], view[at + 1]) {
+        return ScalarStep { scalar: 0, next: at + 1, valid: false };
+    }
+    let c1: u64 = view[at + 1] as u64;
+    let c2: u64 = view[at + 2] as u64;
+    let c3: u64 = view[at + 3] as u64;
+    if !is_utf8_continuation(view[at + 2]) {
+        return ScalarStep { scalar: 0, next: at + 1, valid: false };
+    }
+    if !is_utf8_continuation(view[at + 3]) {
+        return ScalarStep { scalar: 0, next: at + 1, valid: false };
+    }
+    let wide: u64 = (b0 - 240) * 262144 + (c1 % 64) * 4096 + (c2 % 64) * 64 + c3 % 64;
+    return ScalarStep { scalar: wide as u32, next: at + 4, valid: true };
+}
+
+// Deliberately bounded case fold over one scalar: ASCII A-Z gains 0x20,
+// Latin-1 capitals U+00C0-U+00D6 and U+00D8-U+00DE gain 0x20. Everything
+// else is identity — including U+00D7 (multiplication sign, caseless),
+// U+00DF (ß, whose uppercase is two scalars), all already-lowercase
+// scalars, and every scalar above U+00DE. See the module header: this
+// demonstrates the fold shape, it is not Unicode case folding.
+fn fold_scalar(scalar: u32) -> (result: u32) {
+    let n: u64 = scalar as u64;
+    if n >= 65 && n <= 90 {
+        return (n + 32) as u32;
+    }
+    if n >= 192 && n <= 214 {
+        return (n + 32) as u32;
+    }
+    if n >= 216 && n <= 222 {
+        return (n + 32) as u32;
+    }
+    return scalar;
+}
+
+// --- Executable entry points (scalar shapes for backend corpora) ---
+//
+// Corpus buffers carry content, not padding; expectations are computed
+// from the corpus bytes (see examples/execution/text-utf8-corpus.json).
+
+// Validate a staged window: packs valid-flag * 100000 + first-error rank.
+// The corpus pins ASCII-valid, the `[0xC3, 0x28]` rejection at index 1,
+// a stray continuation at 0, an overlong at 0, a surrogate at 1, a
+// truncated tail at the window end, and the empty window as valid.
+fn candidate_validate(buf: [byte; 16], view_length: u64) -> (result: i64) {
+    let view: [byte; up_to 16] = buf[0..view_length];
+    let error: i64 = validate_generic<16>(view, view_length);
+    return select(error == 0 - 1, 100000, error);
+}
+
+// Step one scalar at `at`: packs valid * 100000000 + scalar * 100 + next.
+fn candidate_step(buf: [byte; 16], view_length: u64, at: u64) -> (result: i64) {
+    let view: [byte; up_to 16] = buf[0..view_length];
+    let step: ScalarStep = step_scalar_generic<16>(view, view_length, at);
+    return select(step.valid, 100000000, 0) + (step.scalar as i64) * 100 + step.next as i64;
+}
+
+// Fold the demonstration pairs: ASCII `A`->`a`, `É`->`é`, and the
+// caseless guards (`×`, `ß`, already-lower `é`) as identity. Packs the
+// five results base-100000 in order.
+fn candidate_fold() -> (result: i64) {
+    let a: i64 = (fold_scalar(65) as u64) as i64;
+    let e: i64 = (fold_scalar(201) as u64) as i64;
+    let mul: i64 = (fold_scalar(215) as u64) as i64;
+    let sharp: i64 = (fold_scalar(223) as u64) as i64;
+    let small: i64 = (fold_scalar(233) as u64) as i64;
+    return a * 10000000000000000 + e * 100000000000 + mul * 1000000 + sharp * 1000 + small;
+}

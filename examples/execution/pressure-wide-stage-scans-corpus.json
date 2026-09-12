@@ -1,0 +1,11318 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-wide-stage-scans",
+ "cases": [
+  {
+   "id": "find-256",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_wide_stage_scans",
+     "function": "stage_find_newline256"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 256,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 300000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 200001,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "find-256-narrow",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_wide_stage_scans",
+     "function": "stage_find_newline256"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 100,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 300000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": -999,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "find-392",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_wide_stage_scans",
+     "function": "stage_find_newline392"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 392,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 300000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 391,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "next-256",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_wide_stage_scans",
+     "function": "stage_next_line256"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 67
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        },
+        {
+         "byte": {
+          "value": 68
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 256,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 300000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 52081,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "continue-392",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_wide_stage_scans",
+     "function": "stage_continue_line392"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 65
+         }
+        },
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        },
+        {
+         "byte": {
+          "value": 66
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 392,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 60,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 300000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 3601,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "read-u16-256",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_wide_stage_scans",
+     "function": "stage_read_u16_le256"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 18
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        },
+        {
+         "byte": {
+          "value": 9
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 200,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 300000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 4660,
+      "type": {
+       "bits": 16,
+       "signed": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "read-u32-392",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_wide_stage_scans",
+     "function": "stage_read_u32_le392"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 7
+         }
+        },
+        {
+         "byte": {
+          "value": 120
+         }
+        },
+        {
+         "byte": {
+          "value": 86
+         }
+        },
+        {
+         "byte": {
+          "value": 52
+         }
+        },
+        {
+         "byte": {
+          "value": 18
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 388,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 300000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 305419896,
+      "type": {
+       "bits": 32,
+       "signed": false
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

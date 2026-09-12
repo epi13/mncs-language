@@ -95,6 +95,22 @@ fn collection_contracts_agree_on_every_executable_backend() {
     }
 }
 
+/// INGEST-P-011: 64-, 256-, and 392-byte stages share one
+/// capacity-generic implementation each for newline scans
+/// (`find_newline_generic` and its cursor family) and little-endian
+/// readers (`read_u16_le_generic`/`read_u32_le_generic`). The wide-stage
+/// probe agrees on every executable backend with no per-width duplicate
+/// folds.
+#[test]
+fn wide_stage_scans_agree_on_every_executable_backend() {
+    let source = example("source/pressure-wide-stage-scans.mncs");
+    let corpus = example("execution/pressure-wide-stage-scans-corpus.json");
+    for backend in EXECUTABLE_BACKENDS {
+        let result = run(&source, &corpus, backend);
+        assert_all_met(&result, backend, "pressure-wide-stage-scans", 7);
+    }
+}
+
 /// The collection contracts agree across the layered reference
 /// executors.
 #[test]

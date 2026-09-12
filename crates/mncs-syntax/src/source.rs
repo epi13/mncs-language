@@ -338,6 +338,15 @@ pub struct SourceDiagnostic {
     pub span: SourceSpan,
     pub expected: Vec<TokenKind>,
     pub found: Option<TokenKind>,
+    /// Causal inner diagnostics preserved through import-boundary wrapping
+    /// (INGEST-P-007): when a module failure is re-reported at an importing
+    /// `use` edge (for example `MNE172`), the leaf diagnostics travel here
+    /// verbatim — original code, message, and leaf-relative span — so the
+    /// root compile identifies the failing module without recompiling each
+    /// leaf separately. Empty everywhere else. Older artifacts without this
+    /// field still deserialize; serialization omits it when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related: Vec<SourceDiagnostic>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1141,6 +1150,7 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                     span: SourceSpan::at(source, start, offset),
                     expected: Vec::new(),
                     found: None,
+                    related: Vec::new(),
                 });
             }
             TokenKind::BlockComment
@@ -1347,6 +1357,7 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                             span: SourceSpan::at(source, start, offset),
                             expected: Vec::new(),
                             found: Some(TokenKind::Unknown),
+                            related: Vec::new(),
                         });
                         TokenKind::Unknown
                     }
@@ -1363,6 +1374,7 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                         span: SourceSpan::at(source, start, offset),
                         expected: Vec::new(),
                         found: Some(TokenKind::Unknown),
+                        related: Vec::new(),
                     });
                     TokenKind::Unknown
                 }
@@ -1397,6 +1409,7 @@ pub fn parse(envelope: &SourceEnvelope) -> ParseOutput {
             span: SourceSpan::at(&envelope.text, 0, 0),
             expected: Vec::new(),
             found: None,
+            related: Vec::new(),
         });
     }
     // Fail closed on declared-but-unsupported profiles (RFC 0036). `mncs
@@ -1422,6 +1435,7 @@ pub fn parse(envelope: &SourceEnvelope) -> ParseOutput {
                 span: tree.language_version.span,
                 expected: Vec::new(),
                 found: Some(TokenKind::Version),
+                related: Vec::new(),
             });
         }
     }
@@ -1437,6 +1451,7 @@ pub fn parse(envelope: &SourceEnvelope) -> ParseOutput {
             span: ast.as_ref().expect("checked above").language_version.span,
             expected: Vec::new(),
             found: Some(TokenKind::Version),
+            related: Vec::new(),
         });
     }
     let ast = diagnostics
@@ -4846,6 +4861,7 @@ impl<'a> Parser<'a> {
             span,
             expected,
             found,
+            related: Vec::new(),
         });
     }
 

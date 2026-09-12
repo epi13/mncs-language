@@ -759,15 +759,11 @@ fn elaborate_import_closure(
         };
         let parsed = mncs_syntax::parse(&dependency_envelope);
         let Some(dependency_ast) = parsed.ast else {
-            let codes = parsed
-                .diagnostics
-                .iter()
-                .map(|diagnostic| diagnostic.code.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            return Err(vec![elaboration_diagnostic(
-                "MNE172",
-                format!("imported module '{dependency_name}' failed to parse [{codes}]"),
+            return Err(vec![import_failure_diagnostic(
+                &dependency_name,
+                dependency_envelope.origin.locator.as_deref(),
+                "parse",
+                parsed.diagnostics,
                 use_decl.module.span,
             )]);
         };
@@ -781,14 +777,37 @@ fn elaborate_import_closure(
                 use_decl.module.span,
             )]);
         }
-        elaborate_import_closure(
+        // A deeper import failure already carries its own `MNE172` chain;
+        // re-wrap it at this edge so the root compile records every import
+        // hop (root -> .. -> direct dependency -> failing leaf) instead of
+        // surfacing a span that lives in another file. Non-import errors
+        // (cycle, unavailable, incompatible, conflicting) already name
+        // their edge and pass through unchanged.
+        if let Err(errors) = elaborate_import_closure(
             &dependency_ast,
             resolver,
             elaborated,
             declaration_spans,
             visiting,
             module_ceilings,
-        )?;
+        ) {
+            return Err(errors
+                .into_iter()
+                .map(|error| {
+                    if error.code == "MNE172" {
+                        import_failure_diagnostic(
+                            &dependency_name,
+                            dependency_envelope.origin.locator.as_deref(),
+                            "load",
+                            vec![error],
+                            use_decl.module.span,
+                        )
+                    } else {
+                        error
+                    }
+                })
+                .collect());
+        }
         let dependency_program = link_module_with_closure(
             &dependency_ast,
             elaborated,
@@ -797,16 +816,11 @@ fn elaborate_import_closure(
             &dependency_name,
         );
         let dependency_program = dependency_program.map_err(|errors| {
-            vec![elaboration_diagnostic(
-                "MNE172",
-                format!(
-                    "imported module '{dependency_name}' failed to elaborate [{}]",
-                    errors
-                        .iter()
-                        .map(|diagnostic| diagnostic.code.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
+            vec![import_failure_diagnostic(
+                &dependency_name,
+                dependency_envelope.origin.locator.as_deref(),
+                "elaborate",
+                errors,
                 use_decl.module.span,
             )]
         })?;
@@ -5108,43 +5122,55 @@ impl<'a> BodyBuilder<'a> {
         let (Some(true_expr), Some(false_expr)) = (true_arm, false_arm) else {
             return None;
         };
-        let true_binding = self.elaborate_expr(true_expr, Some(&result_type), env, diagnostics)?;
-        if true_binding.ty != result_type {
-            diagnostics.push(elaboration_diagnostic(
-                "MNE141",
-                "match arms must produce the same expected type",
-                true_expr.span(),
-            ));
-            return None;
-        }
-        let false_binding =
-            self.elaborate_expr(false_expr, Some(&result_type), env, diagnostics)?;
-        if false_binding.ty != result_type {
-            diagnostics.push(elaboration_diagnostic(
-                "MNE141",
-                "match arms must produce the same expected type",
-                false_expr.span(),
-            ));
-            return None;
-        }
-        let id = self.new_value("boolsel");
-        self.blocks[self.current].operations.push(BodyOperation {
-            id: id.clone(),
-            kind: BodyOperationKind::Select {
-                operand_type: Box::new(result_type.clone()),
-            },
-            operands: vec![subject.id.clone(), true_binding.id, false_binding.id],
-            results: vec![BodyValue {
-                id: id.clone(),
-                ty: result_type.clone(),
-            }],
-            contracts: Vec::new(),
-            assumptions: Vec::new(),
-            machine_intent: None,
-            lowering: None,
-            portability: None,
+        // INGEST-P-005/P-006: bool arms dispatch through the same
+        // branch-chain shape as finite and integer matches, so only the
+        // taken arm evaluates. The historical `Select` lowering evaluated
+        // both arms: a trapping projection in the untaken arm fired anyway,
+        // which made `match` unusable as a liveness guard and contradicted
+        // the other two match forms. `select` itself stays strict; only
+        // `match` is uniformly lazy. Each arm elaborates in its own block
+        // and carries its value into the join, exactly like
+        // `elaborate_scalar_match`.
+        let dispatch = self.current;
+        let join_id = self.new_block();
+        let then_id = self.new_block();
+        let else_id = self.new_block();
+        self.blocks[dispatch].terminator = BodyTerminator::ConditionalBranch {
+            condition: subject.id.clone(),
+            then_target: then_id.clone(),
+            then_arguments: Vec::new(),
+            else_target: else_id.clone(),
+            else_arguments: Vec::new(),
+        };
+        let result_id = self.new_value("boolmatch");
+        let join_index = self.index_of(&join_id);
+        self.blocks[join_index].parameters.push(BodyValue {
+            id: result_id.clone(),
+            ty: result_type.clone(),
         });
-        Some(ResolvedBinding::plain(id, result_type))
+        for (arm_expr, arm_id) in [(true_expr, then_id), (false_expr, else_id)] {
+            self.current = self.index_of(&arm_id);
+            env.push();
+            if let Some(value) = self.elaborate_expr(arm_expr, Some(&result_type), env, diagnostics)
+            {
+                if value.ty != result_type {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE141",
+                        "match arms must produce the same expected type",
+                        arm_expr.span(),
+                    ));
+                }
+                if self.block_is_open() {
+                    self.blocks[self.current].terminator = BodyTerminator::Branch {
+                        target: join_id.clone(),
+                        arguments: vec![value.id],
+                    };
+                }
+            }
+            env.pop();
+        }
+        self.current = join_index;
+        Some(ResolvedBinding::plain(result_id, result_type))
     }
 
     /// Elaborate `match` over an integer subject (CP-0010).
@@ -10869,5 +10895,39 @@ fn elaboration_diagnostic(
         span,
         expected: Vec::new(),
         found: None,
+        related: Vec::new(),
     }
+}
+
+/// Import-boundary failure wrapper (INGEST-P-007): re-reports a direct
+/// dependency's parse/elaboration failure at the importing `use` edge
+/// while preserving the leaf diagnostics verbatim in `related` — code,
+/// message, and leaf-relative span — so the root compile identifies the
+/// failing module without recompiling each leaf separately. The outer
+/// `MNE172` keeps its historical code, use-site span, and message shape
+/// (plus the resolved source locator when the envelope names one); leaf
+/// diagnostics are never reduced to bare codes.
+fn import_failure_diagnostic(
+    dependency_name: &str,
+    locator: Option<&str>,
+    verb: &str,
+    inner: Vec<SourceDiagnostic>,
+    use_span: SourceSpan,
+) -> SourceDiagnostic {
+    let codes = inner
+        .iter()
+        .map(|diagnostic| diagnostic.code.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let located = locator
+        .filter(|locator| !locator.is_empty())
+        .map(|locator| format!(" (source: {locator})"))
+        .unwrap_or_default();
+    let mut outer = elaboration_diagnostic(
+        "MNE172",
+        format!("imported module '{dependency_name}' failed to {verb} [{codes}]{located}"),
+        use_span,
+    );
+    outer.related = inner;
+    outer
 }
