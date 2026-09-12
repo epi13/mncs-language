@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mncs_model::{
-    ArithmeticIntent, BodyType, IntegerType, IrType, SemanticId, SsaFunction, SsaInstructionKind,
+    ArithmeticIntent, BodyType, IntegerType, SemanticId, SsaFunction, SsaInstructionKind,
     SsaModule, SsaTerminator, SsaValue,
 };
 
@@ -400,9 +400,13 @@ fn copy_shape_of_spelling_inner(
     }
 }
 
-/// Classify one SSA block-parameter type for region copying.
+/// Classify one SSA block-parameter type for region copying. The input is the
+/// resolved semantic type: nominals enter by canonical identity (never by a
+/// short spelling that could collide across modules); structural types reuse
+/// their canonical spelling for the declaration walk below, exactly the
+/// string the old `IrType::Named` transport carried.
 fn copy_class_of_ty(
-    ty: &IrType,
+    ty: &BodyType,
     program: &mncs_model::Program,
     refmap: &NominalRefMap,
     composites: &CompositeInfo,
@@ -411,12 +415,16 @@ fn copy_class_of_ty(
     // cycle guard starts empty here and only spans one shape.
     let mut visiting = BTreeSet::new();
     match ty {
-        IrType::Record { name, .. } | IrType::Finite { name, .. } => {
-            copy_shape_of_spelling(name, program, refmap, composites, &mut visiting)
+        BodyType::Record { identity, .. } | BodyType::Finite { identity, .. } => {
+            copy_shape_of_spelling(&identity.0, program, refmap, composites, &mut visiting)
         }
-        IrType::Named(spelling) => {
-            copy_shape_of_spelling(spelling, program, refmap, composites, &mut visiting)
-        }
+        other => copy_shape_of_spelling(
+            &other.semantic_name(),
+            program,
+            refmap,
+            composites,
+            &mut visiting,
+        ),
     }
 }
 
@@ -835,7 +843,7 @@ fn plan_loop_regions(
     let block_count = function.blocks.len();
     // Value types for classification: every live value is an input, a
     // block parameter, an instruction output, or the function result.
-    let mut tys: BTreeMap<SemanticId, IrType> = BTreeMap::new();
+    let mut tys: BTreeMap<SemanticId, BodyType> = BTreeMap::new();
     for input in &function.inputs {
         tys.insert(input.identity.clone(), input.ty.clone());
     }
@@ -2687,7 +2695,7 @@ fn lower_instruction(
                         body.push(Instr::Unreachable);
                         body.push(Instr::End);
                     }
-                    if matches!(&instruction.outputs[0].ty, IrType::Named(name) if name == "byte") {
+                    if matches!(&instruction.outputs[0].ty, BodyType::Byte) {
                         // Bit 63 marks a byte view whose source is still an
                         // exact canonical-cell sequence. Host-packed byte
                         // views leave it clear. The low 32 bits always carry
@@ -2811,7 +2819,8 @@ fn lower_instruction(
             // cell-backed marker lives in bit 63 (see
             // crate::composite::VIEW_CELL_MARKER): no address bit may serve
             // as the marker because packed slices may start at odd offsets.
-            let byte_view = matches!(&instruction.outputs[0].ty, IrType::Named(name) if name.contains("[byte;"));
+            let byte_view = matches!(&instruction.outputs[0].ty,
+            BodyType::Sequence { element, .. } if matches!(element.as_ref(), BodyType::Byte));
             match source_bound {
                 mncs_model::SequenceBound::Exact(_) => {
                     body.push(Instr::LocalGet(seq));
@@ -3196,7 +3205,7 @@ fn emit_goto(
     Ok(())
 }
 
-fn emit_const(body: &mut Vec<Instr>, value: i128, ty: &IrType) -> Result<(), String> {
+fn emit_const(body: &mut Vec<Instr>, value: i128, ty: &BodyType) -> Result<(), String> {
     let (wasm_type, integer) = wasm_type(ty)?;
     match wasm_type {
         ValType::I32 => {
@@ -4479,7 +4488,7 @@ fn load_element_width(
         .outputs
         .first()
         .ok_or_else(|| "projection has no result".to_owned())?;
-    if matches!(&output.ty, IrType::Named(name) if name == "byte") {
+    if matches!(&output.ty, BodyType::Byte) {
         // A bounded byte view is a packed host buffer, not an arena cell.
         // Read one unsigned byte so adjacent bytes in the same view do not
         // get folded into a four-byte scalar load.
@@ -4636,47 +4645,42 @@ fn emit_convert(
     Ok(())
 }
 
-fn wasm_type(ty: &IrType) -> Result<(ValType, Option<IntegerType>), String> {
+fn wasm_type(ty: &BodyType) -> Result<(ValType, Option<IntegerType>), String> {
     match ty {
-        IrType::Finite { .. } => Ok((ValType::I32, None)),
+        BodyType::Finite { .. } => Ok((ValType::I32, None)),
         // Records and payload-bearing finite variants are realized as pointers
         // into linear memory; the value's local holds the cell address.
-        IrType::Record { .. } => Ok((ValType::I32, None)),
-        IrType::Named(name) if name == "bool" => Ok((ValType::I32, None)),
-        IrType::Named(name) => match BodyType::from_semantic_name(name) {
-            BodyType::Float(float) if float.is_supported() => Ok((ValType::F64, None)),
-            BodyType::Integer(integer) => Ok((val_type(integer)?, Some(integer))),
-            // Booleans ride zero-extended 0/1 in i32 cells.
-            BodyType::Bool => Ok((ValType::I32, None)),
-            // Bytes ride zero-extended in i32 cells.
-            BodyType::Byte => Ok((ValType::I32, None)),
-            // Exact sequences are canonical cell pointers; bounded views are
-            // packed (offset | length << 32) descriptors riding i64.
-            BodyType::Sequence {
-                bound: mncs_model::SequenceBound::Exact(_),
-                ..
-            } => Ok((ValType::I32, None)),
-            BodyType::Sequence {
-                bound: mncs_model::SequenceBound::UpTo(_),
-                ..
-            } => Ok((ValType::I64, None)),
-            BodyType::Sequence {
-                bound: mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_),
-                ..
-            } => {
-                Err("generic SequenceBound must be specialized before backend lowering".to_owned())
-            }
-            BodyType::Vector { .. } => Ok((ValType::I32, None)),
-            BodyType::Mask { .. } => Ok((ValType::I64, None)),
-            BodyType::Named(_) | BodyType::Finite { .. } | BodyType::Record { .. } => {
-                Err(format!("unsupported SSA type {name}"))
-            }
-            // Non-binary64 floats stay refused in C1.
-            BodyType::Float(_) => Err(format!("unsupported SSA type {name}")),
-            BodyType::GenericParam { .. } => {
-                Err("generic type parameter must be specialized before backend lowering".to_owned())
-            }
-        },
+        BodyType::Record { .. } => Ok((ValType::I32, None)),
+        BodyType::Float(float) if float.is_supported() => Ok((ValType::F64, None)),
+        BodyType::Integer(integer) => Ok((val_type(*integer)?, Some(*integer))),
+        // Booleans ride zero-extended 0/1 in i32 cells.
+        BodyType::Bool => Ok((ValType::I32, None)),
+        // Bytes ride zero-extended in i32 cells.
+        BodyType::Byte => Ok((ValType::I32, None)),
+        // Exact sequences are canonical cell pointers; bounded views are
+        // packed (offset | length << 32) descriptors riding i64.
+        BodyType::Sequence {
+            bound: mncs_model::SequenceBound::Exact(_),
+            ..
+        } => Ok((ValType::I32, None)),
+        BodyType::Sequence {
+            bound: mncs_model::SequenceBound::UpTo(_),
+            ..
+        } => Ok((ValType::I64, None)),
+        BodyType::Sequence {
+            bound: mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_),
+            ..
+        } => {
+            Err("generic SequenceBound must be specialized before backend lowering".to_owned())
+        }
+        BodyType::Vector { .. } => Ok((ValType::I32, None)),
+        BodyType::Mask { .. } => Ok((ValType::I64, None)),
+        BodyType::Named(name) => Err(format!("unsupported SSA type {name}")),
+        // Non-binary64 floats stay refused in C1.
+        BodyType::Float(_) => Err("unsupported SSA float width".to_owned()),
+        BodyType::GenericParam { .. } => {
+            Err("generic type parameter must be specialized before backend lowering".to_owned())
+        }
     }
 }
 

@@ -299,6 +299,132 @@ fn demo(x: u8) -> (result: byte) { return take_byte(x); }
 }
 
 #[test]
+fn declaration_only_record_short_name_keeps_identity_in_ssa() {
+    use mncs_model::{
+        record_type_id, FailureMode, Function, Program, RecordField, RecordType,
+        SUPPORTED_SCHEMA_VERSION, Value,
+    };
+    let identity = record_type_id("app.decl", "R", &[("x", "i64")]);
+    let program = Program {
+        schema_version: SUPPORTED_SCHEMA_VERSION.to_owned(),
+        module: "app.decl".to_owned(),
+        dependencies: Vec::new(),
+        finite_types: Vec::new(),
+        record_types: vec![RecordType {
+            identity: identity.clone(),
+            name: "R".to_owned(),
+            fields: vec![RecordField {
+                name: "x".to_owned(),
+                field_type: "i64".to_owned(),
+            }],
+        }],
+        assumptions: Vec::new(),
+        binding_table: None,
+        functions: vec![Function {
+            name: "take".to_owned(),
+            home_module: None,
+            generic_params: Vec::new(),
+            inputs: vec![Value {
+                name: "r".to_owned(),
+                value_type: "R".to_owned(),
+            }],
+            outputs: Vec::new(),
+            contracts: Vec::new(),
+            effects: Vec::new(),
+            capabilities: Vec::new(),
+            assumptions: Vec::new(),
+            evidence: Vec::new(),
+            failure: FailureMode::Isolated,
+            body: None,
+        }],
+        generic_specializations: Vec::new(),
+    };
+    assert!(program.validate().valid);
+    let expected = mncs_model::BodyType::Record {
+        identity: identity.clone(),
+        name: "R".to_owned(),
+    };
+    // HIR resolves the short name (control case).
+    let hir = program.lower_to_ir().expect("HIR lowers");
+    assert_eq!(hir.functions[0].inputs[0].ty, expected, "HIR keeps nominal identity");
+    assert_eq!(hir.schema_version, "0.5");
+    // SSA must agree: a short-name record reference is the same type, and
+    // both layers now carry the resolved semantic type directly.
+    let ssa = program.lower_to_ssa().expect("SSA lowers");
+    assert_eq!(ssa.functions[0].inputs[0].ty, expected, "SSA keeps nominal identity");
+    assert_eq!(ssa.schema_version, "0.5");
+    assert!(ssa.validate().valid);
+    assert!(ssa.validate_lowering_boundary(&program).valid);
+}
+
+#[test]
+fn legacy_ssa_spellings_normalize_deterministically() {
+    let resolver = MapResolver::default();
+    let program = elaborate(
+        &resolver,
+        r#"
+mncs 0.10;
+module app.legacy;
+fn both(a: i32, flag: bool) -> (result: i32) {
+    return select(flag, a, 0);
+}
+"#,
+    )
+    .expect("legacy fixture elaborates");
+    let mut module = program.lower_to_ssa().expect("SSA lowers");
+    assert_eq!(module.schema_version, "0.5");
+    let mut legacy_json = serde_json::to_string(&module).expect("SSA serializes");
+    // Rewrite current typed shapes into pre-0.5 `IrType::Named` spellings.
+    assert!(legacy_json.contains(r#""ty":"bool""#));
+    legacy_json = legacy_json.replace(r#""ty":"bool""#, r#""ty":{"Named":"bool"}"#);
+    assert!(legacy_json.contains(r#""schema_version":"0.5""#));
+    legacy_json = legacy_json.replace(r#""schema_version":"0.5""#, r#""schema_version":"0.4""#);
+    let mut legacy: mncs_model::SsaModule =
+        serde_json::from_str(&legacy_json).expect("legacy SSA still deserializes");
+    assert_eq!(legacy.schema_version, "0.4");
+    legacy.normalize_legacy_types();
+    assert_eq!(legacy.schema_version, "0.5");
+    assert_eq!(legacy, module, "normalization round-trips to the emitted module");
+    assert!(legacy.validate().valid);
+    assert!(legacy.validate_lowering_boundary(&program).valid);
+    // Normalization is idempotent on current modules.
+    module.normalize_legacy_types();
+    assert_eq!(module.schema_version, "0.5");
+}
+
+#[test]
+fn legacy_ssa_unknown_name_fails_closed_not_guessed() {
+    let resolver = MapResolver::default();
+    let program = elaborate(
+        &resolver,
+        r#"
+mncs 0.10;
+module app.legacy_unknown;
+fn id(a: i32) -> (result: i32) { return a; }
+"#,
+    )
+    .expect("fixture elaborates");
+    let module = program.lower_to_ssa().expect("SSA lowers");
+    let json = serde_json::to_string(&module).expect("SSA serializes");
+    let tampered = json.replacen(
+        r#""ty":{"integer":{"bits":32,"signed":true}}"#,
+        r#""ty":{"Named":"Bogus"}"#,
+        1,
+    );
+    assert_ne!(tampered, json, "fixture contains an integer type to tamper");
+    let mut legacy: mncs_model::SsaModule =
+        serde_json::from_str(&tampered).expect("legacy spelling deserializes");
+    legacy.normalize_legacy_types();
+    let report = legacy.validate_lowering_boundary(&program);
+    assert!(!report.valid);
+    assert!(
+        report.errors.iter().any(|error| error.code == "SSA045"),
+        "{:#?}",
+        report.errors
+    );
+}
+
+#[test]
 fn unknown_type_name_is_rejected_not_preserved() {
     let resolver = MapResolver::default();
     let errors = elaborate(

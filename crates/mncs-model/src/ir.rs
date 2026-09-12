@@ -16,7 +16,12 @@ use crate::{
     TransformationRecord, ValidationReport,
 };
 
-pub const HIGH_LEVEL_IR_SCHEMA_VERSION: &str = "0.4";
+pub const HIGH_LEVEL_IR_SCHEMA_VERSION: &str = "0.5";
+/// The previous HIR schema version. Artifacts carrying `"0.4"` store
+/// non-nominal types as `IrType::Named` spellings; they deserialize via
+/// the `BodyType` tag aliases and must pass through
+/// [`HighLevelIr::normalize_legacy_types`] before validation or reuse.
+pub const HIGH_LEVEL_IR_SCHEMA_VERSION_PRE_TYPED: &str = "0.4";
 
 fn trace_timing(stage: &str, started: Instant) {
     crate::record_stage(stage, started.elapsed());
@@ -30,17 +35,10 @@ fn trace_timing(stage: &str, started: Instant) {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum IrType {
-    Named(String),
-    Finite { identity: SemanticId, name: String },
-    Record { identity: SemanticId, name: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IrValue {
     pub identity: SemanticId,
     pub semantic_identity: Option<SemanticId>,
-    pub ty: IrType,
+    pub ty: BodyType,
     pub producer: Option<SemanticId>,
 }
 
@@ -90,7 +88,7 @@ pub enum IrOperationKind {
     FunctionEntry,
     Constant {
         value: i128,
-        ty: IrType,
+        ty: BodyType,
     },
     Integer {
         operator: String,
@@ -350,7 +348,7 @@ pub struct IrBoundedIteration {
     /// serialize unchanged.
     #[serde(default)]
     pub domain: crate::IterationDomain,
-    pub state_type: IrType,
+    pub state_type: BodyType,
     pub preheader: SemanticId,
     pub header: SemanticId,
     pub body_entry: SemanticId,
@@ -453,6 +451,45 @@ impl HighLevelIr {
             .iter()
             .find(|entry| &entry.semantic_identity == semantic_identity)
     }
+
+    /// Normalize every type carried by this HIR module from its legacy
+    /// (pre-0.5) `IrType::Named` spelling to the resolved semantic type.
+    /// Structural spellings normalize deterministically; nominal short names
+    /// that cannot resolve stay `Named` so validation rejects them
+    /// explicitly. Idempotent: current typed modules are unchanged except
+    /// for the schema upgrade stamp. Current emitters never produce legacy
+    /// spellings; this exists only at the compatibility boundary for
+    /// artifacts emitted under schema 0.4.
+    pub fn normalize_legacy_types(&mut self) {
+        fn normalize_value(value: &mut IrValue) {
+            value.ty.normalize_legacy_ir_named();
+        }
+        for function in &mut self.functions {
+            for value in function.inputs.iter_mut().chain(function.outputs.iter_mut()) {
+                normalize_value(value);
+            }
+            for iteration in &mut function.bounded_iterations {
+                iteration.state_type.normalize_legacy_ir_named();
+                if let crate::IterationDomain::OverSequence { element_type } =
+                    &mut iteration.domain
+                {
+                    element_type.normalize_legacy_ir_named();
+                }
+            }
+            for block in &mut function.blocks {
+                for operation in &mut block.operations {
+                    for value in operation.inputs.iter_mut().chain(operation.outputs.iter_mut())
+                    {
+                        normalize_value(value);
+                    }
+                    if let IrOperationKind::Constant { ty, .. } = &mut operation.kind {
+                        ty.normalize_legacy_ir_named();
+                    }
+                }
+            }
+        }
+        self.schema_version = HIGH_LEVEL_IR_SCHEMA_VERSION.to_owned();
+    }
 }
 
 impl Program {
@@ -522,7 +559,7 @@ impl Program {
                 .map(|(index, value)| IrValue {
                     identity: ir_value_identity(&semantic_function, "input", index, &value.name),
                     semantic_identity: None,
-                    ty: ir_type_from_semantic(self, &value.value_type),
+                    ty: crate::TypeSyntax::from(value.value_type.as_str()).resolve_against(self),
                     producer: None,
                 })
                 .collect::<Vec<_>>();
@@ -533,7 +570,7 @@ impl Program {
                 .map(|(index, value)| IrValue {
                     identity: ir_value_identity(&semantic_function, "output", index, &value.name),
                     semantic_identity: None,
-                    ty: ir_type_from_semantic(self, &value.value_type),
+                    ty: crate::TypeSyntax::from(value.value_type.as_str()).resolve_against(self),
                     producer: None,
                 })
                 .collect::<Vec<_>>();
@@ -844,7 +881,7 @@ fn lower_executable_body(
             let value = IrValue {
                 identity: identity.clone(),
                 semantic_identity: Some(identity),
-                ty: ir_type(&parameter.ty),
+                ty: parameter.ty.clone(),
                 producer: None,
             };
             values.insert(parameter.id.clone(), value.clone());
@@ -868,7 +905,7 @@ fn lower_executable_body(
         .map(|(index, value)| IrValue {
             identity: ir_value_identity(&semantic_function, "output", index, &value.name),
             semantic_identity: None,
-            ty: ir_type_from_semantic(program, &value.value_type),
+            ty: crate::TypeSyntax::from(value.value_type.as_str()).resolve_against(program),
             producer: None,
         })
         .collect::<Vec<_>>();
@@ -913,7 +950,7 @@ fn lower_executable_body(
                 IrValue {
                     identity: identity.clone(),
                     semantic_identity: Some(identity.clone()),
-                    ty: ir_type(&parameter.ty),
+                    ty: parameter.ty.clone(),
                     producer: None,
                 },
             );
@@ -950,7 +987,7 @@ fn lower_executable_body(
                     let value = IrValue {
                         identity: identity.clone(),
                         semantic_identity: Some(identity.clone()),
-                        ty: ir_type(&result.ty),
+                        ty: result.ty.clone(),
                         producer: Some(ir_operation_identity.clone()),
                     };
                     trace_entry(
@@ -977,7 +1014,7 @@ fn lower_executable_body(
                 BodyOperationKind::Constant { value, ty } => (
                     IrOperationKind::Constant {
                         value: *value,
-                        ty: ir_type(ty),
+                        ty: ty.clone(),
                     },
                     Vec::new(),
                     Vec::new(),
@@ -1734,7 +1771,7 @@ fn lower_executable_body(
                 domain: iteration.domain.clone(),
                 identity,
                 bound: iteration.bound,
-                state_type: ir_type(&iteration.state_type),
+                state_type: iteration.state_type.clone(),
                 preheader: block_identity(&iteration.preheader),
                 header: block_identity(&iteration.header),
                 body_entry: block_identity(&iteration.body_entry),
@@ -1843,64 +1880,6 @@ fn trace_entry(
         });
     entry.ir_identities.push(ir_identity);
     entry.related.extend(related);
-}
-
-fn ir_type(ty: &BodyType) -> IrType {
-    match ty {
-        BodyType::Finite { identity, name } => IrType::Finite {
-            identity: identity.clone(),
-            name: name.clone(),
-        },
-        BodyType::Record { identity, name } => IrType::Record {
-            identity: identity.clone(),
-            name: name.clone(),
-        },
-        _ => IrType::Named(ty.semantic_name()),
-    }
-}
-
-fn ir_type_from_semantic(program: &Program, name: &str) -> IrType {
-    if let Some(finite_type) = program
-        .finite_types
-        .iter()
-        .find(|finite_type| finite_type.identity.0 == name)
-    {
-        return IrType::Finite {
-            identity: finite_type.identity.clone(),
-            name: finite_type.name.clone(),
-        };
-    }
-    if let Some(record_type) = program
-        .record_types
-        .iter()
-        .find(|record_type| record_type.identity.0 == name)
-    {
-        return IrType::Record {
-            identity: record_type.identity.clone(),
-            name: record_type.name.clone(),
-        };
-    }
-    if let Some(finite_type) = program
-        .finite_types
-        .iter()
-        .find(|finite_type| finite_type.name == name)
-    {
-        return IrType::Finite {
-            identity: finite_type.identity.clone(),
-            name: finite_type.name.clone(),
-        };
-    }
-    if let Some(record_type) = program
-        .record_types
-        .iter()
-        .find(|record_type| record_type.name == name)
-    {
-        return IrType::Record {
-            identity: record_type.identity.clone(),
-            name: record_type.name.clone(),
-        };
-    }
-    IrType::Named(name.to_owned())
 }
 
 fn declared_effect_identity(

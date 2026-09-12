@@ -148,8 +148,9 @@ pub use identity::{
 };
 pub use ir::{
     CapabilityUse, FailurePathKind, HighLevelIr, IrBlock, IrBoundedIteration, IrError, IrFunction,
-    IrOperation, IrOperationKind, IrStateRegion, IrTransition, IrType, IrValue, MachineIntentLinks,
+    IrOperation, IrOperationKind, IrStateRegion, IrTransition, IrValue, MachineIntentLinks,
     PathKind, StateRegionKind, TraceEntry, TraceMap, HIGH_LEVEL_IR_SCHEMA_VERSION,
+    HIGH_LEVEL_IR_SCHEMA_VERSION_PRE_TYPED,
 };
 pub use machine_intent::{
     arithmetic_result_type, minimum_widening_bits, AlignmentCapability, ArithmeticIntent,
@@ -198,6 +199,7 @@ pub use ssa::{
     SsaBlock, SsaBoundedIteration, SsaDiagnostic, SsaError, SsaFunction, SsaInstruction,
     SsaInstructionKind, SsaModule, SsaTerminator, SsaTraceEntry, SsaTraceMap,
     SsaTransformationDecision, SsaValidationReport, SsaValue, SSA_SCHEMA_VERSION,
+    SSA_SCHEMA_VERSION_PRE_TYPED,
 };
 pub use ssa_execution::{
     compare_body_and_ssa, execute_ssa, execute_ssa_module, execute_ssa_module_prevalidated,

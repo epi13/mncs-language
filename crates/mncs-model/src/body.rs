@@ -296,6 +296,12 @@ pub struct BodyValue {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BodyType {
+    /// An unresolved type spelling. Current emitters never produce this for
+    /// known types; it survives only as an explicit error/legacy carrier
+    /// that validation rejects (`MNB122`). Accepts the pre-0.5 HIR/SSA tag
+    /// `"Named"` so legacy IR artifacts deserialize for normalization
+    /// instead of failing to parse.
+    #[serde(alias = "Named")]
     Named(String),
     /// The boolean type (source spelling `bool`). Previously represented as
     /// `Named("bool")`; now an explicit semantic variant so resolved IR never
@@ -330,10 +336,14 @@ pub enum BodyType {
     Mask {
         lanes: u32,
     },
+    /// Accepts the pre-0.5 HIR/SSA tag `"Finite"` (see `Named`).
+    #[serde(alias = "Finite")]
     Finite {
         identity: SemanticId,
         name: String,
     },
+    /// Accepts the pre-0.5 HIR/SSA tag `"Record"` (see `Named`).
+    #[serde(alias = "Record")]
     Record {
         identity: SemanticId,
         name: String,
@@ -615,6 +625,29 @@ impl BodyType {
     pub fn normalized_legacy_bool(mut self) -> Self {
         self.normalize_legacy_bool();
         self
+    }
+
+    /// Normalize a type decoded from a legacy (pre-0.5) HIR/SSA artifact,
+    /// where every non-nominal type traveled as an `IrType::Named` spelling.
+    /// Spellings that denote scalars, sequences, vectors, or masks become
+    /// structural types (recursively); nominal short names and genuinely
+    /// unknown spellings stay `Named` so validation rejects them explicitly
+    /// instead of the loader guessing. Idempotent: current typed types are
+    /// returned unchanged.
+    pub fn normalize_legacy_ir_named(&mut self) {
+        match self {
+            Self::Sequence { element, .. } | Self::Vector { element, .. } => {
+                element.normalize_legacy_ir_named();
+            }
+            Self::Named(spelling) => {
+                let parsed = Self::from_semantic_name(spelling);
+                if parsed != *self {
+                    *self = parsed;
+                    self.normalize_legacy_ir_named();
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Structural type equality: the same semantic type. Nominal record and
@@ -2774,14 +2807,18 @@ fn validate_operation(
                 ));
             }
             if let Some(result) = operation.results.first() {
-                if result.ty != expected_result && !matches!(&result.ty, BodyType::Named(_)) {
+                // No `Named` escape hatch: unresolved names are reported as
+                // `MNB122` by the resolved-type invariant, so any mismatch
+                // here — including a `Named` result — is a genuine view-type
+                // error. Legacy `bool` spellings compare through `same_type`.
+                if !result.ty.same_type(&expected_result) {
                     errors.push(body_diagnostic(
                         "MNB094",
                         format!("{path}.results"),
                         "view construction result does not match its declared view type",
                     ));
                 }
-                if !matches!(result.ty, BodyType::Named(_)) && *capacity > MAX_SEQUENCE_BOUND {
+                if *capacity > MAX_SEQUENCE_BOUND {
                     errors.push(body_diagnostic(
                         "MNB095",
                         format!("{path}.kind.view_bound"),
@@ -4233,6 +4270,44 @@ pub(crate) mod tests {
             }],
         });
         program
+    }
+
+    #[test]
+    fn view_result_with_unresolved_name_reports_mismatch_and_invariant() {
+        // TYPE-P-003: the old `MNB094` escape hatch excused any `Named`
+        // result. Both the mismatch and the unresolved-name invariant must
+        // fire now; neither hides behind the other.
+        let mut program = executable_program();
+        let body = program.functions[0].body.as_mut().expect("body");
+        body.blocks[0].operations.push(BodyOperation {
+            id: "view".to_owned(),
+            kind: BodyOperationKind::ViewConstruct {
+                source_bound: SequenceBound::Exact(4),
+                view_bound: SequenceBound::UpTo(4),
+            },
+            operands: vec!["sum".to_owned(), "one".to_owned(), "one".to_owned()],
+            results: vec![BodyValue {
+                id: "view".to_owned(),
+                ty: BodyType::Named("Bogus".to_owned()),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        let report = program.validate();
+        assert!(!report.valid);
+        assert!(
+            report.errors.iter().any(|error| error.code == "MNB094"),
+            "{:#?}",
+            report.errors
+        );
+        assert!(
+            report.errors.iter().any(|error| error.code == "MNB122"),
+            "{:#?}",
+            report.errors
+        );
     }
 
     #[test]
