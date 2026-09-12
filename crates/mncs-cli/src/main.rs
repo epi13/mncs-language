@@ -15,6 +15,7 @@ use mncs_codegen::{
     BackendExecutionSession, BackendStatefulSession,
 };
 use mncs_compiler::{
+    bundle::{collect_library_modules, StdlibBundle},
     native_node_profile, reference_compiler_architecture, ModuleResolution,
     ModuleResolutionOutcome, ModuleResolver, ReferenceCompiler, SourceFrontEndResult,
 };
@@ -131,6 +132,7 @@ fn run_cli() -> ExitCode {
         "source-study" => source_study_command(args),
         "experiment" => experiment_command(args),
         "corpus" => corpus_command(args),
+        "bundle" => bundle_command(args),
         "diff" => two_manifest_command(args, diff),
         "compare" => two_manifest_command(args, compare),
         "slice" => slice_command(args),
@@ -1159,6 +1161,123 @@ where
         }
         _ => {
             eprintln!("error: unknown corpus action {action:?}; expected lint");
+            ExitCode::from(2)
+        }
+    }
+}
+
+/// Toolchain-owned stdlib-bundle commands (INGEST-P-008): `mncs bundle
+/// generate` pins a library tree into a content-addressed bundle document;
+/// `mncs bundle verify` re-verifies every content hash and the bundle
+/// identity, failing closed on any drift.
+fn bundle_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let Some(action) = args.next() else {
+        eprintln!("error: bundle requires generate or verify");
+        return ExitCode::from(2);
+    };
+    match action.as_str() {
+        "generate" => {
+            let mut library: Option<String> = None;
+            let mut output: Option<String> = None;
+            let mut commit: Option<String> = None;
+            let mut rest = args.peekable();
+            while let Some(flag) = rest.next() {
+                match flag.as_str() {
+                    "--library" => {
+                        library = rest.next();
+                    }
+                    "--output" => {
+                        output = rest.next();
+                    }
+                    "--commit" => {
+                        commit = rest.next();
+                    }
+                    unexpected => {
+                        eprintln!("error: unexpected bundle generate argument {unexpected:?}");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
+            let (Some(library), Some(output)) = (library, output) else {
+                eprintln!(
+                    "error: bundle generate requires --library DIR --output FILE [--commit HASH]"
+                );
+                return ExitCode::from(2);
+            };
+            let modules = match collect_library_modules(std::path::Path::new(&library)) {
+                Ok(modules) => modules,
+                Err(error) => {
+                    eprintln!("error: cannot collect library modules: {error}");
+                    return ExitCode::from(2);
+                }
+            };
+            if modules.is_empty() {
+                eprintln!("error: no distributable modules under {library:?}");
+                return ExitCode::from(2);
+            }
+            let bundle = match StdlibBundle::assemble(
+                "mncs bundle generate",
+                commit.unwrap_or_else(|| "unrecorded".to_owned()),
+                modules,
+            ) {
+                Ok(bundle) => bundle,
+                Err(error) => {
+                    eprintln!("error: cannot assemble bundle: {error}");
+                    return ExitCode::from(2);
+                }
+            };
+            let document = match bundle.to_json_pretty() {
+                Ok(document) => document,
+                Err(error) => {
+                    eprintln!("error: cannot serialize bundle: {error}");
+                    return ExitCode::from(2);
+                }
+            };
+            if let Err(error) = fs::write(&output, format!("{document}\n")) {
+                eprintln!("error: unable to write {output:?}: {error}");
+                return ExitCode::from(2);
+            }
+            eprintln!(
+                "bundled {} modules as {}",
+                bundle.len(),
+                bundle.bundle_identity()
+            );
+            ExitCode::SUCCESS
+        }
+        "verify" => {
+            let Some(path) = args.next() else {
+                eprintln!("error: bundle verify requires a bundle path");
+                return ExitCode::from(2);
+            };
+            if args.next().is_some() {
+                eprintln!("error: unexpected additional arguments");
+                return ExitCode::from(2);
+            }
+            let text = match read_source(&path) {
+                Ok(text) => text,
+                Err(code) => return code,
+            };
+            match StdlibBundle::from_json(&text) {
+                Ok(bundle) => {
+                    eprintln!(
+                        "verified {} modules as {}",
+                        bundle.len(),
+                        bundle.bundle_identity()
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("error: bundle {path:?} failed verification: {error}");
+                    ExitCode::from(2)
+                }
+            }
+        }
+        _ => {
+            eprintln!("error: unknown bundle action {action:?}; expected generate or verify");
             ExitCode::from(2)
         }
     }
@@ -3956,6 +4075,30 @@ fn per_claim_milli(value: usize, claim_count: usize) -> usize {
 struct FileModuleResolver {
     root: PathBuf,
     libraries: Vec<PathBuf>,
+    bundle: Option<StdlibBundle>,
+}
+
+/// A pinned standard-library bundle from `MNCS_STDLIB_BUNDLE` (INGEST-P-008):
+/// when set, the named bundle contributes its pinned modules as one more
+/// resolution authority. Unset or empty means pure filesystem resolution;
+/// an unreadable or unverifiable bundle fails the whole invocation closed
+/// and loud — silently ignoring a requested pin would be a resolution lie.
+fn bundle_from_env() -> Option<StdlibBundle> {
+    let path = std::env::var("MNCS_STDLIB_BUNDLE").ok()?;
+    if path.trim().is_empty() {
+        return None;
+    }
+    let text = fs::read_to_string(&path).unwrap_or_else(|error| {
+        eprintln!("error: unable to read MNCS_STDLIB_BUNDLE {path:?}: {error}");
+        std::process::exit(2);
+    });
+    match StdlibBundle::from_json(&text) {
+        Ok(bundle) => Some(bundle),
+        Err(error) => {
+            eprintln!("error: MNCS_STDLIB_BUNDLE {path:?} is unusable: {error}");
+            std::process::exit(2);
+        }
+    }
 }
 
 impl FileModuleResolver {
@@ -3965,13 +4108,16 @@ impl FileModuleResolver {
         Self {
             root,
             libraries: Vec::new(),
+            bundle: None,
         }
     }
 
-    /// Source-local resolution plus every configured standard-library root.
+    /// Source-local resolution plus every configured standard-library root
+    /// plus the pinned bundle when `MNCS_STDLIB_BUNDLE` names one.
     fn with_libraries(source_path: &str) -> Self {
         let mut resolver = Self::for_source(source_path);
         resolver.libraries = library_roots();
+        resolver.bundle = bundle_from_env();
         resolver
     }
 }
@@ -4077,6 +4223,27 @@ impl ModuleResolver for FileModuleResolver {
                 }
             }
         }
+        // Pinned-bundle authority (INGEST-P-008): when `MNCS_STDLIB_BUNDLE`
+        // names a bundle, its pinned modules join the same authority set
+        // under the same rules — byte-identical content collapses to one
+        // authority, divergent content for one identity fails closed as a
+        // conflict naming both locators. The pin never silently shadows a
+        // working tree, and a working tree never silently shadows the pin.
+        if let Some(bundle) = &self.bundle {
+            if let Some(envelope) = bundle.resolver().resolve(module) {
+                let locator = envelope
+                    .origin
+                    .locator
+                    .clone()
+                    .unwrap_or_else(|| "stdlib-bundle".to_owned());
+                let source = envelope.text.clone();
+                if !authorities.iter().any(|(known_locator, known_source)| {
+                    known_locator == &locator || known_source == &source
+                }) {
+                    authorities.push((locator, source));
+                }
+            }
+        }
         match authorities.len() {
             0 => ModuleResolutionOutcome::NotFound,
             1 => {
@@ -4165,6 +4332,8 @@ fn print_usage() {
     eprintln!("  mncs experiment rust-control <result.json> <equivalent-control.rs>");
     eprintln!("  mncs experiment matrix");
     eprintln!("  mncs corpus lint <program.mncs|program.json> <corpus.json>");
+    eprintln!("  mncs bundle generate --library DIR --output FILE [--commit HASH]");
+    eprintln!("  mncs bundle verify <bundle.json>");
     eprintln!("  mncs diff <before.json> <after.json>");
     eprintln!("  mncs compare <before.json> <after.json>");
     eprintln!("  mncs slice <manifest.json> <semantic-identity>");

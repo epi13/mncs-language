@@ -4,6 +4,7 @@
 //! HIR, SSA, obligation, and provenance implementations remain in
 //! `mncs-model`.
 
+pub mod bundle;
 mod frontend;
 pub mod proof_admission;
 mod resolution;
