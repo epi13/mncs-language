@@ -633,7 +633,7 @@ fn lower_instruction(
             })
         }
         SsaInstructionKind::FloatIntrinsic { function } => {
-            if !matches!(function.as_str(), "sin" | "cos") {
+            if !matches!(function.as_str(), "sin" | "cos" | "neg") {
                 return Err(format!("unsupported float intrinsic {function}"));
             }
             Ok(ScalarInst::FloatIntrinsic {

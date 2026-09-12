@@ -2276,6 +2276,9 @@ fn execute_operation(
             let value = match function.as_str() {
                 "sin" => input.sin(),
                 "cos" => input.cos(),
+                // Exact IEEE-754 negation (total on finite inputs;
+                // non-finite inputs already trapped above).
+                "neg" => -input,
                 _ => {
                     result.fail(
                         ExecutionStatus::Unsupported,

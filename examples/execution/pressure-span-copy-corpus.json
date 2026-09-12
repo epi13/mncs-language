@@ -235,6 +235,59 @@
    "expected_status": "returned"
   },
   {
+   "id": "float_window",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.span_copy",
+     "function": "copy_f64"
+    },
+    "arguments": [],
+    "step_budget": 1000
+   },
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "float": {
+         "bits": 4607182418800017408,
+         "type": {
+          "bits": 64
+         }
+        }
+       },
+       {
+        "float": {
+         "bits": 4621819117588971520,
+         "type": {
+          "bits": 64
+         }
+        }
+       },
+       {
+        "float": {
+         "bits": 4626322717216342016,
+         "type": {
+          "bits": 64
+         }
+        }
+       },
+       {
+        "float": {
+         "bits": 4616189618054758400,
+         "type": {
+          "bits": 64
+         }
+        }
+       }
+      ]
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
    "id": "overlap_fwd",
    "request": {
     "schema_version": "0.1",

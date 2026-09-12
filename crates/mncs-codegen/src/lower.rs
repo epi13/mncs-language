@@ -1478,7 +1478,12 @@ fn trig_import_list(ssa: &SsaModule) -> Vec<String> {
         for block in &function.blocks {
             for instruction in &block.instructions {
                 if let SsaInstructionKind::FloatIntrinsic { function } = &instruction.kind {
-                    names.insert(function.clone());
+                    // `neg` lowers to inline `F64Neg`, never to a host
+                    // call: importing it would declare a `mncs.neg` the
+                    // host must provide for no reason.
+                    if function != "neg" {
+                        names.insert(function.clone());
+                    }
                 }
             }
         }
@@ -1965,7 +1970,7 @@ fn lower_instruction(
             emit_finite_guard(body, dest);
         }
         SsaInstructionKind::FloatIntrinsic { function } => {
-            if !matches!(function.as_str(), "sin" | "cos") {
+            if !matches!(function.as_str(), "sin" | "cos" | "neg") {
                 return Err(format!("unsupported float intrinsic {function}"));
             }
             let dest = dest_local(layout, instruction)?;
@@ -1975,13 +1980,22 @@ fn lower_instruction(
             // call, exactly like arithmetic.
             emit_finite_guard(body, src);
             body.push(Instr::LocalGet(src));
-            let import = trig_imports
-                .iter()
-                .position(|import| import == function)
-                .ok_or_else(|| format!("float intrinsic {function} was not imported"))?;
-            body.push(Instr::Call(import as u32));
-            body.push(Instr::LocalSet(dest));
-            emit_finite_guard(body, dest);
+            // `neg` lowers inline (exact IEEE-754 negation needs no host
+            // call), so it is excluded from `trig_import_list`. The
+            // result of negating a finite input is finite: no result
+            // guard, unlike the transcendental pair.
+            if function == "neg" {
+                body.push(Instr::F64Neg);
+                body.push(Instr::LocalSet(dest));
+            } else {
+                let import = trig_imports
+                    .iter()
+                    .position(|import| import == function)
+                    .ok_or_else(|| format!("float intrinsic {function} was not imported"))?;
+                body.push(Instr::Call(import as u32));
+                body.push(Instr::LocalSet(dest));
+                emit_finite_guard(body, dest);
+            }
         }
         SsaInstructionKind::FloatCompare { predicate } => {
             let instruction_op = match predicate.as_str() {
@@ -2146,11 +2160,10 @@ fn lower_instruction(
                 match element_valtype {
                     ValType::I32 => body.push(Instr::I32Load),
                     ValType::I64 => body.push(Instr::I64Load),
-                    // Float sequences stay refused in C1: element lowering
-                    // is per-width on every backend.
-                    ValType::F64 => {
-                        return Err("float sequences are not supported".to_owned());
-                    }
+                    // Bit-carried f64: an 8-byte I64 move carries the
+                    // payload bits exactly like the I64Store that
+                    // `store_element_width` emits for F64 below.
+                    ValType::F64 => body.push(Instr::I64Load),
                 }
                 store_element_width(layout, instruction, 2, body)?;
             }
@@ -2311,16 +2324,17 @@ fn lower_instruction(
                     body.push(Instr::I32WrapI64);
                 }
                 body.push(Instr::I32Add);
-                // [daddr] [saddr]; load the source value.
+                // [daddr] [saddr]; load the source value. Bit-carried
+                // f64 moves as I64 like every other 8-byte lane; the
+                // lane-membership `Select` below needs both values at
+                // one width, so the destination reload matches.
                 if is_byte {
                     body.push(Instr::I32Load8U);
                 } else {
                     match element_valtype {
                         ValType::I32 => body.push(Instr::I32Load),
                         ValType::I64 => body.push(Instr::I64Load),
-                        ValType::F64 => {
-                            return Err("float sequences are not supported".to_owned());
-                        }
+                        ValType::F64 => body.push(Instr::I64Load),
                     }
                 }
                 // [outaddr] [sval]; reload the destination lane value.
@@ -2335,7 +2349,7 @@ fn lower_instruction(
                     match element_valtype {
                         ValType::I32 => body.push(Instr::I32Load),
                         ValType::I64 => body.push(Instr::I64Load),
-                        ValType::F64 => body.push(Instr::F64Load),
+                        ValType::F64 => body.push(Instr::I64Load),
                     }
                 }
                 // [outaddr] [sval] [dval]; lane membership.
@@ -2349,6 +2363,8 @@ fn lower_instruction(
                 body.push(Instr::I64LtU);
                 body.push(Instr::I32And);
                 // [outaddr] [sval] [dval] [in]; select and store.
+                // The selected value is an I64-carried lane either way,
+                // so one store width serves integers and floats.
                 body.push(Instr::Select);
                 if is_byte {
                     body.push(Instr::I32Store);
@@ -2356,9 +2372,7 @@ fn lower_instruction(
                     match element_valtype {
                         ValType::I32 => body.push(Instr::I32Store),
                         ValType::I64 => body.push(Instr::I64Store),
-                        ValType::F64 => {
-                            return Err("float sequences are not supported".to_owned());
-                        }
+                        ValType::F64 => body.push(Instr::I64Store),
                     }
                 }
             }

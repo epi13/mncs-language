@@ -355,7 +355,9 @@ fn roadmap_05_arithmetic_control_and_bounded_refinement_are_evidence_gated() {
         .collect();
     assert_eq!(exports.len(), 1, "admitted subset: {exports:?}");
     assert!(
-        exports.iter().any(|export| export.contains("saturating__add")),
+        exports
+            .iter()
+            .any(|export| export.contains("saturating__add")),
         "saturating_add is exported: {exports:?}"
     );
     let refused: Vec<String> = artifact["unsupported"]

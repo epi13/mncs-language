@@ -648,6 +648,92 @@
    "expected_status": "returned"
   },
   {
+   "id": "host-nominal-point-identity",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.host_generics",
+     "function": "id_value"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.host_generics::Point::x%3Ai64%3By%3Ai64%3B",
+       "name": "Point",
+       "fields": [
+        [
+         "x",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "y",
+         {
+          "integer": {
+           "value": 4,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 8000,
+    "type_arguments": [
+     {
+      "kind": "type",
+      "type": "mncs:0.2:record-type:pressure.host_generics::Point::x%3Ai64%3By%3Ai64%3B"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:pressure.host_generics::Point::x%3Ai64%3By%3Ai64%3B",
+      "name": "Point",
+      "fields": [
+       [
+        "x",
+        {
+         "integer": {
+          "value": 3,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ],
+       [
+        "y",
+        {
+         "integer": {
+          "value": 4,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
    "id": "same-fill",
    "request": {
     "schema_version": "0.1",
@@ -710,6 +796,205 @@
     {
      "integer": {
       "value": 9,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "host-nat-pair-22",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.host_generics",
+     "function": "pick2_sum"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "integer": {
+          "value": 10,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 20,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ]
+      }
+     }
+    ],
+    "step_budget": 8000,
+    "type_arguments": [
+     {
+      "kind": "nat",
+      "value": 2
+     },
+     {
+      "kind": "nat",
+      "value": 2
+     }
+    ]
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 33,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "host-nat-pair-32",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.host_generics",
+     "function": "pick2_sum"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "integer": {
+          "value": 1,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 2,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 3,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ]
+      }
+     },
+     {
+      "sequence": {
+       "values": [
+        {
+         "integer": {
+          "value": 10,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 20,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ]
+      }
+     }
+    ],
+    "step_budget": 8000,
+    "type_arguments": [
+     {
+      "kind": "nat",
+      "value": 3
+     },
+     {
+      "kind": "nat",
+      "value": 2
+     }
+    ]
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 36,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "same-pick",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.host_generics",
+     "function": "probe_same_pick"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 33,
       "type": {
        "bits": 64,
        "signed": true

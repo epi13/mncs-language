@@ -74,9 +74,10 @@ const EXECUTABLE_BACKENDS: [&str; 5] = [
 ];
 
 /// Value cases agree on every backend, including view sources, static
-/// windows, overlapping self-copies, zero-length copies, and narrow
-/// integer/boolean widths. The byte cases also read both inputs back, so
-/// a backend that mutated an input cell would fail the expectation.
+/// windows, overlapping self-copies, zero-length copies, narrow
+/// integer/boolean widths, and a bit-exact float window. The byte cases
+/// also read both inputs back, so a backend that mutated an input cell
+/// would fail the expectation.
 #[test]
 fn span_copy_values_agree_on_every_backend() {
     let source = example("source/pressure-span-copy.mncs");
@@ -91,7 +92,7 @@ fn span_copy_values_agree_on_every_backend() {
         let cases = result["cases"]
             .as_array()
             .unwrap_or_else(|| panic!("{backend}: missing cases; {result:#}"));
-        assert_eq!(cases.len(), 15, "{backend}: case count");
+        assert_eq!(cases.len(), 16, "{backend}: case count");
         for case in cases {
             let id = case["case_id"].as_str().unwrap_or("?");
             if id.starts_with("trap_") {

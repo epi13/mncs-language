@@ -40,7 +40,9 @@ let view: [i32; up_to 4] = xs[2..5];
   `[value; N]` elaborates the element once and duplicates the operand, so
   it lowers exactly like the equivalent N-element literal; a count that
   disagrees with the declared exact length is `MNE184`, a non-length
-  count is `MNE256`, and a non-integer count is a parse error (`MNP203`).
+  count is `MNE256` (a bare-identifier count parses and reports the
+  Nat-literal rule once via `MNE256`), and any other non-integer
+  count is a parse error (`MNP203`).
 - Sequences have pure value semantics: no mutation, aliasing, or ownership
   transfer exists in this profile, so ownership/lifetime theory stays
   explicitly unresolved (RFC 0009).

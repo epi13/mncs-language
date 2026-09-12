@@ -3,12 +3,14 @@
 //! A host selects a concrete specialization with explicit
 //! `type_arguments` on the execution request — no hand-written wrapper
 //! functions. The corpus names Nat arguments (`{"kind": "nat", "value":
-//! 8}`), type arguments (`{"kind": "type", "type": "i64"}`), view bounds,
-//! cross-module declarations, and nominal record arguments; elaboration
-//! compiles each named instantiation through the same specialization
-//! queue, identity scheme, and ceiling sweep as in-language calls, and
-//! every executable backend lowers and serves it. `probe_same_*`
-//! wrappers instantiate the same arguments in-language, pinning the
+//! 8}`), multi-parameter Nat addresses (`pick2_sum<2, 2>` and
+//! `<3, 2>`, pinning positional spelling round-trips), type arguments
+//! (`{"kind": "type", "type": "i64"}`), view bounds, cross-module
+//! declarations, and nominal record arguments; elaboration compiles
+//! each named instantiation through the same specialization queue,
+//! identity scheme, and ceiling sweep as in-language calls, and every
+//! executable backend lowers and serves it. `probe_same_*` wrappers
+//! instantiate the same arguments in-language, pinning the
 //! single-specialization contract: the seeded artifact carries exactly
 //! one entrypoint row per instantiation however it was requested.
 //!
@@ -99,14 +101,18 @@ fn host_named_instantiations_pass_on_all_five_backends() {
         for id in [
             "host-nat-fill",
             "host-nat-fill-4",
+            "host-nat-pair-22",
+            "host-nat-pair-32",
             "host-type-first",
             "host-view-len",
             "host-xmod-fill",
             "host-xmod-first",
             "host-nominal-point",
+            "host-nominal-point-identity",
             "same-fill",
             "same-first",
             "same-lib",
+            "same-pick",
         ] {
             let case = case_by_id(&report, id);
             assert_eq!(case["status"], "returned", "{backend}: {id} returns");
@@ -179,7 +185,7 @@ fn seeded_artifacts_carry_one_entrypoint_row_per_instantiation() {
         .get("generic_entrypoints")
         .and_then(Value::as_array)
         .expect("entrypoint map present");
-    assert_eq!(rows.len(), 7, "one row per instantiation: {rows:?}");
+    assert_eq!(rows.len(), 10, "one row per instantiation: {rows:?}");
     let rows_for = |module: &str, function: &str| {
         rows.iter()
             .filter(|row| {
@@ -213,9 +219,42 @@ fn seeded_artifacts_carry_one_entrypoint_row_per_instantiation() {
     let xmod = rows_for("pressure.host_generics.lib", "grow_fill");
     assert_eq!(xmod.len(), 1, "{xmod:?}");
     assert_eq!(xmod[0]["args_spellings"], json!(["4"]));
+    // Multi-parameter Nat addresses round-trip positionally: the
+    // repeated spelling (2, 2) is not deduplicated to (2), the
+    // unsorted spelling (3, 2) is not reordered to (2, 3), and the
+    // host-seeded (2, 2) plus the in-language probe_same_pick share
+    // one row (single specialization, first-seen address kept).
+    let pick = rows_for("pressure.host_generics", "pick2_sum");
+    assert_eq!(pick.len(), 2, "{pick:?}");
+    let pair22 = pick
+        .iter()
+        .find(|row| row["canonical_args"] == "value:2|value:2")
+        .expect("(2, 2) row");
+    assert_eq!(pair22["args_spellings"], json!(["2", "2"]));
+    let pair32 = pick
+        .iter()
+        .find(|row| row["canonical_args"] == "value:3|value:2")
+        .expect("(3, 2) row");
+    assert_eq!(pair32["args_spellings"], json!(["3", "2"]));
+    assert_ne!(pair22["entry_function"], pair32["entry_function"]);
     let nominal = rows_for("pressure.host_generics", "id_value");
-    assert_eq!(nominal.len(), 1, "{nominal:?}");
+    assert_eq!(nominal.len(), 2, "{nominal:?}");
     assert_eq!(nominal[0]["args_spellings"], json!(["Point"]));
+    // The same instantiation named by identity instead of by short
+    // name shares the specialization entry while keeping its own
+    // addressable row (spelling union, not spelling soup).
+    assert_eq!(
+        nominal[1]["args_spellings"],
+        json!(["mncs:0.2:record-type:pressure.host_generics::Point::x%3Ai64%3By%3Ai64%3B"])
+    );
+    assert_eq!(
+        nominal[1]["canonical_args"], nominal[0]["canonical_args"],
+        "one instantiation, two addresses"
+    );
+    assert_eq!(
+        nominal[1]["entry_function"], nominal[0]["entry_function"],
+        "one instantiation, one entry"
+    );
     assert!(
         nominal[0]["canonical_args"]
             .as_str()
@@ -272,7 +311,7 @@ fn frozen_artifacts_serve_generic_entrypoints() {
         let observations: Value =
             serde_json::from_slice(&executed.stdout).expect("observations JSON");
         let cases = observations.as_array().expect("observations array");
-        assert_eq!(cases.len(), 10, "{backend}: every case runs once");
+        assert_eq!(cases.len(), 14, "{backend}: every case runs once");
         for case in cases {
             assert_eq!(case["status"], "returned", "{backend}: {case:#}");
             assert_eq!(case["status_met"], true, "{backend}: {case:#}");
@@ -608,7 +647,7 @@ fn stripped_entrypoint_maps_fail_closed_at_the_identity_gate() {
     );
     let observations: Value = serde_json::from_slice(&executed.stdout).expect("observations JSON");
     let cases = observations.as_array().expect("observations array");
-    assert_eq!(cases.len(), 10, "every case runs once");
+    assert_eq!(cases.len(), 14, "every case runs once");
     for case in cases {
         assert_eq!(case["status"], "invalid_request", "{case:#}");
         assert!(

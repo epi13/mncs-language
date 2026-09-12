@@ -1691,7 +1691,7 @@ fn validate_operation(
             }
         }
         BodyOperationKind::FloatIntrinsic { function } => {
-            if !matches!(function.as_str(), "sin" | "cos") {
+            if !matches!(function.as_str(), "sin" | "cos" | "neg") {
                 errors.push(body_diagnostic(
                     "MNB134",
                     format!("{path}.kind"),

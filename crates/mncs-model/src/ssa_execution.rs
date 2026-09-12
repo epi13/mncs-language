@@ -1068,6 +1068,11 @@ fn execute_instruction(
             let value = match function.as_str() {
                 "sin" => input.sin(),
                 "cos" => input.cos(),
+                // Exact IEEE-754 negation (total on finite inputs;
+                // non-finite inputs already trapped above, and the
+                // result of negating a finite input is finite, so the
+                // non-finite-result trap below cannot fire for neg).
+                "neg" => -input,
                 _ => {
                     result.fail(
                         ExecutionStatus::Unsupported,

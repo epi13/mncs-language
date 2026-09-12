@@ -138,3 +138,317 @@ fn pressure_symbol_hygiene_agrees_per_backend() {
         assert_value_agreement(backend, code, &result, &stderr, 3);
     }
 }
+
+/// Float `replace` construction is bit-exact on every backend.
+/// Regression: the LLVM backend stored the `double` replacement lane
+/// into an `i64` slot (`slot_payload_ty` maps every 8-byte lane to
+/// `i64`), so clang rejected the whole artifact — and the WASM
+/// lowering refused float lanes outright (mncs-numerics P-001). LLVM
+/// now bitcasts the lane to the raw slot word; WASM moves it as an
+/// 8-byte I64 word like every other lane. The copy kernel is
+/// obligation-clean (top-level PASS); the scaled kernel carries the
+/// honest float-finite obligations of opaque-operand arithmetic, so it
+/// pins case-level exactness instead. Lanes include `-0.0` and a
+/// subnormal, which any converting store would destroy.
+#[test]
+fn float_replace_constructs_bit_exact_sequences() {
+    let dir = std::env::temp_dir().join(format!(
+        "mncs-float-replace-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create replace workspace");
+    // Two sources: obligations are per-compilation, so the
+    // obligation-clean copy kernel and the arithmetic scaled kernel
+    // (honest float-finite obligations on opaque operands) run as
+    // separate experiments.
+    std::fs::write(
+        dir.join("copy.mncs"),
+        "mncs 0.16;\n\nmodule pressure.float_replace_copy;\n\nfn copy4(xs: [f64; 4]) -> (result: [f64; 4]) {\n    iterate i over xs carrying out: [f64; 4] = xs {\n        next out = replace(out, i, xs[i]);\n    }\n    return out;\n}\n",
+    )
+    .expect("write copy source");
+    std::fs::write(
+        dir.join("scaled.mncs"),
+        "mncs 0.16;\n\nmodule pressure.float_replace_scaled;\n\nfn scaled4(xs: [f64; 4], s: f64) -> (result: [f64; 4]) {\n    iterate i over xs carrying out: [f64; 4] = xs {\n        next out = replace(out, i, xs[i] * s);\n    }\n    return out;\n}\n",
+    )
+    .expect("write scaled source");
+    let float = |bits: u64| serde_json::json!({"float": {"bits": bits, "type": {"bits": 64}}});
+    let seq = |lanes: Vec<serde_json::Value>| serde_json::json!({"sequence": {"values": lanes}});
+    // 1.5, -2.0, -0.0, 5e-324 (subnormal, bits == 1).
+    let lanes = vec![
+        float(4609434218613702656),
+        float(13835058055282163712),
+        float(9223372036854775808),
+        float(1),
+    ];
+    // The same lanes times 2.0: 3.0, -4.0, -0.0, 1e-323 (bits == 2).
+    let doubled = vec![
+        float(4613937818241073152),
+        float(13839561654909534208),
+        float(9223372036854775808),
+        float(2),
+    ];
+    let write_corpus = |name: &str, cases: serde_json::Value| {
+        let path = dir.join(name);
+        std::fs::write(&path, cases.to_string()).expect("write replace corpus");
+        path.to_string_lossy().into_owned()
+    };
+    let copy_corpus = write_corpus(
+        "copy-corpus.json",
+        serde_json::json!({
+            "schema_version": "0.2",
+            "name": "float-replace-copy",
+            "cases": [
+                {
+                    "id": "copy",
+                    "request": {
+                        "schema_version": "0.1",
+                        "target": {"module": "pressure.float_replace_copy", "function": "copy4"},
+                        "arguments": [seq(lanes.clone())],
+                        "step_budget": 8192
+                    },
+                    "expected": [seq(lanes.clone())],
+                    "expected_status": "returned"
+                }
+            ]
+        }),
+    );
+    let scaled_corpus = write_corpus(
+        "scaled-corpus.json",
+        serde_json::json!({
+            "schema_version": "0.2",
+            "name": "float-replace-scaled",
+            "cases": [
+                {
+                    "id": "scaled",
+                    "request": {
+                        "schema_version": "0.1",
+                        "target": {"module": "pressure.float_replace_scaled", "function": "scaled4"},
+                        "arguments": [seq(lanes.clone()), float(4611686018427387904)],
+                        "step_budget": 8192
+                    },
+                    "expected": [seq(doubled.clone())],
+                    "expected_status": "returned"
+                }
+            ]
+        }),
+    );
+    let copy_source = dir.join("copy.mncs").to_string_lossy().into_owned();
+    let scaled_source = dir.join("scaled.mncs").to_string_lossy().into_owned();
+    let case_by_id = |result: &Value, id: &str| {
+        result["cases"]
+            .as_array()
+            .and_then(|cases| {
+                cases
+                    .iter()
+                    .find(|case| case.get("case_id").and_then(Value::as_str) == Some(id))
+            })
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_experiment(&copy_source, backend, &copy_corpus);
+        assert_eq!(
+            code,
+            Some(0),
+            "{backend}: float copy must exit 0; stderr={stderr}; result={result:#}"
+        );
+        assert_eq!(result["status"], "PASS", "{backend}: {result:#}");
+        let case = case_by_id(&result, "copy");
+        assert_eq!(case["status"], "returned", "{backend}: {case:#}");
+        assert_eq!(case["status_met"], true, "{backend}: {case:#}");
+        // The scaled kernel is the original P-001 shape (arithmetic fed
+        // into `replace`): exact values on every backend, with the
+        // honest float-finite obligations left for the proof story.
+        let (scaled_code, scaled_result, scaled_stderr) =
+            run_experiment(&scaled_source, backend, &scaled_corpus);
+        assert!(
+            scaled_code.is_some(),
+            "{backend}: float scale must not crash; stderr={scaled_stderr}"
+        );
+        let scaled = case_by_id(&scaled_result, "scaled");
+        assert_eq!(scaled["status"], "returned", "{backend}: {scaled:#}");
+        assert_eq!(
+            scaled["expectation_met"], true,
+            "{backend}: scaled lanes must be bit-exact; returned={:#}",
+            scaled["returned"]
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Arity-mismatched execution requests fail closed as `invalid_request`
+/// on every backend — they must never kill the compiler process.
+/// Regression: the Cranelift JIT called the compiled two-argument
+/// function through a one-argument pointer type (no request-vs-contract
+/// arity check before raw trampoline dispatch), dying with SIGSEGV
+/// and empty stdout (mncs-numerics P-006). The gate now lives in
+/// `jit_boundary_arguments_for_request` (one-shot and retained
+/// session paths) plus the AOT fallback, with the same value-contract
+/// message the C11/LLVM gates report.
+#[test]
+fn arity_mismatched_requests_fail_closed_without_crashing() {
+    let dir = std::env::temp_dir().join(format!(
+        "mncs-arity-gate-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create arity workspace");
+    std::fs::write(
+        dir.join("arity.mncs"),
+        "mncs 0.16;\n\nmodule pressure.arity_gate;\n\nfn fmin2(a: f64, b: f64) -> (result: f64) {\n    if a <= b {\n        return a;\n    }\n    return b;\n}\n",
+    )
+    .expect("write arity source");
+    let float = |bits: u64| serde_json::json!({"float": {"bits": bits, "type": {"bits": 64}}});
+    // 1.0, 2.0, 3.0 as exact bit patterns.
+    let corpus = serde_json::json!({
+        "schema_version": "0.2",
+        "name": "arity-gate",
+        "cases": [
+            {
+                "id": "too-few",
+                "request": {
+                    "schema_version": "0.1",
+                    "target": {"module": "pressure.arity_gate", "function": "fmin2"},
+                    "arguments": [float(4607182418800017408)],
+                    "step_budget": 4096
+                },
+                "expected_status": "invalid_request"
+            },
+            {
+                "id": "too-many",
+                "request": {
+                    "schema_version": "0.1",
+                    "target": {"module": "pressure.arity_gate", "function": "fmin2"},
+                    "arguments": [
+                        float(4613937818241073152),
+                        float(4607182418800017408),
+                        float(4611686018427387904)
+                    ],
+                    "step_budget": 4096
+                },
+                "expected_status": "invalid_request"
+            },
+            {
+                "id": "exact",
+                "request": {
+                    "schema_version": "0.1",
+                    "target": {"module": "pressure.arity_gate", "function": "fmin2"},
+                    "arguments": [
+                        float(4613937818241073152),
+                        float(4607182418800017408)
+                    ],
+                    "step_budget": 4096
+                },
+                "expected": [float(4607182418800017408)],
+                "expected_status": "returned"
+            }
+        ]
+    });
+    let corpus_path = dir.join("corpus.json");
+    std::fs::write(&corpus_path, corpus.to_string()).expect("write arity corpus");
+    let source = dir.join("arity.mncs").to_string_lossy().into_owned();
+    let corpus = corpus_path.to_string_lossy().into_owned();
+    let case_by_id = |result: &Value, id: &str| {
+        result
+            .get("cases")
+            .and_then(Value::as_array)
+            .and_then(|cases| {
+                cases
+                    .iter()
+                    .find(|case| case.get("case_id").and_then(Value::as_str) == Some(id))
+            })
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_experiment(&source, backend, &corpus);
+        assert!(
+            code.is_some(),
+            "{backend}: arity mismatch must not kill the compiler process (signal): {stderr}"
+        );
+        let few = case_by_id(&result, "too-few");
+        assert_eq!(few["status"], "invalid_request", "{backend}: {few:#}");
+        let many = case_by_id(&result, "too-many");
+        assert_eq!(many["status"], "invalid_request", "{backend}: {many:#}");
+        // Every native backend gates the request against the entrypoint
+        // value contract with one shared message (one-shot, retained
+        // session, and AOT paths alike); the reference interpreter keeps
+        // its own historical wording.
+        if backend == "mncs-research-bytecode" {
+            assert!(
+                few["failure_reason"]
+                    .as_str()
+                    .is_some_and(|reason| !reason.is_empty()),
+                "{backend}: refusal attributed: {few:#}"
+            );
+        } else {
+            assert!(
+                few["failure_reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("expected 2 argument(s), received 1")),
+                "{backend}: contract counts named: {few:#}"
+            );
+            assert!(
+                many["failure_reason"]
+                    .as_str()
+                    .is_some_and(|reason| reason.contains("expected 2 argument(s), received 3")),
+                "{backend}: contract counts named: {many:#}"
+            );
+        }
+        let exact = case_by_id(&result, "exact");
+        assert_eq!(exact["status"], "returned", "{backend}: {exact:#}");
+        assert_eq!(exact["status_met"], true, "{backend}: {exact:#}");
+    }
+    // The frozen-artifact path serves the same refusal: compile, then
+    // execute the artifact with no program in sight.
+    let compiled = binary()
+        .env("MNCS_LIBRARY_PATH", library(""))
+        .args([
+            "compile",
+            &source,
+            "--emit",
+            "backend",
+            "--target",
+            "mncs-cranelift",
+        ])
+        .arg("--corpus")
+        .arg(&corpus)
+        .arg("--output-dir")
+        .arg(&dir)
+        .output()
+        .expect("compile arity artifact");
+    assert!(
+        compiled.status.success(),
+        "seeded compile exits 0: {}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let executed = binary()
+        .args(["experiment", "execute"])
+        .arg(dir.join("backend.json"))
+        .arg(&corpus)
+        .output()
+        .expect("execute arity artifact");
+    assert!(
+        executed.status.code().is_some(),
+        "frozen arity mismatch must not kill the compiler process"
+    );
+    let observations: Value = serde_json::from_slice(&executed.stdout).expect("observations JSON");
+    let by_id = |id: &str| {
+        observations
+            .as_array()
+            .and_then(|cases| {
+                cases
+                    .iter()
+                    .find(|case| case.get("case_id").and_then(Value::as_str) == Some(id))
+            })
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    assert_eq!(by_id("too-few")["status"], "invalid_request");
+    assert_eq!(by_id("too-many")["status"], "invalid_request");
+    assert_eq!(by_id("exact")["status"], "returned");
+    let _ = std::fs::remove_dir_all(&dir);
+}

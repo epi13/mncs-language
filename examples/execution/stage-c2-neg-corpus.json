@@ -1,0 +1,188 @@
+{
+ "schema_version": "0.2",
+ "name": "stage-c2-neg",
+ "cases": [
+  {
+   "id": "neg-pos-zero",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "stage.c2_neg",
+     "function": "fneg_exact"
+    },
+    "arguments": [
+     {
+      "float": {
+       "bits": 0,
+       "type": {
+        "bits": 64
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "float": {
+      "bits": 9223372036854775808,
+      "type": {
+       "bits": 64
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "neg-neg-zero",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "stage.c2_neg",
+     "function": "fneg_exact"
+    },
+    "arguments": [
+     {
+      "float": {
+       "bits": 9223372036854775808,
+       "type": {
+        "bits": 64
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "float": {
+      "bits": 0,
+      "type": {
+       "bits": 64
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "neg-value",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "stage.c2_neg",
+     "function": "fneg_exact"
+    },
+    "arguments": [
+     {
+      "float": {
+       "bits": 4609434218613702656,
+       "type": {
+        "bits": 64
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "float": {
+      "bits": 13832806255468478464,
+      "type": {
+       "bits": 64
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "neg-subnormal",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "stage.c2_neg",
+     "function": "fneg_exact"
+    },
+    "arguments": [
+     {
+      "float": {
+       "bits": 1,
+       "type": {
+        "bits": 64
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "float": {
+      "bits": 9223372036854775809,
+      "type": {
+       "bits": 64
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "negneg-value",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "stage.c2_neg",
+     "function": "negneg"
+    },
+    "arguments": [
+     {
+      "float": {
+       "bits": 4609434218613702656,
+       "type": {
+        "bits": 64
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected": [
+    {
+     "float": {
+      "bits": 4609434218613702656,
+      "type": {
+       "bits": 64
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "neg-nan-traps",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "stage.c2_neg",
+     "function": "fneg_exact"
+    },
+    "arguments": [
+     {
+      "float": {
+       "bits": 9221120237041090560,
+       "type": {
+        "bits": 64
+       }
+      }
+     }
+    ],
+    "step_budget": 4096
+   },
+   "expected_status": "runtime_failure"
+  }
+ ]
+}

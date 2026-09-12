@@ -147,7 +147,7 @@ pub fn language_owned_abi_contracts(
             .generic_specializations
             .iter()
             .filter(|record| record.generic_function == function_identity)
-            .map(|record| {
+            .flat_map(|record| {
                 let (entry_module, entry_function) = program
                     .functions
                     .iter()
@@ -164,12 +164,26 @@ pub fn language_owned_abi_contracts(
                         )
                     })
                     .unwrap_or_default();
-                CompiledInstantiationAbi {
-                    canonical_args: record.canonical_args.clone(),
-                    entry_module,
-                    entry_function,
-                    spellings: record.host_spellings.clone(),
-                }
+                // One ABI row per distinct positional spelling address:
+                // every address that named the instantiation stays
+                // host-addressable, while the shared canonical identity
+                // keeps the single-specialization contract.
+                // In-language-only instantiations keep their historical
+                // single row with empty spellings.
+                let addresses = if record.host_spellings.is_empty() {
+                    vec![Vec::new()]
+                } else {
+                    record.host_spellings.clone()
+                };
+                addresses
+                    .into_iter()
+                    .map(|spellings| CompiledInstantiationAbi {
+                        canonical_args: record.canonical_args.clone(),
+                        entry_module: entry_module.clone(),
+                        entry_function: entry_function.clone(),
+                        spellings,
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
         compiled_instantiations.sort_by(|left, right| {
@@ -177,11 +191,13 @@ pub fn language_owned_abi_contracts(
                 &left.canonical_args,
                 &left.entry_module,
                 &left.entry_function,
+                &left.spellings,
             )
                 .cmp(&(
                     &right.canonical_args,
                     &right.entry_module,
                     &right.entry_function,
+                    &right.spellings,
                 ))
         });
         let declaration = LanguageOwnedFunctionAbi {

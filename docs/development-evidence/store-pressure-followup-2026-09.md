@@ -160,6 +160,21 @@ source concept); `Nat` spellings beyond decimal `u32`; seeding
 frozen `compare-execution` baselines across schema versions (same-
 version only, by construction).
 
+Follow-up (numerics-pressure campaign, 2026-09-12): the "spellings
+unioned" merge above treated the positional spelling list as a set
+(`sort`+`dedup` across positions), so `(2, 2)` collapsed to `(2)`
+and `(3, 2)` reordered to `(2, 3)` on every native backend
+(mncs-numerics P-002). Repaired on branch
+`feat/numerics-pressure-2026-09-12`: spelling addresses stay
+positional whole vectors (ordered set per instantiation,
+first-seen); `GenericSpecializationRecord.host_spellings` is now
+`Vec<Vec<String>>`, and the artifact map plus `mncs abi` emit one
+row per address sharing one specialization entry. Pinned by
+`pick2_sum<2, 2>`/`<3, 2>` plus a nominal short-name/identity union
+pair in `examples/source/pressure-host-generics.mncs` (14 cases,
+all five backends) with artifact-row assertions in
+`crates/mncs-cli/tests/host_generic_entrypoints.rs`.
+
 ## Tranche 2 — filesystem TOCTOU (PARTIAL CLOSE + explicit remainder)
 
 Verdict: the final-component swap closes cleanly on Unix without

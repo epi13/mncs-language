@@ -14,6 +14,12 @@ mncs 0.16;
 //   probe_same_fill  = fill 8 with 7, read index 3 = 7
 //   probe_same_first = first(42) = 42
 //   probe_same_lib   = cross-module fill 4 with 9, read index 1 = 9
+//   probe_same_pick  = wrapping sum over [1, 2] ++ [10, 20] = 33
+//
+// `pick2_sum` takes TWO Nat parameters so host seeding must keep
+// positional spelling addresses exact: `<2, 2>` (repeated spelling)
+// and `<3, 2>` (unsorted spelling) are different instantiations, and
+// neither address may be sorted or deduplicated across positions.
 module pressure.host_generics;
 
 use pressure.host_generics.lib as lib;
@@ -39,6 +45,20 @@ fn id_value<T>(spot: T) -> (result: T) {
     return spot;
 }
 
+// Two Nat parameters, traversal-only indexing (proven by construction),
+// and wrapping accumulation (total: no overflow obligation), so the
+// function is obligation-clean and the experiment can reach PASS —
+// leaving host-seeding addresses as the only thing under test.
+fn pick2_sum<M: Nat, N: Nat>(a: [i64; M], b: [i64; N]) -> (result: i64) {
+    iterate i over a carrying s: i64 = 0 {
+        next s = s +% a[i];
+    }
+    iterate j over b carrying t: i64 = s {
+        next t = t +% b[j];
+    }
+    return t;
+}
+
 fn probe_same_fill() -> (result: i64) {
     let base: [i64; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
     let full: [i64; 8] = grow_fill_local<8>(base, 7);
@@ -53,4 +73,10 @@ fn probe_same_lib() -> (result: i64) {
     let base: [i64; 4] = [0, 0, 0, 0];
     let full: [i64; 4] = lib.grow_fill(base, 9);
     return full[1];
+}
+
+fn probe_same_pick() -> (result: i64) {
+    let a: [i64; 2] = [1, 2];
+    let b: [i64; 2] = [10, 20];
+    return pick2_sum<2, 2>(a, b);
 }

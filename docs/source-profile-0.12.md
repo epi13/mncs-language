@@ -15,9 +15,19 @@ sequence/view lengths of at most 64 (`MNE182`/`MNE105`/`MNE225`).
 ## Binary64 arithmetic and conversions
 
 `f64` is the only admitted float. Literals are finite `digits.digits`
-spellings: the parser refuses non-finite spellings (`MNP198`), and `f32`
-parses only so validation can report the single-width rule — every
-backend realizes exactly one float domain.
+spellings with an optional `[eE][+-]?digits` exponent (`1e300`,
+`1.5e-3`, `5e-324` — a dotless mantissa is valid only with an
+exponent): the parser refuses non-finite spellings (`MNP198`), and
+`f32` parses only so validation can report the single-width rule —
+every backend realizes exactly one float domain.
+
+An integer literal in a binary64 position adapts when exactly
+representable (`|v| <= 2^53`, so the conversion is lossless):
+`xs[i] * 2` and `2 * xs[i]` both mean `2.0`, through the same
+symmetric operand threading as integer adaptation. Anything wider
+stays refused (`MNE118`) with an explicit-`as` remedy instead of
+silently rounding — adaptation never invents a value the literal
+cannot inhabit exactly.
 
 `+ - * /` and the six comparisons are total over finite values under the
 non-finite trap rule: any non-finite input or result is a deterministic
@@ -40,6 +50,17 @@ arithmetic stay refused; boundary values are computed, never spelled.
 `sin(x)` / `cos(x)` over finite binary64, via same-process libm on
 every backend so layers agree bit-exactly. The operand must be finite;
 results for finite inputs are finite, guarded like arithmetic.
+
+## Exact negation
+
+`neg(x)` over finite binary64 is IEEE-754 negation: exact and total,
+including signed zeros (`neg(+0.0)` is `-0.0`, where `0.0 - x` rounds
+to `+0.0`). No libm call — every backend lowers one negation
+instruction — and no result guard, since negating a finite input is
+finite. Non-finite inputs trap like every other float operation.
+General `-x` on non-literal operands stays refused (Profile 0.13):
+spell float negation `neg(x)` so the exactness is explicit at the
+source.
 
 ## Granted-filesystem observation
 

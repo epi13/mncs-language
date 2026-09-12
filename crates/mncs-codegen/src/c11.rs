@@ -92,6 +92,21 @@ impl C11StatefulSession<'_> {
                 "C11 execution requires a language-owned function value contract",
             );
         };
+        // Arity gate (P-006): fail closed on a miscounted request before
+        // driving the child. Missing arguments surface as an unattributed
+        // driver failure and extra arguments are silently ignored without
+        // this check. Same message as the LLVM/WASM/Cranelift gates.
+        if contract.inputs.len() != request.arguments.len() {
+            return execution_failure(
+                result,
+                ExecutionStatus::InvalidRequest,
+                format!(
+                    "backend request violates the language-owned value contract: expected {} argument(s), received {}",
+                    contract.inputs.len(),
+                    request.arguments.len()
+                ),
+            );
+        }
         // Entry symbols are module-qualified (`mncs_<module>__<name>`), so
         // same-named functions from distinct modules lower and execute as
         // distinct natives (ENG-PRESSURE-0017). Refused entrypoints (P1-B02
@@ -1095,9 +1110,12 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &CNames) {
         } => {
             // Same-process libm, guarded like arithmetic: `sin`/`cos` of
             // a finite binary64 is finite, and the guards trap otherwise.
+            // `neg` is exact IEEE-754 negation (unary minus, no libm);
+            // only the input finiteness guard is load-bearing.
             let call = match function.as_str() {
                 "sin" => "sin",
                 "cos" => "cos",
+                "neg" => "-",
                 _ => {
                     let _ = writeln!(out, "      *mncs_status = 2; *mncs_value = 0; return;");
                     return;
@@ -1934,6 +1952,19 @@ pub fn execute_c11(
             "C11 execution requires a language-owned function value contract",
         );
     };
+    // Arity gate (P-006): same check as the stateful session path, so
+    // frozen-artifact execution refuses miscounted requests identically.
+    if contract.inputs.len() != request.arguments.len() {
+        return execution_failure(
+            result,
+            ExecutionStatus::InvalidRequest,
+            format!(
+                "backend request violates the language-owned value contract: expected {} argument(s), received {}",
+                contract.inputs.len(),
+                request.arguments.len()
+            ),
+        );
+    }
     // Composite arguments and results cross through the canonical call
     // file; pure scalar calls keep the historical argv-only protocol.
     // The entry symbol is module-qualified (ENG-PRESSURE-0017). Refused
