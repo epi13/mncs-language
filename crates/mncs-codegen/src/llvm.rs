@@ -1885,17 +1885,22 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 }
             };
             // Range validity: start <= end <= len(source), end-start <= cap.
+            // Temp names carry underscore separators throughout: bare
+            // digit-suffix concatenation is ambiguous (`bad1` + tag 6
+            // spelled the same `%bad16` as `bad` + tag 16), and LLVM
+            // requires function-unique SSA names, so two views in one
+            // function redefined the check when the tags aligned.
             *split += 1;
             let tag = *split;
-            let _ = writeln!(out, "  %bad1{tag} = icmp ugt i64 %{startv}, %{endv}");
-            let _ = writeln!(out, "  %bad2{tag} = icmp ugt i64 %{endv}, %{source_len}");
-            let _ = writeln!(out, "  %span{tag} = sub i64 %{endv}, %{startv}");
-            let _ = writeln!(out, "  %bad3{tag} = icmp ugt i64 %span{tag}, {view_cap}");
-            let _ = writeln!(out, "  %bad12{tag} = or i1 %bad1{tag}, %bad2{tag}");
-            let _ = writeln!(out, "  %bad{tag} = or i1 %bad12{tag}, %bad3{tag}");
+            let _ = writeln!(out, "  %bad_1_{tag} = icmp ugt i64 %{startv}, %{endv}");
+            let _ = writeln!(out, "  %bad_2_{tag} = icmp ugt i64 %{endv}, %{source_len}");
+            let _ = writeln!(out, "  %span_{tag} = sub i64 %{endv}, %{startv}");
+            let _ = writeln!(out, "  %bad_3_{tag} = icmp ugt i64 %span_{tag}, {view_cap}");
+            let _ = writeln!(out, "  %bad_12_{tag} = or i1 %bad_1_{tag}, %bad_2_{tag}");
+            let _ = writeln!(out, "  %bad_{tag} = or i1 %bad_12_{tag}, %bad_3_{tag}");
             let _ = writeln!(
                 out,
-                "  br i1 %bad{tag}, label %mncs_fail, label %vr{tag}_ok"
+                "  br i1 %bad_{tag}, label %mncs_fail, label %vr{tag}_ok"
             );
             let _ = writeln!(out, "vr{tag}_ok:");
             // Pack (base + start*8) | ((end-start) << 32) into one i64.
@@ -1906,9 +1911,12 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
                 mncs_model::SequenceBound::UpTo(_) => {
                     let srcv = load_value(out, names, source, "srcb", split);
                     *split += 1;
-                    let b = format!("vb{split}");
-                    let _ = writeln!(out, "  %vb32{split} = trunc i64 %{srcv} to i32");
-                    let _ = writeln!(out, "  %{b} = zext i32 %vb32{split} to i64");
+                    // Underscore separators here too: `%vb32{split}` and
+                    // `%vb{split}` collide the same way (`vb32` + 2 spells
+                    // `vb322`, as does `vb` + 322).
+                    let b = format!("vb_{split}");
+                    let _ = writeln!(out, "  %vb_32_{split} = trunc i64 %{srcv} to i32");
+                    let _ = writeln!(out, "  %{b} = zext i32 %vb_32_{split} to i64");
                     b
                 }
                 mncs_model::SequenceBound::Param(_) | mncs_model::SequenceBound::UpToParam(_) => {
@@ -1924,7 +1932,7 @@ fn emit_inst(out: &mut String, inst: &ScalarInst, names: &NameMap, split: &mut u
             *split += 1;
             let packed = format!("vp{split}");
             let _ = writeln!(out, "  %pa{split} = and i64 %{addr}, 4294967295");
-            let _ = writeln!(out, "  %pl{split} = shl i64 %span{tag}, 32");
+            let _ = writeln!(out, "  %pl{split} = shl i64 %span_{tag}, 32");
             let _ = writeln!(out, "  %{packed} = or i64 %pa{split}, %pl{split}");
             store_dest(out, names, dest, &packed);
         }
