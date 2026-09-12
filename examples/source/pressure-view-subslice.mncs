@@ -1,0 +1,37 @@
+mncs 0.14;
+
+// INGEST-P-002 regression: arbitrary bounded sub-views `view[a..b]` over an
+// existing bounded view, with dynamic endpoints.
+//
+// A streaming decoder carves word/field/line spans out of a leased chunk
+// view and hands the span itself to shared classifiers — no `(text,
+// start, length)` triples, no staging copies. Sub-slicing is
+// provenance-relative (endpoints count from the source view's live window,
+// not its capacity) and fail-closed (out-of-range endpoints trap
+// deterministically on every backend; the range check is retained, never
+// discharged away).
+//
+// Corpus: examples/execution/pressure-view-subslice-corpus.json. Escape
+// cases (`*_escape`) must report `runtime_failure` on every backend.
+module examples.pressure_view_subslice;
+
+// First byte of the sub-view `v[a..b]` of the live window `buf[0..n].
+fn sub_first(buf: [byte; 8], n: u64, a: u64, b: u64) -> (result: byte) {
+    let v: [byte; up_to 8] = buf[0..n];
+    let w: [byte; up_to 8] = v[a..b];
+    return w[0];
+}
+
+// Runtime length of the sub-view `v[a..b]` of the live window `buf[0..n]`.
+fn sub_len(buf: [byte; 8], n: u64, a: u64, b: u64) -> (result: u64) {
+    let v: [byte; up_to 8] = buf[0..n];
+    let w: [byte; up_to 8] = v[a..b];
+    return w.len;
+}
+
+// Static endpoints take the same path: `v[1..4]` of the full window.
+fn sub_first_static(buf: [byte; 8]) -> (result: byte) {
+    let v: [byte; up_to 8] = buf[0..8];
+    let w: [byte; up_to 8] = v[1..4];
+    return w[0];
+}

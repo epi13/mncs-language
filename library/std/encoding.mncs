@@ -1,6 +1,13 @@
-mncs 0.7;
+mncs 0.13;
 
 // mncs.std.encoding — canonical big-endian byte encodings for scalar values.
+//
+// Profile note: this module declares 0.13 (raised from 0.7 for the
+// capacity-generic little-endian readers, INGEST-P-011, which need RFC 0013
+// explicit polymorphism, plus a defining-module ceiling past 64 so wide
+// stages can specialize them). Narrow-profile roots are unaffected: each
+// module is admitted under its own profile, so a 0.7 consumer keeps
+// importing `mncs.std.encoding.v1` with unchanged 64-byte entry points.
 //
 // This is the first portable module in mncs.std: it exists because the
 // bounded-data substrate finally makes encoded data expressible without
@@ -146,16 +153,35 @@ fn u64_roundtrip(value: u64) -> (result: bool) {
 // view traps deterministically when offset+width exceeds the runtime
 // length, exactly like every other dynamic view index. Callers that need a
 // total read must gate the offset against window.len first.
-fn read_u16_le(window: [byte; up_to 64], offset: u64) -> (result: u16) {
+// Capacity-generic little-endian readers (INGEST-P-011): one reusable
+// reader serves every stage width (64-, 256-, ~392-byte views). `N` is the
+// static view capacity; reads stay partial in the offset exactly like the
+// 64-byte originals — indexing past the runtime length traps
+// deterministically, and callers needing a total read gate the offset
+// against `window.len` first.
+fn read_u16_le_generic<N: Nat>(window: [byte; up_to N], offset: u64) -> (result: u16) {
     let lo: u64 = window[offset] as u64;
     let hi: u64 = window[offset +% 1] as u64;
     return (lo +% hi *% 256) as u16;
 }
 
-fn read_u32_le(window: [byte; up_to 64], offset: u64) -> (result: u32) {
+fn read_u16_le(window: [byte; up_to 64], offset: u64) -> (result: u16) {
+    return read_u16_le_generic<64>(window, offset);
+}
+
+fn read_u32_le_generic<N: Nat>(window: [byte; up_to N], offset: u64) -> (result: u32) {
     let b0: u64 = window[offset] as u64;
     let b1: u64 = window[offset +% 1] as u64;
     let b2: u64 = window[offset +% 2] as u64;
     let b3: u64 = window[offset +% 3] as u64;
     return (b0 +% b1 *% 256 +% b2 *% 65536 +% b3 *% 16777216) as u32;
 }
+
+fn read_u32_le(window: [byte; up_to 64], offset: u64) -> (result: u32) {
+    return read_u32_le_generic<64>(window, offset);
+}
+
+// NOTE (INGEST-P-011): 256-/392-byte stage entry points live in
+// `examples/source/pressure-wide-stage-scans.mncs`, not here: this module
+// stays width-agnostic while the probe example owns the width-specific
+// cross-backend proof.

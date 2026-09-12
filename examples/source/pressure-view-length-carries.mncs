@@ -1,0 +1,34 @@
+mncs 0.13;
+
+// INGEST-P-009 regression: length-carrying bounded views need no second
+// `length` parameter. A host/embed-called entrypoint taking a single
+// `[byte; up_to 1024]` view observes the actual staged runtime length
+// through `.len`, projects head/tail through it, and iterates the live
+// window — identically on every executable backend. The old
+// `(storage, explicit_length)` signatures are consumer convention, not a
+// language requirement.
+//
+// Corpus: examples/execution/pressure-view-length-carries-corpus.json.
+module examples.pressure_view_length_carries;
+
+// The staged runtime length, no second argument.
+fn take_len(window: [byte; up_to 1024]) -> (result: u64) {
+    return window.len;
+}
+
+// Head/tail packed as head * 256 + tail; the empty window packs 0.
+fn take_ends(window: [byte; up_to 1024]) -> (result: u64) {
+    if window.len == 0 {
+        return 0;
+    }
+    return ((window[0] as u64) * 256) + (window[window.len - 1] as u64);
+}
+
+// Checksum of the sub-view `window[a..b]` by live-window iteration.
+fn take_subsum(window: [byte; up_to 1024], a: u64, b: u64) -> (result: u64) {
+    let w: [byte; up_to 1024] = window[a..b];
+    iterate i over w carrying acc: u64 = 0 {
+        next acc = acc + (w[i] as u64);
+    }
+    return acc;
+}

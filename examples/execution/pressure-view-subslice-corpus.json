@@ -1,0 +1,1135 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-view-subslice",
+ "cases": [
+  {
+   "id": "mid",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_view_subslice",
+     "function": "sub_first"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 60
+         }
+        },
+        {
+         "byte": {
+          "value": 70
+         }
+        },
+        {
+         "byte": {
+          "value": 80
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "byte": {
+      "value": 30
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "mid-len",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_view_subslice",
+     "function": "sub_len"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 60
+         }
+        },
+        {
+         "byte": {
+          "value": 70
+         }
+        },
+        {
+         "byte": {
+          "value": 80
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 2,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 3,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "narrow-runtime",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_view_subslice",
+     "function": "sub_first"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 60
+         }
+        },
+        {
+         "byte": {
+          "value": 70
+         }
+        },
+        {
+         "byte": {
+          "value": 80
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "byte": {
+      "value": 20
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "narrow-runtime-len",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_view_subslice",
+     "function": "sub_len"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 60
+         }
+        },
+        {
+         "byte": {
+          "value": 70
+         }
+        },
+        {
+         "byte": {
+          "value": 80
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 3,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "full",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_view_subslice",
+     "function": "sub_first"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 60
+         }
+        },
+        {
+         "byte": {
+          "value": 70
+         }
+        },
+        {
+         "byte": {
+          "value": 80
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "byte": {
+      "value": 10
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "full-len",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_view_subslice",
+     "function": "sub_len"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 60
+         }
+        },
+        {
+         "byte": {
+          "value": 70
+         }
+        },
+        {
+         "byte": {
+          "value": 80
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 8,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "empty-len",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_view_subslice",
+     "function": "sub_len"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 60
+         }
+        },
+        {
+         "byte": {
+          "value": 70
+         }
+        },
+        {
+         "byte": {
+          "value": 80
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 0,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "static",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_view_subslice",
+     "function": "sub_first_static"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 60
+         }
+        },
+        {
+         "byte": {
+          "value": 70
+         }
+        },
+        {
+         "byte": {
+          "value": 80
+         }
+        }
+       ]
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [
+    {
+     "byte": {
+      "value": 20
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "beyond-len_escape",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_view_subslice",
+     "function": "sub_first"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 60
+         }
+        },
+        {
+         "byte": {
+          "value": 70
+         }
+        },
+        {
+         "byte": {
+          "value": 80
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 6,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 1,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [],
+   "expected_status": "runtime_failure"
+  },
+  {
+   "id": "beyond-cap_escape",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_view_subslice",
+     "function": "sub_first"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 60
+         }
+        },
+        {
+         "byte": {
+          "value": 70
+         }
+        },
+        {
+         "byte": {
+          "value": 80
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 0,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 9,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [],
+   "expected_status": "runtime_failure"
+  },
+  {
+   "id": "inverted_escape",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_view_subslice",
+     "function": "sub_first"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 60
+         }
+        },
+        {
+         "byte": {
+          "value": 70
+         }
+        },
+        {
+         "byte": {
+          "value": 80
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 3,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [],
+   "expected_status": "runtime_failure"
+  },
+  {
+   "id": "project-empty_escape",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "examples.pressure_view_subslice",
+     "function": "sub_first"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "element": {
+        "byte": {}
+       },
+       "values": [
+        {
+         "byte": {
+          "value": 10
+         }
+        },
+        {
+         "byte": {
+          "value": 20
+         }
+        },
+        {
+         "byte": {
+          "value": 30
+         }
+        },
+        {
+         "byte": {
+          "value": 40
+         }
+        },
+        {
+         "byte": {
+          "value": 50
+         }
+        },
+        {
+         "byte": {
+          "value": 60
+         }
+        },
+        {
+         "byte": {
+          "value": 70
+         }
+        },
+        {
+         "byte": {
+          "value": 80
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 8,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     },
+     {
+      "integer": {
+       "value": 4,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 12000
+   },
+   "expected": [],
+   "expected_status": "runtime_failure"
+  }
+ ]
+}
