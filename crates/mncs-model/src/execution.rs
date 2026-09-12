@@ -96,6 +96,367 @@ pub struct ExecutionTarget {
     pub function: String,
 }
 
+/// One explicit generic argument on an execution request (P1-013/P2-003:
+/// host invocation of generic entrypoints).
+///
+/// A host names a concrete specialization exactly as source does, without
+/// a hand-written wrapper: `{"kind": "nat", "value": 8}` selects `W = 8`
+/// and `{"kind": "type", "type": "i64"}` selects `T = i64`. Type spellings
+/// are canonical semantic names (`i64`, `[i64; 8]`, `[byte; up_to 16]`,
+/// `vec<i64, 4>`, a declared record/finite name or nominal identity) and
+/// resolve against the linked program exactly like an in-language
+/// explicit `<...>` argument, so host spellings and source spellings name
+/// one deterministic instantiation. Inferred (omitted) arguments are not
+/// a boundary concept: the host always spells every parameter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExecutionTypeArgument {
+    Type {
+        #[serde(rename = "type")]
+        ty: String,
+    },
+    Nat {
+        value: u32,
+    },
+}
+
+impl ExecutionTypeArgument {
+    /// Program-independent normalization for artifact entrypoint lookup.
+    /// Structural spellings canonicalize (`[i64;8]` and `[i64; 8]` agree);
+    /// nominal spellings round-trip verbatim and resolve at compile time,
+    /// so hosts must use the exact spellings `mncs abi` advertises.
+    pub fn normalized_spelling(&self) -> String {
+        match self {
+            Self::Type { ty } => BodyType::from_semantic_name(ty.trim()).semantic_name(),
+            Self::Nat { value } => value.to_string(),
+        }
+    }
+}
+
+/// A host request to instantiate one generic entrypoint, collected from
+/// execution corpora before elaboration so the requested specializations
+/// are compiled in (and lower on every backend) rather than invented at
+/// execution time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostGenericSeedRequest {
+    pub module: String,
+    pub function: String,
+    pub type_arguments: Vec<ExecutionTypeArgument>,
+}
+
+impl HostGenericSeedRequest {
+    pub fn from_request(
+        module: &str,
+        function: &str,
+        type_arguments: &[ExecutionTypeArgument],
+    ) -> Self {
+        Self {
+            module: module.to_owned(),
+            function: function.to_owned(),
+            type_arguments: type_arguments.to_vec(),
+        }
+    }
+
+    /// Deduplicated seed key: identical spellings against the same
+    /// declaration name one instantiation.
+    pub fn seed_key(&self) -> String {
+        let spellings = self
+            .type_arguments
+            .iter()
+            .map(ExecutionTypeArgument::normalized_spelling)
+            .collect::<Vec<_>>()
+            .join("|");
+        format!("{}::{}|{spellings}", self.module, self.function)
+    }
+}
+
+/// Collect the generic-instantiation seeds named anywhere in a corpus:
+/// top-level case requests plus stateful step requests, deduplicated so
+/// one specialization serves every case that names it. Requests without
+/// type arguments seed nothing.
+pub fn host_seed_requests(corpus: &ExecutionCorpus) -> Vec<HostGenericSeedRequest> {
+    let mut seen = BTreeSet::new();
+    let mut seeds = Vec::new();
+    let mut push = |module: &str, function: &str, type_arguments: &[ExecutionTypeArgument]| {
+        if type_arguments.is_empty() {
+            return;
+        }
+        let seed = HostGenericSeedRequest::from_request(module, function, type_arguments);
+        if seen.insert(seed.seed_key()) {
+            seeds.push(seed);
+        }
+    };
+    for case in &corpus.cases {
+        push(
+            &case.request.target.module,
+            &case.request.target.function,
+            &case.request.type_arguments,
+        );
+    }
+    for case in &corpus.stateful_cases {
+        for step in &case.steps {
+            push(
+                &step.target.module,
+                &step.target.function,
+                &step.type_arguments,
+            );
+        }
+    }
+    seeds
+}
+
+/// Why host type-argument parsing declined a seed. The `code` reuses the
+/// in-language elaboration diagnostic for the same mistake (MNE221 arity,
+/// MNE222 kind, MNE224 malformed Nat, MNE225 over-ceiling Nat, MNE105
+/// unknown type, MNE131 unknown generic) so one taxonomy covers source
+/// and boundary spellings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostSeedError {
+    pub code: &'static str,
+    pub message: String,
+}
+
+impl HostSeedError {
+    fn named(code: &'static str, message: String) -> Self {
+        Self { code, message }
+    }
+}
+
+/// Parse host type arguments against a generic declaration into the same
+/// [`crate::GenericArg`] values an in-language explicit `<...>` call
+/// produces. Profile ceilings are NOT applied here: the elaborator checks
+/// `Nat` values against the defining module's admitted ceiling (MNE225)
+/// and the post-specialization sweep re-checks substituted traversal
+/// bounds (MNE182), so execution-time parsing shares the argument shape
+/// without owning profile policy.
+pub fn parse_host_generic_args(
+    program: &Program,
+    generic: &Function,
+    type_arguments: &[ExecutionTypeArgument],
+) -> Result<Vec<crate::GenericArg>, HostSeedError> {
+    use crate::{GenericArg, GenericParamKind};
+    if type_arguments.len() != generic.generic_params.len() {
+        return Err(HostSeedError::named(
+            "MNE221",
+            format!(
+                "generic argument count mismatch for '{}': expected {}, got {}",
+                generic.name,
+                generic.generic_params.len(),
+                type_arguments.len()
+            ),
+        ));
+    }
+    let mut args = Vec::with_capacity(type_arguments.len());
+    for (param, arg) in generic.generic_params.iter().zip(type_arguments) {
+        match (&param.kind, arg) {
+            (GenericParamKind::Type, ExecutionTypeArgument::Type { ty }) => {
+                if ty.trim().parse::<u32>().is_ok() {
+                    return Err(HostSeedError::named(
+                        "MNE222",
+                        format!(
+                            "generic type parameter '{}' received value argument '{}'",
+                            param.name,
+                            ty.trim()
+                        ),
+                    ));
+                }
+                let resolved = BodyType::from_program(program, ty.trim());
+                if type_has_unresolved_name(&resolved) {
+                    return Err(HostSeedError::named(
+                        "MNE105",
+                        format!(
+                            "host type argument '{}' names an unknown type; source profile supports bool, byte, 8/16/32/64-bit integers, declared finite/record types, bounded sequences, and Profile 0.8 integer vec<T, N>/mask<N>",
+                            ty.trim()
+                        ),
+                    ));
+                }
+                args.push(GenericArg::Type { ty: resolved });
+            }
+            (GenericParamKind::Nat, ExecutionTypeArgument::Nat { value }) => {
+                args.push(GenericArg::Value { value: *value });
+            }
+            (GenericParamKind::Type, ExecutionTypeArgument::Nat { value }) => {
+                return Err(HostSeedError::named(
+                    "MNE222",
+                    format!(
+                        "generic type parameter '{}' received Nat value argument '{value}'",
+                        param.name
+                    ),
+                ));
+            }
+            (GenericParamKind::Nat, ExecutionTypeArgument::Type { ty }) => {
+                return Err(HostSeedError::named(
+                    "MNE222",
+                    format!(
+                        "generic value parameter '{}' received type argument '{}'",
+                        param.name,
+                        ty.trim()
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(args)
+}
+
+/// A `Named` body type other than `bool` after program resolution names
+/// nothing the program declares: scalars, sequences, vectors, masks, and
+/// nominal record/finite types all resolve structurally or nominally, so
+/// only `bool` (which elaboration treats as a named type) legitimately
+/// survives.
+fn type_has_unresolved_name(ty: &BodyType) -> bool {
+    match ty {
+        BodyType::Named(name) => name != "bool",
+        BodyType::Sequence { element, .. } => type_has_unresolved_name(element),
+        BodyType::Vector { element, .. } => type_has_unresolved_name(element),
+        _ => false,
+    }
+}
+
+/// How an execution target resolved against generic declarations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GenericEntryTarget {
+    /// A concrete function executed under its own name.
+    Concrete { function_name: String },
+    /// A compiled specialization of the named generic function.
+    Specialization {
+        generic_name: String,
+        function_name: String,
+        canonical_args: String,
+    },
+}
+
+/// Why an execution target carrying (or missing) type arguments cannot
+/// run. Rendered by each execution layer into its own diagnostic shape;
+/// `NotFound` keeps the layer's historical message byte-identical.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GenericEntryFailure {
+    NotFound,
+    RequiresTypeArguments {
+        function: String,
+    },
+    ArgsForConcreteFunction {
+        function: String,
+    },
+    Seed(HostSeedError),
+    NoCompiledSpecialization {
+        function: String,
+        canonical_args: String,
+        available: Vec<String>,
+    },
+}
+
+/// Resolve an execution target to the concrete function that runs: either
+/// the named concrete function or the compiled specialization selected by
+/// explicit type arguments. Specializations come only from
+/// [`crate::generics::specialize_program`] (seeded from the corpus at
+/// compile time); execution never invents one, so host-requested and
+/// in-language instantiations share one identity by construction.
+pub fn resolve_generic_entry(
+    program: &Program,
+    target_module: &str,
+    target_function: &str,
+    type_arguments: &[ExecutionTypeArgument],
+) -> Result<GenericEntryTarget, GenericEntryFailure> {
+    let Some(function) = program.functions.iter().find(|function| {
+        function.name == target_function
+            && function.identity_namespace(&program.module) == target_module
+    }) else {
+        return Err(GenericEntryFailure::NotFound);
+    };
+    if function.generic_params.is_empty() {
+        if !type_arguments.is_empty() {
+            return Err(GenericEntryFailure::ArgsForConcreteFunction {
+                function: target_function.to_owned(),
+            });
+        }
+        return Ok(GenericEntryTarget::Concrete {
+            function_name: function.name.clone(),
+        });
+    }
+    if type_arguments.is_empty() {
+        return Err(GenericEntryFailure::RequiresTypeArguments {
+            function: target_function.to_owned(),
+        });
+    }
+    let args = parse_host_generic_args(program, function, type_arguments)
+        .map_err(GenericEntryFailure::Seed)?;
+    let canonical = args
+        .iter()
+        .map(|arg| arg.canonical_string())
+        .collect::<Vec<_>>()
+        .join("|");
+    let generic_id = function_id(function.identity_namespace(&program.module), &function.name);
+    let available = program
+        .generic_specializations
+        .iter()
+        .filter(|record| record.generic_function == generic_id)
+        .map(|record| record.canonical_args.clone())
+        .collect::<Vec<_>>();
+    let Some(record) = program
+        .generic_specializations
+        .iter()
+        .find(|record| record.generic_function == generic_id && record.canonical_args == canonical)
+    else {
+        return Err(GenericEntryFailure::NoCompiledSpecialization {
+            function: target_function.to_owned(),
+            canonical_args: canonical,
+            available,
+        });
+    };
+    let Some(specialization) = program.functions.iter().find(|candidate| {
+        function_id(
+            candidate.identity_namespace(&program.module),
+            &candidate.name,
+        ) == record.specialization_function
+    }) else {
+        return Err(GenericEntryFailure::NoCompiledSpecialization {
+            function: target_function.to_owned(),
+            canonical_args: canonical,
+            available,
+        });
+    };
+    Ok(GenericEntryTarget::Specialization {
+        generic_name: function.name.clone(),
+        function_name: specialization.name.clone(),
+        canonical_args: canonical,
+    })
+}
+
+/// Render a [`GenericEntryFailure`] into an execution-layer refusal
+/// reason. `NotFound` has no rendering: each layer keeps its historical
+/// message byte-identical.
+pub fn generic_entry_failure_reason(failure: &GenericEntryFailure) -> String {
+    match failure {
+        GenericEntryFailure::NotFound => "execution target function does not exist".to_owned(),
+        GenericEntryFailure::RequiresTypeArguments { function } => format!(
+            "generic function {function:?} requires explicit type_arguments selecting a compiled specialization; name the instantiation in the corpus so elaboration compiles it in"
+        ),
+        GenericEntryFailure::ArgsForConcreteFunction { function } => format!(
+            "generic arguments supplied for non-generic function {function:?} (MNE222)"
+        ),
+        GenericEntryFailure::Seed(error) => {
+            format!("host type arguments rejected ({}): {}", error.code, error.message)
+        }
+        GenericEntryFailure::NoCompiledSpecialization {
+            function,
+            canonical_args,
+            available,
+        } => {
+            if available.is_empty() {
+                format!(
+                    "no compiled generic instantiation of {function:?} for arguments ({canonical_args}) matches this program: name the instantiation in the corpus so elaboration compiles it in"
+                )
+            } else {
+                format!(
+                    "no compiled specialization of generic function {function:?} for arguments ({canonical_args}); compiled instantiations: [{}]",
+                    available.join(", ")
+                )
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionValue {
@@ -307,6 +668,13 @@ pub struct ExecutionRequest {
     pub schema_version: String,
     pub target: ExecutionTarget,
     pub arguments: Vec<ExecutionValue>,
+    /// Explicit generic arguments selecting a concrete specialization of a
+    /// generic entrypoint (P1-013/P2-003). Empty for concrete targets, so
+    /// every existing corpus parses unchanged: the field is additive like
+    /// `host_grants` and `call_depth_budget` before it, and the request
+    /// schema version stays `0.1`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub type_arguments: Vec<ExecutionTypeArgument>,
     pub step_budget: u64,
     #[serde(default)]
     pub policy: ExecutionPolicy,
@@ -465,6 +833,10 @@ pub struct StatefulExecutionStep {
     pub id: String,
     pub target: ExecutionTarget,
     pub arguments: Vec<StatefulArgument>,
+    /// Explicit generic arguments for a generic step target, resolved
+    /// exactly like top-level request type arguments.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub type_arguments: Vec<ExecutionTypeArgument>,
     pub step_budget: u64,
     #[serde(default)]
     pub policy: ExecutionPolicy,
@@ -995,6 +1367,7 @@ where
             schema_version: EXECUTION_REQUEST_SCHEMA_VERSION.to_owned(),
             target: step.target.clone(),
             arguments,
+            type_arguments: step.type_arguments.clone(),
             step_budget: step.step_budget,
             policy: step.policy.clone(),
             host_grants: Vec::new(),
@@ -1449,8 +1822,27 @@ fn execute_inner(
             ),
         );
     }
+    // P1-013: a generic target runs only through an explicit,
+    // previously compiled specialization selected by `type_arguments`.
+    // Execution never invents an instantiation: host-requested and
+    // in-language specializations share one identity by construction.
+    let entry_name = match resolve_generic_entry(
+        program,
+        &request.target.module,
+        &request.target.function,
+        &request.type_arguments,
+    ) {
+        Ok(GenericEntryTarget::Concrete { function_name }) => function_name,
+        Ok(GenericEntryTarget::Specialization { function_name, .. }) => function_name,
+        Err(GenericEntryFailure::NotFound) => {
+            return ExecutionResult::invalid(request, "execution target function does not exist");
+        }
+        Err(failure) => {
+            return ExecutionResult::invalid(request, generic_entry_failure_reason(&failure));
+        }
+    };
     let Some(function) = program.functions.iter().find(|function| {
-        function.name == request.target.function
+        function.name == entry_name
             && function.identity_namespace(&program.module) == request.target.module
     }) else {
         return ExecutionResult::invalid(request, "execution target function does not exist");
@@ -3031,6 +3423,12 @@ fn execute_operation(
                     }
                 },
                 arguments,
+                // Nested callees are specialization-rewritten concrete
+                // targets, never host-selected instantiations: a nested
+                // call that still names a generic template fails closed
+                // in the uniform refusal below instead of inheriting the
+                // outer request's arguments.
+                type_arguments: Vec::new(),
                 step_budget: remaining,
                 policy: request.policy.clone(),
                 // Authority flows explicitly to callees within one
@@ -3601,25 +3999,50 @@ pub fn lint_corpus(program: &Program, corpus: &ExecutionCorpus) -> CorpusLintRep
                 "step_budget must be between 1 and {MAX_EXECUTION_BUDGET}"
             ));
         }
-        match program.functions.iter().find(|function| {
-            function.name == request.target.function
-                && function.identity_namespace(&program.module) == request.target.module
-        }) {
-            None => errors.push(format!(
-                "execution target function {:?} does not exist in module {:?}",
-                request.target.function, request.target.module
-            )),
-            Some(function) => match &function.body {
+        // P1-013: lint resolves the entry exactly like execution, so a
+        // corpus naming a generic instantiation it never seeded fails at
+        // authoring time with the same reason execution would report.
+        let lint_body = match resolve_generic_entry(
+            program,
+            &request.target.module,
+            &request.target.function,
+            &request.type_arguments,
+        ) {
+            Ok(GenericEntryTarget::Concrete { function_name }) => Some(function_name),
+            Ok(GenericEntryTarget::Specialization { function_name, .. }) => Some(function_name),
+            Err(GenericEntryFailure::NotFound) => {
+                errors.push(format!(
+                    "execution target function {:?} does not exist in module {:?}",
+                    request.target.function, request.target.module
+                ));
+                None
+            }
+            Err(failure) => {
+                errors.push(generic_entry_failure_reason(&failure));
+                None
+            }
+        };
+        if let Some(entry_name) = lint_body {
+            match program.functions.iter().find(|function| {
+                function.name == entry_name
+                    && function.identity_namespace(&program.module) == request.target.module
+            }) {
                 None => errors.push(format!(
-                    "execution target function {:?} has no executable body",
-                    request.target.function
+                    "execution target function {:?} does not exist in module {:?}",
+                    request.target.function, request.target.module
                 )),
-                Some(body) => {
-                    if let Err(reason) = validate_arguments(program, body, request) {
-                        errors.push(reason);
+                Some(function) => match &function.body {
+                    None => errors.push(format!(
+                        "execution target function {:?} has no executable body",
+                        request.target.function
+                    )),
+                    Some(body) => {
+                        if let Err(reason) = validate_arguments(program, body, request) {
+                            errors.push(reason);
+                        }
                     }
-                }
-            },
+                },
+            }
         }
         match &case.expected {
             None => notes.push("caller-judged case: no expected values declared".to_owned()),
@@ -5022,6 +5445,7 @@ mod tests {
             },
             arguments: Vec::new(),
             step_budget: 1,
+            type_arguments: Vec::new(),
             policy: ExecutionPolicy::default(),
             host_grants: Vec::new(),
             call_depth_budget: None,
@@ -5102,6 +5526,7 @@ mod tests {
                     },
                     arguments: Vec::new(),
                     step_budget: 4,
+                    type_arguments: Vec::new(),
                     policy: ExecutionPolicy::default(),
                     expected: None,
                     expected_status: Some(ExecutionStatus::Returned),
@@ -5118,6 +5543,7 @@ mod tests {
                         result_index: 0,
                     }],
                     step_budget: 4,
+                    type_arguments: Vec::new(),
                     policy: ExecutionPolicy::default(),
                     expected: None,
                     expected_status: Some(ExecutionStatus::Returned),
@@ -5186,6 +5612,7 @@ mod tests {
                     result_index: 0,
                 }],
                 step_budget: 1,
+                type_arguments: Vec::new(),
                 policy: ExecutionPolicy::default(),
                 expected: None,
                 expected_status: None,
@@ -5229,6 +5656,7 @@ mod tests {
                 },
                 arguments,
                 step_budget: 4,
+                type_arguments: Vec::new(),
                 policy: ExecutionPolicy::default(),
                 expected: None,
                 expected_status: Some(ExecutionStatus::Returned),
@@ -5367,5 +5795,132 @@ mod tests {
         let mut changed_state = scoped_checkpoint.clone();
         changed_state.returned.push(integer(99));
         assert!(!changed_state.identity_is_valid_for_scope("test-corpus", &case, Some(&scope_a)));
+    }
+
+    #[test]
+    fn host_seed_requests_collect_top_level_and_stateful_instantiations_once() {
+        let typed =
+            |module: &str, function: &str, args: Vec<ExecutionTypeArgument>| ExecutionRequest {
+                schema_version: EXECUTION_REQUEST_SCHEMA_VERSION.to_owned(),
+                target: ExecutionTarget {
+                    module: module.to_owned(),
+                    function: function.to_owned(),
+                },
+                arguments: Vec::new(),
+                type_arguments: args,
+                step_budget: 8,
+                policy: ExecutionPolicy::default(),
+                host_grants: Vec::new(),
+                call_depth_budget: None,
+            };
+        let nat8 = vec![ExecutionTypeArgument::Nat { value: 8 }];
+        let corpus = ExecutionCorpus {
+            schema_version: "0.1".to_owned(),
+            name: "seed-probe".to_owned(),
+            cases: vec![
+                ExecutionCase {
+                    id: "bare".to_owned(),
+                    request: typed("m", "concrete", Vec::new()),
+                    expected: None,
+                    expected_status: None,
+                    maximum_steps: None,
+                    expected_effects: Vec::new(),
+                    prohibit_unexpected_effects: false,
+                },
+                ExecutionCase {
+                    id: "host".to_owned(),
+                    request: typed("m", "fill", nat8.clone()),
+                    expected: None,
+                    expected_status: None,
+                    maximum_steps: None,
+                    expected_effects: Vec::new(),
+                    prohibit_unexpected_effects: false,
+                },
+                // A duplicate spelling of the same instantiation seeds once.
+                ExecutionCase {
+                    id: "host-again".to_owned(),
+                    request: typed("m", "fill", nat8.clone()),
+                    expected: None,
+                    expected_status: None,
+                    maximum_steps: None,
+                    expected_effects: Vec::new(),
+                    prohibit_unexpected_effects: false,
+                },
+            ],
+            properties: Vec::new(),
+            stateful_cases: vec![StatefulExecutionCase {
+                id: "steps".to_owned(),
+                steps: vec![StatefulExecutionStep {
+                    id: "grow".to_owned(),
+                    target: ExecutionTarget {
+                        module: "m".to_owned(),
+                        function: "fill".to_owned(),
+                    },
+                    arguments: Vec::new(),
+                    type_arguments: nat8.clone(),
+                    step_budget: 8,
+                    policy: ExecutionPolicy::default(),
+                    expected: None,
+                    expected_status: None,
+                    observe_returned: false,
+                }],
+                maximum_calls: 1,
+                maximum_total_steps: None,
+                expected_final: None,
+                expected_final_status: None,
+            }],
+        };
+        let seeds = host_seed_requests(&corpus);
+        assert_eq!(
+            seeds.len(),
+            1,
+            "one instantiation, however named: {seeds:?}"
+        );
+        assert_eq!(seeds[0].module, "m");
+        assert_eq!(seeds[0].function, "fill");
+        assert_eq!(seeds[0].type_arguments, nat8);
+    }
+
+    #[test]
+    fn stateful_steps_carry_type_arguments_into_backend_requests() {
+        let case = StatefulExecutionCase {
+            id: "generic-step".to_owned(),
+            steps: vec![StatefulExecutionStep {
+                id: "grow".to_owned(),
+                target: ExecutionTarget {
+                    module: "m".to_owned(),
+                    function: "fill".to_owned(),
+                },
+                arguments: Vec::new(),
+                type_arguments: vec![ExecutionTypeArgument::Nat { value: 8 }],
+                step_budget: 8,
+                policy: ExecutionPolicy::default(),
+                expected: None,
+                expected_status: Some(ExecutionStatus::Returned),
+                observe_returned: false,
+            }],
+            maximum_calls: 1,
+            maximum_total_steps: None,
+            expected_final: None,
+            expected_final_status: Some(ExecutionStatus::Returned),
+        };
+        let result = execute_stateful_case("test-corpus", &case, |request| {
+            assert_eq!(
+                request.type_arguments,
+                vec![ExecutionTypeArgument::Nat { value: 8 }],
+                "step type arguments reach the backend request"
+            );
+            assert_eq!(request.target.function, "fill");
+            StatefulCallResult {
+                status: ExecutionStatus::Returned,
+                returned: Vec::new(),
+                steps: 1,
+                effects: Vec::new(),
+                failure: None,
+                program_identity: None,
+                program_fingerprint: None,
+            }
+        });
+        assert_eq!(result.status, ExecutionStatus::Returned);
     }
 }

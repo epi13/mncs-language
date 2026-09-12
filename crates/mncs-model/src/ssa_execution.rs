@@ -339,6 +339,7 @@ impl SsaExecutionSession {
             schema_version,
             target,
             arguments,
+            type_arguments,
             step_budget,
             policy,
             host_grants,
@@ -348,6 +349,7 @@ impl SsaExecutionSession {
             schema_version,
             target,
             arguments: Vec::new(),
+            type_arguments,
             step_budget,
             policy,
             host_grants,
@@ -458,18 +460,38 @@ fn execute_ssa_module_with_validation(
             return SsaExecutionResult::invalid(request, "SSA validation failed");
         }
     }
+    // P1-013: resolve a generic target through its explicit,
+    // previously compiled specialization exactly like the body executor.
+    // `NotFound` falls through to the historical SSA lookup so the
+    // missing-entry message below stays byte-identical.
+    let entry_name = match crate::resolve_generic_entry(
+        program,
+        &request.target.module,
+        &request.target.function,
+        &request.type_arguments,
+    ) {
+        Ok(crate::GenericEntryTarget::Concrete { function_name }) => function_name,
+        Ok(crate::GenericEntryTarget::Specialization { function_name, .. }) => function_name,
+        Err(crate::GenericEntryFailure::NotFound) => request.target.function.clone(),
+        Err(failure) => {
+            return SsaExecutionResult::invalid(
+                request,
+                crate::generic_entry_failure_reason(&failure),
+            );
+        }
+    };
     // Resolve the target against its home module namespace when the target
     // names a linked declaration rather than a root-module function.
     let target_namespace = program
         .functions
         .iter()
         .find(|candidate| {
-            candidate.name == request.target.function
+            candidate.name == entry_name
                 && candidate.identity_namespace(&program.module) == request.target.module
         })
         .map(|candidate| candidate.identity_namespace(&program.module).to_owned())
         .unwrap_or_else(|| program.module.clone());
-    let semantic_function = function_id(&target_namespace, &request.target.function);
+    let semantic_function = function_id(&target_namespace, &entry_name);
     let Some(function) = module
         .functions
         .iter()
@@ -2241,6 +2263,10 @@ fn execute_instruction(
                     function: callee.name.clone(),
                 },
                 arguments,
+                // Nested callees are specialization-rewritten concrete
+                // targets; a nested call still naming a generic template
+                // fails closed in entry resolution below.
+                type_arguments: Vec::new(),
                 step_budget: remaining,
                 policy: request.policy.clone(),
                 // Authority flows explicitly to callees within one
@@ -3847,6 +3873,7 @@ mod tests {
                 },
             }],
             step_budget: 64,
+            type_arguments: Vec::new(),
             policy: crate::ExecutionPolicy::default(),
             host_grants: Vec::new(),
             call_depth_budget: None,

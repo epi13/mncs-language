@@ -268,6 +268,8 @@ impl ConformanceReport {
                             function: predicate.predicate.clone(),
                         },
                         arguments: case.arguments.clone(),
+                        // Conformance predicates are concrete entrypoints.
+                        type_arguments: Vec::new(),
                         step_budget: 16384,
                         policy: Default::default(),
                         host_grants: Vec::new(),
@@ -842,6 +844,8 @@ pub fn run_conformance(program: &Program, options: &ConformanceOptions) -> Confo
                     function: predicate.name.clone(),
                 },
                 arguments: arguments.clone(),
+                // Conformance probes target concrete entrypoints.
+                type_arguments: Vec::new(),
                 step_budget: options.step_budget,
                 policy: Default::default(),
                 host_grants: Vec::new(),

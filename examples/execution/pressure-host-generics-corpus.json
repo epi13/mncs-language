@@ -1,0 +1,723 @@
+{
+ "schema_version": "0.1",
+ "name": "pressure-host-generics",
+ "cases": [
+  {
+   "id": "host-nat-fill",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.host_generics",
+     "function": "grow_fill_local"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000,
+    "type_arguments": [
+     {
+      "kind": "nat",
+      "value": 8
+     }
+    ]
+   },
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "integer": {
+         "value": 7,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 7,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 7,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 7,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 7,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 7,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 7,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 7,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       }
+      ]
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "host-nat-fill-4",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.host_generics",
+     "function": "grow_fill_local"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 5,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000,
+    "type_arguments": [
+     {
+      "kind": "nat",
+      "value": 4
+     }
+    ]
+   },
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "integer": {
+         "value": 5,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 5,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 5,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 5,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       }
+      ]
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "host-type-first",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.host_generics",
+     "function": "first_local"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 42,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000,
+    "type_arguments": [
+     {
+      "kind": "type",
+      "type": "i64"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 42,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "host-view-len",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.host_generics",
+     "function": "vlen"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "byte": {
+          "value": 104
+         }
+        },
+        {
+         "byte": {
+          "value": 101
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 108
+         }
+        },
+        {
+         "byte": {
+          "value": 111
+         }
+        }
+       ]
+      }
+     }
+    ],
+    "step_budget": 8000,
+    "type_arguments": [
+     {
+      "kind": "nat",
+      "value": 8
+     }
+    ]
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 5,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "host-xmod-fill",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.host_generics.lib",
+     "function": "grow_fill"
+    },
+    "arguments": [
+     {
+      "sequence": {
+       "values": [
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        },
+        {
+         "integer": {
+          "value": 0,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ]
+      }
+     },
+     {
+      "integer": {
+       "value": 9,
+       "type": {
+        "bits": 64,
+        "signed": true
+       }
+      }
+     }
+    ],
+    "step_budget": 8000,
+    "type_arguments": [
+     {
+      "kind": "nat",
+      "value": 4
+     }
+    ]
+   },
+   "expected": [
+    {
+     "sequence": {
+      "values": [
+       {
+        "integer": {
+         "value": 9,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 9,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 9,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       },
+       {
+        "integer": {
+         "value": 9,
+         "type": {
+          "bits": 64,
+          "signed": true
+         }
+        }
+       }
+      ]
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "host-xmod-first",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.host_generics.lib",
+     "function": "first"
+    },
+    "arguments": [
+     {
+      "integer": {
+       "value": 7,
+       "type": {
+        "bits": 64,
+        "signed": false
+       }
+      }
+     }
+    ],
+    "step_budget": 8000,
+    "type_arguments": [
+     {
+      "kind": "type",
+      "type": "u64"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": false
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "host-nominal-point",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.host_generics",
+     "function": "id_value"
+    },
+    "arguments": [
+     {
+      "record": {
+       "type_identity": "mncs:0.2:record-type:pressure.host_generics::Point::x%3Ai64%3By%3Ai64%3B",
+       "name": "Point",
+       "fields": [
+        [
+         "x",
+         {
+          "integer": {
+           "value": 3,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ],
+        [
+         "y",
+         {
+          "integer": {
+           "value": 4,
+           "type": {
+            "bits": 64,
+            "signed": true
+           }
+          }
+         }
+        ]
+       ]
+      }
+     }
+    ],
+    "step_budget": 8000,
+    "type_arguments": [
+     {
+      "kind": "type",
+      "type": "Point"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "record": {
+      "type_identity": "mncs:0.2:record-type:pressure.host_generics::Point::x%3Ai64%3By%3Ai64%3B",
+      "name": "Point",
+      "fields": [
+       [
+        "x",
+        {
+         "integer": {
+          "value": 3,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ],
+       [
+        "y",
+        {
+         "integer": {
+          "value": 4,
+          "type": {
+           "bits": 64,
+           "signed": true
+          }
+         }
+        }
+       ]
+      ]
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "same-fill",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.host_generics",
+     "function": "probe_same_fill"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 7,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "same-first",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.host_generics",
+     "function": "probe_same_first"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 42,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  },
+  {
+   "id": "same-lib",
+   "request": {
+    "schema_version": "0.1",
+    "target": {
+     "module": "pressure.host_generics",
+     "function": "probe_same_lib"
+    },
+    "arguments": [],
+    "step_budget": 8000
+   },
+   "expected": [
+    {
+     "integer": {
+      "value": 9,
+      "type": {
+       "bits": 64,
+       "signed": true
+      }
+     }
+    }
+   ],
+   "expected_status": "returned"
+  }
+ ]
+}

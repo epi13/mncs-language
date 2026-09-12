@@ -216,6 +216,16 @@ pub struct GenericSpecializationRecord {
     pub instantiation: crate::SemanticId,
     pub args: Vec<crate::GenericArg>,
     pub canonical_args: String,
+    /// Host spellings that requested this instantiation, normalized
+    /// (`ExecutionTypeArgument::normalized_spelling`). Empty for
+    /// in-language instantiations. Non-empty rows let artifact-only
+    /// execution layers (WASM, natives) map a host request back to this
+    /// exact specialization without re-resolving nominal types, while
+    /// `canonical_args` keeps the single identity shared with
+    /// in-language call sites. Skipped when empty so existing
+    /// fingerprints are unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_spellings: Vec<String>,
 }
 
 impl Program {

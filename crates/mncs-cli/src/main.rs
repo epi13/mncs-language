@@ -459,10 +459,13 @@ where
             return ExitCode::from(2);
         }
     };
-    let program = match read_program_for_execution(&program_path) {
-        Ok(program) => program,
-        Err(code) => return code,
-    };
+    // P1-013: a request naming a generic instantiation seeds its
+    // compilation, so direct `execute` invokes generics with no corpus.
+    let program =
+        match read_program_for_execution_with_seeds(&program_path, &request_seeds(&request)) {
+            Ok(program) => program,
+            Err(code) => return code,
+        };
     let result = execute_with_policy(&program, &request);
     let status = result.status;
     if !print_json(&result) {
@@ -488,14 +491,6 @@ where
         eprintln!("error: unexpected additional arguments");
         return ExitCode::from(2);
     }
-    let baseline = match read_program_for_execution(&baseline_path) {
-        Ok(program) => program,
-        Err(code) => return code,
-    };
-    let candidate = match read_program_for_execution(&candidate_path) {
-        Ok(program) => program,
-        Err(code) => return code,
-    };
     let corpus_input = match read_source(&corpus_path) {
         Ok(input) => input,
         Err(code) => return code,
@@ -506,6 +501,17 @@ where
             eprintln!("error: invalid execution corpus: {error}");
             return ExitCode::from(2);
         }
+    };
+    // P1-013: both sides compile with the corpus-named instantiations so
+    // generic entrypoints compare instead of failing closed.
+    let seeds = mncs_model::host_seed_requests(&corpus);
+    let baseline = match read_program_for_execution_with_seeds(&baseline_path, &seeds) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let candidate = match read_program_for_execution_with_seeds(&candidate_path, &seeds) {
+        Ok(program) => program,
+        Err(code) => return code,
     };
     let report: ExecutionComparison = compare_execution(&baseline, &candidate, &corpus);
     let status = report.status;
@@ -545,10 +551,13 @@ where
             return ExitCode::from(2);
         }
     };
-    let program = match read_program_for_execution(&program_path) {
-        Ok(program) => program,
-        Err(code) => return code,
-    };
+    // P1-013: like `execute` above, a generic SSA target seeds its
+    // own compilation from the request.
+    let program =
+        match read_program_for_execution_with_seeds(&program_path, &request_seeds(&request)) {
+            Ok(program) => program,
+            Err(code) => return code,
+        };
     let result = execute_ssa(&program, &request);
     let status = result.status;
     if !print_json(&result) {
@@ -572,10 +581,6 @@ where
         eprintln!("error: unexpected additional arguments");
         return ExitCode::from(2);
     }
-    let program = match read_program_for_execution(&program_path) {
-        Ok(program) => program,
-        Err(code) => return code,
-    };
     let corpus_input = match read_source(&corpus_path) {
         Ok(input) => input,
         Err(code) => return code,
@@ -586,6 +591,13 @@ where
             eprintln!("error: invalid execution corpus: {error}");
             return ExitCode::from(2);
         }
+    };
+    // P1-013: the program compiles with the corpus-named instantiations
+    // so body and SSA agree on generic entrypoints instead of refusing.
+    let seeds = mncs_model::host_seed_requests(&corpus);
+    let program = match read_program_for_execution_with_seeds(&program_path, &seeds) {
+        Ok(program) => program,
+        Err(code) => return code,
     };
     let report: LoweringExecutionComparison = compare_body_and_ssa(&program, &corpus);
     let status = report.status;
@@ -611,6 +623,10 @@ struct CompileOptions {
     kernel_entries: Vec<String>,
     proof_artifacts: Vec<String>,
     proof_operation: Option<String>,
+    /// Optional execution corpus whose generic-instantiation requests
+    /// seed the compilation (P1-013/P2-003), so frozen artifacts emitted
+    /// here serve the same generic entrypoints `experiment run` serves.
+    corpus: Option<PathBuf>,
 }
 
 fn valid_kernel_entry(name: &str) -> bool {
@@ -633,7 +649,22 @@ where
             return ExitCode::from(2);
         }
     };
-    let program = match read_program_unvalidated(&options.program_path) {
+    // P1-013: an optional corpus seeds the compilation with its
+    // generic-instantiation requests, so the emitted (possibly frozen)
+    // artifact serves the same entrypoints `experiment run` serves.
+    // Seed-free compiles load exactly as before.
+    let seeds = match &options.corpus {
+        None => Vec::new(),
+        Some(corpus_path) => {
+            let corpus = match read_json::<ExecutionCorpus>(corpus_path.to_string_lossy().as_ref())
+            {
+                Ok(corpus) => corpus,
+                Err(code) => return code,
+            };
+            mncs_model::host_seed_requests(&corpus)
+        }
+    };
+    let program = match load_program_with_seeds(&options.program_path, &seeds) {
         Ok(program) => program,
         Err(code) => return code,
     };
@@ -1104,12 +1135,16 @@ where
                 eprintln!("error: unexpected additional arguments");
                 return ExitCode::from(2);
             }
-            let program = match read_program_for_execution(&program_path) {
-                Ok(program) => program,
-                Err(code) => return code,
-            };
             let corpus = match read_json::<ExecutionCorpus>(&corpus_path) {
                 Ok(corpus) => corpus,
+                Err(code) => return code,
+            };
+            // P1-013: lint resolves entries exactly like execution, so the
+            // program lints with the corpus-named instantiations compiled
+            // in; an unseedable instantiation reports here, not later.
+            let seeds = mncs_model::host_seed_requests(&corpus);
+            let program = match read_program_for_execution_with_seeds(&program_path, &seeds) {
+                Ok(program) => program,
                 Err(code) => return code,
             };
             let report = mncs_model::lint_corpus(&program, &corpus);
@@ -1845,6 +1880,47 @@ fn rust_control_comparison(result_path: &str, control_path: &str) -> ExitCode {
     }
 }
 
+/// Compile host-requested generic instantiations into a semantic-JSON
+/// program (P1-013/P2-003). Semantic JSON carries no import closure, so
+/// every module is judged under the envelope profile (conservative:
+/// a JSON admitted under a wider profile than its envelope claims fails
+/// closed rather than smuggling an over-ceiling instantiation), and
+/// pre-existing specializations keep their admissions — only newly
+/// seeded instantiations face the sweep. Seed-free programs pass through
+/// untouched.
+fn specialize_json_program_with_seeds(
+    program: Program,
+    seeds: &[mncs_model::HostGenericSeedRequest],
+    language_version: &str,
+    source_text: &str,
+) -> Result<Program, ExitCode> {
+    if seeds.is_empty() {
+        return Ok(program);
+    }
+    let ceiling = mncs_syntax::max_sequence_bound_for(language_version).unwrap_or(0);
+    let ceilings = BTreeMap::from([(program.module.clone(), ceiling)]);
+    let prior = program
+        .generic_specializations
+        .iter()
+        .map(|record| record.specialization_function.clone())
+        .collect::<BTreeSet<_>>();
+    let span = mncs_syntax::SourceSpan::at(source_text, 0, 0);
+    match mncs_compiler::specialize_program_with_host_seeds(
+        &program,
+        seeds,
+        &ceilings,
+        ceiling,
+        span,
+        Some(&prior),
+    ) {
+        Ok(specialized) => Ok(specialized),
+        Err(diagnostics) => {
+            let _ = print_json(&diagnostics);
+            Err(ExitCode::FAILURE)
+        }
+    }
+}
+
 fn prepare_experiment(
     options: &ExperimentOptions,
     include_definition: bool,
@@ -1863,11 +1939,23 @@ fn prepare_experiment(
     let semantic_json_source = Path::new(&options.source_path)
         .extension()
         .is_some_and(|extension| extension == "json");
+    // P1-013: the corpus is read before elaboration so requests naming a
+    // generic instantiation seed its compilation. Seed collection is pure
+    // JSON shaping (no program needed); malformed type-argument shapes
+    // already fail here at corpus-read time.
+    let corpus = read_json::<ExecutionCorpus>(&options.corpus_path)?;
+    let seeds = mncs_model::host_seed_requests(&corpus);
     let (program, front_end) = if semantic_json_source {
         let program = Program::from_json(&envelope.text).map_err(|error| {
             eprintln!("error: invalid canonical semantic JSON experiment source: {error}");
             ExitCode::FAILURE
         })?;
+        let program = specialize_json_program_with_seeds(
+            program,
+            &seeds,
+            &envelope.language_version,
+            &envelope.text,
+        )?;
         let report = program.validate();
         if !report.valid {
             let _ = print_json(&report);
@@ -1876,14 +1964,14 @@ fn prepare_experiment(
         (program, None)
     } else {
         let resolver = FileModuleResolver::with_libraries(&options.source_path);
-        let front_end = compiler.front_end_with_resolver(envelope.clone(), &resolver);
+        let front_end =
+            compiler.front_end_with_resolver_and_seeds(envelope.clone(), &resolver, &seeds);
         let Some(program) = front_end.program.clone().filter(|_| front_end.is_valid()) else {
             let _ = print_json(&front_end);
             return Err(ExitCode::FAILURE);
         };
         (program, Some(front_end))
     };
-    let corpus = read_json::<ExecutionCorpus>(&options.corpus_path)?;
     let source_artifact_identity = envelope.identity;
     let source_profile = envelope.language_version;
     let definition = if include_definition {
@@ -2673,6 +2761,7 @@ where
     let mut kernel_entries = Vec::new();
     let mut proof_artifacts = Vec::new();
     let mut proof_operation = None;
+    let mut corpus = None;
     while let Some(option) = args.next() {
         match option.as_str() {
             "--emit" => {
@@ -2723,6 +2812,15 @@ where
                 }
                 proof_operation = Some(value);
             }
+            "--corpus" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| "--corpus requires an execution corpus path".to_owned())?;
+                if value.is_empty() {
+                    return Err("--corpus path is empty".to_owned());
+                }
+                corpus = Some(PathBuf::from(value));
+            }
             other => return Err(format!("unknown compile option {other:?}")),
         }
     }
@@ -2754,6 +2852,7 @@ where
         kernel_entries,
         proof_artifacts,
         proof_operation,
+        corpus,
     })
 }
 
@@ -2811,6 +2910,17 @@ fn target_has_backend_adapter(target: &TargetContractRef) -> bool {
 /// path ends in `.mncs`, directly from MNCS source text via the reference
 /// front end.
 fn load_program(path: &str) -> Result<Program, ExitCode> {
+    load_program_with_seeds(path, &[])
+}
+
+/// Elaboration bridge shared by every manifest-consuming command
+/// (P1-013/P2-003): host-requested generic instantiations compile in
+/// from `seeds`, whether the program arrives as source or as semantic
+/// JSON. Seed-free loads behave exactly as before.
+fn load_program_with_seeds(
+    path: &str,
+    seeds: &[mncs_model::HostGenericSeedRequest],
+) -> Result<Program, ExitCode> {
     if Path::new(path)
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("mncs"))
@@ -2822,7 +2932,8 @@ fn load_program(path: &str) -> Result<Program, ExitCode> {
             source,
         );
         let resolver = FileModuleResolver::with_libraries(path);
-        let front_end = ReferenceCompiler::default().front_end_with_resolver(envelope, &resolver);
+        let front_end = ReferenceCompiler::default()
+            .front_end_with_resolver_and_seeds(envelope, &resolver, seeds);
         let diagnostics = front_end.diagnostics.clone();
         let valid = front_end.is_valid();
         let program = front_end.program;
@@ -2835,10 +2946,20 @@ fn load_program(path: &str) -> Result<Program, ExitCode> {
         }
     }
     let input = read_source(path)?;
-    Program::from_json(&input).map_err(|error| {
+    let program = Program::from_json(&input).map_err(|error| {
         eprintln!("error: invalid semantic manifest: {error}");
         ExitCode::from(2)
-    })
+    })?;
+    let envelope = SourceEnvelope::new(
+        SourceArtifactKind::Program,
+        path.to_owned(),
+        SourceOrigin {
+            kind: SourceOriginKind::Path,
+            locator: Some(path.to_owned()),
+        },
+        input.clone(),
+    );
+    specialize_json_program_with_seeds(program, seeds, &envelope.language_version, &input)
 }
 
 fn read_program_unvalidated(path: &str) -> Result<Program, ExitCode> {
@@ -3257,19 +3378,53 @@ fn write_pretty_json(path: PathBuf, value: &impl Serialize) -> Result<(), std::i
 }
 
 fn read_program_for_execution(path: &str) -> Result<Program, ExitCode> {
+    read_program_for_execution_with_seeds(path, &[])
+}
+
+/// Execution-path program loading (P1-013/P2-003): the program compiles
+/// with the given host-requested generic instantiations so requests
+/// naming them resolve. Seed-free loads behave exactly as before.
+fn read_program_for_execution_with_seeds(
+    path: &str,
+    seeds: &[mncs_model::HostGenericSeedRequest],
+) -> Result<Program, ExitCode> {
     // Source programs take the same elaboration bridge as every other
     // manifest-consuming command.
     if Path::new(path)
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("mncs"))
     {
-        return load_program(path);
+        return load_program_with_seeds(path, seeds);
     }
     let input = read_source(path)?;
-    Program::from_json(&input).map_err(|error| {
+    let program = Program::from_json(&input).map_err(|error| {
         eprintln!("error: {error}");
         ExitCode::from(2)
-    })
+    })?;
+    let envelope = SourceEnvelope::new(
+        SourceArtifactKind::Program,
+        path.to_owned(),
+        SourceOrigin {
+            kind: SourceOriginKind::Path,
+            locator: Some(path.to_owned()),
+        },
+        input.clone(),
+    );
+    specialize_json_program_with_seeds(program, seeds, &envelope.language_version, &input)
+}
+
+/// Seeds named by one execution request: empty for concrete targets, one
+/// deduplicated seed for a generic target.
+fn request_seeds(request: &ExecutionRequest) -> Vec<mncs_model::HostGenericSeedRequest> {
+    if request.type_arguments.is_empty() {
+        Vec::new()
+    } else {
+        vec![mncs_model::HostGenericSeedRequest::from_request(
+            &request.target.module,
+            &request.target.function,
+            &request.type_arguments,
+        )]
+    }
 }
 
 fn execution_status_code(status: ExecutionStatus) -> ExitCode {

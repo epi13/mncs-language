@@ -1,0 +1,56 @@
+mncs 0.16;
+
+// P1-013 / P2-003: host invocation of generic entrypoints.
+//
+// Every generic function below is callable two ways: from MNCS source
+// (explicit `<...>` or inference) and from the host boundary through
+// explicit `type_arguments` on the execution request — no hand-written
+// wrapper functions. The `probe_same_*` wrappers instantiate the same
+// arguments in-language that the corpus names from the host, pinning
+// the single-specialization contract: one function, one record, one
+// identity, however the instantiation was requested.
+//
+// Independent expectations (hand-computed):
+//   probe_same_fill  = fill 8 with 7, read index 3 = 7
+//   probe_same_first = first(42) = 42
+//   probe_same_lib   = cross-module fill 4 with 9, read index 1 = 9
+module pressure.host_generics;
+
+use pressure.host_generics.lib as lib;
+
+record Point { x: i64, y: i64 }
+
+fn grow_fill_local<W: Nat>(row: [i64; W], v: i64) -> (result: [i64; W]) {
+    iterate i over row carrying out: [i64; W] = row {
+        next out = replace(out, i, v);
+    }
+    return out;
+}
+
+fn first_local<T>(value: T) -> (result: T) {
+    return value;
+}
+
+fn vlen<N: Nat>(view: [byte; up_to N]) -> (result: u64) {
+    return view.len;
+}
+
+fn id_value<T>(spot: T) -> (result: T) {
+    return spot;
+}
+
+fn probe_same_fill() -> (result: i64) {
+    let base: [i64; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
+    let full: [i64; 8] = grow_fill_local<8>(base, 7);
+    return full[3];
+}
+
+fn probe_same_first() -> (result: i64) {
+    return first_local<i64>(42);
+}
+
+fn probe_same_lib() -> (result: i64) {
+    let base: [i64; 4] = [0, 0, 0, 0];
+    let full: [i64; 4] = lib.grow_fill(base, 9);
+    return full[1];
+}

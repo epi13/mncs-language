@@ -559,6 +559,7 @@ fn imported_execution_and_lowering_keep_the_declaring_namespace() {
         step_budget: 64,
         policy: mncs_model::ExecutionPolicy::default(),
         host_grants: Vec::new(),
+        type_arguments: Vec::new(),
         call_depth_budget: None,
     };
     let body = mncs_model::execute_with_policy(&program, &request);
@@ -735,6 +736,7 @@ fn main(input: i64) -> (result: i64) {
         step_budget: 64,
         policy: mncs_model::ExecutionPolicy::default(),
         host_grants: Vec::new(),
+        type_arguments: Vec::new(),
         call_depth_budget: None,
     };
     let body = mncs_model::execute(&program, &request);
@@ -1145,6 +1147,7 @@ fn execute_main(program: &mncs_model::Program, module: &str) -> mncs_model::Exec
         step_budget: 256,
         policy: mncs_model::ExecutionPolicy::default(),
         host_grants: Vec::new(),
+        type_arguments: Vec::new(),
         call_depth_budget: None,
     };
     mncs_model::execute(program, &request)
