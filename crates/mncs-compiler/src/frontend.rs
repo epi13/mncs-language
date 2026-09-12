@@ -5122,43 +5122,55 @@ impl<'a> BodyBuilder<'a> {
         let (Some(true_expr), Some(false_expr)) = (true_arm, false_arm) else {
             return None;
         };
-        let true_binding = self.elaborate_expr(true_expr, Some(&result_type), env, diagnostics)?;
-        if true_binding.ty != result_type {
-            diagnostics.push(elaboration_diagnostic(
-                "MNE141",
-                "match arms must produce the same expected type",
-                true_expr.span(),
-            ));
-            return None;
-        }
-        let false_binding =
-            self.elaborate_expr(false_expr, Some(&result_type), env, diagnostics)?;
-        if false_binding.ty != result_type {
-            diagnostics.push(elaboration_diagnostic(
-                "MNE141",
-                "match arms must produce the same expected type",
-                false_expr.span(),
-            ));
-            return None;
-        }
-        let id = self.new_value("boolsel");
-        self.blocks[self.current].operations.push(BodyOperation {
-            id: id.clone(),
-            kind: BodyOperationKind::Select {
-                operand_type: Box::new(result_type.clone()),
-            },
-            operands: vec![subject.id.clone(), true_binding.id, false_binding.id],
-            results: vec![BodyValue {
-                id: id.clone(),
-                ty: result_type.clone(),
-            }],
-            contracts: Vec::new(),
-            assumptions: Vec::new(),
-            machine_intent: None,
-            lowering: None,
-            portability: None,
+        // INGEST-P-005/P-006: bool arms dispatch through the same
+        // branch-chain shape as finite and integer matches, so only the
+        // taken arm evaluates. The historical `Select` lowering evaluated
+        // both arms: a trapping projection in the untaken arm fired anyway,
+        // which made `match` unusable as a liveness guard and contradicted
+        // the other two match forms. `select` itself stays strict; only
+        // `match` is uniformly lazy. Each arm elaborates in its own block
+        // and carries its value into the join, exactly like
+        // `elaborate_scalar_match`.
+        let dispatch = self.current;
+        let join_id = self.new_block();
+        let then_id = self.new_block();
+        let else_id = self.new_block();
+        self.blocks[dispatch].terminator = BodyTerminator::ConditionalBranch {
+            condition: subject.id.clone(),
+            then_target: then_id.clone(),
+            then_arguments: Vec::new(),
+            else_target: else_id.clone(),
+            else_arguments: Vec::new(),
+        };
+        let result_id = self.new_value("boolmatch");
+        let join_index = self.index_of(&join_id);
+        self.blocks[join_index].parameters.push(BodyValue {
+            id: result_id.clone(),
+            ty: result_type.clone(),
         });
-        Some(ResolvedBinding::plain(id, result_type))
+        for (arm_expr, arm_id) in [(true_expr, then_id), (false_expr, else_id)] {
+            self.current = self.index_of(&arm_id);
+            env.push();
+            if let Some(value) = self.elaborate_expr(arm_expr, Some(&result_type), env, diagnostics)
+            {
+                if value.ty != result_type {
+                    diagnostics.push(elaboration_diagnostic(
+                        "MNE141",
+                        "match arms must produce the same expected type",
+                        arm_expr.span(),
+                    ));
+                }
+                if self.block_is_open() {
+                    self.blocks[self.current].terminator = BodyTerminator::Branch {
+                        target: join_id.clone(),
+                        arguments: vec![value.id],
+                    };
+                }
+            }
+            env.pop();
+        }
+        self.current = join_index;
+        Some(ResolvedBinding::plain(result_id, result_type))
     }
 
     /// Elaborate `match` over an integer subject (CP-0010).
