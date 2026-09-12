@@ -299,18 +299,11 @@ pub fn parse_host_generic_args(
     Ok(args)
 }
 
-/// A `Named` body type other than `bool` after program resolution names
-/// nothing the program declares: scalars, sequences, vectors, masks, and
-/// nominal record/finite types all resolve structurally or nominally, so
-/// only `bool` (which elaboration treats as a named type) legitimately
-/// survives.
+/// Whether a resolved type still carries an arbitrary name. Delegates to
+/// [`BodyType::has_unresolved_named`]: `Bool` is semantic, every other
+/// `Named` (including legacy spellings normalized elsewhere) is unresolved.
 fn type_has_unresolved_name(ty: &BodyType) -> bool {
-    match ty {
-        BodyType::Named(name) => name != "bool",
-        BodyType::Sequence { element, .. } => type_has_unresolved_name(element),
-        BodyType::Vector { element, .. } => type_has_unresolved_name(element),
-        _ => false,
-    }
+    ty.has_unresolved_named()
 }
 
 /// How an execution target resolved against generic declarations.
@@ -4152,6 +4145,7 @@ fn value_matches_type(program: &Program, value: &ExecutionValue, ty: &BodyType) 
         (ExecutionValue::Integer { value, ty: actual }, BodyType::Integer(expected)) => {
             actual == expected && in_range(*value, *expected)
         }
+        (ExecutionValue::Boolean { .. }, BodyType::Bool) => true,
         (ExecutionValue::Boolean { .. }, BodyType::Named(name)) if name == "bool" => true,
         (ExecutionValue::Boolean { .. }, BodyType::Integer(integer)) => {
             integer.bits == 1 && !integer.signed
@@ -4379,6 +4373,9 @@ fn constant_value(value: i128, ty: &BodyType) -> Option<ExecutionValue> {
             value,
             ty: *integer,
         }),
+        BodyType::Bool if matches!(value, 0 | 1) => {
+            Some(ExecutionValue::Boolean { value: value == 1 })
+        }
         BodyType::Named(name) if name == "bool" && matches!(value, 0 | 1) => {
             Some(ExecutionValue::Boolean { value: value == 1 })
         }
@@ -4431,6 +4428,14 @@ fn convert_float_edge(
         {
             Ok(ExecutionValue::Float {
                 bits: (*value as f64).to_bits(),
+                ty: *ty,
+            })
+        }
+        (ExecutionValue::Boolean { value }, BodyType::Bool, BodyType::Float(ty))
+            if ty.is_supported() =>
+        {
+            Ok(ExecutionValue::Float {
+                bits: (if *value { 1.0 } else { 0.0f64 }).to_bits(),
                 ty: *ty,
             })
         }
@@ -4518,11 +4523,20 @@ fn convert_scalar_inner(
             Some(ExecutionValue::Byte { value: *value })
         }
         // Booleans convert outward as 0/1; never inward.
+        (ExecutionValue::Boolean { value }, BodyType::Bool, BodyType::Integer(target)) => {
+            wrap_to_bits(i128::from(*value), target.bits, target.signed)
+                .map(|value| ExecutionValue::Integer { value, ty: *target })
+        }
         (ExecutionValue::Boolean { value }, BodyType::Named(name), BodyType::Integer(target))
             if name == "bool" =>
         {
             wrap_to_bits(i128::from(*value), target.bits, target.signed)
                 .map(|value| ExecutionValue::Integer { value, ty: *target })
+        }
+        (ExecutionValue::Boolean { value }, BodyType::Bool, BodyType::Byte) => {
+            Some(ExecutionValue::Byte {
+                value: i128::from(*value),
+            })
         }
         (ExecutionValue::Boolean { value }, BodyType::Named(name), BodyType::Byte)
             if name == "bool" =>
@@ -4552,6 +4566,9 @@ fn normalize_value(
                     ty: *actual,
                 })
             }
+        }
+        (ExecutionValue::Boolean { value }, BodyType::Bool) => {
+            Some(ExecutionValue::Boolean { value: *value })
         }
         (ExecutionValue::Boolean { value }, BodyType::Named(name)) if name == "bool" => {
             Some(ExecutionValue::Boolean { value: *value })

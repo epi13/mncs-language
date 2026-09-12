@@ -381,7 +381,10 @@ pub(crate) fn value_contract_for(program: &Program, name: &str) -> BackendValueC
             payloads,
         };
     }
-    match BodyType::from_semantic_name(name) {
+    // Program-aware resolution so nested nominal elements (records/finites
+    // inside sequences) rehydrate to their identities instead of lingering
+    // as opaque spellings; the wire still carries short names for compat.
+    match BodyType::from_program(program, name) {
         BodyType::Sequence {
             element,
             bound: SequenceBound::Exact(length),
@@ -901,6 +904,7 @@ fn check_scalar_value(
     path: &str,
 ) -> Result<(), String> {
     let matches = match (BodyType::from_semantic_name(semantic_type), value) {
+        (BodyType::Bool, ExecutionValue::Boolean { .. }) => true,
         (BodyType::Named(name), ExecutionValue::Boolean { .. }) => name == "bool",
         (BodyType::Integer(expected), ExecutionValue::Integer { value, ty }) => {
             expected == *ty && integer_fits(*value, expected)

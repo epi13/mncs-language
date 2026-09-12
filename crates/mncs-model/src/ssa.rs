@@ -816,6 +816,14 @@ fn check_body_type(
             path,
             "unresolved generic type reached the backend lowering boundary",
         )),
+        // Any other unresolved name (including the `"invalid"` error poison)
+        // must not reach lowering either. Legacy `Named("bool")` is the only
+        // spelling still accepted here for pre-0.3 artifacts.
+        crate::BodyType::Named(name) if name != "bool" => errors.push(diagnostic(
+            "SSA045",
+            path,
+            "unresolved generic type reached the backend lowering boundary",
+        )),
         crate::BodyType::Sequence { element, bound } => {
             check_body_type(element, generic_names, path, errors);
             check_bound(bound, path, errors);

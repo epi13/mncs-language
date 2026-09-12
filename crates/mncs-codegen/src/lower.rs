@@ -2288,6 +2288,7 @@ fn lower_instruction(
             } else {
                 match element_type {
                     mncs_model::BodyType::Integer(integer) => val_type(*integer)?,
+                    mncs_model::BodyType::Bool => ValType::I32,
                     mncs_model::BodyType::Named(name) if name == "bool" => ValType::I32,
                     // Composite elements (records, boxed finites, nested
                     // cells) ride as pointers in 8-byte slots: copy the
@@ -4535,6 +4536,9 @@ fn emit_convert(
             BodyType::Integer(_) | BodyType::Byte => {
                 body.push(Instr::F64ConvertI32U);
             }
+            BodyType::Bool => {
+                body.push(Instr::F64ConvertI32U);
+            }
             BodyType::Named(name) if name == "bool" => {
                 body.push(Instr::F64ConvertI32U);
             }
@@ -4642,6 +4646,8 @@ fn wasm_type(ty: &IrType) -> Result<(ValType, Option<IntegerType>), String> {
         IrType::Named(name) => match BodyType::from_semantic_name(name) {
             BodyType::Float(float) if float.is_supported() => Ok((ValType::F64, None)),
             BodyType::Integer(integer) => Ok((val_type(integer)?, Some(integer))),
+            // Booleans ride zero-extended 0/1 in i32 cells.
+            BodyType::Bool => Ok((ValType::I32, None)),
             // Bytes ride zero-extended in i32 cells.
             BodyType::Byte => Ok((ValType::I32, None)),
             // Exact sequences are canonical cell pointers; bounded views are

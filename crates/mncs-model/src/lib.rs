@@ -57,8 +57,9 @@ pub use body::{
     BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator, BodyType, BodyValue,
     BoundedIterationCompletion, BoundsEvidence, FunctionBody, GenericArg, GenericParam,
     GenericParamKind, IterationDomain, LoweringEnvelope, MachineIntentSpec, PortabilityEnvelope,
-    PortabilityTarget, RealizationClass, SequenceBound, EXECUTABLE_BODY_SCHEMA_VERSION,
-    MAX_SEQUENCE_BOUND, MAX_VECTOR_LANES, MODEL_MAX_ITERATION_BOUND, MODEL_MAX_SEQUENCE_BOUND,
+    PortabilityTarget, RealizationClass, SequenceBound, TypeRelation, TypeSyntax,
+    EXECUTABLE_BODY_SCHEMA_VERSION, EXECUTABLE_BODY_SCHEMA_VERSION_PRE_BOOL, MAX_SEQUENCE_BOUND,
+    MAX_VECTOR_LANES, MODEL_MAX_ITERATION_BOUND, MODEL_MAX_SEQUENCE_BOUND,
     SOURCE_PROFILE_0_4_MAX_ITERATION_BOUND,
 };
 pub use canonical::sha256_hex;
