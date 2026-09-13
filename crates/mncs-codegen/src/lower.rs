@@ -60,10 +60,10 @@ struct FunctionLayout {
 //
 // A loop is skipped (status-quo bump behavior, always sound) when any of
 // this fails to establish: a non-single-entry body, unresolvable nominal
-// types, live views (a view descriptor cannot be rebased without its
-// source base, so view-carrying loops keep today's behavior), values
-// missing from the layout, or excessive static copy size. The backedge
-// sequence is additionally guarded on the host-buffer end cursor when the
+// types, values missing from the layout, or excessive static copy size.
+// Packed bounded-view descriptors are words and remain valid across a reset;
+// they are preserved in their locals rather than copied through the arena.
+// The backedge sequence is additionally guarded on the host-buffer end cursor when the
 // module has one: a host reservation inside the loop means the mark no
 // longer bounds scratch, so that iteration keeps status-quo behavior
 // with all locals valid.
@@ -184,13 +184,14 @@ enum CopyShape {
     },
 }
 
-/// Whether an SSA value type needs region copying: `Cell` shapes copy,
-/// `Word` values ride in locals untouched, `View` carriers skip the loop.
+/// Whether an SSA value type needs region copying: `Cell` shapes copy and
+/// `Word` values ride in locals untouched. Packed bounded views are words in
+/// the WASM ABI, so they are preserved without trying to rebase their
+/// descriptor during a region reset.
 #[derive(Debug, Clone)]
 enum CopyClass {
     Word,
     Cell(CopyShape),
-    View,
 }
 
 fn slot_width_of(spelling: &str) -> crate::composite::SlotWidth {
@@ -208,9 +209,9 @@ fn slot_width_of(spelling: &str) -> crate::composite::SlotWidth {
 
 /// Resolve the copy shape of one field/element spelling: named composites
 /// recurse through the program declarations, structural spellings recurse
-/// structurally, and everything else is an inline word. `View` reports a
-/// bounded view at any depth (callers skip the loop); `Err` reports an
-/// unresolvable spelling (callers skip the loop). `visiting` tracks the
+/// structurally, and everything else is an inline word. Packed bounded views
+/// are inline i64 words at any depth; `Err` reports an unresolvable spelling
+/// (callers skip the loop). `visiting` tracks the
 /// in-progress declaration chain: a recursive type re-enters its own
 /// spelling, and since no static temp assignment can flatten unbounded
 /// nesting depth, that is an `Err` (skip) rather than unbounded host
@@ -285,7 +286,6 @@ fn copy_shape_of_spelling_inner(
                             "record field {name:?} marked as a reference but resolves to a word"
                         ));
                     }
-                    CopyClass::View => return Ok(CopyClass::View),
                 }
             } else {
                 CopyShape::Word(*width)
@@ -342,7 +342,6 @@ fn copy_shape_of_spelling_inner(
                                 "finite payload field {name:?} marked as a reference but resolves to a word"
                             ));
                         }
-                        CopyClass::View => return Ok(CopyClass::View),
                     }
                 } else {
                     CopyShape::Word(*width)
@@ -369,7 +368,6 @@ fn copy_shape_of_spelling_inner(
                 CopyClass::Cell(nested) => nested,
                 // Scalar lanes copy as words with the lane width.
                 CopyClass::Word => CopyShape::Word(slot_width_of(&element_spelling)),
-                CopyClass::View => return Ok(CopyClass::View),
             };
             Ok(CopyClass::Cell(CopyShape::Lanes {
                 count: length,
@@ -380,7 +378,7 @@ fn copy_shape_of_spelling_inner(
         BodyType::Sequence {
             bound: mncs_model::SequenceBound::UpTo(_),
             ..
-        } => Ok(CopyClass::View),
+        } => Ok(CopyClass::Word),
         BodyType::Vector { element, lanes } => {
             let BodyType::Integer(integer) = *element else {
                 return Err("vector lanes must be integers".to_owned());
@@ -525,6 +523,28 @@ mod region_copy_tests {
                 Instr::LocalSet(2),
             ]
         );
+    }
+
+    #[test]
+    fn packed_bounded_views_are_preserved_as_nonallocating_words() {
+        let program = mncs_model::Program::from_json(
+            r#"{"schema_version":"0.1","module":"test.views","functions":[]}"#,
+        )
+        .expect("minimal program fixture");
+        let view = BodyType::Sequence {
+            element: Box::new(BodyType::Byte),
+            bound: mncs_model::SequenceBound::UpTo(64),
+        };
+
+        let class = copy_class_of_ty(
+            &view,
+            &program,
+            &NominalRefMap::default(),
+            &CompositeInfo::default(),
+        )
+        .expect("bounded view copy class");
+
+        assert!(matches!(class, CopyClass::Word));
     }
 }
 
@@ -884,10 +904,8 @@ struct RegionEmit<'a> {
 /// reads valid because cells are immutable; words need no copying, and
 /// latch temporaries need none by dominance. A header is left unplanned
 /// (status-quo bump behavior, always sound) when its body is not
-/// single-entry, when any preserved value is a view carrier (a view
-/// descriptor cannot be rebased without its source base), has an
-/// unresolvable shape, or is missing from the layout, or when the static
-/// scratch need exceeds the temp cap.
+/// single-entry, when a preserved value has an unresolvable shape, is missing
+/// from the layout, or when the static scratch need exceeds the temp cap.
 fn plan_loop_regions(
     program: &mncs_model::Program,
     function: &SsaFunction,
@@ -1168,7 +1186,7 @@ fn plan_loop_regions(
                     copies.push((local(layout, value)?, shape));
                 }
                 Ok(CopyClass::Word) => {}
-                Ok(CopyClass::View) | Err(_) => {
+                Err(_) => {
                     skip = true;
                     break;
                 }
