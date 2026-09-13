@@ -480,11 +480,51 @@ fn cell_bytes(shape: &CopyShape) -> u32 {
     }
 }
 
-fn emit_push_slot(body: &mut Vec<Instr>, addr_local: u32, byte_offset: u32) {
+/// Push a canonical cell slot address. Cell references in ordinary SSA
+/// locals are I32 pointers, while the shared flatten scratch pool is made
+/// entirely of I64 locals so it can hold both W32 and W64 payloads. Keep the
+/// address conversion explicit at this boundary: WASM memory instructions
+/// consume I32 addresses and validators must see the wrap before every load.
+fn emit_push_slot(body: &mut Vec<Instr>, addr_local: u32, address_type: ValType, byte_offset: u32) {
     body.push(Instr::LocalGet(addr_local));
+    if matches!(address_type, ValType::I64) {
+        body.push(Instr::I32WrapI64);
+    }
     if byte_offset != 0 {
         body.push(Instr::I32Const(byte_offset as i32));
         body.push(Instr::I32Add);
+    }
+}
+
+#[cfg(test)]
+mod region_copy_tests {
+    use super::*;
+
+    #[test]
+    fn nested_flatten_wraps_i64_scratch_addresses_before_memory_access() {
+        let shape = CopyShape::Record(vec![(
+            SlotWidth::W32,
+            CopyShape::Record(vec![(SlotWidth::W32, CopyShape::Word(SlotWidth::W32))]),
+        )]);
+        let mut body = Vec::new();
+
+        let used = emit_flatten(&mut body, 0, ValType::I32, &shape, 1);
+
+        assert_eq!(used, 2);
+        assert_eq!(
+            body,
+            vec![
+                Instr::LocalGet(0),
+                Instr::I32Load,
+                Instr::I64ExtendI32U,
+                Instr::LocalSet(1),
+                Instr::LocalGet(1),
+                Instr::I32WrapI64,
+                Instr::I32Load,
+                Instr::I64ExtendI32U,
+                Instr::LocalSet(2),
+            ]
+        );
     }
 }
 
@@ -502,10 +542,16 @@ fn emit_extend_for_temp(body: &mut Vec<Instr>, width: crate::composite::SlotWidt
 /// Flatten one cell aside into `temp..`: read every slot (recursing into
 /// nested references) without writing memory. Returns temps consumed; the
 /// assignment is deterministic so unflatten reuses it exactly.
-fn emit_flatten(body: &mut Vec<Instr>, addr_local: u32, shape: &CopyShape, temp: u32) -> u32 {
+fn emit_flatten(
+    body: &mut Vec<Instr>,
+    addr_local: u32,
+    address_type: ValType,
+    shape: &CopyShape,
+    temp: u32,
+) -> u32 {
     match shape {
         CopyShape::Word(width) => {
-            emit_push_slot(body, addr_local, 0);
+            emit_push_slot(body, addr_local, address_type, 0);
             emit_load_width(body, *width);
             emit_extend_for_temp(body, *width);
             body.push(Instr::LocalSet(temp));
@@ -517,28 +563,34 @@ fn emit_flatten(body: &mut Vec<Instr>, addr_local: u32, shape: &CopyShape, temp:
                 let offset = index as u32 * 8;
                 match nested {
                     CopyShape::Word(_) => {
-                        emit_push_slot(body, addr_local, offset);
+                        emit_push_slot(body, addr_local, address_type, offset);
                         emit_load_width(body, *width);
                         emit_extend_for_temp(body, *width);
                         body.push(Instr::LocalSet(temp + used));
                         used += 1;
                     }
                     nested => {
-                        emit_push_slot(body, addr_local, offset);
+                        emit_push_slot(body, addr_local, address_type, offset);
                         body.push(Instr::I32Load);
                         // References ride extended in the uniform I64
                         // scratch temps (a bare I32 into an I64 local
                         // would fail WASM validation).
                         body.push(Instr::I64ExtendI32U);
                         body.push(Instr::LocalSet(temp + used));
-                        used += 1 + emit_flatten(body, temp + used, nested, temp + used + 1);
+                        used += 1 + emit_flatten(
+                            body,
+                            temp + used,
+                            ValType::I64,
+                            nested,
+                            temp + used + 1,
+                        );
                     }
                 }
             }
             used
         }
         CopyShape::Finite(variants) => {
-            emit_push_slot(body, addr_local, 0);
+            emit_push_slot(body, addr_local, address_type, 0);
             body.push(Instr::I32Load);
             body.push(Instr::I64ExtendI32U);
             body.push(Instr::LocalSet(temp));
@@ -555,20 +607,21 @@ fn emit_flatten(body: &mut Vec<Instr>, addr_local: u32, shape: &CopyShape, temp:
                     let offset = (index as u32 + 1) * 8;
                     match nested {
                         CopyShape::Word(_) => {
-                            emit_push_slot(body, addr_local, offset);
+                            emit_push_slot(body, addr_local, address_type, offset);
                             emit_load_width(body, *width);
                             emit_extend_for_temp(body, *width);
                             body.push(Instr::LocalSet(temp + 1 + used));
                             used += 1;
                         }
                         nested => {
-                            emit_push_slot(body, addr_local, offset);
+                            emit_push_slot(body, addr_local, address_type, offset);
                             body.push(Instr::I32Load);
                             body.push(Instr::I64ExtendI32U);
                             body.push(Instr::LocalSet(temp + 1 + used));
                             used += 1 + emit_flatten(
                                 body,
                                 temp + 1 + used,
+                                ValType::I64,
                                 nested,
                                 temp + 1 + used + 1,
                             );
@@ -590,18 +643,24 @@ fn emit_flatten(body: &mut Vec<Instr>, addr_local: u32, shape: &CopyShape, temp:
                 let offset = lane.saturating_mul(*stride_bytes);
                 match element.as_ref() {
                     CopyShape::Word(width) => {
-                        emit_push_slot(body, addr_local, offset);
+                        emit_push_slot(body, addr_local, address_type, offset);
                         emit_load_width(body, *width);
                         emit_extend_for_temp(body, *width);
                         body.push(Instr::LocalSet(temp + used));
                         used += 1;
                     }
                     nested => {
-                        emit_push_slot(body, addr_local, offset);
+                        emit_push_slot(body, addr_local, address_type, offset);
                         body.push(Instr::I32Load);
                         body.push(Instr::I64ExtendI32U);
                         body.push(Instr::LocalSet(temp + used));
-                        used += 1 + emit_flatten(body, temp + used, nested, temp + used + 1);
+                        used += 1 + emit_flatten(
+                            body,
+                            temp + used,
+                            ValType::I64,
+                            nested,
+                            temp + used + 1,
+                        );
                     }
                 }
             }
@@ -666,7 +725,7 @@ fn emit_unflatten(
                 let offset = index as u32 * 8;
                 match nested {
                     CopyShape::Word(_) => {
-                        emit_push_slot(body, dest_local, offset);
+                        emit_push_slot(body, dest_local, ValType::I32, offset);
                         body.push(Instr::LocalGet(data_temp + used));
                         emit_unwrap_temp(body, *width);
                         store_width(*width, body);
@@ -679,7 +738,7 @@ fn emit_unflatten(
                         body.push(Instr::LocalSet(addr));
                         used += 1;
                         emit_unflatten(body, addr_base, nested, depth + 1, data_temp + used, addr)?;
-                        emit_push_slot(body, dest_local, offset);
+                        emit_push_slot(body, dest_local, ValType::I32, offset);
                         body.push(Instr::LocalGet(addr));
                         body.push(Instr::I32Store);
                         used += flatten_words(nested);
@@ -695,7 +754,7 @@ fn emit_unflatten(
                 body.push(Instr::I64Eq);
                 body.push(Instr::If);
                 emit_alloc(body, dest_local, (payload.len() as u32 + 1) * 8)?;
-                emit_push_slot(body, dest_local, 0);
+                emit_push_slot(body, dest_local, ValType::I32, 0);
                 body.push(Instr::LocalGet(data_temp));
                 body.push(Instr::I32WrapI64);
                 body.push(Instr::I32Store);
@@ -704,7 +763,7 @@ fn emit_unflatten(
                     let offset = (index as u32 + 1) * 8;
                     match nested {
                         CopyShape::Word(_) => {
-                            emit_push_slot(body, dest_local, offset);
+                            emit_push_slot(body, dest_local, ValType::I32, offset);
                             body.push(Instr::LocalGet(data_temp + 1 + used));
                             emit_unwrap_temp(body, *width);
                             store_width(*width, body);
@@ -724,7 +783,7 @@ fn emit_unflatten(
                                 data_temp + 1 + used,
                                 addr,
                             )?;
-                            emit_push_slot(body, dest_local, offset);
+                            emit_push_slot(body, dest_local, ValType::I32, offset);
                             body.push(Instr::LocalGet(addr));
                             body.push(Instr::I32Store);
                             used += flatten_words(nested);
@@ -746,7 +805,7 @@ fn emit_unflatten(
                 let offset = lane.saturating_mul(*stride_bytes);
                 match element.as_ref() {
                     CopyShape::Word(width) => {
-                        emit_push_slot(body, dest_local, offset);
+                        emit_push_slot(body, dest_local, ValType::I32, offset);
                         body.push(Instr::LocalGet(data_temp + used));
                         emit_unwrap_temp(body, *width);
                         store_width(*width, body);
@@ -759,7 +818,7 @@ fn emit_unflatten(
                         body.push(Instr::LocalSet(addr));
                         used += 1;
                         emit_unflatten(body, addr_base, nested, depth + 1, data_temp + used, addr)?;
-                        emit_push_slot(body, dest_local, offset);
+                        emit_push_slot(body, dest_local, ValType::I32, offset);
                         body.push(Instr::LocalGet(addr));
                         body.push(Instr::I32Store);
                         used += flatten_words(nested);
@@ -1202,7 +1261,11 @@ fn emit_backedge_region(
     let mut sequence = Vec::new();
     let mut temp = emit.data_base;
     for (slot, shape) in &header.copies {
-        emit_flatten(&mut sequence, *slot, shape, temp);
+        // Header/live values are ordinary composite locals, whose canonical
+        // cell representation is an I32 address. Nested references are
+        // converted explicitly to the I64 scratch representation by
+        // `emit_flatten` before its recursive descent.
+        emit_flatten(&mut sequence, *slot, ValType::I32, shape, temp);
         temp = temp.saturating_add(flatten_words(shape));
     }
     sequence.push(Instr::GlobalGet(header.mark_global));
