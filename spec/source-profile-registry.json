@@ -267,7 +267,7 @@
   },
   {
     "version": "0.16",
-    "status": "current",
+    "status": "sealed",
     "spec_document": "docs/source-profile-0.16.md",
     "predecessor": "0.15",
     "supports_parsing": true,
@@ -286,6 +286,23 @@
       "fs_delete",
       "fs_atomic_rename",
       "fs_sync_barrier"
+    ]
+  },
+  {
+    "version": "0.17",
+    "status": "current",
+    "spec_document": "docs/source-profile-0.17.md",
+    "predecessor": "0.16",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 1024,
+    "max_iteration_bound": 1024,
+    "max_iteration_nesting": 2,
+    "max_iteration_work_product": 1048576,
+    "max_vector_lanes": 64,
+    "features": [
+      "first_class_test_declarations",
+      "static_test_inventory"
     ]
   }
 ]

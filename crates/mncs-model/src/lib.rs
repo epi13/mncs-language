@@ -143,9 +143,9 @@ pub use graph::{
 };
 pub use identity::{
     binding_id, binding_id_for, contract_id, finite_type_id, finite_variant_id, function_id,
-    generic_param_id, instantiation_id, module_id, record_field_id, record_type_id, reference_id,
-    scope_id, specialization_id, IdentityChange, IdentityKind, IdentityRecord, SemanticDiff,
-    SemanticId, SemanticIdentities,
+    generic_param_id, instantiation_id, module_id, program_id, record_field_id, record_type_id,
+    reference_id, scope_id, specialization_id, test_case_id, test_declaration_id, IdentityChange,
+    IdentityKind, IdentityRecord, SemanticDiff, SemanticId, SemanticIdentities,
 };
 pub use ir::{
     CapabilityUse, FailurePathKind, HighLevelIr, IrBlock, IrBoundedIteration, IrError, IrFunction,

@@ -95,6 +95,7 @@ fn run_cli() -> ExitCode {
             }
             validate(&path)
         }
+        "test-inventory" => test_inventory_command(args),
         "canonicalize" => one_manifest_command(args, canonicalize),
         "identity" => one_manifest_command(args, identity),
         "graph" => one_manifest_command(args, graph),
@@ -184,6 +185,65 @@ fn validate(path: &str) -> ExitCode {
     }
 
     if report.valid {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct TestInventoryCommandReport {
+    schema_version: &'static str,
+    valid: bool,
+    source: String,
+    inventory: Option<mncs_compiler::TestInventory>,
+    diagnostics: Vec<mncs_syntax::SourceDiagnostic>,
+}
+
+/// Emit the compiler-owned structural inventory of first-class source tests.
+/// The command deliberately exposes the front end's diagnostics alongside an
+/// absent inventory, so a runner cannot silently treat an invalid source as a
+/// project with zero tests.
+fn test_inventory_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let Some(source_path) = args.next() else {
+        eprintln!("error: test-inventory requires an MNCS source path");
+        print_usage();
+        return ExitCode::from(2);
+    };
+    if args.next().is_some() {
+        eprintln!("error: unexpected test-inventory arguments");
+        return ExitCode::from(2);
+    }
+    let source = match read_source(&source_path) {
+        Ok(source) => source,
+        Err(code) => return code,
+    };
+    let envelope = SourceEnvelope::new(
+        SourceArtifactKind::Program,
+        source_path.clone(),
+        SourceOrigin {
+            kind: SourceOriginKind::Path,
+            locator: Some(source_path.clone()),
+        },
+        source,
+    );
+    let resolver = FileModuleResolver::with_libraries(&source_path);
+    let front_end = ReferenceCompiler::default().front_end_with_resolver(envelope, &resolver);
+    let valid = front_end.is_valid();
+    let report = TestInventoryCommandReport {
+        schema_version: mncs_compiler::TEST_INVENTORY_SCHEMA_VERSION,
+        valid,
+        source: source_path,
+        inventory: front_end.test_inventory,
+        diagnostics: front_end.diagnostics,
+    };
+    if !print_json(&report) {
+        ExitCode::from(2)
+    } else if valid {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
@@ -620,6 +680,9 @@ where
 struct CompileOptions {
     program_path: String,
     emit: BTreeSet<ArtifactRepresentation>,
+    /// Production compilation excludes first-class test declarations unless
+    /// the caller opts into a test artifact explicitly.
+    include_tests: bool,
     output_dir: Option<PathBuf>,
     target: Option<TargetContractRef>,
     kernel_entries: Vec<String>,
@@ -669,6 +732,11 @@ where
     let program = match load_program_with_seeds(&options.program_path, &seeds) {
         Ok(program) => program,
         Err(code) => return code,
+    };
+    let program = if options.include_tests {
+        program
+    } else {
+        program.without_tests()
     };
     let compiler = ReferenceCompiler::default();
     // Explicit kernel entries are recorded on the backend configuration
@@ -2875,6 +2943,8 @@ where
     ]
     .into_iter()
     .collect::<BTreeSet<_>>();
+    let mut include_tests = false;
+    let mut test_selection_seen = false;
     let mut output_dir = None;
     let mut target = None;
     let mut kernel_entries = Vec::new();
@@ -2883,6 +2953,20 @@ where
     let mut corpus = None;
     while let Some(option) = args.next() {
         match option.as_str() {
+            "--include-tests" => {
+                if test_selection_seen && !include_tests {
+                    return Err("--include-tests conflicts with --exclude-tests".to_owned());
+                }
+                include_tests = true;
+                test_selection_seen = true;
+            }
+            "--exclude-tests" => {
+                if test_selection_seen && include_tests {
+                    return Err("--exclude-tests conflicts with --include-tests".to_owned());
+                }
+                include_tests = false;
+                test_selection_seen = true;
+            }
             "--emit" => {
                 let value = args
                     .next()
@@ -2966,6 +3050,7 @@ where
     Ok(CompileOptions {
         program_path,
         emit,
+        include_tests,
         output_dir,
         target,
         kernel_entries,
@@ -4295,6 +4380,7 @@ fn print_usage() {
     eprintln!();
     eprintln!("Usage:");
     eprintln!("  mncs validate <manifest.json>");
+    eprintln!("  mncs test-inventory <program.mncs>");
     eprintln!("  mncs canonicalize <manifest.json>");
     eprintln!("  mncs identity <manifest.json>");
     eprintln!("  mncs graph <manifest.json>");
@@ -4311,7 +4397,7 @@ fn print_usage() {
     eprintln!("  mncs execute-ssa <program.json> <execution-request.json>");
     eprintln!("  mncs compare-execution <baseline.json> <candidate.json> <corpus.json>");
     eprintln!("  mncs check-lowering-execution <program.json> <corpus.json>");
-    eprintln!("  mncs compile <program.json> [--emit semantic,hir,ssa,evidence,target-plan,backend] [--output-dir DIR] [--target TARGET]");
+    eprintln!("  mncs compile <program.json|program.mncs> [--include-tests|--exclude-tests] [--emit semantic,hir,ssa,evidence,target-plan,backend] [--output-dir DIR] [--target TARGET]");
     eprintln!("  mncs compile <program> --proof <artifact.json> [--proof-operation OP]  (RFC 0007 tranche-0.2 proof ingestion)");
     eprintln!("  mncs abi <program.mncs|program.json>");
     eprintln!("  mncs execute-backend <program.json> <execution-request.json>");

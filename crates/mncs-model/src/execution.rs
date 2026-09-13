@@ -5502,6 +5502,7 @@ mod tests {
             },
             &Function {
                 home_module: None,
+                is_test: false,
                 generic_params: Vec::new(),
                 name: "f".to_owned(),
                 inputs: Vec::new(),

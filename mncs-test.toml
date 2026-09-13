@@ -1,0 +1,8 @@
+schema_version = "mncs.test-manifest/1"
+name = "mncs-language-first-class-tests"
+source = "tests/first_class_tests.mncs"
+module = "mncs.language.first_class_tests"
+profile = "0.17"
+step_budget = 200000
+timeout_seconds = 60
+libraries = ["library"]

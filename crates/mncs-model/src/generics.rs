@@ -359,6 +359,7 @@ pub fn specialize_program_with_seeds(
 
         let new_function = Function {
             name: new_name.clone(),
+            is_test: generic_fn.is_test,
             home_module: home.clone(),
             generic_params: Vec::new(),
             inputs: new_inputs,

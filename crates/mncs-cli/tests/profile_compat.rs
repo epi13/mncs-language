@@ -1,7 +1,8 @@
 //! Source-profile compatibility (RFC 0036): published profiles are
 //! immutable semantic objects, and post-0.12 extensions live in Profiles
 //! 0.13 (consolidation), 0.14 (buffer pipelines), 0.15 (view
-//! composition), and 0.16 (durable filesystem mutation).
+//! composition), 0.16 (durable filesystem mutation), and 0.17 (first-class
+//! test declarations).
 //!
 //! Every case below pins one direction of the evolution relation:
 //! - an older profile keeps its *historical* acceptance/rejection and
@@ -11,6 +12,7 @@
 //!   view narrowing, checked-index discharge);
 //! - Profile 0.15 admits static view-capacity widening;
 //! - Profile 0.16 admits the `fs_write` mutation family;
+//! - Profile 0.17 admits the language-owned `test` declaration;
 //! - `mncs 1.0` (no published specification) fails closed.
 //!
 //! The expected codes for the older-profile rows were reproduced against
@@ -92,6 +94,23 @@ fn expect_error(name: &str, text: &str, code: &str) {
 fn expect_clean(name: &str, text: &str) {
     let errors = error_codes(text);
     assert!(errors.is_empty(), "{name}: unexpected errors {errors:?}");
+}
+
+#[test]
+fn profile_017_admits_first_class_test_declarations() {
+    expect_clean(
+        "first-class-test-017",
+        "mncs 0.17;\nmodule compat.first_class_test;\ntest arithmetic() -> (result: i64) { return 42; }\n",
+    );
+}
+
+#[test]
+fn profile_016_refuses_first_class_test_declarations_precisely() {
+    expect_error(
+        "first-class-test-016",
+        "mncs 0.16;\nmodule compat.first_class_test;\ntest arithmetic() -> (result: i64) { return 42; }\n",
+        "MNP220",
+    );
 }
 
 /// Older profiles reject boolean negation exactly as before Profile 0.13:

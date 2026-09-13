@@ -4,17 +4,18 @@ use std::time::Instant;
 
 use mncs_model::{
     binding_id, binding_id_for, finite_type_id, finite_variant_id, function_id, module_id,
-    record_field_id, record_type_id, reference_id, scope_id, ArithmeticIntent,
-    ArtifactRepresentation, BodyBlock, BodyBoundedIteration, BodyCyclePolicy, BodyOperation,
-    BodyOperationKind, BodyParameter, BodyTerminator, BodyType, BodyValue,
-    BoundedIterationCompletion, CompilationStatus, CompilationStudyRequest, CompilationStudyResult,
-    CompilerArtifactRef, CompilerNodeProfile, CompilerPassExecutionObservation, ContractClause,
-    ContractKind, Effect, FailureMode, FiniteType, FiniteVariant, FloatType, Function,
-    FunctionBody, IntegerType, Intent, IterationDomain, MachineIntentSpec, MachinePreference,
-    Program, RecordField, RecordType, Requirement, ResolutionProvenance, SemanticBinding,
-    SemanticBindingKind, SemanticBindingTable, SemanticGraph, SemanticId, SemanticIdentities,
-    SemanticNamespace, SemanticReference, SemanticScope, TransformationEdge, TransformationStatus,
-    ValidationReport, Value, EXECUTABLE_BODY_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSION,
+    program_id, record_field_id, record_type_id, reference_id, scope_id, test_case_id,
+    test_declaration_id, ArithmeticIntent, ArtifactRepresentation, BodyBlock, BodyBoundedIteration,
+    BodyCyclePolicy, BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator, BodyType,
+    BodyValue, BoundedIterationCompletion, CompilationStatus, CompilationStudyRequest,
+    CompilationStudyResult, CompilerArtifactRef, CompilerNodeProfile,
+    CompilerPassExecutionObservation, ContractClause, ContractKind, Effect, FailureMode,
+    FiniteType, FiniteVariant, FloatType, Function, FunctionBody, IntegerType, Intent,
+    IterationDomain, MachineIntentSpec, MachinePreference, Program, RecordField, RecordType,
+    Requirement, ResolutionProvenance, SemanticBinding, SemanticBindingKind, SemanticBindingTable,
+    SemanticGraph, SemanticId, SemanticIdentities, SemanticNamespace, SemanticReference,
+    SemanticScope, TransformationEdge, TransformationStatus, ValidationReport, Value,
+    EXECUTABLE_BODY_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSION,
 };
 use mncs_syntax::{
     parse, AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstMatchArm, AstMatchPattern,
@@ -62,6 +63,46 @@ pub struct SourceFrontEndResult {
     pub module_resolutions: Vec<ModuleResolution>,
     pub artifacts: Vec<CompilerArtifactRef>,
     pub diagnostics: Vec<SourceDiagnostic>,
+    /// Compiler-owned inventory of local first-class `test` declarations.
+    /// This is absent when the source cannot be elaborated into a valid
+    /// program; consumers never reconstruct it by scanning source text.
+    pub test_inventory: Option<TestInventory>,
+}
+
+pub const TEST_INVENTORY_SCHEMA_VERSION: &str = "mncs.test-inventory/1";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TestInventory {
+    pub schema_version: String,
+    pub module: String,
+    pub source_artifact_identity: String,
+    pub source_profile: String,
+    pub subject_identity: SemanticId,
+    pub subject_fingerprint: String,
+    pub tests: Vec<TestInventoryEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TestInventoryEntry {
+    /// Stable declaration slot used for filtering and source navigation.
+    pub declaration_identity: SemanticId,
+    /// Body-sensitive case identity used to bind an RFC 0034 experiment.
+    pub test_case_identity: SemanticId,
+    /// Callable function identity used only by the execution ABI.
+    pub function_identity: SemanticId,
+    pub module: String,
+    pub name: String,
+    pub qualified_name: String,
+    pub source_span: SourceSpan,
+    pub profile: String,
+    pub generic_params: Vec<mncs_model::GenericParam>,
+    pub inputs: Vec<Value>,
+    pub outputs: Vec<Value>,
+    pub effects: Vec<Effect>,
+    pub capabilities: Vec<String>,
+    pub semantic_fingerprint: String,
+    pub subject_identity: SemanticId,
+    pub subject_fingerprint: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,6 +131,66 @@ impl SourceFrontEndResult {
         self.artifacts
             .iter()
             .find(|artifact| artifact.representation == representation)
+    }
+}
+
+fn build_test_inventory(
+    envelope: &SourceEnvelope,
+    ast: &AbstractSyntaxTree,
+    program: &Program,
+) -> TestInventory {
+    let identities = program.semantic_identities();
+    let subject_identity = program_id(&program.module);
+    let subject_fingerprint = program
+        .production_content_fingerprint()
+        .expect("validated production program is canonicalizable");
+    let mut tests = ast
+        .functions
+        .iter()
+        .filter(|function| function.is_test)
+        .filter_map(|ast_function| {
+            let function = program.functions.iter().find(|candidate| {
+                candidate.home_module.is_none() && candidate.name == ast_function.name.text
+            })?;
+            let function_identity = function_id(&program.module, &function.name);
+            let semantic_fingerprint = identities.fingerprint(&function_identity)?.to_owned();
+            Some(TestInventoryEntry {
+                declaration_identity: test_declaration_id(&program.module, &function.name),
+                test_case_identity: test_case_id(
+                    &program.module,
+                    &function.name,
+                    &semantic_fingerprint,
+                ),
+                function_identity,
+                module: program.module.clone(),
+                name: function.name.clone(),
+                qualified_name: format!("{}::{}", program.module, function.name),
+                source_span: ast_function.span,
+                profile: ast.language_version.text.clone(),
+                generic_params: function.generic_params.clone(),
+                inputs: function.inputs.clone(),
+                outputs: function.outputs.clone(),
+                effects: function.effects.clone(),
+                capabilities: function.capabilities.clone(),
+                semantic_fingerprint,
+                subject_identity: subject_identity.clone(),
+                subject_fingerprint: subject_fingerprint.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+    tests.sort_by(|left, right| {
+        left.declaration_identity
+            .cmp(&right.declaration_identity)
+            .then_with(|| left.qualified_name.cmp(&right.qualified_name))
+    });
+    TestInventory {
+        schema_version: TEST_INVENTORY_SCHEMA_VERSION.to_owned(),
+        module: program.module.clone(),
+        source_artifact_identity: envelope.identity.clone(),
+        source_profile: ast.language_version.text.clone(),
+        subject_identity,
+        subject_fingerprint,
+        tests,
     }
 }
 
@@ -241,6 +342,16 @@ impl ReferenceCompiler {
                 }
             }
         }
+        let test_inventory = if program
+            .as_ref()
+            .is_some_and(|_| validation.as_ref().is_some_and(|report| report.valid))
+        {
+            ast.as_ref()
+                .zip(program.as_ref())
+                .map(|(ast, program)| build_test_inventory(&envelope, ast, program))
+        } else {
+            None
+        };
         SourceFrontEndResult {
             envelope,
             lexical,
@@ -255,6 +366,7 @@ impl ReferenceCompiler {
             module_resolutions,
             artifacts,
             diagnostics,
+            test_inventory,
         }
     }
 
@@ -2023,7 +2135,11 @@ fn build_binding_table(
             namespace: namespace.clone(),
             scope: module_scope,
             declaration: identity,
-            kind: SemanticBindingKind::Function,
+            kind: if function.is_test {
+                SemanticBindingKind::Test
+            } else {
+                SemanticBindingKind::Function
+            },
             projected_from: None,
         });
     }
@@ -2877,6 +2993,7 @@ fn elaborate_function(
     let _ = assumptions;
     Ok(Function {
         name: function.name.text.clone(),
+        is_test: function.is_test,
         home_module: None,
         generic_params: generic_params.clone(),
         inputs,

@@ -73,6 +73,12 @@ pub struct FiniteVariant {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Function {
     pub name: String,
+    /// True when this declaration was introduced with the Profile 0.17
+    /// `test` keyword. The callable function identity remains available for
+    /// execution, while declaration/test-case identities are separate in the
+    /// identity map and compiler inventory.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_test: bool,
     /// Namespace of the module that declared this function. `None` means the
     /// program's own module. Linked imports carry their declaring module so
     /// their semantic identities stay anchored to their home namespace.
@@ -106,6 +112,10 @@ pub struct Function {
 }
 
 impl Function {
+    pub fn is_test(&self) -> bool {
+        self.is_test
+    }
+
     /// The namespace this function's semantic identity is anchored to: its
     /// declaring module when it arrived through linking, otherwise the
     /// program's own module.
@@ -235,5 +245,15 @@ pub struct GenericSpecializationRecord {
 impl Program {
     pub fn from_json(input: &str) -> Result<Self, ParseError> {
         Ok(serde_json::from_str(input)?)
+    }
+
+    /// Return the production compilation view of this program. First-class
+    /// test declarations remain available to the compiler inventory and to
+    /// an explicit test build, but are not executable production exports by
+    /// default. The semantic subject identity is deliberately unchanged;
+    /// this is only an artifact-selection policy.
+    pub fn without_tests(mut self) -> Self {
+        self.functions.retain(|function| !function.is_test);
+        self
     }
 }

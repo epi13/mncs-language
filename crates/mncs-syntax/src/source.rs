@@ -9,7 +9,10 @@ pub const SOURCE_ENVELOPE_SCHEMA_VERSION: &str = "0.1";
 // the supported-profile predicate live in the authoritative registry
 // (`profile.rs`, RFC 0036). They are re-exported at the crate root, so
 // existing `mncs_syntax::SOURCE_PROFILE_VERSION_0_4` paths keep working.
-pub use crate::profile::{profile_at_least, source_profile_supported, SOURCE_PROFILE_VERSION_0_13};
+pub use crate::profile::{
+    profile_at_least, source_profile_supported, SOURCE_PROFILE_VERSION_0_13,
+    SOURCE_PROFILE_VERSION_0_17,
+};
 use crate::profile::{
     SOURCE_PROFILE_VERSION, SOURCE_PROFILE_VERSION_0_10, SOURCE_PROFILE_VERSION_0_11,
     SOURCE_PROFILE_VERSION_0_12, SOURCE_PROFILE_VERSION_0_14, SOURCE_PROFILE_VERSION_0_15,
@@ -223,6 +226,7 @@ pub enum TokenKind {
     MncsKeyword,
     ModuleKeyword,
     FunctionKeyword,
+    TestKeyword,
     ReturnKeyword,
     LetKeyword,
     IfKeyword,
@@ -378,6 +382,7 @@ pub enum CstKind {
     ModuleDeclaration,
     UseDeclaration,
     FunctionDeclaration,
+    TestDeclaration,
     FiniteTypeDeclaration,
     FiniteVariant,
     RecordTypeDeclaration,
@@ -988,6 +993,11 @@ pub struct AstGenericArg {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AstFunction {
+    /// The declaration role is part of the source AST and is preserved by the
+    /// compiler. It is omitted for ordinary functions to keep old AST
+    /// documents/fingerprints compatible.
+    #[serde(default, skip_serializing_if = "is_function_declaration")]
+    pub is_test: bool,
     pub name: SpannedText,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub generic_params: Vec<AstGenericParam>,
@@ -1001,6 +1011,10 @@ pub struct AstFunction {
     pub capabilities: Vec<SpannedText>,
     pub body: AstBody,
     pub span: SourceSpan,
+}
+
+fn is_function_declaration(is_test: &bool) -> bool {
+    !*is_test
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1202,6 +1216,14 @@ pub fn lex(envelope: &SourceEnvelope) -> LexedDocument {
                 "mncs" => TokenKind::MncsKeyword,
                 "module" => TokenKind::ModuleKeyword,
                 "fn" => TokenKind::FunctionKeyword,
+                "test"
+                    if profile_at_least(
+                        &envelope.language_version,
+                        SOURCE_PROFILE_VERSION_0_17,
+                    ) =>
+                {
+                    TokenKind::TestKeyword
+                }
                 "return" => TokenKind::ReturnKeyword,
                 "let" => TokenKind::LetKeyword,
                 "if" => TokenKind::IfKeyword,
@@ -1419,11 +1441,11 @@ pub fn parse(envelope: &SourceEnvelope) -> ParseOutput {
     if let Some(tree) = ast.as_ref() {
         if !source_profile_supported(&tree.language_version.text) {
             let message = if tree.language_version.text == SOURCE_PROFILE_VERSION_1_0 {
-                "source profile 1.0 has no published specification; declare a supported profile (0.1 through 0.13) until Profile 1.0 is deliberately specified"
+                "source profile 1.0 has no published specification; declare a supported profile (0.1 through 0.17) until Profile 1.0 is deliberately specified"
                     .to_owned()
             } else {
                 format!(
-                    "source profile {} is not supported; declare a supported profile (0.1 through 0.13)",
+                    "source profile {} is not supported; declare a supported profile (0.1 through 0.17)",
                     tree.language_version.text
                 )
             };
@@ -1618,6 +1640,29 @@ impl<'a> Parser<'a> {
                         functions.push(function);
                     }
                 }
+                Some(TokenKind::TestKeyword) => {
+                    let (node, function) = self.function_with_role(true, false);
+                    declaration_nodes.push(node);
+                    if let Some(function) = function {
+                        functions.push(function);
+                    }
+                }
+                Some(TokenKind::Identifier)
+                    if self
+                        .current_token()
+                        .is_some_and(|token| token.text == "test") =>
+                {
+                    self.error(
+                        "MNP220",
+                        "first-class test declarations require source profile 0.17 or later",
+                        vec![TokenKind::Identifier],
+                    );
+                    let (node, function) = self.function_with_role(true, true);
+                    declaration_nodes.push(node);
+                    if let Some(function) = function {
+                        functions.push(function);
+                    }
+                }
                 _ => break,
             }
         }
@@ -1646,7 +1691,7 @@ impl<'a> Parser<'a> {
             self.error(
                 "MNP006",
                 "module declares nothing; expected at least one function, type, or import",
-                vec![TokenKind::FunctionKeyword],
+                vec![TokenKind::FunctionKeyword, TokenKind::TestKeyword],
             );
         }
         if self.cursor < self.significant.len() {
@@ -1722,7 +1767,7 @@ impl<'a> Parser<'a> {
                 None
             } else {
                 self.cursor += 1;
-                self.spanned(TokenKind::Identifier, "MNP182", "expected import alias")
+                self.identifier_like("MNP182", "expected import alias")
             }
         } else {
             None
@@ -1754,7 +1799,7 @@ impl<'a> Parser<'a> {
     fn finite_type(&mut self) -> (CstNode, Option<AstFiniteType>) {
         let start = self.current_token_index();
         self.expect(TokenKind::EnumKeyword, "MNP070", "expected 'enum'");
-        let name = self.spanned(TokenKind::Identifier, "MNP071", "expected finite type name");
+        let name = self.identifier_like("MNP071", "expected finite type name");
         // Numerics P-004: like generic records (see `record_decl`), a
         // `<...>` parameter list after an enum name is refused precisely
         // at the `<`, then the balanced body is skipped so parsing
@@ -1779,12 +1824,10 @@ impl<'a> Parser<'a> {
         );
         let mut variants = Vec::new();
         let mut children = Vec::new();
-        while self.current_kind() == Some(TokenKind::Identifier) {
+        while self.is_identifier_like() {
             let variant_start = self.current_token_index();
             let mut variant_fields = Vec::new();
-            if let Some(variant) =
-                self.spanned(TokenKind::Identifier, "MNP073", "expected variant name")
-            {
+            if let Some(variant) = self.identifier_like("MNP073", "expected variant name") {
                 if self.current_kind() == Some(TokenKind::LeftBrace)
                     && profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_6)
                 {
@@ -1873,7 +1916,7 @@ impl<'a> Parser<'a> {
     fn record_decl(&mut self) -> (CstNode, Option<AstRecordDecl>) {
         let start = self.current_token_index();
         self.expect(TokenKind::RecordKeyword, "MNP121", "expected 'record'");
-        let name = self.spanned(TokenKind::Identifier, "MNP122", "expected record name");
+        let name = self.identifier_like("MNP122", "expected record name");
         // Numerics P-004: a `<...>` parameter list after the record name
         // is a generic record, which the type system does not offer.
         // Refuse precisely at the `<` (reusing the shared parameter
@@ -1949,8 +1992,25 @@ impl<'a> Parser<'a> {
     }
 
     fn function(&mut self) -> (CstNode, Option<AstFunction>) {
+        self.function_with_role(false, false)
+    }
+
+    fn function_with_role(
+        &mut self,
+        is_test: bool,
+        legacy_test_identifier: bool,
+    ) -> (CstNode, Option<AstFunction>) {
         let start = self.current_token_index();
-        self.expect(TokenKind::FunctionKeyword, "MNP010", "expected 'fn'");
+        if is_test && legacy_test_identifier {
+            self.cursor += 1;
+        } else {
+            let (expected, code, label) = if is_test {
+                (TokenKind::TestKeyword, "MNP221", "expected 'test'")
+            } else {
+                (TokenKind::FunctionKeyword, "MNP010", "expected 'fn'")
+            };
+            self.expect(expected, code, label);
+        }
         let name = self.value_name("MNP011", "expected function name");
         let generic_params = self.generic_params();
         let (input_node, inputs) = self.parameter_list("input");
@@ -1999,13 +2059,18 @@ impl<'a> Parser<'a> {
         let block_node = self.node(CstKind::Block, block_start, end, block_children);
         let body_span = block_node.span;
         let function_node = self.node(
-            CstKind::FunctionDeclaration,
+            if is_test {
+                CstKind::TestDeclaration
+            } else {
+                CstKind::FunctionDeclaration
+            },
             start,
             end,
             vec![input_node, output_node, block_node],
         );
         let function = match (name, returned_value) {
             (Some(name), Some(returned_value)) => Some(AstFunction {
+                is_test,
                 name,
                 generic_params: generic_params.unwrap_or_default(),
                 inputs,
@@ -2654,7 +2719,7 @@ impl<'a> Parser<'a> {
             }
         }
         match self.current_kind() {
-            Some(TokenKind::Identifier | TokenKind::CapabilityKeyword) => {
+            Some(TokenKind::Identifier | TokenKind::TestKeyword | TokenKind::CapabilityKeyword) => {
                 if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_9)
                     && self.peek_kind(1) == Some(TokenKind::Dot)
                 {
@@ -3084,11 +3149,7 @@ impl<'a> Parser<'a> {
             while self.current_kind() != Some(TokenKind::RightBrace)
                 && self.cursor < self.significant.len()
             {
-                let field_name = self.spanned(
-                    TokenKind::Identifier,
-                    "MNP140",
-                    "expected payload field name",
-                )?;
+                let field_name = self.field_name("MNP140", "expected payload field name")?;
                 self.expect(
                     TokenKind::Colon,
                     "MNP141",
@@ -3852,7 +3913,12 @@ impl<'a> Parser<'a> {
     /// integer in arm position still reaches MNP084.
     fn at_match_arm_start(&self, scalar_patterns: bool) -> bool {
         match self.current_kind() {
-            Some(TokenKind::Identifier | TokenKind::TrueKeyword | TokenKind::FalseKeyword) => true,
+            Some(
+                TokenKind::Identifier
+                | TokenKind::TestKeyword
+                | TokenKind::TrueKeyword
+                | TokenKind::FalseKeyword,
+            ) => true,
             Some(TokenKind::IntegerLiteral | TokenKind::Minus) => scalar_patterns,
             _ => false,
         }
@@ -3868,7 +3934,7 @@ impl<'a> Parser<'a> {
     fn at_record_literal(&self) -> bool {
         match self.peek_kind(1) {
             Some(TokenKind::DotDot) => true,
-            Some(TokenKind::Identifier) => {
+            Some(TokenKind::Identifier | TokenKind::TestKeyword) => {
                 matches!(self.peek_kind(2), Some(TokenKind::Colon))
             }
             Some(TokenKind::NextKeyword) if self.admits_contextual_next() => {
@@ -3886,7 +3952,7 @@ impl<'a> Parser<'a> {
             return false;
         }
         match self.peek_kind(1) {
-            Some(TokenKind::Identifier) => {
+            Some(TokenKind::Identifier | TokenKind::TestKeyword) => {
                 matches!(self.peek_kind(2), Some(TokenKind::Colon))
             }
             Some(TokenKind::NextKeyword) if self.admits_contextual_next() => {
@@ -3979,7 +4045,12 @@ impl<'a> Parser<'a> {
         let scalar_patterns = profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_13);
         while matches!(
             self.current_kind(),
-            Some(TokenKind::Identifier | TokenKind::TrueKeyword | TokenKind::FalseKeyword)
+            Some(
+                TokenKind::Identifier
+                    | TokenKind::TestKeyword
+                    | TokenKind::TrueKeyword
+                    | TokenKind::FalseKeyword,
+            )
         ) || (scalar_patterns
             && matches!(
                 self.current_kind(),
@@ -4063,7 +4134,7 @@ impl<'a> Parser<'a> {
                     let kind = self.current_kind().expect("boolean match pattern");
                     self.spanned(kind, "MNP082", "expected match variant")?
                 }
-                _ => self.spanned(TokenKind::Identifier, "MNP082", "expected match variant")?,
+                _ => self.identifier_like("MNP082", "expected match variant")?,
             };
             // NOTE (CP-0010): a bare `_` stays a `Variant` pattern here.
             // Whether it means "variant literally named `_`" or "default
@@ -4085,22 +4156,16 @@ impl<'a> Parser<'a> {
             {
                 self.cursor += 1;
                 let mut qualified_type = variant.clone();
-                variant = self.spanned(
-                    TokenKind::Identifier,
-                    "MNP136",
-                    "expected variant name after '.'",
-                )?;
+                variant = self.identifier_like("MNP136", "expected variant name after '.'")?;
                 if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_9)
                     && self.current_kind() == Some(TokenKind::Dot)
                 {
                     let mut segments = vec![qualified_type.clone(), variant.clone()];
                     while self.current_kind() == Some(TokenKind::Dot) {
                         self.cursor += 1;
-                        segments.push(self.spanned(
-                            TokenKind::Identifier,
-                            "MNP136",
-                            "expected variant name after '.'",
-                        )?);
+                        segments.push(
+                            self.identifier_like("MNP136", "expected variant name after '.'")?,
+                        );
                     }
                     variant = segments.pop().expect("qualified pattern has a variant");
                     let start = segments.first().expect("qualified pattern has a type").span;
@@ -4139,11 +4204,7 @@ impl<'a> Parser<'a> {
                     };
                     let binding = if self.current_kind() == Some(TokenKind::Colon) {
                         self.cursor += 1;
-                        self.spanned(
-                            TokenKind::Identifier,
-                            "MNP138",
-                            "expected binding name after ':'",
-                        )?
+                        self.identifier_like("MNP138", "expected binding name after ':'")?
                     } else {
                         field_name.clone()
                     };
@@ -4563,7 +4624,9 @@ impl<'a> Parser<'a> {
     /// admitted such names, so this is purely additive.
     fn name_segment(&mut self, code: &str, message: &str) -> Option<SpannedText> {
         match self.current_kind() {
-            Some(TokenKind::Identifier) | Some(TokenKind::MncsKeyword) => {}
+            Some(TokenKind::Identifier)
+            | Some(TokenKind::MncsKeyword)
+            | Some(TokenKind::TestKeyword) => {}
             _ => {
                 self.error(code, message, vec![TokenKind::Identifier]);
                 return None;
@@ -4597,7 +4660,9 @@ impl<'a> Parser<'a> {
     /// carry their own introducing token.
     fn value_name(&mut self, code: &str, message: &str) -> Option<SpannedText> {
         match self.current_kind() {
-            Some(TokenKind::Identifier) => self.spanned(TokenKind::Identifier, code, message),
+            Some(TokenKind::Identifier | TokenKind::TestKeyword) => {
+                self.identifier_like(code, message)
+            }
             Some(TokenKind::CapabilityKeyword) => {
                 let index = self.significant[self.cursor];
                 self.cursor += 1;
@@ -4618,7 +4683,7 @@ impl<'a> Parser<'a> {
     fn is_value_name(&self) -> bool {
         matches!(
             self.current_kind(),
-            Some(TokenKind::Identifier | TokenKind::CapabilityKeyword)
+            Some(TokenKind::Identifier | TokenKind::TestKeyword | TokenKind::CapabilityKeyword)
         )
     }
 
@@ -4634,7 +4699,9 @@ impl<'a> Parser<'a> {
     /// `value_name` and the `mncs`-segment handling in `name_segment`.
     fn field_name(&mut self, code: &str, message: &str) -> Option<SpannedText> {
         match self.current_kind() {
-            Some(TokenKind::Identifier) => self.spanned(TokenKind::Identifier, code, message),
+            Some(TokenKind::Identifier | TokenKind::TestKeyword) => {
+                self.identifier_like(code, message)
+            }
             Some(TokenKind::NextKeyword) if self.admits_contextual_next() => {
                 let index = self.significant[self.cursor];
                 self.cursor += 1;
@@ -4653,9 +4720,42 @@ impl<'a> Parser<'a> {
 
     /// Whether the cursor sits on a field/member name (`field_name`).
     fn is_field_name(&self) -> bool {
-        matches!(self.current_kind(), Some(TokenKind::Identifier))
-            || (self.admits_contextual_next()
-                && matches!(self.current_kind(), Some(TokenKind::NextKeyword)))
+        matches!(
+            self.current_kind(),
+            Some(TokenKind::Identifier | TokenKind::TestKeyword)
+        ) || (self.admits_contextual_next()
+            && matches!(self.current_kind(), Some(TokenKind::NextKeyword)))
+    }
+
+    /// Consume a name token that is normally an identifier but is reserved as
+    /// the contextual `test` declaration token in Profile 0.17. Keeping this
+    /// acceptance at name positions lets existing modules such as
+    /// `mncs.test.assertions.v1` remain valid while preserving an explicit
+    /// declaration role at module scope.
+    fn identifier_like(&mut self, code: &str, message: &str) -> Option<SpannedText> {
+        match self.current_kind() {
+            Some(TokenKind::Identifier | TokenKind::TestKeyword) => {
+                let index = self.significant[self.cursor];
+                let token = &self.tokens[index];
+                let value = SpannedText {
+                    text: token.text.clone(),
+                    span: token.span,
+                };
+                self.cursor += 1;
+                Some(value)
+            }
+            _ => {
+                self.error(code, message, vec![TokenKind::Identifier]);
+                None
+            }
+        }
+    }
+
+    fn is_identifier_like(&self) -> bool {
+        matches!(
+            self.current_kind(),
+            Some(TokenKind::Identifier | TokenKind::TestKeyword)
+        )
     }
 
     /// Parse a type annotation: a plain named/scalar identifier, a Profile
@@ -4672,7 +4772,7 @@ impl<'a> Parser<'a> {
 
     fn type_annotation_inner(&mut self, code: &str, message: &str) -> Option<SpannedText> {
         if self.current_kind() != Some(TokenKind::LeftBracket) {
-            let mut name = self.spanned(TokenKind::Identifier, code, message)?;
+            let mut name = self.identifier_like(code, message)?;
             if profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_9)
                 && self.current_kind() == Some(TokenKind::Dot)
             {
@@ -4681,11 +4781,8 @@ impl<'a> Parser<'a> {
                 let mut end = start;
                 while self.current_kind() == Some(TokenKind::Dot) {
                     self.cursor += 1;
-                    let segment = self.spanned(
-                        TokenKind::Identifier,
-                        code,
-                        "expected qualified type member after '.'",
-                    )?;
+                    let segment =
+                        self.identifier_like(code, "expected qualified type member after '.',")?;
                     text.push('.');
                     text.push_str(&segment.text);
                     end = segment.span;
@@ -5124,6 +5221,7 @@ fn infer_source_profile(text: &str) -> &'static str {
     });
     match header {
         Some(line) if line.trim_start().starts_with("mncs 1.0") => SOURCE_PROFILE_VERSION_1_0,
+        Some(line) if line.trim_start().starts_with("mncs 0.17") => SOURCE_PROFILE_VERSION_0_17,
         Some(line) if line.trim_start().starts_with("mncs 0.16") => SOURCE_PROFILE_VERSION_0_16,
         Some(line) if line.trim_start().starts_with("mncs 0.15") => SOURCE_PROFILE_VERSION_0_15,
         Some(line) if line.trim_start().starts_with("mncs 0.14") => SOURCE_PROFILE_VERSION_0_14,
@@ -5533,5 +5631,79 @@ mod tests {
             vec!["0.12".to_owned(), "1e300".to_owned(), "1.5e-3".to_owned()]
         );
         assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+    }
+
+    #[test]
+    fn first_class_test_declaration_is_structural_and_profile_gated() {
+        let current = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "first-class-test",
+            "mncs 0.17;\nmodule example.tests;\ntest arithmetic() -> (result: i64) { return 42; }\n",
+        );
+        let parsed = parse(&current);
+        assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+        assert_eq!(
+            parsed
+                .lexical
+                .tokens
+                .iter()
+                .filter(|token| token.kind == TokenKind::TestKeyword)
+                .count(),
+            1
+        );
+        let ast = parsed.ast.expect("current profile produces an AST");
+        assert!(ast.functions[0].is_test);
+        assert!(parsed
+            .cst
+            .root
+            .children
+            .iter()
+            .any(|node| node.kind == CstKind::TestDeclaration));
+
+        let old = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "old-test-syntax",
+            "mncs 0.16;\nmodule example.tests;\ntest arithmetic() -> (result: i64) { return 42; }\n",
+        );
+        let refused = parse(&old);
+        assert!(!refused.is_valid());
+        assert!(refused
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "MNP220"));
+    }
+
+    #[test]
+    fn test_remains_an_identifier_inside_older_profile_function_bodies() {
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "test-identifier",
+            "mncs 0.16;\nmodule example.tests;\nfn test(test: i64) -> (result: i64) { return test; }\n",
+        );
+        let parsed = parse(&envelope);
+        assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+    }
+
+    #[test]
+    fn test_keyword_remains_contextual_in_module_and_value_names() {
+        let envelope = SourceEnvelope::inline(
+            SourceArtifactKind::Program,
+            "test-contextual-name",
+            "mncs 0.17;\nmodule example.test;\nuse mncs.test.assertions.v1;\nfn test() -> (result: i64) { return 42; }\ntest check() -> (result: i64) { return test(); }\n",
+        );
+        let parsed = parse(&envelope);
+        assert!(parsed.is_valid(), "{:#?}", parsed.diagnostics);
+        let ast = parsed.ast.expect("contextual names produce an AST");
+        assert_eq!(ast.module.text, "example.test");
+        assert_eq!(ast.uses[0].module.text, "mncs.test.assertions.v1");
+        assert!(ast
+            .functions
+            .iter()
+            .any(|function| function.name.text == "test"));
+        assert!(ast
+            .functions
+            .iter()
+            .find(|function| function.name.text == "check")
+            .is_some_and(|function| function.is_test));
     }
 }
