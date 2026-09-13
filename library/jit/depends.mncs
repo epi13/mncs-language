@@ -34,7 +34,6 @@ mncs 0.13;
 // <= bindings * affected. No operation allocates.
 module mncs.jit.depends.v1;
 
-use mncs.core.logic.v1 as logic;
 use mncs.jit.types.v1 as types;
 
 // --- Edge storage ---
@@ -60,12 +59,11 @@ fn insert_edge(edges: [types.DepEdge; 16], count: u64, user: u64, used: u64, kin
     let full: bool = count >= 16;
     let known: bool = edge_known(edges, count, user, used);
     let kind_ok: bool = types.dep_kind_is_known(kind_code);
-    let accepted: bool = logic.bool_not(full) && logic.bool_not(known) && kind_ok;
+    let accepted: bool = !full && !known && kind_ok;
     let slot: u64 = select(accepted, count, 0);
     let grown: [types.DepEdge; 16] = replace(edges, slot, types.DepEdge { user: user, used: used, kind_code: kind_code });
     if accepted {
         return EdgeInsertOut { edges: grown, count: count +% 1, accepted: true };
-    } else {
     }
     return EdgeInsertOut { edges: edges, count: count, accepted: false };
 }
@@ -76,10 +74,10 @@ fn insert_edge(edges: [types.DepEdge; 16], count: u64, user: u64, used: u64, kin
 // kind codes fail closed to RequiresRecompile: an unrecognized change
 // must never read as Unaffected.
 fn classify_dependent(change_code: u64, kind_code: u64) -> (result: u64) {
-    if logic.bool_not(types.change_is_known(change_code)) {
+    if !types.change_is_known(change_code) {
         return 2;
     }
-    if logic.bool_not(types.dep_kind_is_known(kind_code)) {
+    if !types.dep_kind_is_known(kind_code) {
         return 2;
     }
     if change_code == 0 {
@@ -127,15 +125,15 @@ fn direct_has(users: [u64; 8], count: u64, node: u64) -> (result: bool) {
 // At most 8 users; further nominations set `truncated`.
 fn direct_users(edges: [types.DepEdge; 16], count: u64, changed: u64) -> (result: DirectOut) {
     let seed: DirectOut = DirectOut {
-        users: [0, 0, 0, 0, 0, 0, 0, 0],
-        kinds: [0, 0, 0, 0, 0, 0, 0, 0],
+        users: [0; 8],
+        kinds: [0; 8],
         count: 0,
         truncated: false,
     };
     iterate i over edges carrying st: DirectOut = seed {
         let live: bool = i < count;
         let edge: types.DepEdge = edges[i];
-        let nominated: bool = live && edge.used == changed && logic.bool_not(direct_has(st.users, st.count, edge.user));
+        let nominated: bool = live && edge.used == changed && !direct_has(st.users, st.count, edge.user);
         let room: bool = st.count < 8;
         let join: bool = nominated && room;
         let slot: u64 = select(join, st.count, 0);
@@ -143,7 +141,7 @@ fn direct_users(edges: [types.DepEdge; 16], count: u64, changed: u64) -> (result
             users: replace(st.users, slot, select(join, edge.user, st.users[slot])),
             kinds: replace(st.kinds, slot, select(join, edge.kind_code, st.kinds[slot])),
             count: st.count +% select(join, 1, 0) as u64,
-            truncated: st.truncated || (nominated && logic.bool_not(room)),
+            truncated: st.truncated || (nominated && !room),
         };
     }
     return st;
@@ -172,14 +170,14 @@ fn depend_round(edges: [types.DepEdge; 16], count: u64, base: [u64; 8], base_cou
     iterate i over edges carrying acc: DependentsOut = st {
         let live: bool = i < count;
         let edge: types.DepEdge = edges[i];
-        let nominated: bool = live && affected_has(base, base_count, edge.used) && logic.bool_not(affected_has(acc.affected, acc.count, edge.user));
+        let nominated: bool = live && affected_has(base, base_count, edge.used) && !affected_has(acc.affected, acc.count, edge.user);
         let room: bool = acc.count < 8;
         let join: bool = nominated && room && active;
         let slot: u64 = select(join, acc.count, 0);
         next acc = DependentsOut {
             affected: replace(acc.affected, slot, select(join, edge.user, acc.affected[slot])),
             count: acc.count +% select(join, 1, 0) as u64,
-            truncated: acc.truncated || (nominated && logic.bool_not(room) && active),
+            truncated: acc.truncated || (nominated && !room && active),
         };
     }
     return acc;
@@ -254,7 +252,7 @@ fn stale_bindings(edges: [types.DepEdge; 16], edge_count: u64, bindings: [types.
         let b: types.Binding = st.bindings[i];
         let is_changed: bool = b.logical == changed;
         let is_valid: bool = b.state_code == 0;
-        let hit: bool = live && logic.bool_not(is_changed) && is_valid && affected_has(reach.affected, reach.count, b.logical);
+        let hit: bool = live && !is_changed && is_valid && affected_has(reach.affected, reach.count, b.logical);
         let is_direct: bool = direct_has(direct.users, direct.count, b.logical);
         let verdict: u64 = select(is_direct, classify_dependent(change_code, direct_kind(direct.users, direct.kinds, direct.count, b.logical)), escalate_transitive(change_code));
         let stale_now: bool = hit && verdict == 2;
@@ -305,38 +303,20 @@ fn select_binding(flag: bool, a: types.Binding, b: types.Binding) -> (result: ty
 
 // --- Executable entry points (scalar shapes for backend corpora) ---
 
+fn empty_edge() -> (result: types.DepEdge) {
+    return types.DepEdge { user: 0, used: 0, kind_code: 0 };
+}
+
 fn empty_edges() -> (result: [types.DepEdge; 16]) {
-    return [
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-        types.DepEdge { user: 0, used: 0, kind_code: 0 },
-    ];
+    return [empty_edge(); 16];
+}
+
+fn empty_binding() -> (result: types.Binding) {
+    return types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 };
 }
 
 fn empty_bindings() -> (result: [types.Binding; 8]) {
-    return [
-        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
-        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
-        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
-        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
-        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
-        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
-        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
-        types.Binding { logical: 0, generation: 0, artifact: 0, previous_generation: 0, previous_artifact: 0, state_code: 0, stale_reason: 0 },
-    ];
+    return [empty_binding(); 8];
 }
 
 // Policy matrix over (change, kind): BodyOnlyx3 -> 000, Signature ->

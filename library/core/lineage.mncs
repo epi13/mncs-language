@@ -8,7 +8,7 @@ mncs 0.10;
 // strings, maps, mutation, or host authority into their lineage semantics.
 module mncs.core.lineage.v1;
 
-use mncs.core.identity as idlib;
+use mncs.core.identity.v1 as idlib;
 
 enum Relation { Root, Successor, Conflict }
 

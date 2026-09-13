@@ -43,7 +43,6 @@ mncs 0.13;
 // function is total.
 module mncs.jit.session.v1;
 
-use mncs.core.logic.v1 as logic;
 use mncs.jit.depends.v1 as depends;
 use mncs.jit.lifecycle.v1 as lifecycle;
 use mncs.jit.types.v1 as types;
@@ -157,13 +156,13 @@ fn create() -> (result: types.Session) {
         next_artifact: 1,
         publish_seq: 0,
         closed: false,
-        defs: [d0, d0, d0, d0, d0, d0, d0, d0],
+        defs: [d0; 8],
         def_count: 0,
-        bindings: [b0, b0, b0, b0, b0, b0, b0, b0],
+        bindings: [b0; 8],
         binding_count: 0,
-        artifacts: [a0, a0, a0, a0, a0, a0, a0, a0, a0, a0, a0, a0, a0, a0, a0, a0],
+        artifacts: [a0; 16],
         artifact_count: 0,
-        edges: [e0, e0, e0, e0, e0, e0, e0, e0, e0, e0, e0, e0, e0, e0, e0, e0],
+        edges: [e0; 16],
         edge_count: 0,
     };
 }
@@ -249,23 +248,18 @@ fn select_edge_fold(flag: bool, a: [types.DepEdge; 16], b: [types.DepEdge; 16]) 
 fn define(session: types.Session, logical: u64, content_hash: u64, change_code: u64, assumption_bits: u64, deps: [u64; 4], dep_count: u64, dep_kind_code: u64) -> (result: DefineOut) {
     if session.closed {
         return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 2 };
-    } else {
     }
-    if logic.bool_not(types.change_is_known(change_code)) {
+    if !types.change_is_known(change_code) {
         return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 7 };
-    } else {
     }
-    if dep_count > 0 && logic.bool_not(types.dep_kind_is_known(dep_kind_code)) {
+    if dep_count > 0 && !types.dep_kind_is_known(dep_kind_code) {
         return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 7 };
-    } else {
     }
     if dep_count > 4 {
         return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 5 };
-    } else {
     }
     if logical == 0 {
         return define_new(session, content_hash, change_code, assumption_bits, deps, dep_count, dep_kind_code);
-    } else {
     }
     return define_redefine(session, logical, content_hash, change_code, assumption_bits, deps, dep_count, dep_kind_code);
 }
@@ -273,15 +267,12 @@ fn define(session: types.Session, logical: u64, content_hash: u64, change_code: 
 fn define_new(session: types.Session, content_hash: u64, change_code: u64, assumption_bits: u64, deps: [u64; 4], dep_count: u64, dep_kind_code: u64) -> (result: DefineOut) {
     if session.def_count >= 8 {
         return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 3 };
-    } else {
     }
     if session.binding_count >= 8 {
         return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 3 };
-    } else {
     }
-    if logic.bool_not(has_room_edges(session, dep_count)) {
+    if !has_room_edges(session, dep_count) {
         return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 5 };
-    } else {
     }
     let fresh: u64 = session.next_logical;
     let gen: u64 = session.next_generation;
@@ -329,19 +320,15 @@ fn define_redefine(session: types.Session, logical: u64, content_hash: u64, chan
     let slot: u64 = binding_index(session, logical);
     if slot >= session.binding_count {
         return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 6 };
-    } else {
     }
     if latest_hash(session, logical) == content_hash {
         return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 4 };
-    } else {
     }
     if session.def_count >= 8 {
         return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 3 };
-    } else {
     }
-    if logic.bool_not(has_room_edges(session, dep_count)) {
+    if !has_room_edges(session, dep_count) {
         return DefineOut { session: session, logical: 0, generation: 0, accepted: false, reason: 5 };
-    } else {
     }
     let gen: u64 = session.next_generation;
     let row: types.Definition = types.Definition {
@@ -553,7 +540,7 @@ fn definition_proof(session: types.Session, logical: u64, generation: u64) -> (r
 // --- Executable entry points (scalar shapes for backend corpora) ---
 
 fn no_deps() -> (result: [u64; 4]) {
-    return [0, 0, 0, 0];
+    return [0; 4];
 }
 
 // Create then define one BodyOnly definition: logical 1,

@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.core.geometry — typed spatial primitives for machine-native layout.
 //
@@ -241,11 +241,12 @@ fn rect_from_point_size(p: Point, s: Size) -> (result: Rect) {
     return Rect { origin: p, size: s };
 }
 
-// Sequence-typed spatial helpers are now generic over the bound `N: Nat`
-// (Profile 0.10, RFC 0013). The authoritative primitives are
-// `first_point<N>`, `contains_any<N>`, `union<N>`; the legacy `*4`
-// wrappers remain for compatibility. A window of points or rects is a
-// language-level `[Record; N]` value, not four scalar wrappers.
+// Sequence-typed spatial helpers are generic over the bound `N: Nat`
+// (Profile 0.10, RFC 0013); call sites use Profile 0.13 inference so the
+// fixed-width wrappers below read as plain delegations. The authoritative
+// primitives are `first_point<N>`, `contains_any<N>`, `union<N>`; the
+// fixed-width wrappers remain for compatibility. A window of points or
+// rects is a language-level `[Record; N]` value, not four scalar wrappers.
 fn first_point<N: Nat>(points: [Point; N]) -> (result: Point) {
     return points[0];
 }
@@ -265,15 +266,15 @@ fn union<N: Nat>(rects: [Rect; N]) -> (result: Rect) {
 }
 
 fn first_point4(points: [Point; 4]) -> (result: Point) {
-    return first_point<4>(points);
+    return first_point(points);
 }
 
 fn contains_any4(rects: [Rect; 4], p: Point) -> (result: bool) {
-    return contains_any<4>(rects, p);
+    return contains_any(rects, p);
 }
 
 fn union4(rects: [Rect; 4]) -> (result: Rect) {
-    return union<4>(rects);
+    return union(rects);
 }
 
 fn rect_center(r: Rect) -> (result: Point) {
@@ -331,7 +332,7 @@ fn rect_split_vertical(r: Rect, first_height: i64) -> (result: RectPair) {
 }
 
 fn rect_disjoint(a: Rect, b: Rect) -> (result: bool) {
-    return select(rect_intersects(a, b), false, true);
+    return !rect_intersects(a, b);
 }
 
 // Adjacent means the closures touch on an edge while the open interiors
@@ -399,9 +400,11 @@ fn pick_i64(condition: bool, when_true: i64, when_false: i64) -> (result: i64) {
     return select(condition, when_true, when_false);
 }
 
+// Scalar clamp between inclusive bounds. Comparison-only clamping is owned
+// by `mncs.core.ordering.v1` (imported above); this delegates there instead
+// of restating the bounds.
 fn clamp_between(value: i64, lo: i64, hi: i64) -> (result: i64) {
-    let lower: i64 = select(value < lo, lo, value);
-    return select(lower > hi, hi, lower);
+    return clamp_i64(value, lo, hi);
 }
 
 // Size clamp between inclusive bounds for layout remainder distribution.

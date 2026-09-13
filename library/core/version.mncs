@@ -74,7 +74,12 @@ fn order_satisfies(envelope: Envelope, order: Ordering, majors_agree: bool) -> (
 }
 
 fn satisfies(envelope: Envelope, bound: Version, candidate: Version) -> (result: bool) {
-    let order: Ordering = compare(bound, candidate);
+    // Order is candidate-relative-to-bound: a candidate at or after the
+    // bound compares Same or After, which is what AtLeast accepts. (This
+    // matches `mncs.std.platform.v1::version_satisfies`; the two envelopes
+    // agree on every input by construction, see the platform convention
+    // note.)
+    let order: Ordering = compare(candidate, bound);
     let majors_agree: bool = bound.major == candidate.major;
     return order_satisfies(envelope, order, majors_agree);
 }

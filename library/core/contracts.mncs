@@ -1,4 +1,4 @@
-mncs 0.7;
+mncs 0.13;
 
 // mncs.core.contracts — executable semantic-contract vocabulary.
 //
@@ -12,31 +12,25 @@ mncs 0.7;
 // negative i64 tolerance never matches (it returns false rather than
 // failing) so callers need not pre-check.
 //
+// Boolean connectives stay owned by `mncs.core.logic.v1`; implication
+// delegates there instead of restating the truth table. Equivalence uses
+// the native Profile 0.13 boolean equality.
+//
 // Realization envelope: reference executors, research bytecode, portable
-// WASM, C11, LLVM, and Cranelift realize these operations; they use only
-// Profile 0.7 integer/boolean/conversion semantics.
+// WASM, C11, LLVM, and Cranelift realize these operations.
 module mncs.core.contracts.v1;
+
+use mncs.core.logic.v1 as logic;
 
 // Logical implication for preconditions: `implies(requires, ensures)` is
 // false only when the premise holds and the conclusion does not.
 fn implies(premise: bool, conclusion: bool) -> (result: bool) {
-    if premise {
-        return conclusion;
-    }
-    return true;
+    return logic.bool_implies(premise, conclusion);
 }
 
 // Biconditional for exact inverse laws such as decode(encode(x)) == x.
-// Comparisons are integer-only in MNCS, so boolean equivalence is decided
-// by control flow rather than `==`.
 fn iff(left: bool, right: bool) -> (result: bool) {
-    if left {
-        return right;
-    }
-    if right {
-        return false;
-    }
-    return true;
+    return left == right;
 }
 
 // Unsigned magnitude of the difference between two u64 observations.

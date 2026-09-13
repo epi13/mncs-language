@@ -34,7 +34,6 @@ mncs 0.13;
 // every function is total.
 module mncs.jit.proof.v1;
 
-use mncs.core.logic.v1 as logic;
 
 // True when a (semantic, proof) pair validated `then` still matches
 // the session era `now`. Assumption bits compare separately so

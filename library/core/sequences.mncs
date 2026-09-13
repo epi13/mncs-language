@@ -1,19 +1,22 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.core.sequences — reusable operations over bounded sequences.
 //
 // This module is the standard-library definition of the bounded-data
 // substrate's traversal vocabulary (Source Profile 0.7, RFC 0044) extended
-// with RFC 0013 explicit polymorphism (Profile 0.10). Every operation is
+// with RFC 0013 explicit polymorphism (Profile 0.10) and deterministic
+// generic-argument inference (Profile 0.13, ENG-0019): call sites omit
+// `<...>` wherever the value arguments determine every parameter, so the
+// fixed-width wrappers below read as plain delegations. Every operation is
 // total over its declared domain: lengths are fixed by the sequence types
 // themselves, traversal discharges element bounds checks by semantics, and
 // no operation allocates or fails. Element bounds facts are machine knowledge
 // here, not runtime folklore.
 //
-// Sequence generality is now expressed with explicit type/value parameters:
+// Sequence generality is expressed with explicit type/value parameters:
 // `fn contains<N: Nat>(xs: [i64; N], needle: i64) -> bool` is the
-// authoritative primitive; the legacy `contains4` family remains as thin
-// wrappers for compatibility. New code should use the generic bound.
+// authoritative primitive; the fixed-width `contains4` family remains as
+// thin wrappers for compatibility. New code should use the generic bound.
 //
 // Realization envelope (2026-08): reference executors, research bytecode,
 // portable WASM, C11, LLVM IR, and Cranelift realize these operations,
@@ -37,7 +40,7 @@ fn no_found() -> (result: Found) {
 }
 
 // Generic bounded-sequence primitives (Profile 0.10, RFC 0013)
-// These are the authoritative N-parameterized algorithms; the legacy `*4`
+// These are the authoritative N-parameterized algorithms; the fixed-width
 // wrappers below delegate to them. New code should use the generic bound.
 
 fn sum<N: Nat>(xs: [i64; N]) -> (result: i64) {
@@ -110,20 +113,48 @@ fn contains_byte<N: Nat>(xs: [byte; N], needle: byte) -> (result: bool) {
     return hit;
 }
 
+// Equality of two windows by position-wise conjunction.
+fn equals<N: Nat>(left: [i64; N], right: [i64; N]) -> (result: bool) {
+    iterate i over left carrying same: bool = true {
+        next same = same && left[i] == right[i];
+    }
+    return same;
+}
+
+// Non-decreasing scan: carries the previous element and the running verdict
+// through one traversal. Pairwise adjacency comes from carried state, so no
+// index arithmetic beyond the traversal domain is needed.
+fn scan_sorted(prev: i64, ordered: bool, next_value: i64) -> (result: Scan) {
+    let still: bool = ordered && prev <= next_value;
+    return Scan { prev: next_value, ordered: still };
+}
+
+fn start_scan(first: i64) -> (result: Scan) {
+    return Scan { prev: first, ordered: true };
+}
+
+// Non-decreasing check over any window using the scan state machine.
+fn is_sorted<N: Nat>(xs: [i64; N]) -> (result: bool) {
+    iterate i over xs carrying state: Scan = start_scan(xs[0]) {
+        next state = scan_sorted(state.prev, state.ordered, xs[i]);
+    }
+    return state.ordered;
+}
+
 // Sum of an exact window. Checked accumulation keeps overflow explicit.
 fn sum4(a: i64, b: i64, c: i64, d: i64) -> (result: i64) {
     let xs: [i64; 4] = [a, b, c, d];
-    return sum<4>(xs);
+    return sum(xs);
 }
 
 // Membership test by full deterministic traversal.
 fn contains4(xs: [i64; 4], needle: i64) -> (result: bool) {
-    return contains<4>(xs, needle);
+    return contains(xs, needle);
 }
 
 // Count of exact matches; the canonical search-shape fold.
 fn count4(xs: [i64; 4], needle: i64) -> (result: i64) {
-    return count<4>(xs, needle);
+    return count(xs, needle);
 }
 
 // First element of a window, as a logical option. The empty case is
@@ -138,7 +169,7 @@ fn first_of_generic<N: Nat>(view: [i64; up_to N]) -> (result: Found) {
 }
 
 fn first_of(view: [i64; up_to 4]) -> (result: Found) {
-    return first_of_generic<4>(view);
+    return first_of_generic(view);
 }
 
 // Last element of a window under the same option discipline.
@@ -150,7 +181,7 @@ fn last_of_generic<N: Nat>(view: [i64; up_to N]) -> (result: Found) {
 }
 
 fn last_of(view: [i64; up_to 4]) -> (result: Found) {
-    return last_of_generic<4>(view);
+    return last_of_generic(view);
 }
 
 fn first_or(view: [i64; up_to 4], fallback: i64) -> (result: i64) {
@@ -167,33 +198,14 @@ fn last_or(view: [i64; up_to 4], fallback: i64) -> (result: i64) {
     };
 }
 
-// Strict ordering scan: carries the previous element and the running verdict
-// through one traversal. Pairwise adjacency comes from carried state, so no
-// index arithmetic beyond the traversal domain is needed.
-fn scan_sorted(prev: i64, ordered: bool, next_value: i64) -> (result: Scan) {
-    let still: bool = ordered && prev <= next_value;
-    return Scan { prev: next_value, ordered: still };
-}
-
-fn start_scan(first: i64) -> (result: Scan) {
-    return Scan { prev: first, ordered: true };
-}
-
 // Non-decreasing check over a fixed window using the scan state machine.
 fn is_sorted4(xs: [i64; 4]) -> (result: bool) {
-    let seed: Scan = start_scan(xs[0]);
-    iterate i over xs carrying state: Scan = seed {
-        next state = scan_sorted(state.prev, state.ordered, xs[i]);
-    }
-    return state.ordered;
+    return is_sorted(xs);
 }
 
 // Equality of two fixed windows by position-wise conjunction.
 fn equals4(left: [i64; 4], right: [i64; 4]) -> (result: bool) {
-    iterate i over left carrying same: bool = true {
-        next same = same && left[i] == right[i];
-    }
-    return same;
+    return equals(left, right);
 }
 
 // Positional overwrite of one slot; the canonical functional-update shape
@@ -213,11 +225,11 @@ fn put4(base: [i64; 4], index: u64, value: i64) -> (result: [i64; 4]) {
 
 // Comparison-only extrema. No arithmetic, so no overflow obligation.
 fn min4(xs: [i64; 4]) -> (result: i64) {
-    return min<4>(xs);
+    return min(xs);
 }
 
 fn max4(xs: [i64; 4]) -> (result: i64) {
-    return max<4>(xs);
+    return max(xs);
 }
 
 // First matching index, or 4 when the needle is absent. One-past-end is a
@@ -259,25 +271,25 @@ fn first_u64_view(view: [u64; up_to 4], fallback: u64) -> (result: u64) {
 }
 
 fn contains_byte4(xs: [byte; 4], needle: byte) -> (result: bool) {
-    return contains_byte<4>(xs, needle);
+    return contains_byte(xs, needle);
 }
 
 fn count_nonzero4(xs: [i64; 4]) -> (result: i64) {
-    return count_nonzero<4>(xs);
+    return count_nonzero(xs);
 }
 
 // Boolean windows are logical `[bool; N]` sequences, not masks. Masks
 // remain lane predicates; these helpers traverse boolean elements.
 fn count_true4(xs: [bool; 4]) -> (result: i64) {
-    return count_true<4>(xs);
+    return count_true(xs);
 }
 
 fn any_true4(xs: [bool; 4]) -> (result: bool) {
-    return any_true<4>(xs);
+    return any_true(xs);
 }
 
 fn all_true4(xs: [bool; 4]) -> (result: bool) {
-    return all_true<4>(xs);
+    return all_true(xs);
 }
 
 fn reverse4(xs: [i64; 4]) -> (result: [i64; 4]) {

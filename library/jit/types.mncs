@@ -40,7 +40,6 @@ mncs 0.13;
 // No operation allocates; every function is total over its domain.
 module mncs.jit.types.v1;
 
-use mncs.core.logic.v1 as logic;
 
 // Execution providers. Reference and Cranelift are implemented;
 // LLVM and Native exist as first-class future provider classes so
@@ -434,11 +433,11 @@ fn candidate_codes_roundtrip() -> (result: i64) {
     let ok_validity: bool = validity_code(validity_of(1)) == 1;
     let ok_workload: bool = workload_code(workload_of(3)) == 3;
     let ok_known: bool = provider_is_known(3)
-        && logic.bool_not(provider_is_known(4))
+        && !provider_is_known(4)
         && lifecycle_is_known(4)
-        && logic.bool_not(lifecycle_is_known(5))
+        && !lifecycle_is_known(5)
         && workload_is_known(0)
-        && logic.bool_not(workload_is_known(9));
+        && !workload_is_known(9);
     let pack: u64 = select(ok_provider, 128, 0) as u64
         +% select(ok_lifecycle, 64, 0) as u64
         +% select(ok_tier, 32, 0) as u64

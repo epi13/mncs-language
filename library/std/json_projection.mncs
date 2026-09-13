@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.std.json.projection — bounded raw key/value projections.
 //
@@ -82,7 +82,7 @@ fn project_chunk(state: i64, input: [byte; up_to 64], key: [byte; 32], key_len: 
 }
 
 fn count_key(input: [byte; up_to 64], key: [byte; 32], key_len: i64) -> (result: i64) {
-    let zeros: [byte; 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let zeros: [byte; 32] = [0; 32];
     return projection_key_hits(project_chunk(0, input, key, key_len, zeros, 0));
 }
 

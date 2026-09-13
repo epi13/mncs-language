@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.core.proof_admit.v1 — authoritative tranche-0.2 proof admission and
 // binding (RFC 0007 hardening pass).
@@ -47,8 +47,9 @@ mncs 0.10;
 //
 // NOTE (backend constraint): native backends emit flat per-module symbols,
 // so every helper in this module keeps a globally-unique name and reuses
-// `dep.*` kernel helpers (e.g. `dep.bnot`) instead of redefining them —
-// a duplicate definition fails C11/LLVM/Cranelift compilation.
+// `dep.*` kernel helpers instead of redefining them — a duplicate
+// definition fails C11/LLVM/Cranelift compilation. Boolean negation spells
+// the native `!` operator; no kernel helper call is needed for it.
 module mncs.core.proof_admit.v1;
 
 use mncs.core.proof_dep.v2 as dep;
@@ -148,7 +149,7 @@ fn binding_authorizes(binding: ProofBinding) -> (result: bool) {
     if binding.verdict != 0 {
         return false;
     }
-    if dep.bnot(kernel_matches(binding.kernel, binding.kernel_len)) {
+    if !kernel_matches(binding.kernel, binding.kernel_len) {
         return false;
     }
     return binding.assumptions.valid;
@@ -186,26 +187,26 @@ fn cells_prefix_equal(first: [dep.Cell; 32], second: [dep.Cell; 32], total: i64)
 // at admission time (documented trust boundary: MNCS has no hash primitive);
 // everything downstream of admission is exact MNCS comparison.
 fn binding_reusable(binding: ProofBinding, proof: [byte; 32], obligation: [byte; 32], kernel: [byte; 32], kernel_len: u64, cells: [dep.Cell; 32], count: byte, proof_index: byte, prop_index: byte, dep_count: u64, dep0: [byte; 32], dep1: [byte; 32], dep2: [byte; 32], dep3: [byte; 32]) -> (result: bool) {
-    if dep.bnot(binding_authorizes(binding)) {
+    if !binding_authorizes(binding) {
         return false;
     }
-    if dep.bnot(bytes32_equal(binding.proof, proof)) {
+    if !bytes32_equal(binding.proof, proof) {
         return false;
     }
-    if dep.bnot(bytes32_equal(binding.obligation, obligation)) {
+    if !bytes32_equal(binding.obligation, obligation) {
         return false;
     }
-    if dep.bnot(kernel_matches(kernel, kernel_len)) {
+    if !kernel_matches(kernel, kernel_len) {
         return false;
     }
     let total: i64 = count as i64;
     if total != binding.count as i64 || proof_index != binding.proof_index || prop_index != binding.prop_index {
         return false;
     }
-    if dep.bnot(cells_prefix_equal(binding.cells, cells, total)) {
+    if !cells_prefix_equal(binding.cells, cells, total) {
         return false;
     }
-    if dep.bnot(deps_equal(binding, dep_count, dep0, dep1, dep2, dep3)) {
+    if !deps_equal(binding, dep_count, dep0, dep1, dep2, dep3) {
         return false;
     }
     let fresh: i64 = dep.check_proof_code(binding.cells, binding.count, binding.proof_index, binding.prop_index);

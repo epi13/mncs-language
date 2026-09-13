@@ -6953,8 +6953,59 @@ impl<'a> BodyBuilder<'a> {
                         _ => false,
                     });
                     if has_forwarding {
-                        // Keep signature generic inputs as is; validation will be performed after specialization when caller is specialized.
-                        (signature.inputs.clone(), signature.output.clone())
+                        // Partially symbolic: concretize the parameters
+                        // inference solved to values, and rename the
+                        // forwarded ones to the caller's own parameter
+                        // names, so the argument/result checks below
+                        // compare caller-side facts. The recorded call
+                        // keeps the symbolic `ValueParam`/generic `Type`
+                        // arguments; full validation completes at
+                        // specialization when the caller is specialized.
+                        // (Without the rename, only same-named parameters
+                        // compared equal and genuine forwarding refused
+                        // with MNE117/MNE133/MNE135.)
+                        let mut nat_forward = std::collections::BTreeMap::new();
+                        let mut type_forward = std::collections::BTreeMap::new();
+                        for (param, arg) in signature
+                            .generic_params
+                            .iter()
+                            .zip(&elaborated_generic_args)
+                        {
+                            match (param.kind, arg) {
+                                (
+                                    mncs_model::GenericParamKind::Nat,
+                                    mncs_model::GenericArg::ValueParam { name },
+                                ) => {
+                                    nat_forward.insert(param.name.clone(), name.clone());
+                                }
+                                (
+                                    mncs_model::GenericParamKind::Type,
+                                    mncs_model::GenericArg::Type {
+                                        ty: mncs_model::BodyType::GenericParam { name },
+                                    },
+                                ) => {
+                                    type_forward.insert(param.name.clone(), name.clone());
+                                }
+                                _ => {}
+                            }
+                        }
+                        let forwarded_inputs: Vec<mncs_model::BodyType> = signature
+                            .inputs
+                            .iter()
+                            .map(|ty| {
+                                rename_forwarded_params(
+                                    substitute_body_type(ty.clone(), &type_map, &value_map),
+                                    &nat_forward,
+                                    &type_forward,
+                                )
+                            })
+                            .collect();
+                        let forwarded_output = rename_forwarded_params(
+                            substitute_body_type(signature.output.clone(), &type_map, &value_map),
+                            &nat_forward,
+                            &type_forward,
+                        );
+                        (forwarded_inputs, forwarded_output)
                     } else {
                         // Fully concrete substitution
                         let substituted_inputs: Vec<mncs_model::BodyType> = signature
@@ -10481,8 +10532,12 @@ enum InferredTy {
 
 /// Collect Nat/type constraints by walking declared and actual types in
 /// lockstep. Sequences recurse structurally; a direct generic position
-/// pins its parameter; everything else (nominals, views against views,
-/// mismatched shapes) constrains nothing and lets ambiguity refuse.
+/// pins its parameter; exact bounds and view capacities constrain their
+/// parameter symmetrically (`[T; N]` against `[T; 4]`, `[T; up_to N]`
+/// against `[T; up_to 4]`), including caller-parameter forwarding;
+/// everything else (nominals, exact-against-view or view-against-exact
+/// mismatches, other mismatched shapes) constrains nothing and lets
+/// ambiguity refuse.
 fn collect_inference_constraints(
     declared: &BodyType,
     actual: &BodyType,
@@ -10524,6 +10579,22 @@ fn collect_inference_constraints(
                 (
                     mncs_model::SequenceBound::Param(name),
                     mncs_model::SequenceBound::Param(caller),
+                ) => {
+                    nats.entry(name.clone())
+                        .or_default()
+                        .push(InferredNat::Forward(caller.clone()));
+                }
+                (
+                    mncs_model::SequenceBound::UpToParam(name),
+                    mncs_model::SequenceBound::UpTo(value),
+                ) => {
+                    nats.entry(name.clone())
+                        .or_default()
+                        .push(InferredNat::Value(*value));
+                }
+                (
+                    mncs_model::SequenceBound::UpToParam(name),
+                    mncs_model::SequenceBound::UpToParam(caller),
                 ) => {
                     nats.entry(name.clone())
                         .or_default()
@@ -10574,6 +10645,54 @@ fn substitute_body_type(
         }
         BodyType::Vector { element, lanes } => BodyType::Vector {
             element: Box::new(substitute_body_type(*element, type_map, value_map)),
+            lanes,
+        },
+        BodyType::Mask { lanes } => BodyType::Mask { lanes },
+        BodyType::Record { identity, name } => BodyType::Record { identity, name },
+        BodyType::Finite { identity, name } => BodyType::Finite { identity, name },
+        BodyType::Integer(i) => BodyType::Integer(i),
+        BodyType::Float(f) => BodyType::Float(f),
+        BodyType::Byte => BodyType::Byte,
+        BodyType::Bool => BodyType::Bool,
+        BodyType::Named(n) => BodyType::Named(n),
+    }
+}
+
+/// Rename generic parameters after inference-time forwarding: a callee-side
+/// `Nat`/`Type` parameter that inference solved to the caller's own
+/// parameter (`ValueParam`/generic `Type`) is spelled with the caller's
+/// name, so call-site checks compare caller-side facts. Concrete answers
+/// are handled by [`substitute_body_type`] first; this covers only the
+/// symbolic remainder.
+fn rename_forwarded_params(
+    ty: BodyType,
+    nat_forward: &BTreeMap<String, String>,
+    type_forward: &BTreeMap<String, String>,
+) -> BodyType {
+    match ty {
+        BodyType::GenericParam { name } => BodyType::GenericParam {
+            name: type_forward.get(&name).cloned().unwrap_or(name),
+        },
+        BodyType::Sequence { element, bound } => {
+            let new_element =
+                Box::new(rename_forwarded_params(*element, nat_forward, type_forward));
+            let new_bound = match bound {
+                mncs_model::SequenceBound::Exact(v) => mncs_model::SequenceBound::Exact(v),
+                mncs_model::SequenceBound::UpTo(v) => mncs_model::SequenceBound::UpTo(v),
+                mncs_model::SequenceBound::Param(n) => {
+                    mncs_model::SequenceBound::Param(nat_forward.get(&n).cloned().unwrap_or(n))
+                }
+                mncs_model::SequenceBound::UpToParam(n) => {
+                    mncs_model::SequenceBound::UpToParam(nat_forward.get(&n).cloned().unwrap_or(n))
+                }
+            };
+            BodyType::Sequence {
+                element: new_element,
+                bound: new_bound,
+            }
+        }
+        BodyType::Vector { element, lanes } => BodyType::Vector {
+            element: Box::new(rename_forwarded_params(*element, nat_forward, type_forward)),
             lanes,
         },
         BodyType::Mask { lanes } => BodyType::Mask { lanes },

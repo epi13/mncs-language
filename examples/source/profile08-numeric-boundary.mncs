@@ -11,3 +11,19 @@ fn l2_probe(
 ) -> (result: i32) {
     return l2_squared4(a0, a1, a2, a3, b0, b1, b2, b3);
 }
+
+fn sum_probe(a: i64, b: i64, c: i64, d: i64) -> (result: i64) {
+    return sum4_wrap(a, b, c, d);
+}
+
+fn mean_probe(a: i64, b: i64, c: i64, d: i64) -> (result: i64) {
+    return mean4_wrap(a, b, c, d);
+}
+
+fn centroid_probe(a: i32, b: i32, c: i32, d: i32) -> (result: i32) {
+    return centroid4(a, b, c, d);
+}
+
+fn clamp_probe(a: i32, lo: i32, hi: i32) -> (result: i32) {
+    return clamp4(a, lo, hi);
+}

@@ -135,3 +135,39 @@ fn ambiguous_inference_refuses_with_names() {
         );
     }
 }
+
+/// View capacities constrain inference exactly like exact bounds: `[T; up_to
+/// N]` against `[T; up_to 4]` pins `N` to 4, and a generic caller forwards
+/// its own capacity parameter. (Regression root: `first_of_generic(view)`
+/// in `mncs.core.sequences.v1` refused with `MNE220` until capacities
+/// constrained.)
+#[test]
+fn view_capacity_inference_accepts() {
+    let text = "mncs 0.13;\nmodule test.generics.view_capacity;\nfn head_or<N: Nat>(view: [i64; up_to N], fallback: i64) -> (result: i64) {\n    if view.len == 0 {\n        return fallback;\n    }\n    return view[0];\n}\nfn outer<M: Nat>(view: [i64; up_to M], fallback: i64) -> (result: i64) {\n    return head_or(view, fallback);\n}\nfn ident<T>(value: T) -> (result: T) {\n    return value;\n}\nfn wrap<U>(value: U) -> (result: U) {\n    return ident(value);\n}\nfn mixed<N: Nat, M: Nat>(flex: [i64; N], fixed: [i64; M], scale: i64) -> (result: i64) {\n    return flex[0] +% fixed[0] +% scale;\n}\nfn mixed_caller<K: Nat>(flex: [i64; K], scale: i64) -> (result: i64) {\n    let fixed: [i64; 8] = [0, 0, 0, 0, 0, 0, 0, 0];\n    return mixed(flex, fixed, scale);\n}\nfn probe() -> (result: i64) {\n    let buf: [i64; 4] = [1, 2, 3, 4];\n    let view: [i64; up_to 4] = buf[0..4];\n    return head_or(view, -1) +% outer(view, -1) +% wrap(1) +% mixed_caller(buf, 2);\n}\n";
+    let dir = std::env::temp_dir().join("mncs-pressure-generics-view-capacity");
+    std::fs::create_dir_all(&dir).expect("create workspace");
+    let path = dir.join("view_capacity.mncs");
+    std::fs::write(&path, text).expect("write case");
+    let output = binary()
+        .args(["source-study", &path.to_string_lossy()])
+        .env("MNCS_LIBRARY_PATH", library(""))
+        .output()
+        .expect("run source-study");
+    let result: Value = serde_json::from_slice(&output.stdout).expect("study JSON");
+    let elaboration_errors: Vec<String> = result["diagnostics"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter(|d| {
+            d["code"]
+                .as_str()
+                .is_some_and(|code| code.starts_with("MNE"))
+        })
+        .filter_map(|d| d["message"].as_str().map(str::to_owned))
+        .collect();
+    assert!(
+        elaboration_errors.is_empty(),
+        "view capacity inference elaborates without errors, got {elaboration_errors:?}"
+    );
+}
