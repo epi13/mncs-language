@@ -43,6 +43,13 @@ An MNCS-oriented program should make it possible to answer:
 
 Canonical semantic JSON remains an experimental bootstrap transport. Source Profile 0.1 is an executable but intentionally narrow grammar experiment, not a selected production grammar.
 
+The Atlas stateful JSON model is a current profile `0.16` backend workload.
+Its two resolved backend pressures—nested-cell address normalization and
+packed bounded-view region reclamation—are documented in the
+[Atlas WASM backend evidence record](docs/development-evidence/atlas-wasm-backend-2026-09.md)
+and tracked canonically in the
+[MNCS Commons pressure exchange](https://github.com/epi13/MNCS-Commons/tree/main/pressures).
+
 The complete logical compiler stage contract, including explicitly missing frontend and executable-backend stages, is available as deterministic machine JSON:
 
 ```bash
