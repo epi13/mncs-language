@@ -799,20 +799,20 @@ fn emit_block(
             else_args,
         } => {
             let loaded = load_value(out, names, cond, "cnd", split);
+            // The condition temp is keyed by the emission counter, not the
+            // condition value: one source binding can guard several
+            // branches (e.g. two `if key` tests in one body), and reusing
+            // the value name redefined the same LLVM local.
+            *split += 1;
+            let cond_tmp = format!("c{split}_{}", names.value(cond));
             let _ = writeln!(
                 out,
-                "  %c_{} = icmp ne {} %{loaded}, 0",
-                names.value(cond),
+                "  %{cond_tmp} = icmp ne {} %{loaded}, 0",
                 llvm_type(names.ty(cond))
             );
-            *split += 1;
             let then_l = format!("br{split}_then");
             let else_l = format!("br{split}_else");
-            let _ = writeln!(
-                out,
-                "  br i1 %c_{}, label %{then_l}, label %{else_l}",
-                names.value(cond)
-            );
+            let _ = writeln!(out, "  br i1 %{cond_tmp}, label %{then_l}, label %{else_l}",);
             let _ = writeln!(out, "{then_l}:");
             emit_transfers(out, function, then_target, then_args, names, split);
             let _ = writeln!(out, "  br label %{}", names.block(then_target));

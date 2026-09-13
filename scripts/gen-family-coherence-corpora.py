@@ -144,9 +144,12 @@ def version_cases():
     for left in versions:
         for right in versions:
             tag = f"v{left[0]}{left[1]}{left[2]}-v{right[0]}{right[1]}{right[2]}"
-            if key(left) < key(right):
+            # `order` mirrors the implementation: candidate-relative-to-bound,
+            # i.e. compare(right, left), since satisfies() receives
+            # (envelope, bound=left, candidate=right).
+            if key(right) < key(left):
                 order = "Before"
-            elif key(left) == key(right):
+            elif key(right) == key(left):
                 order = "Same"
             else:
                 order = "After"

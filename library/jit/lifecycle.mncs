@@ -29,15 +29,14 @@ mncs 0.13;
 // every function is total.
 module mncs.jit.lifecycle.v1;
 
-use mncs.core.logic.v1 as logic;
 use mncs.jit.types.v1 as types;
 
 // Explicit transition table. Unknown codes are refused.
 fn transition_allowed(from_code: u64, to_code: u64) -> (result: bool) {
-    if logic.bool_not(types.lifecycle_is_known(from_code)) {
+    if !types.lifecycle_is_known(from_code) {
         return false;
     }
-    if logic.bool_not(types.lifecycle_is_known(to_code)) {
+    if !types.lifecycle_is_known(to_code) {
         return false;
     }
     if from_code == 0 {

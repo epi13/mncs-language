@@ -20,7 +20,6 @@ mncs 0.13;
 // allocates; every function is total.
 module mncs.jit.profile.v1;
 
-use mncs.core.logic.v1 as logic;
 
 // Per-executable-generation accounting. provider_code and generation
 // identify the subject; the session layer re-keys on republication.
@@ -77,7 +76,6 @@ fn observe_compile(p: Profile, compile_ms: u64) -> (result: Profile) {
 fn mean_exec_ms(p: Profile) -> (result: u64) {
     if p.calls == 0 {
         return 0;
-    } else {
     }
     return p.exec_ms_total / p.calls;
 }

@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.std.scope — deterministic structured task-scope contracts.
 //
@@ -35,8 +35,6 @@ mncs 0.10;
 //   values): `join_sum`/`join_pack2` fold DONE values in id order.
 module mncs.std.scope.v1;
 
-use mncs.core.logic.v1 as logic;
-
 // Lifecycle of one work descriptor. Declaration order fixes the numeric
 // codes used by `state_of`: PENDING=0, DONE=1, FAILED=2, CANCELLED=3.
 enum TaskState { PENDING, DONE, FAILED, CANCELLED }
@@ -66,7 +64,7 @@ fn open(capacity: u64) -> (result: Scope) {
     let clamped: u64 = select(cap >= 1, cap, 1);
     let empty: TaskSlot = blank_slot();
     return Scope {
-        slots: [empty, empty, empty, empty, empty, empty, empty, empty],
+        slots: [empty; 8],
         count: 0,
         capacity: clamped,
         closed: false,
@@ -79,14 +77,13 @@ fn open(capacity: u64) -> (result: Scope) {
 // ordered by spawn. Rejected when closed, cancelled, or full.
 fn spawn(s: Scope) -> (result: Spawned) {
     let full: bool = s.count >= s.capacity || s.count >= 8;
-    let accepted: bool = logic.bool_not(s.closed) && logic.bool_not(s.cancel_requested) && logic.bool_not(full);
+    let accepted: bool = !s.closed && !s.cancel_requested && !full;
     if accepted {
         let fresh: TaskSlot = TaskSlot { id: s.count, state: TaskState.PENDING, value: 0, code: 0 };
         let grown: Scope = Scope { ..s, slots: replace(s.slots, s.count, fresh), count: s.count +% 1 };
         return Spawned { scope: grown, id: s.count as i64, accepted: true };
-    } else {
     }
-    return Spawned { scope: s, id: 0 - 1, accepted: false };
+    return Spawned { scope: s, id: -1, accepted: false };
 }
 
 fn slot_is_pending(slot: TaskSlot) -> (result: bool) {
@@ -105,8 +102,7 @@ fn slot_is_pending(slot: TaskSlot) -> (result: bool) {
 // taken branch.
 fn can_settle(s: Scope, id: i64) -> (result: bool) {
     if id >= 0 && id < s.count as i64 {
-        return logic.bool_not(s.closed) && logic.bool_not(s.cancel_requested) && slot_is_pending(s.slots[id as u64]);
-    } else {
+        return !s.closed && !s.cancel_requested && slot_is_pending(s.slots[id as u64]);
     }
     return false;
 }
@@ -119,7 +115,6 @@ fn complete(s: Scope, id: i64, value: i64) -> (result: Settled) {
         let prior: TaskSlot = s.slots[index];
         let done: TaskSlot = TaskSlot { ..prior, state: TaskState.DONE, value: value };
         return Settled { scope: Scope { ..s, slots: replace(s.slots, index, done) }, accepted: true };
-    } else {
     }
     return Settled { scope: s, accepted: false };
 }
@@ -131,7 +126,6 @@ fn record_failure(s: Scope, id: i64, code: u64) -> (result: Settled) {
         let prior: TaskSlot = s.slots[index];
         let failed: TaskSlot = TaskSlot { ..prior, state: TaskState.FAILED, code: code };
         return Settled { scope: Scope { ..s, slots: replace(s.slots, index, failed) }, accepted: true };
-    } else {
     }
     return Settled { scope: s, accepted: false };
 }
@@ -156,9 +150,8 @@ fn request_cancel(s: Scope) -> (result: Scope) {
 // Close the scope. Afterwards spawn/settle are rejected: children cannot
 // escape. Closing an already-closed scope is rejected (not fatal).
 fn close(s: Scope) -> (result: Settled) {
-    if logic.bool_not(s.closed) {
+    if !s.closed {
         return Settled { scope: Scope { ..s, closed: true }, accepted: true };
-    } else {
     }
     return Settled { scope: s, accepted: false };
 }
@@ -172,7 +165,6 @@ fn state_of(s: Scope, id: i64) -> (result: u64) {
             FAILED => 2,
             CANCELLED => 3,
         };
-    } else {
     }
     return 99;
 }
@@ -180,7 +172,6 @@ fn state_of(s: Scope, id: i64) -> (result: u64) {
 fn code_of(s: Scope, id: i64) -> (result: u64) {
     if id >= 0 && id < s.count as i64 {
         return s.slots[id as u64].code;
-    } else {
     }
     return 99;
 }
@@ -210,9 +201,8 @@ fn join_sum(s: Scope) -> (result: i64) {
 fn join_pack2(s: Scope) -> (result: i64) {
     if s.count >= 2 && slot_is_done(s.slots[0]) && slot_is_done(s.slots[1]) {
         return s.slots[0].value * 100 + s.slots[1].value;
-    } else {
     }
-    return 0 - 1;
+    return -1;
 }
 
 // --- Executable entry points (scalar shapes for backend corpora) ---

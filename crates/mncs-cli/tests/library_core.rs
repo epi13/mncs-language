@@ -363,6 +363,11 @@ fn canonical_fingerprint(path: &str) -> String {
 /// `use mncs.core.status.v1`, plus the generic evidence envelope), whose
 /// rotation to `2fd0d19d...` was verified by proving a header-comment-only
 /// delta canonicalizes identically to the upstream file.
+/// `2fd0d19d...` then rotated to `8bb6640b...` with the source untouched:
+/// the stdlib modernization moved `mncs.core.status.v1` to Profile 0.13
+/// (generic-argument inference at the `summarize8` delegation), changing
+/// the linked canonical form. Snapshot and upstream agree with each other
+/// on the new fingerprint, which is the robust relationship.
 ///
 /// The test compares the snapshot against upstream RAVEL directly (the
 /// robust relationship) in addition to the hardcoded rotation detector,
@@ -370,7 +375,7 @@ fn canonical_fingerprint(path: &str) -> String {
 /// is present.
 #[test]
 fn ravel_snapshot_is_canonically_identical_to_upstream() {
-    const EXPECTED: &str = "2fd0d19d7cf8af64dbb4a99cc8830880cee3137fc0ae5f5b939d6de94a46bb6a";
+    const EXPECTED: &str = "8bb6640bbd4226360a4729df60b06642bf54e39bd8a63978446db597e421e16f";
     let snapshot = example("consumers/ravel-core-snapshot.mncs");
     let snapshot_fingerprint = canonical_fingerprint(&snapshot);
     assert_eq!(snapshot_fingerprint, EXPECTED, "{snapshot}");
@@ -438,7 +443,20 @@ fn sequence_typed_library_exports_agree_per_backend() {
     let corpus = example("execution/library-core-sequences-corpus.json");
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_experiment(&source, backend, &corpus);
-        assert_value_agreement(backend, code, &result, &stderr, 9);
+        assert_value_agreement(backend, code, &result, &stderr, 14);
+    }
+}
+
+/// Contract combinators execute identically on every executable backend,
+/// including the `logic`-delegated implication and native boolean
+/// equality paths.
+#[test]
+fn contract_combinators_agree_per_backend() {
+    let source = library("core/contracts.mncs");
+    let corpus = example("execution/library-core-contracts-corpus.json");
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_experiment(&source, backend, &corpus);
+        assert_value_agreement(backend, code, &result, &stderr, 8);
     }
 }
 

@@ -1,0 +1,114 @@
+{
+  "schema_version": "0.1",
+  "name": "library-core-contracts",
+  "cases": [
+    {
+      "id": "implies-true-false",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.contracts.v1", "function": "implies" },
+        "arguments": [
+          { "boolean": { "value": true } },
+          { "boolean": { "value": false } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "boolean": { "value": false } }]
+    },
+    {
+      "id": "implies-false-true",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.contracts.v1", "function": "implies" },
+        "arguments": [
+          { "boolean": { "value": false } },
+          { "boolean": { "value": true } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "iff-true-true",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.contracts.v1", "function": "iff" },
+        "arguments": [
+          { "boolean": { "value": true } },
+          { "boolean": { "value": true } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "iff-true-false",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.contracts.v1", "function": "iff" },
+        "arguments": [
+          { "boolean": { "value": true } },
+          { "boolean": { "value": false } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "boolean": { "value": false } }]
+    },
+    {
+      "id": "tol-u64-inside",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.contracts.v1", "function": "within_tolerance_u64" },
+        "arguments": [
+          { "integer": { "value": 7, "type": { "bits": 64, "signed": false } } },
+          { "integer": { "value": 5, "type": { "bits": 64, "signed": false } } },
+          { "integer": { "value": 2, "type": { "bits": 64, "signed": false } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "tol-u64-outside",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.contracts.v1", "function": "within_tolerance_u64" },
+        "arguments": [
+          { "integer": { "value": 8, "type": { "bits": 64, "signed": false } } },
+          { "integer": { "value": 5, "type": { "bits": 64, "signed": false } } },
+          { "integer": { "value": 2, "type": { "bits": 64, "signed": false } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "boolean": { "value": false } }]
+    },
+    {
+      "id": "tol-i64-negative-never-matches",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.contracts.v1", "function": "within_tolerance_i64" },
+        "arguments": [
+          { "integer": { "value": 5, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 5, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": -1, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "boolean": { "value": false } }]
+    },
+    {
+      "id": "byte-equal-match",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.contracts.v1", "function": "byte_equal" },
+        "arguments": [
+          { "byte": { "value": 65 } },
+          { "byte": { "value": 65 } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "boolean": { "value": true } }]
+    }
+  ],
+  "properties": []
+}

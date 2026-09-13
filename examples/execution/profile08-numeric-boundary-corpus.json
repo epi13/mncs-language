@@ -23,6 +23,129 @@
       "expected": [
         {"integer": {"value": 20, "type": {"bits": 32, "signed": true}}}
       ]
+    },
+    {
+      "id": "wrap-sum",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "examples.profile08_numeric_boundary", "function": "sum_probe"},
+        "arguments": [
+          {"integer": {"value": 1, "type": {"bits": 64, "signed": true}}},
+          {"integer": {"value": 2, "type": {"bits": 64, "signed": true}}},
+          {"integer": {"value": 3, "type": {"bits": 64, "signed": true}}},
+          {"integer": {"value": 4, "type": {"bits": 64, "signed": true}}}
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        {"integer": {"value": 10, "type": {"bits": 64, "signed": true}}}
+      ]
+    },
+    {
+      "id": "wrap-mean-exact",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "examples.profile08_numeric_boundary", "function": "mean_probe"},
+        "arguments": [
+          {"integer": {"value": 1, "type": {"bits": 64, "signed": true}}},
+          {"integer": {"value": 2, "type": {"bits": 64, "signed": true}}},
+          {"integer": {"value": 3, "type": {"bits": 64, "signed": true}}},
+          {"integer": {"value": 4, "type": {"bits": 64, "signed": true}}}
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        {"integer": {"value": 2, "type": {"bits": 64, "signed": true}}}
+      ]
+    },
+    {
+      "id": "wrap-mean-truncates",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "examples.profile08_numeric_boundary", "function": "mean_probe"},
+        "arguments": [
+          {"integer": {"value": 2, "type": {"bits": 64, "signed": true}}},
+          {"integer": {"value": 2, "type": {"bits": 64, "signed": true}}},
+          {"integer": {"value": 2, "type": {"bits": 64, "signed": true}}},
+          {"integer": {"value": 3, "type": {"bits": 64, "signed": true}}}
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        {"integer": {"value": 2, "type": {"bits": 64, "signed": true}}}
+      ]
+    },
+    {
+      "id": "centroid-basic",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "examples.profile08_numeric_boundary", "function": "centroid_probe"},
+        "arguments": [
+          {"integer": {"value": 1, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 2, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 3, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 4, "type": {"bits": 32, "signed": true}}}
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        {"integer": {"value": 2, "type": {"bits": 32, "signed": true}}}
+      ]
+    },
+    {
+      "id": "clamp-inside",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "examples.profile08_numeric_boundary", "function": "clamp_probe"},
+        "arguments": [
+          {"integer": {"value": 5, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 0, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 10, "type": {"bits": 32, "signed": true}}}
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        {"integer": {"value": 5, "type": {"bits": 32, "signed": true}}}
+      ]
+    },
+    {
+      "id": "clamp-below",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "examples.profile08_numeric_boundary", "function": "clamp_probe"},
+        "arguments": [
+          {"integer": {"value": -5, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 0, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 10, "type": {"bits": 32, "signed": true}}}
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        {"integer": {"value": 0, "type": {"bits": 32, "signed": true}}}
+      ]
+    },
+    {
+      "id": "clamp-above",
+      "request": {
+        "schema_version": "0.1",
+        "target": {"module": "examples.profile08_numeric_boundary", "function": "clamp_probe"},
+        "arguments": [
+          {"integer": {"value": 15, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 0, "type": {"bits": 32, "signed": true}}},
+          {"integer": {"value": 10, "type": {"bits": 32, "signed": true}}}
+        ],
+        "step_budget": 10000
+      },
+      "expected_status": "returned",
+      "expected": [
+        {"integer": {"value": 10, "type": {"bits": 32, "signed": true}}}
+      ]
     }
   ],
   "properties": []

@@ -51,7 +51,11 @@ fn probe_xmod_ty() -> (result: i64) {
     return lib.first(42);
 }
 
-fn outer<W: Nat>(row: [i64; W], v: i64) -> (result: [i64; W]) {
+// The caller's capacity parameter is deliberately named `M` (not the
+// callee's `W`): this case passes only when forwarding renames the
+// callee's parameter to the caller's own name instead of comparing the
+// two spellings for equality.
+fn outer<M: Nat>(row: [i64; M], v: i64) -> (result: [i64; M]) {
     return lib.grow_fill(row, v);
 }
 

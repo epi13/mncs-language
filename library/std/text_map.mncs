@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.std.text_map.v1 — bounded text-to-code tables.
 //
@@ -40,9 +40,9 @@ fn lookup32<K: Nat>(table: [Coded32; K], key: [byte; 32], key_length: u64, fallb
 // Executable entry points with concrete table shapes for backend corpora.
 
 fn candidate_lookup16(table: [Coded16; 3], key: [byte; 16], key_length: u64, fallback: i64) -> (result: i64) {
-    return lookup16<3>(table, key, key_length, fallback);
+    return lookup16(table, key, key_length, fallback);
 }
 
 fn candidate_lookup32(table: [Coded32; 2], key: [byte; 32], key_length: u64, fallback: i64) -> (result: i64) {
-    return lookup32<2>(table, key, key_length, fallback);
+    return lookup32(table, key, key_length, fallback);
 }

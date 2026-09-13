@@ -30,8 +30,6 @@ mncs 0.13;
 //   carried in `kind`, never in `value`.
 module mncs.std.channel.v1;
 
-use mncs.core.logic.v1 as logic;
-
 record Channel {
     buf: [u64; 8],
     count: u64,
@@ -69,8 +67,8 @@ fn new(capacity: u64, producers: u64) -> (result: Channel) {
 // data. Closed rejects. Neither traps.
 fn send(ch: Channel, value: u64) -> (result: SendOut) {
     let full: bool = ch.count >= ch.capacity;
-    let accepted: bool = logic.bool_not(ch.closed) && logic.bool_not(full);
-    let blocked: bool = logic.bool_not(ch.closed) && full;
+    let accepted: bool = !ch.closed && !full;
+    let blocked: bool = !ch.closed && full;
     let slot: u64 = select(accepted, ch.count, 0);
     let grown: Channel = Channel { ..ch, buf: replace(ch.buf, slot, value), count: ch.count +% 1 };
     return SendOut { channel: select(accepted, grown, ch), accepted: accepted, blocked: blocked };
@@ -83,7 +81,7 @@ record ShiftFold { buf: [u64; 8] }
 // sentinel-bearing: `value` is meaningful only when `kind == 0`.
 fn recv(ch: Channel) -> (result: RecvOut) {
     let has_data: bool = ch.count > 0;
-    let drained_close: bool = ch.closed && logic.bool_not(has_data);
+    let drained_close: bool = ch.closed && !has_data;
     let kind: u64 = select(has_data, 0, select(drained_close, 2, 1));
     let head: u64 = ch.buf[0];
     let seed: ShiftFold = ShiftFold { buf: ch.buf };
@@ -100,7 +98,7 @@ fn recv(ch: Channel) -> (result: RecvOut) {
 // Record one finished producer. Rejected once all registered producers
 // are done (over-reporting is observable, not fatal).
 fn producer_done(ch: Channel) -> (result: DoneOut) {
-    let ok: bool = logic.bool_not(ch.closed) && ch.done < ch.producers;
+    let ok: bool = !ch.closed && ch.done < ch.producers;
     let advanced: Channel = Channel { ..ch, done: ch.done +% 1 };
     return DoneOut { channel: select(ok, advanced, ch), accepted: ok };
 }
@@ -109,10 +107,9 @@ fn producer_done(ch: Channel) -> (result: DoneOut) {
 // registered producer reported done. A rejected close leaves the channel
 // unchanged, so an early close can never smuggle the channel shut.
 fn close(ch: Channel) -> (result: CloseOut) {
-    let ok: bool = logic.bool_not(ch.closed) && ch.done == ch.producers;
+    let ok: bool = !ch.closed && ch.done == ch.producers;
     if ok {
         return CloseOut { channel: Channel { ..ch, closed: true }, accepted: true };
-    } else {
     }
     return CloseOut { channel: ch, accepted: false };
 }
@@ -131,7 +128,7 @@ fn candidate_channel_flow() -> (result: i64) {
     let s2: SendOut = send(s1.channel, 2);
     // Producer A hits backpressure on the third send.
     let s3: SendOut = send(s2.channel, 3);
-    let blocked: bool = s3.blocked && logic.bool_not(s3.accepted);
+    let blocked: bool = s3.blocked && !s3.accepted;
     // Consumer drains one, producer A's item fits.
     let r1: RecvOut = recv(s2.channel);
     let s4: SendOut = send(r1.channel, 3);
@@ -158,8 +155,8 @@ fn candidate_channel_flow() -> (result: i64) {
     let ordered: bool = r1.value == 1 && r2.value == 2 && r3.value == 3 && r4.value == 4 && r5.value == 5 && r6.value == 6 && r7.value == 7 && r8.value == 8;
     let sum: u64 = r1.value +% r2.value +% r3.value +% r4.value +% r5.value +% r6.value +% r7.value +% r8.value;
     let kinds: bool = r1.kind == 0 && r8.kind == 0 && empty.kind == 2;
-    let ok: bool = s1.accepted && s2.accepted && blocked && s4.accepted && s5.accepted && s6.accepted && s7.accepted && s8.accepted && s9.accepted && d1.accepted && d2.accepted && shut.accepted && kinds && logic.bool_not(again.accepted);
-    return select(ok && ordered, (sum as i64) * 10000 + 1000 + 100 + 20 + 1, 0 - 1);
+    let ok: bool = s1.accepted && s2.accepted && blocked && s4.accepted && s5.accepted && s6.accepted && s7.accepted && s8.accepted && s9.accepted && d1.accepted && d2.accepted && shut.accepted && kinds && !again.accepted;
+    return select(ok && ordered, (sum as i64) * 10000 + 1000 + 100 + 20 + 1, -1);
 }
 
 // Empty/close-boundary test: recv on an open empty channel reports EMPTY
@@ -173,8 +170,8 @@ fn candidate_channel_empty() -> (result: i64) {
     let d1: DoneOut = producer_done(early.channel);
     let shut: CloseOut = close(d1.channel);
     let drained: RecvOut = recv(shut.channel);
-    let ok: bool = r0.kind == 1 && logic.bool_not(early.accepted) && d1.accepted && shut.accepted && drained.kind == 2;
-    return select(ok, 102, 0 - 1);
+    let ok: bool = r0.kind == 1 && !early.accepted && d1.accepted && shut.accepted && drained.kind == 2;
+    return select(ok, 102, -1);
 }
 
 // Send-after-close test: a closed channel rejects sends and done reports,
@@ -188,6 +185,6 @@ fn candidate_send_closed() -> (result: i64) {
     let r1: RecvOut = recv(s2.channel);
     let r2: RecvOut = recv(r1.channel);
     let dd: DoneOut = producer_done(r2.channel);
-    let ok: bool = s1.accepted && shut.accepted && logic.bool_not(s2.accepted) && r1.kind == 0 && r1.value == 5 && r2.kind == 2 && logic.bool_not(dd.accepted);
-    return select(ok, 11002, 0 - 1);
+    let ok: bool = s1.accepted && shut.accepted && !s2.accepted && r1.kind == 0 && r1.value == 5 && r2.kind == 2 && !dd.accepted;
+    return select(ok, 11002, -1);
 }

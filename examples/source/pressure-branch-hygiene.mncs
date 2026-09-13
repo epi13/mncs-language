@@ -1,0 +1,25 @@
+mncs 0.13;
+
+// Minimal witness for LLVM branch-condition hygiene: one binding guards
+// two reachable branches in a single body. The LLVM backend must give
+// each branch test its own condition temporary even though both read the
+// same source binding; naming the temporary after the value redefined one
+// LLVM local and clang rejected the module.
+module examples.pressure_branch_hygiene;
+
+fn twice_guarded(flag: bool, mode: bool, a: i64, b: i64) -> (result: i64) {
+    if mode {
+        if flag {
+            return a;
+        }
+        return b;
+    }
+    if flag {
+        return a +% b;
+    }
+    return b -% a;
+}
+
+fn probe(flag: bool, mode: bool, a: i64, b: i64) -> (result: i64) {
+    return twice_guarded(flag, mode, a, b);
+}

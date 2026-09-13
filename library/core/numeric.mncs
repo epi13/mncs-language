@@ -13,7 +13,12 @@ mncs 0.8;
 // every operation fully; portable WASM, C11, LLVM, and Cranelift realize
 // the vector kernels through conservative scalarized fallbacks with the
 // same bounded agreement.
+//
+// Comparison-only clamping stays owned by `mncs.core.ordering.v1`; the
+// i32 entrypoint below delegates there instead of restating the bounds.
 module mncs.core.numeric.v1;
+
+use mncs.core.ordering.v1;
 
 // Wrapping sum of four i64 lanes via a bounded traversal. The traversal
 // discharges element bounds checks; wrapping addition discharges overflow.
@@ -52,13 +57,8 @@ fn centroid4(a: i32, b: i32, c: i32, d: i32) -> (result: i32) {
     return s / 4;
 }
 
-// Clamp a single i32 value to [lo, hi] using only comparisons (no arithmetic).
+// Clamp a single i32 value to [lo, hi]; see the module note on why this
+// delegates to the ordering vocabulary instead of restating it.
 fn clamp4(a: i32, lo: i32, hi: i32) -> (result: i32) {
-    if a < lo {
-        return lo;
-    }
-    if a > hi {
-        return hi;
-    }
-    return a;
+    return clamp_i32(a, lo, hi);
 }

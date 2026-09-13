@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.std.json — bounded JSON recognition.
 //
@@ -289,6 +289,6 @@ fn scan(input: [byte; up_to 64]) -> (result: i64) {
     if complete {
         return 1000000 +% (finished.objects as i64) *% 1000 +% (finished.arrays as i64) *% 10 +% (finished.strings as i64);
     }
-    if finished.valid { return 0 - 1; }
+    if finished.valid { return -1; }
     return 0 - (100 + finished.error as i64);
 }

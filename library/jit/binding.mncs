@@ -52,7 +52,6 @@ mncs 0.13;
 // allocates; every function is total.
 module mncs.jit.binding.v1;
 
-use mncs.core.logic.v1 as logic;
 use mncs.jit.lifecycle.v1 as lifecycle;
 use mncs.jit.proof.v1 as proof;
 use mncs.jit.session.v1 as session;
@@ -132,28 +131,22 @@ fn def_slot(session: types.Session, logical: u64, generation: u64) -> (result: u
 fn note_compiled(session: types.Session, logical: u64, generation: u64, provider_code: u64, compile_ms: u64, sem: u64, proof_gen: u64, bits: u64) -> (result: NoteOut) {
     if session.closed {
         return NoteOut { session: session, artifact_code: 0, accepted: false, reason: 1 };
-    } else {
     }
-    if logic.bool_not(types.provider_is_known(provider_code)) {
+    if !types.provider_is_known(provider_code) {
         return NoteOut { session: session, artifact_code: 0, accepted: false, reason: 4 };
-    } else {
     }
-    if logic.bool_not(types.provider_is_implemented(provider_code)) {
+    if !types.provider_is_implemented(provider_code) {
         return NoteOut { session: session, artifact_code: 0, accepted: false, reason: 6 };
-    } else {
     }
     let bslot: u64 = binding_slot(session, logical);
     if bslot >= session.binding_count {
         return NoteOut { session: session, artifact_code: 0, accepted: false, reason: 3 };
-    } else {
     }
     if generation != latest_generation(session, logical) {
         return NoteOut { session: session, artifact_code: 0, accepted: false, reason: 5 };
-    } else {
     }
     if session.artifact_count >= 16 {
         return NoteOut { session: session, artifact_code: 0, accepted: false, reason: 2 };
-    } else {
     }
     let code: u64 = session.next_artifact;
     let art: types.Executable = types.Executable {
@@ -197,39 +190,32 @@ record PublishScan {
 fn publish(session: types.Session, logical: u64, artifact_code: u64) -> (result: PublishOut) {
     if session.closed {
         return PublishOut { session: session, accepted: false, reason: 1 };
-    } else {
     }
     let aslot: u64 = artifact_slot(session, artifact_code);
     if aslot >= session.artifact_count {
         return PublishOut { session: session, accepted: false, reason: 2 };
-    } else {
     }
     let arts: [types.Executable; 16] = session.artifacts;
     let art: types.Executable = arts[aslot];
     if art.logical != logical {
         return PublishOut { session: session, accepted: false, reason: 3 };
-    } else {
     }
     if art.generation != latest_generation(session, logical) {
         return PublishOut { session: session, accepted: false, reason: 3 };
-    } else {
     }
-    if logic.bool_not(art.lifecycle_code == 1 || art.lifecycle_code == 2) {
+    if !(art.lifecycle_code == 1 || art.lifecycle_code == 2) {
         return PublishOut { session: session, accepted: false, reason: 4 };
-    } else {
     }
     let dslot: u64 = def_slot(session, logical, art.generation);
     if dslot >= session.def_count {
         return PublishOut { session: session, accepted: false, reason: 3 };
-    } else {
     }
     let rows: [types.Definition; 8] = session.defs;
     let def: types.Definition = rows[dslot];
     let era_ok: bool = proof.artifact_proof_valid(art.semantic_generation, art.proof_generation, art.assumption_bits, session.semantic_generation, session.proof_generation, def.assumption_bits)
         && proof.proof_current(def.semantic_generation, def.proof_generation, session.semantic_generation, session.proof_generation);
-    if logic.bool_not(era_ok) {
+    if !era_ok {
         return PublishOut { session: session, accepted: false, reason: 5 };
-    } else {
     }
     let seq: u64 = session.publish_seq +% 1;
     let seed: PublishScan = PublishScan { artifacts: session.artifacts };
@@ -257,7 +243,6 @@ fn publish(session: types.Session, logical: u64, artifact_code: u64) -> (result:
     let bslot: u64 = binding_slot(session, logical);
     if bslot >= session.binding_count {
         return PublishOut { session: session, accepted: false, reason: 3 };
-    } else {
     }
     let binds: [types.Binding; 8] = session.bindings;
     let cur_b: types.Binding = binds[bslot];
@@ -296,14 +281,12 @@ fn abandon(session: types.Session, logical: u64) -> (result: AbandonOut) {
     let bslot: u64 = binding_slot(session, logical);
     if bslot >= session.binding_count {
         return AbandonOut { session: session, restored: false };
-    } else {
     }
     let binds: [types.Binding; 8] = session.bindings;
     let cur: types.Binding = binds[bslot];
     let can: bool = cur.state_code == 1 && cur.previous_generation != 0;
-    if logic.bool_not(can) {
+    if !can {
         return AbandonOut { session: session, restored: false };
-    } else {
     }
     let back: types.Binding = types.Binding {
         logical: logical,
@@ -344,13 +327,11 @@ fn retire_artifact(session: types.Session, code: u64) -> (result: RetireArtifact
     let aslot: u64 = artifact_slot(session, code);
     if aslot >= session.artifact_count {
         return RetireArtifactOut { session: session, retired: false };
-    } else {
     }
     let arts: [types.Executable; 16] = session.artifacts;
     let art: types.Executable = arts[aslot];
-    if logic.bool_not(lifecycle.transition_allowed(art.lifecycle_code, 4)) {
+    if !lifecycle.transition_allowed(art.lifecycle_code, 4) {
         return RetireArtifactOut { session: session, retired: false };
-    } else {
     }
     let dead: types.Executable = types.Executable {
         code: art.code,
@@ -425,7 +406,7 @@ fn resolve(session: types.Session, logical: u64) -> (result: ResolveOut) {
 // --- Executable entry points (scalar shapes for backend corpora) ---
 
 fn nodeps() -> (result: [u64; 4]) {
-    return [0, 0, 0, 0];
+    return [0; 4];
 }
 
 // Define, compile, publish, resolve: the binding swings to

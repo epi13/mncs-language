@@ -81,50 +81,62 @@ resolution provenance.
 | File | Module | Contents |
 | --- | --- | --- |
 | `core/status.mncs` | `mncs.core.status.v1` | `Status { PASS, FAIL, UNKNOWN }`, dominance join (`dominate`), pair/four-way combination, bounded `StatusSummary`/`summarize8`, decidedness predicate, dominance test |
-| `core/identity.mncs` | `mncs.core.identity.v1` (Profile 0.10) | bounded 32-byte opaque digest values with portable equality, zero, and lexicographic ordering; digest production stays an explicit host boundary |
+| `core/identity.mncs` | `mncs.core.identity.v1` (Profile 0.13) | bounded 32-byte opaque digest values with portable equality, zero, and lexicographic ordering; digest production stays an explicit host boundary |
 | `core/lineage.mncs` | `mncs.core.lineage.v1` (Profile 0.10) | total root/successor/conflict classification for adjacent digest identities |
 | `core/logic.mncs` | `mncs.core.logic.v1` | total boolean algebra: `bool_not/and/or/implies/xor` |
 | `core/ordering.mncs` | `mncs.core.ordering.v1` | comparison-only `min/max/clamp` for i32/i64 (no arithmetic, hence no overflow obligations) |
 | `core/bounds.mncs` | `mncs.core.bounds.v1` (Profile 0.5) | comparison-only `clamp_i64`, intentionally overlapping `ordering` to pressure namespace qualification |
 | `core/result.mncs` | `mncs.core.result.v1` (Profile 0.6) | the standard Result shape with real reason payloads: `Ok { value }`, `Err { reason }`, `divide`, `bounded_divide`, `value_or`, `reason_of`; exhaustive matching with payload binders |
-| `core/sequences.mncs` | `mncs.core.sequences.v1` (Profiles 0.8/0.10) | bounded folds, membership, counting, prefix/suffix views, generic exact-sequence and empty-view helpers over `N: Nat`, reverse, extrema, find-index, equality, functional put, unsigned `u64` identity; sequence- and view-typed signatures |
-| `std/json.mncs` | `mncs.std.json.v1` (Profile 0.10) | bounded syntax scanner over a 64-byte byte view for JSON objects, arrays, strings, numbers, literals, whitespace, nesting, separators, control bytes, and escapes; scalar status/summary contract |
-| `std/json_stream.mncs` | `mncs.std.json_stream.v1` (Profile 0.10) | scalar structural stream state for feeding larger documents as <=64-byte views; validates quotes, four-digit Unicode escapes, control bytes, matched delimiters, bounded nesting, and one closed root |
-| `std/json_projection.mncs` | `mncs.std.json_projection.v1` (Profile 0.10) | bounded raw key/member projections over <=64-byte views with <=32-byte target windows; escaped text is validated by the scanner but is not decoded by this projection layer |
+| `core/sequences.mncs` | `mncs.core.sequences.v1` (Profile 0.13) | bounded folds, membership, counting, prefix/suffix views, generic exact-sequence and empty-view helpers over `N: Nat`, reverse, extrema, find-index, equality, functional put, unsigned `u64` identity; sequence- and view-typed signatures |
+| `std/json.mncs` | `mncs.std.json.v1` (Profile 0.13) | bounded syntax scanner over a 64-byte byte view for JSON objects, arrays, strings, numbers, literals, whitespace, nesting, separators, control bytes, and escapes; scalar status/summary contract |
+| `std/json_stream.mncs` | `mncs.std.json_stream.v1` (Profile 0.13) | scalar structural stream state for feeding larger documents as <=64-byte views; validates quotes, four-digit Unicode escapes, control bytes, matched delimiters, bounded nesting, and one closed root |
+| `std/json_projection.mncs` | `mncs.std.json_projection.v1` (Profile 0.13) | bounded raw key/member projections over <=64-byte views with <=32-byte target windows; escaped text is validated by the scanner but is not decoded by this projection layer |
 | `std/text_view.mncs` | `mncs.std.text_view.v1` (Profile 0.10) | borrowed bounded text spans, UTF-8/decode flags, and 16/32-byte key matching for schema consumers |
-| `std/text_scan.mncs` | `mncs.std.text_scan.v1` (Profile 0.10) | bounded literal text scanning over <=64-byte views: window equality, contains, prefix/suffix, first-index search, deterministic ordering, byte counting, word scanning; total, allocation-free, explicit complexity bounds |
+| `std/text_scan.mncs` | `mncs.std.text_scan.v1` (Profile 0.13) | bounded literal text scanning over <=64-byte views: window equality, contains, prefix/suffix, first-index search, deterministic ordering, byte counting, word scanning; total, allocation-free, explicit complexity bounds |
 | `std/fixed.mncs` | `mncs.std.fixed.v1` (Profile 0.6) | blessed milli-scale decimal scores: type-encoded 1/1000 scale, saturating add/sub, clamp; exact comparison at the call site; products/quotients out of scope |
-| `std/json_emit.mncs` | `mncs.std.json_emit.v1` (Profile 0.10) | bounded canonical JSON emission over a 64-byte writer: objects/arrays, quoted strings with escapes, integers incl. i64::MIN, bools, null; capacity poisoning and fail-closed ends; caller-ordered keys |
+| `std/json_emit.mncs` | `mncs.std.json_emit.v1` (Profile 0.13) | bounded canonical JSON emission over a 64-byte writer: objects/arrays, quoted strings with escapes, integers incl. i64::MIN, bools, null; capacity poisoning and fail-closed ends; caller-ordered keys |
 | `std/task.mncs` | `mncs.std.task.v1` (Profile 0.8) | bounded task/cancellation lifecycle seed: spawn/begin/advance/finish with explicit acceptance, cooperative cancel flag, step budget, deterministic counters; no threads, no preemption |
 | `std/clock.mncs` | `mncs.std.clock.v1` (Profile 0.8) | relational wall-clock comparisons over u64 epoch millis observed via `clock_read()` under an explicit `--grant-time` capability: saturating elapsed, inclusive expired, freshness windows; total, O(1), absolutes never pinned |
 | `std/json_cursor.mncs` | `mncs.std.json_cursor.v1` (Profile 0.10) | streaming JSON cursor with bounded container stack, string/key events, absolute spans, 32-byte saturated unknown-key matching, and basic UTF-8 lead/continuation validation |
+| `std/channel.mncs` | `mncs.std.channel.v1` (Profile 0.13) | bounded channel/close/drain protocol with explicit acceptance |
+| `std/chunk.mncs` | `mncs.std.chunk.v1` (Profile 0.13) | bounded line-chunk cursors over byte views with continuation joins |
+| `std/relation.mncs` | `mncs.std.relation.v1` (Profile 0.13) | bounded edge-set insert with deduplication, transitive closure, reachability |
+| `std/scope.mncs` | `mncs.std.scope.v1` (Profile 0.13) | bounded task scope with completion/cancel accounting |
+| `std/sort.mncs` | `mncs.std.sort.v1` (Profile 0.13) | bounded insertion sort/dedup over u64 windows |
+| `std/store.mncs` | `mncs.std.store.v1` (Profile 0.13) | generational compare-and-swap store with snapshots and compaction |
+| `std/text_utf8.mncs` | `mncs.std.text_utf8.v1` (Profile 0.13) | UTF-8 validation substrate over byte views |
+| `std/text_map.mncs` | `mncs.std.text_map.v1` (Profile 0.13) | bounded text-to-code tables |
+| `std/token_set.mncs` | `mncs.std.token_set.v1` (Profile 0.13) | bounded token-set algebra: contains/require/forbid/prefer/dedup/top |
+| `std/sha256.mncs` | `mncs.std.sha256.v1` (Profile 0.14) | bounded SHA-256 over byte views |
 | `core/bytes.mncs` | `mncs.core.bytes.v1` (Profile 0.7) | byte bitwise/shift/order, folding fingerprint, nibble split, ASCII classifiers, wrapping checksum |
 | `core/numeric.mncs` | `mncs.core.numeric.v1` (Profile 0.8) | wrapping 4-lane sum/mean/centroid and L2-squared; vector kernels live in `vector.v1` |
 | `core/random.mncs` | `mncs.core.random.v1` (Profile 0.6) | deterministic MMIX LCG streams, bounded draws, domain-separated split/derive (no statistical-independence claim) |
-| `core/contracts.mncs` | `mncs.core.contracts.v1` (Profile 0.7) | executable-contract vocabulary: `implies`/`iff` combinators, `abs_diff`/`within_tolerance` for u64/i64/byte with explicit wrapping and documented boundary behavior |
-| `core/image.mncs` | `mncs.core.image.v1` (Profile 0.8) | bounded 8x8 grayscale frames: total pixel access, filled/outline rectangle renderer, mirror/rotate90 transforms, invert/saturating-brighten, L1 Sobel gradients with replicated borders, threshold, 3x3 mean blur |
-| `core/vision.mncs` | `mncs.core.vision.v1` (Profile 0.9) | visual observer pipeline: thresholded edge samples, greedy 8-neighbour segments, deduped corner Points, bounding contour with explicit closedness estimate, confidence-scored rectangle/line/blob candidates, persistent scene graph with stable-id tracking, compact frame deltas |
-| `core/version.mncs` | `mncs.core.version.v1` (Profile 0.6) | version triples, envelopes, pre-1.0 breaking rule |
+| `core/contracts.mncs` | `mncs.core.contracts.v1` (Profile 0.13) | executable-contract vocabulary: `implies`/`iff` combinators, `abs_diff`/`within_tolerance` for u64/i64/byte with explicit wrapping and documented boundary behavior |
+| `core/image.mncs` | `mncs.core.image.v1` (Profile 0.13) | bounded 8x8 grayscale frames: total pixel access, filled/outline rectangle renderer, mirror/rotate90 transforms, invert/saturating-brighten, L1 Sobel gradients with replicated borders, threshold, 3x3 mean blur |
+| `core/vision.mncs` | `mncs.core.vision.v1` (Profile 0.13) | visual observer pipeline: thresholded edge samples, greedy 8-neighbour segments, deduped corner Points, bounding contour with explicit closedness estimate, confidence-scored rectangle/line/blob candidates, persistent scene graph with stable-id tracking, compact frame deltas |
+| `core/version.mncs` | `mncs.core.version.v1` (Profile 0.6) | version triples, candidate-relative envelopes (AtLeast holds when the candidate is at or after the bound), pre-1.0 breaking rule |
 | `core/vector.mncs` | `mncs.core.vector.v1` (Profile 0.8) | wrapping dot product, masked positive sum, functional lane replacement, and vector-typed reduce/double exports |
 | `core/mask.mncs` | `mncs.core.mask.v1` (Profile 0.8) | bounded any/all/none kernels plus mask-typed `any_of`/`all_of`/`none_of`/`and4`/`or4`/`xor4`/`not4`/`identity4` exports |
-| `core/geometry.mncs` | `mncs.core.geometry.v1` (Profiles 0.8/0.10) | typed Point/Size/Rect/Insets with containment, intersection, generic sequence union/selection helpers, clipping, translation, alignment/place, split, disjoint/adjacent, and branchless selection helpers |
+| `core/geometry.mncs` | `mncs.core.geometry.v1` (Profile 0.13) | typed Point/Size/Rect/Insets with containment, intersection, generic sequence union/selection helpers, clipping, translation, alignment/place, split, disjoint/adjacent, and branchless selection helpers |
 | `core/partition.mncs` | `mncs.core.partition.v1` | overflow-safe weighted four-lane partitioning with deterministic remainder allocation, zero/negative-weight normalization, cap-friendly leftovers, and explicit validity |
-| `std/encoding.mncs` | `mncs.std.encoding.v1` (Profile 0.7) | canonical big-endian `encode_u16`/`u32`/`u64` and version encodings with executable round-trip laws |
+| `std/encoding.mncs` | `mncs.std.encoding.v1` (Profile 0.13) | canonical big-endian `encode_u16`/`u32`/`u64` and version encodings with executable round-trip laws |
 | `std/simd.mncs` | `mncs.std.simd.v1` (Profile 0.8) | explicit-intent affine/ReLU/reduction kernel |
 | `std/ansi.mncs` | `mncs.std.ansi.v1` | bounded ANSI/VT parsing into generic Character, Arrow, Focus, Paste, Mouse, Resize, and Unknown events |
 | `std/platform.mncs` | `mncs.std.platform.v1` (Profile 0.6) | finite-domain platform vocabulary: OS/arch/libc/init/accelerator enums, version envelopes, CUDA compute floors, eBPF/WASM/PTX flags, resource bounds, and the native/emulated execution path |
 | `core/proof_term.mncs` | `mncs.core.proof_term.v1` (Profile 0.10) | RFC 0007 tranche 0.1 vocabulary: flat topological `[Cell; 16]` buffers, `TermTag` (universes, Pi/Lambda/Apply, Nat family with closed `Plus`, `Eq`/`Refl`), unique-binder variables, descriptor kind codes |
 | `core/proof_check.mncs` | `mncs.core.proof_check.v1` (Profile 0.10) | the MNCS-native proof kernel: single forward pass deciding well-formedness, universes, typing, and closed definitional equality to `PASS`/`FAIL`/`UNKNOWN`; dependent application, dependent motives, and open terms stay `UNKNOWN`, never `PASS` |
+| `core/proof_admit.mncs` | `mncs.core.proof_admit.v1` (Profile 0.13) | tranche-0.2 proof admission and binding: kernel admission, `ProofBinding` seal, replay authorization and reuse |
 | `family/rfc_status.mncs` | `mncs.family.rfc_status.v1` (Profile 0.10) | MNCS-native RFC status gates: `gate_experimental`/`gate_implemented` over criterion tallies plus evidence flags, and `transition_allowed` (upgrades need `PASS`, downgrades always pass); the RFC 0007 tally executes here |
 | `family/journal.mncs` | `mncs.family.journal.v1` (Profile 0.10) | MNCS-native Journal admission policy: bounded 16-kind event vocabulary, `gate_admit` over evidence tallies, `admission_decision` (duplicates and model-only claims rejected), stepwise `trust_transition` with legacy quarantine, lineage-delegated `chain_ok`, constantly-false `model_may_admit`, and the `may_render_public` redaction guard |
-| `jit/types.mncs` | `mncs.jit.types.v1` (Profile 0.10) | JIT execution vocabulary: Provider/Lifecycle/Tier/ChangeKind/DepKind/DepVerdict/Validity/Workload enums with u64 code converters, Session/Definition/Binding/Executable/DepEdge tables (8/8/16/16), host-assigned-code boundary convention |
-| `jit/session.mncs` | `mncs.jit.session.v1` (Profile 0.10) | persistent JIT session value: create/define (new + redefine with duplicate/overflow/closed guards), dependent staleness via `depends`, era advance, idempotent close, introspection getters |
-| `jit/binding.mncs` | `mncs.jit.binding.v1` (Profile 0.10) | generational publication: note_compiled/publish (owner, generation, lifecycle, proof-era checks), atomic binding swing with supersession demotion, abandon rollback, artifact retirement, resolve with proof currency |
-| `jit/depends.mncs` | `mncs.jit.depends.v1` (Profile 0.10) | dependency edges with explicit invalidation policy matrix (BodyOnly/Signature/Contract x Call/Signature/Layout), transitive escalation, bounded closure, stale application over binding windows |
-| `jit/lifecycle.mncs` | `mncs.jit.lifecycle.v1` (Profile 0.10) | provider-neutral artifact lifecycle table (Retired terminal), retire_window for session close |
-| `jit/plan.mncs` | `mncs.jit.plan.v1` (Profile 0.10) | provider-neutral execution planning: workload-class selection with degraded-route and accelerator-refusal verdicts, parameterized tier policy, plan validation |
-| `jit/profile.mncs` | `mncs.jit.profile.v1` (Profile 0.10) | saturating execution observations (calls, exec/compile millis, means, steady-state hooks) for future adaptive tiering |
-| `jit/proof.mncs` | `mncs.jit.proof.v1` (Profile 0.10) | proof-aware execution metadata: era currency, exact assumption match, dual-key (micro-verifier + kernel) specialization admission |
+| `family/coherence.mncs` | `mncs.family.coherence.v01` (Profile 0.13) | envelope compatibility, dominance-fold check aggregation, impact/promotion/transition/drift verdicts |
+| `jit/types.mncs` | `mncs.jit.types.v1` (Profile 0.13) | JIT execution vocabulary: Provider/Lifecycle/Tier/ChangeKind/DepKind/DepVerdict/Validity/Workload enums with u64 code converters, Session/Definition/Binding/Executable/DepEdge tables (8/8/16/16), host-assigned-code boundary convention |
+| `jit/session.mncs` | `mncs.jit.session.v1` (Profile 0.13) | persistent JIT session value: create/define (new + redefine with duplicate/overflow/closed guards), dependent staleness via `depends`, era advance, idempotent close, introspection getters |
+| `jit/binding.mncs` | `mncs.jit.binding.v1` (Profile 0.13) | generational publication: note_compiled/publish (owner, generation, lifecycle, proof-era checks), atomic binding swing with supersession demotion, abandon rollback, artifact retirement, resolve with proof currency |
+| `jit/depends.mncs` | `mncs.jit.depends.v1` (Profile 0.13) | dependency edges with explicit invalidation policy matrix (BodyOnly/Signature/Contract x Call/Signature/Layout), transitive escalation, bounded closure, stale application over binding windows |
+| `jit/lifecycle.mncs` | `mncs.jit.lifecycle.v1` (Profile 0.13) | provider-neutral artifact lifecycle table (Retired terminal), retire_window for session close |
+| `jit/plan.mncs` | `mncs.jit.plan.v1` (Profile 0.13) | provider-neutral execution planning: workload-class selection with degraded-route and accelerator-refusal verdicts, parameterized tier policy, plan validation |
+| `jit/profile.mncs` | `mncs.jit.profile.v1` (Profile 0.13) | saturating execution observations (calls, exec/compile millis, means, steady-state hooks) for future adaptive tiering |
+| `jit/proof.mncs` | `mncs.jit.proof.v1` (Profile 0.13) | proof-aware execution metadata: era currency, exact assumption match, dual-key (micro-verifier + kernel) specialization admission |
 
 ## Current module boundary
 
@@ -207,4 +219,11 @@ Bounded corpora live under `examples/execution/library-core-*.json` and the
 hand-authored parser witnesses such as `json-cursor-corpus.json`. Generated
 core corpora are regenerated by `python3 scripts/gen-library-core-corpora.py`;
 regeneration is deterministic and committed generated files must match the
-generator output.
+generator output. Family corpora (`family-version-corpus.json`,
+`family-coherence-*-corpus.json`) are regenerated by
+`python3 scripts/gen-family-coherence-corpora.py` under the same
+determinism requirement. The version, compatibility, aggregate, impact,
+promotion, transition, and drift corpora, the JSON recognition probes, the
+contracts corpus, and the branch-hygiene probe are all wired to
+backend-agreement tests, so committed expectations execute rather than
+document.

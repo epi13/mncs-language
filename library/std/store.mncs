@@ -34,8 +34,6 @@ mncs 0.13;
 //   reclaimed, and a protected generation is never reported.
 module mncs.std.store.v1;
 
-use mncs.core.logic.v1 as logic;
-
 // Durability promise codes: 0 = volatile (no crash promise), 1 =
 // process (complete old-or-new across process death), 2 = power
 // (UNKNOWN without realization evidence; carried, never claimed).
@@ -56,7 +54,6 @@ fn cas(store: Store, base: u64, value: u64, durability: u64) -> (result: CasOut)
             committed: true,
             observed: store.generation +% 1
         };
-    } else {
     }
     return CasOut { store: store, committed: false, observed: store.generation };
 }
@@ -79,7 +76,6 @@ record ReadOut { value: u64, at: u64, live: bool }
 fn read_through(snap: Snapshot) -> (result: ReadOut) {
     if snap.live {
         return ReadOut { value: snap.value, at: snap.generation, live: true };
-    } else {
     }
     return ReadOut { value: 0, at: snap.generation, live: false };
 }
@@ -99,7 +95,7 @@ fn reclaim_scan(newest: u64, keep_last: u64, live_a: u64, live_b: u64, live_coun
         let in_range: bool = g <= newest;
         let retained: bool = g +% window > newest;
         let pinned: bool = (live_count >= 1 && g == live_a) || (live_count >= 2 && g == live_b);
-        let free: bool = in_range && logic.bool_not(retained) && logic.bool_not(pinned);
+        let free: bool = in_range && !retained && !pinned;
         next st = ReclaimOut {
             count: st.count +% select(free, 1, 0),
             first: select(free && st.count == 0, g, st.first)
@@ -134,8 +130,8 @@ fn candidate_snapshot_isolation() -> (result: i64) {
     let w3: CasOut = cas(w2.store, w2.observed, 33, 1);
     let seen: ReadOut = read_through(snap);
     let gone: ReadOut = read_through(release(snap));
-    let ok: bool = seen.live && logic.bool_not(gone.live);
-    return select(ok, seen.at as i64 * 1000 + seen.value as i64 * 10 + w3.store.generation as i64, 0 - 1);
+    let ok: bool = seen.live && !gone.live;
+    return select(ok, seen.at as i64 * 1000 + seen.value as i64 * 10 + w3.store.generation as i64, -1);
 }
 
 // Retention: newest 5, keep 2, live {4} reclaims {0,1,2,3} (count 4,
@@ -152,5 +148,5 @@ fn candidate_reclaim() -> (result: i64) {
 fn candidate_durability_receipt() -> (result: i64) {
     let s0: Store = Store { generation: 0, value: 0, durability: 0 };
     let w1: CasOut = cas(s0, 0, 11, 1);
-    return select(w1.committed, w1.store.generation as i64 * 100 + w1.store.durability as i64 * 10 + 1, 0 - 1);
+    return select(w1.committed, w1.store.generation as i64 * 100 + w1.store.durability as i64 * 10 + 1, -1);
 }

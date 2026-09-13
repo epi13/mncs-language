@@ -1,4 +1,4 @@
-mncs 0.9;
+mncs 0.13;
 
 // mncs.core.image — bounded grayscale images and deterministic pixel ops.
 //
@@ -50,11 +50,7 @@ fn set_pixel(img: [byte; 64], row: u64, col: u64, value: byte) -> (result: [byte
 }
 
 fn blank(value: byte) -> (result: [byte; 64]) {
-    let base: [byte; 64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    iterate i over base carrying img: [byte; 64] = base {
-        next img = replace(img, i, value);
-    }
-    return img;
+    return [value; 64];
 }
 
 fn image_equal(a: [byte; 64], b: [byte; 64]) -> (result: bool) {
@@ -189,11 +185,11 @@ fn sample_replicate(img: [byte; 64], row: u64, col: u64) -> (result: u64) {
     return get_pixel(img, row, col) as u64;
 }
 
+// Unsigned magnitude of the difference between two pixel accumulations.
+// Comparison-guarded subtraction is owned by `mncs.core.contracts.v1`
+// (imported above); this delegates there instead of restating the guard.
 fn abs_diff_mag(pos: u64, neg: u64) -> (result: u64) {
-    if pos >= neg {
-        return pos - neg;
-    }
-    return neg - pos;
+    return abs_diff_u64(pos, neg);
 }
 
 // L1 x-gradient magnitude at one pixel (Sobel kernel, borders replicated).
