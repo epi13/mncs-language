@@ -887,7 +887,12 @@ pub(crate) fn operation_id(
     )
 }
 
-pub(crate) fn parameter_id(module: &str, function: &str, value: &str) -> SemanticId {
+/// Stable semantic identity for a function parameter value.
+///
+/// Runtime observation uses this same identity for an argument rather than
+/// inventing an execution-only binding namespace. The observed value still
+/// receives a distinct execution-scoped version identity.
+pub fn parameter_id(module: &str, function: &str, value: &str) -> SemanticId {
     make_id(IdentityKind::Value, &[module, function, "parameter", value])
 }
 

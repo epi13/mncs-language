@@ -20,18 +20,19 @@ use mncs_compiler::{
     ModuleResolutionOutcome, ModuleResolver, ReferenceCompiler, SourceFrontEndResult,
 };
 use mncs_model::{
-    compare_body_and_ssa, compare_execution, execute_ssa, execute_with_policy,
+    compare_body_and_ssa, compare_execution, execute_observed, execute_ssa, execute_with_policy,
     ArtifactRepresentation, CandidateEvaluation, CausalSlice, ComparisonStatus, CompilationResult,
     CompilationStatus, CompilationStudyRequest, CompilationStudyResult, Confidence,
     DeterministicVerifier, DiagnosticCategory, DiagnosticObligation, EvidenceFreshness,
-    EvidenceManifest, EvidenceState, ExecutionComparison, ExecutionCorpus, ExecutionProperty,
-    ExecutionRequest, ExecutionStatus, ExecutionValue, FunctionBody, HostGrant,
-    LanguageExperimentCaseObservation, LanguageExperimentComparison, LanguageExperimentDefinition,
+    EvidenceManifest, EvidenceState, ExecutionComparison, ExecutionCorpus,
+    ExecutionObservationPolicy, ExecutionProperty, ExecutionRequest, ExecutionStatus,
+    ExecutionValue, FunctionBody, HostGrant, LanguageExperimentCaseObservation,
+    LanguageExperimentComparison, LanguageExperimentDefinition,
     LanguageExperimentPropertyObservation, LanguageExperimentResult,
     LanguageExperimentStatefulCaseObservation, LoweringExecutionComparison,
-    LoweringExecutionStatus, ObligationStatus, Program, RealizationRequest, SemanticDiff,
-    SemanticId, SsaModule, StatefulExecutionCase, StatefulExecutionResult, TargetContractRef,
-    ValidatorRequirement,
+    LoweringExecutionStatus, ObligationStatus, ObservationCapturePolicy, ObservedExecutionResult,
+    Program, RealizationRequest, SemanticDiff, SemanticId, SsaModule, StatefulExecutionCase,
+    StatefulExecutionResult, TargetContractRef, ValidatorRequirement,
 };
 use mncs_syntax::{
     analyze, SourceArtifactKind, SourceEnvelope, SourceMetrics, SourceOrigin, SourceOriginKind,
@@ -41,6 +42,8 @@ use mncs_translation_check::{
     validate_constant_folding, validate_unreachable_removal,
 };
 use serde::{Deserialize, Serialize};
+
+const OBSERVED_EXECUTION_COMMAND_SCHEMA_VERSION: &str = "mncs.execution-observation-command/1";
 
 /// Bounded summary emitted by `experiment execute --baseline` after executing a
 /// frozen backend artifact against a recorded baseline experiment result.
@@ -109,6 +112,7 @@ fn run_cli() -> ExitCode {
         "trace" => one_manifest_command(args, trace),
         "verifier-request" => one_manifest_command(args, verifier_request),
         "execute" => execution_command(args),
+        "observe" => observation_command(args),
         "execute-ssa" => ssa_execution_command(args),
         "compare-execution" => execution_compare_command(args),
         "check-lowering-execution" => lowering_execution_command(args),
@@ -534,6 +538,210 @@ where
         ExitCode::from(2)
     } else {
         execution_status_code(status)
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ObservationCommandReport {
+    schema_version: String,
+    execution: mncs_model::ExecutionResult,
+    observation: mncs_model::ExecutionObservationStream,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    validation: Option<mncs_model::ValidationReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_map: Option<mncs_compiler::ExecutionSourceMap>,
+}
+
+struct ExecutionProgramBundle {
+    program: Program,
+    validation: mncs_model::ValidationReport,
+    source_map: Option<mncs_compiler::ExecutionSourceMap>,
+}
+
+fn observation_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
+    let (Some(program_path), Some(request_path)) = (args.next(), args.next()) else {
+        eprintln!("error: observe requires a program and execution request path");
+        print_usage();
+        return ExitCode::from(2);
+    };
+    let mut capture = ObservationCapturePolicy::FailureOnly;
+    let mut max_events = 256_usize;
+    let mut max_values = 128_usize;
+    let mut max_value_bytes = 4096_usize;
+    let mut include_frames = true;
+    let mut include_effects = true;
+    let mut selected_operations = BTreeSet::new();
+    while let Some(option) = args.next() {
+        match option.as_str() {
+            "--capture" => {
+                let Some(value) = args.next() else {
+                    eprintln!("error: --capture requires none, failure-only, selected, bounded, or diagnostic");
+                    return ExitCode::from(2);
+                };
+                capture = match value.as_str() {
+                    "none" => ObservationCapturePolicy::None,
+                    "failure-only" => ObservationCapturePolicy::FailureOnly,
+                    "selected" => ObservationCapturePolicy::Selected,
+                    "bounded" => ObservationCapturePolicy::Bounded,
+                    "diagnostic" => ObservationCapturePolicy::Diagnostic,
+                    other => {
+                        eprintln!("error: unsupported observation capture policy {other:?}");
+                        return ExitCode::from(2);
+                    }
+                };
+            }
+            "--max-events" => {
+                let Some(value) = args.next() else {
+                    eprintln!("error: --max-events requires a non-negative integer");
+                    return ExitCode::from(2);
+                };
+                max_events = match value.parse() {
+                    Ok(value) => value,
+                    Err(_) => {
+                        eprintln!("error: invalid --max-events value {value:?}");
+                        return ExitCode::from(2);
+                    }
+                };
+            }
+            "--max-values" => {
+                let Some(value) = args.next() else {
+                    eprintln!("error: --max-values requires a non-negative integer");
+                    return ExitCode::from(2);
+                };
+                max_values = match value.parse() {
+                    Ok(value) => value,
+                    Err(_) => {
+                        eprintln!("error: invalid --max-values value {value:?}");
+                        return ExitCode::from(2);
+                    }
+                };
+            }
+            "--max-value-bytes" => {
+                let Some(value) = args.next() else {
+                    eprintln!("error: --max-value-bytes requires a non-negative integer");
+                    return ExitCode::from(2);
+                };
+                max_value_bytes = match value.parse() {
+                    Ok(value) => value,
+                    Err(_) => {
+                        eprintln!("error: invalid --max-value-bytes value {value:?}");
+                        return ExitCode::from(2);
+                    }
+                };
+            }
+            "--no-frames" => include_frames = false,
+            "--no-effects" => include_effects = false,
+            "--operation" => {
+                let Some(value) = args.next() else {
+                    eprintln!("error: --operation requires a semantic operation identity");
+                    return ExitCode::from(2);
+                };
+                selected_operations.insert(SemanticId(value));
+            }
+            other => {
+                eprintln!("error: unknown observe option {other:?}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let request: ExecutionRequest = match read_json(&request_path) {
+        Ok(request) => request,
+        Err(code) => return code,
+    };
+    let bundle = match read_execution_program_bundle(&program_path, &request_seeds(&request)) {
+        Ok(bundle) => bundle,
+        Err(code) => return code,
+    };
+    let policy = ExecutionObservationPolicy {
+        schema_version: mncs_model::EXECUTION_OBSERVATION_POLICY_SCHEMA_VERSION.to_owned(),
+        capture,
+        max_events,
+        max_values,
+        max_value_bytes,
+        include_frames,
+        include_effects,
+        selected_operations,
+    };
+    let observed: ObservedExecutionResult = execute_observed(&bundle.program, &request, &policy);
+    let status = observed.execution.status;
+    if !print_json(&ObservationCommandReport {
+        schema_version: OBSERVED_EXECUTION_COMMAND_SCHEMA_VERSION.to_owned(),
+        execution: observed.execution,
+        observation: observed.observation,
+        validation: Some(bundle.validation),
+        source_map: bundle.source_map,
+    }) {
+        ExitCode::from(2)
+    } else {
+        execution_status_code(status)
+    }
+}
+
+fn read_execution_program_bundle(
+    path: &str,
+    seeds: &[mncs_model::HostGenericSeedRequest],
+) -> Result<ExecutionProgramBundle, ExitCode> {
+    if Path::new(path)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("mncs"))
+    {
+        let source = read_source(path)?;
+        let envelope = SourceEnvelope::new(
+            SourceArtifactKind::Program,
+            path.to_owned(),
+            SourceOrigin {
+                kind: SourceOriginKind::Path,
+                locator: Some(path.to_owned()),
+            },
+            source,
+        );
+        let resolver = FileModuleResolver::with_libraries(path);
+        let front_end = ReferenceCompiler::default()
+            .front_end_with_resolver_and_seeds(envelope, &resolver, seeds);
+        let diagnostics = front_end.diagnostics.clone();
+        let valid = front_end.is_valid();
+        let source_map = front_end.execution_source_map.clone();
+        let validation =
+            front_end
+                .validation
+                .clone()
+                .unwrap_or_else(|| mncs_model::ValidationReport {
+                    valid: false,
+                    errors: Vec::new(),
+                    warnings: Vec::new(),
+                    summary: mncs_model::ValidationSummary {
+                        modules: 0,
+                        functions: 0,
+                        contracts: 0,
+                        effects: 0,
+                        evidence_claims: 0,
+                        assumptions: 0,
+                    },
+                });
+        let program = front_end.program;
+        match program.filter(|_| valid) {
+            Some(program) => Ok(ExecutionProgramBundle {
+                program,
+                validation,
+                source_map,
+            }),
+            None => {
+                let _ = print_json(&diagnostics);
+                Err(ExitCode::from(2))
+            }
+        }
+    } else {
+        let program = read_program_for_execution_with_seeds(path, seeds)?;
+        let validation = program.validate();
+        Ok(ExecutionProgramBundle {
+            program,
+            validation,
+            source_map: None,
+        })
     }
 }
 
@@ -4394,6 +4602,7 @@ fn print_usage() {
     eprintln!("  mncs trace <manifest.json>");
     eprintln!("  mncs verifier-request <manifest.json>");
     eprintln!("  mncs execute <program.json> <execution-request.json>");
+    eprintln!("  mncs observe <program.mncs|program.json> <execution-request.json> [--capture none|failure-only|selected|bounded|diagnostic] [--max-events N] [--max-values N] [--max-value-bytes N] [--operation ID]");
     eprintln!("  mncs execute-ssa <program.json> <execution-request.json>");
     eprintln!("  mncs compare-execution <baseline.json> <candidate.json> <corpus.json>");
     eprintln!("  mncs check-lowering-execution <program.json> <corpus.json>");

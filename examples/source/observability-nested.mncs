@@ -1,0 +1,14 @@
+mncs 0.4;
+
+// Small nested-call fixture for the compiler/runtime observability contract.
+// The source map is expected to bind every executable semantic operation to
+// the expression that created it, while runtime frames preserve the call.
+module examples.observability.nested;
+
+fn increment(value: i64) -> (result: i64) {
+    return value + 1;
+}
+
+fn wrapper(value: i64) -> (result: i64) {
+    return increment(value);
+}
