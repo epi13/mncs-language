@@ -146,8 +146,8 @@ pub use experiment::{
     LANGUAGE_EXPERIMENT_RESULT_CONTRACT_ID, LANGUAGE_EXPERIMENT_SCHEMA_VERSION,
 };
 pub use graph::{
-    EdgeKind, GraphEdge, GraphError, GraphNode, InvalidationReason, InvalidationReport,
-    SemanticGraph,
+    EdgeKind, GraphEdge, GraphError, GraphNode, ImpactNode, ImpactRisk, InvalidationReason,
+    InvalidationReport, SemanticGraph, SemanticImpact, SEMANTIC_IMPACT_SCHEMA_VERSION,
 };
 pub use identity::{
     binding_id, binding_id_for, contract_id, finite_type_id, finite_variant_id, function_id,
