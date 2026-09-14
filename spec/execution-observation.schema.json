@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/epi13/mncs-language/blob/main/spec/execution-observation.schema.json",
+  "title": "MNCS bounded execution observation",
+  "type": "object",
+  "required": ["schema_version", "identity", "execution_identity", "policy", "completeness", "frames", "values", "effects", "events"],
+  "properties": {
+    "schema_version": {"const": "mncs.execution-observation/1"},
+    "identity": {"$ref": "#/$defs/semanticId"},
+    "execution_identity": {"$ref": "#/$defs/semanticId"},
+    "policy": {"$ref": "#/$defs/policy"},
+    "completeness": {"$ref": "#/$defs/completeness"},
+    "frames": {"type": "array", "items": {"$ref": "#/$defs/frame"}},
+    "values": {"type": "array", "items": {"$ref": "#/$defs/value"}},
+    "effects": {"type": "array", "items": {"$ref": "#/$defs/effect"}},
+    "events": {"type": "array", "items": {"$ref": "#/$defs/event"}}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "semanticId": {"type": "string", "minLength": 1},
+    "policy": {
+      "type": "object",
+      "required": ["schema_version", "capture", "max_events", "max_values", "max_value_bytes", "include_frames", "include_effects"],
+      "properties": {
+        "schema_version": {"const": "mncs.execution-observation-policy/1"},
+        "capture": {"enum": ["none", "failure_only", "selected", "bounded", "diagnostic"]},
+        "max_events": {"type": "integer", "minimum": 0, "maximum": 4096},
+        "max_values": {"type": "integer", "minimum": 0, "maximum": 2048},
+        "max_value_bytes": {"type": "integer", "minimum": 0, "maximum": 65536},
+        "include_frames": {"type": "boolean"},
+        "include_effects": {"type": "boolean"},
+        "selected_operations": {"type": "array", "items": {"$ref": "#/$defs/semanticId"}, "uniqueItems": true}
+      },
+      "additionalProperties": false
+    },
+    "completeness": {
+      "type": "object",
+      "required": ["status", "captured_events", "dropped_events", "captured_values", "dropped_values", "captured_effects", "truncated"],
+      "properties": {
+        "status": {"enum": ["disabled", "not_captured", "complete", "truncated"]},
+        "captured_events": {"type": "integer", "minimum": 0},
+        "dropped_events": {"type": "integer", "minimum": 0},
+        "captured_values": {"type": "integer", "minimum": 0},
+        "dropped_values": {"type": "integer", "minimum": 0},
+        "captured_effects": {"type": "integer", "minimum": 0},
+        "truncated": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "frame": {
+      "type": "object",
+      "required": ["identity", "function", "depth", "arguments"],
+      "properties": {
+        "identity": {"$ref": "#/$defs/semanticId"},
+        "function": {"$ref": "#/$defs/semanticId"},
+        "parent": {"$ref": "#/$defs/semanticId"},
+        "call_operation": {"$ref": "#/$defs/semanticId"},
+        "depth": {"type": "integer", "minimum": 0},
+        "arguments": {"type": "array", "items": {"$ref": "#/$defs/semanticId"}}
+      },
+      "additionalProperties": false
+    },
+    "capture": {
+      "oneOf": [
+        {"type": "object", "required": ["kind", "value"], "properties": {"kind": {"const": "full"}, "value": {"type": "object"}}, "additionalProperties": false},
+        {"type": "object", "required": ["kind", "sha256", "bytes"], "properties": {"kind": {"const": "truncated"}, "sha256": {"type": "string"}, "bytes": {"type": "integer", "minimum": 0}}, "additionalProperties": false},
+        {"type": "object", "required": ["kind", "sha256", "bytes"], "properties": {"kind": {"const": "digest_only"}, "sha256": {"type": "string"}, "bytes": {"type": "integer", "minimum": 0}}, "additionalProperties": false},
+        {"type": "object", "required": ["kind", "reason"], "properties": {"kind": {"const": "unavailable"}, "reason": {"type": "string"}}, "additionalProperties": false}
+      ]
+    },
+    "value": {
+      "type": "object",
+      "required": ["identity", "logical_identity", "binding", "version", "type_name", "observation", "frame", "capture"],
+      "properties": {
+        "identity": {"$ref": "#/$defs/semanticId"},
+        "logical_identity": {"$ref": "#/$defs/semanticId"},
+        "binding": {"type": "string"},
+        "version": {"type": "integer", "minimum": 0},
+        "type_name": {"type": "string"},
+        "observation": {"type": "string"},
+        "frame": {"$ref": "#/$defs/semanticId"},
+        "operation": {"$ref": "#/$defs/semanticId"},
+        "origin": {"$ref": "#/$defs/semanticId"},
+        "capture": {"$ref": "#/$defs/capture"}
+      },
+      "additionalProperties": false
+    },
+    "effect": {
+      "type": "object",
+      "required": ["identity", "operation", "frame", "kind", "target", "capability", "input_values", "replayability", "status"],
+      "properties": {
+        "identity": {"$ref": "#/$defs/semanticId"},
+        "operation": {"$ref": "#/$defs/semanticId"},
+        "frame": {"$ref": "#/$defs/semanticId"},
+        "kind": {"type": "string"},
+        "target": {"type": "string"},
+        "capability": {"type": "string"},
+        "input_values": {"type": "array", "items": {"$ref": "#/$defs/semanticId"}},
+        "result_value": {"$ref": "#/$defs/semanticId"},
+        "provenance": {"type": "string"},
+        "replayability": {"enum": ["lineage_only", "recorded", "replayable", "unavailable"]},
+        "status": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "event": {
+      "type": "object",
+      "required": ["identity", "sequence", "kind", "inputs", "outputs"],
+      "properties": {
+        "identity": {"$ref": "#/$defs/semanticId"},
+        "sequence": {"type": "integer", "minimum": 0},
+        "kind": {"type": "string"},
+        "frame": {"$ref": "#/$defs/semanticId"},
+        "block": {"$ref": "#/$defs/semanticId"},
+        "operation": {"$ref": "#/$defs/semanticId"},
+        "inputs": {"type": "array", "items": {"$ref": "#/$defs/semanticId"}},
+        "outputs": {"type": "array", "items": {"$ref": "#/$defs/semanticId"}},
+        "effect": {"$ref": "#/$defs/semanticId"},
+        "failure": {"$ref": "#/$defs/semanticId"},
+        "status": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

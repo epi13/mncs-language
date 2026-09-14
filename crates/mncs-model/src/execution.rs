@@ -13,10 +13,11 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::canonical::{canonical_json_value, sha256_hex};
-use crate::identity::{function_id, SemanticId};
+use crate::identity::{function_id, parameter_id, value_id, SemanticId};
 use crate::{
-    ArithmeticIntent, BodyBlock, BodyOperation, BodyOperationKind, BodyTerminator, BodyType,
-    BoundsEvidence, FloatType, Function, FunctionBody, IntegerType, Program, SequenceBound,
+    ArithmeticIntent, BodyBlock, BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator,
+    BodyType, BoundsEvidence, FloatType, Function, FunctionBody, IntegerType, Program,
+    SequenceBound,
 };
 
 /// Recover the `f64` of a float boundary value.
@@ -68,6 +69,13 @@ use sha2::{Digest, Sha256};
 
 pub const EXECUTION_REQUEST_SCHEMA_VERSION: &str = "0.1";
 pub const EXECUTION_RESULT_SCHEMA_VERSION: &str = "0.1";
+/// Versioned wrapper for a semantic execution plus an optional bounded
+/// observation stream.  The semantic result remains the authority for the
+/// execution verdict; observations are explanatory evidence.
+pub const EXECUTION_OBSERVED_SCHEMA_VERSION: &str = "mncs.execution-observed/1";
+/// Version of the language-owned bounded execution-observation stream.
+pub const EXECUTION_OBSERVATION_SCHEMA_VERSION: &str = "mncs.execution-observation/1";
+pub const EXECUTION_OBSERVATION_POLICY_SCHEMA_VERSION: &str = "mncs.execution-observation-policy/1";
 pub const EXECUTION_CORPUS_SCHEMA_VERSION: &str = "0.1";
 pub const EXECUTION_CORPUS_SCHEMA_VERSION_0_2: &str = "0.2";
 pub const EXECUTION_CORPUS_SCHEMA_VERSION_0_3: &str = "0.3";
@@ -80,6 +88,9 @@ pub const STATEFUL_EXECUTION_COMPARISON_SCHEMA_VERSION: &str = "0.1";
 pub const MAX_EXECUTION_BUDGET: u64 = 8_000_000;
 pub const MAX_STATEFUL_CALLS: u32 = 4096;
 const MAX_TRACE_ENTRIES: usize = 256;
+pub const MAX_OBSERVATION_EVENTS: usize = 4096;
+pub const MAX_OBSERVATION_VALUES: usize = 2048;
+pub const MAX_OBSERVATION_VALUE_BYTES: usize = 64 * 1024;
 
 pub fn execution_corpus_schema_supported(schema_version: &str) -> bool {
     matches!(
@@ -770,6 +781,1114 @@ pub struct ExecutionResult {
     pub trace: Vec<ExecutionTraceEntry>,
     pub trace_truncated: bool,
     pub effects: Vec<ExecutionEffectEvent>,
+}
+
+/// Capture policy for a bounded observation run.  This is deliberately not
+/// part of [`ExecutionRequest`]: changing how an execution is observed must
+/// not change the semantic subject that was requested.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationCapturePolicy {
+    None,
+    FailureOnly,
+    Selected,
+    Bounded,
+    Diagnostic,
+}
+
+impl Default for ObservationCapturePolicy {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+/// Explicit bounds and selectors for one observation run.  Limits are
+/// defensive-capped by the runtime; callers cannot turn this stream into an
+/// unbounded execution log.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionObservationPolicy {
+    pub schema_version: String,
+    #[serde(default)]
+    pub capture: ObservationCapturePolicy,
+    #[serde(default = "default_observation_events")]
+    pub max_events: usize,
+    #[serde(default = "default_observation_values")]
+    pub max_values: usize,
+    #[serde(default = "default_observation_value_bytes")]
+    pub max_value_bytes: usize,
+    #[serde(default = "default_true")]
+    pub include_frames: bool,
+    #[serde(default = "default_true")]
+    pub include_effects: bool,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub selected_operations: BTreeSet<SemanticId>,
+}
+
+fn default_observation_events() -> usize {
+    256
+}
+
+fn default_observation_values() -> usize {
+    128
+}
+
+fn default_observation_value_bytes() -> usize {
+    4096
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for ExecutionObservationPolicy {
+    fn default() -> Self {
+        Self {
+            schema_version: EXECUTION_OBSERVATION_POLICY_SCHEMA_VERSION.to_owned(),
+            capture: ObservationCapturePolicy::None,
+            max_events: default_observation_events(),
+            max_values: default_observation_values(),
+            max_value_bytes: default_observation_value_bytes(),
+            include_frames: true,
+            include_effects: true,
+            selected_operations: BTreeSet::new(),
+        }
+    }
+}
+
+impl ExecutionObservationPolicy {
+    pub fn bounded(capture: ObservationCapturePolicy) -> Self {
+        Self {
+            capture,
+            ..Self::default()
+        }
+    }
+
+    fn normalized(&self) -> Self {
+        let mut normalized = self.clone();
+        normalized.schema_version = EXECUTION_OBSERVATION_POLICY_SCHEMA_VERSION.to_owned();
+        normalized.max_events = normalized.max_events.min(MAX_OBSERVATION_EVENTS);
+        normalized.max_values = normalized.max_values.min(MAX_OBSERVATION_VALUES);
+        normalized.max_value_bytes = normalized.max_value_bytes.min(MAX_OBSERVATION_VALUE_BYTES);
+        normalized
+    }
+
+    fn captures_events(&self) -> bool {
+        !matches!(self.capture, ObservationCapturePolicy::None)
+    }
+
+    fn captures_operation(&self, operation: Option<&SemanticId>) -> bool {
+        match self.capture {
+            ObservationCapturePolicy::None => false,
+            ObservationCapturePolicy::Selected => {
+                operation.is_some_and(|identity| self.selected_operations.contains(identity))
+            }
+            ObservationCapturePolicy::FailureOnly
+            | ObservationCapturePolicy::Bounded
+            | ObservationCapturePolicy::Diagnostic => true,
+        }
+    }
+}
+
+/// Completeness status for an observation stream.  `not_captured` means the
+/// policy intentionally retained no stream (for example a passing run under
+/// `failure_only`), not that the runtime failed to observe a fact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationCompletenessStatus {
+    Disabled,
+    NotCaptured,
+    Complete,
+    Truncated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionObservationCompleteness {
+    pub status: ObservationCompletenessStatus,
+    pub captured_events: usize,
+    pub dropped_events: usize,
+    pub captured_values: usize,
+    pub dropped_values: usize,
+    pub captured_effects: usize,
+    pub truncated: bool,
+}
+
+/// A value projection is intentionally explicit about what crossed the
+/// observation boundary.  A digest or truncation marker is never presented
+/// as the value itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExecutionValueCapture {
+    Full { value: ExecutionValue },
+    Truncated { sha256: String, bytes: usize },
+    DigestOnly { sha256: String, bytes: usize },
+    Unavailable { reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionObservedValue {
+    pub identity: SemanticId,
+    /// The compiler/runtime logical binding or operation-result identity
+    /// whose version was observed.  This is not a host address.
+    pub logical_identity: SemanticId,
+    pub binding: String,
+    pub version: u64,
+    pub type_name: String,
+    pub observation: String,
+    pub frame: SemanticId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<SemanticId>,
+    pub capture: ExecutionValueCapture,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionObservedFrame {
+    pub identity: SemanticId,
+    pub function: SemanticId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_operation: Option<SemanticId>,
+    pub depth: u64,
+    pub arguments: Vec<SemanticId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionObservedEffect {
+    pub identity: SemanticId,
+    pub operation: SemanticId,
+    pub frame: SemanticId,
+    pub kind: String,
+    pub target: String,
+    pub capability: String,
+    pub input_values: Vec<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_value: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
+    /// This classifies what the stream knows about replay; it does not claim
+    /// deterministic replay of the external world.
+    pub replayability: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionObservationEvent {
+    pub identity: SemanticId,
+    pub sequence: u64,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<SemanticId>,
+    pub inputs: Vec<SemanticId>,
+    pub outputs: Vec<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<SemanticId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+}
+
+/// One bounded, compiler/runtime-owned execution observation stream.  The
+/// stream references semantic operation and value identities; source spans
+/// are joined from the compiler-owned source map by consumers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionObservationStream {
+    pub schema_version: String,
+    pub identity: SemanticId,
+    pub execution_identity: SemanticId,
+    pub policy: ExecutionObservationPolicy,
+    pub completeness: ExecutionObservationCompleteness,
+    pub frames: Vec<ExecutionObservedFrame>,
+    pub values: Vec<ExecutionObservedValue>,
+    pub effects: Vec<ExecutionObservedEffect>,
+    pub events: Vec<ExecutionObservationEvent>,
+}
+
+/// Explicit composition of the semantic execution result and explanatory
+/// observations.  Consumers must evaluate the two layers independently.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObservedExecutionResult {
+    pub schema_version: String,
+    pub execution: ExecutionResult,
+    pub observation: ExecutionObservationStream,
+}
+
+/// Stable identity for a semantic execution request.  Observation policy is
+/// intentionally absent from the material: one request observed twice has
+/// one subject identity and distinct observation identities.
+pub fn semantic_execution_identity(
+    program_identity: Option<&SemanticId>,
+    program_fingerprint: Option<&str>,
+    request: &ExecutionRequest,
+) -> SemanticId {
+    let material = (
+        program_identity,
+        program_fingerprint,
+        &request.schema_version,
+        &request.target,
+        &request.arguments,
+        &request.type_arguments,
+        request.step_budget,
+        &request.policy,
+        &request.host_grants,
+        request.call_depth_budget,
+    );
+    let canonical = canonical_json_value(&material).expect("execution identity is serializable");
+    SemanticId(format!(
+        "mncs:language:execution:{}",
+        sha256_hex(canonical.as_bytes())
+    ))
+}
+
+impl ExecutionObservationStream {
+    pub fn identity_is_valid(&self) -> bool {
+        if self.schema_version != EXECUTION_OBSERVATION_SCHEMA_VERSION {
+            return false;
+        }
+        let mut copy = self.clone();
+        let identity = copy.identity.clone();
+        copy.identity = SemanticId(String::new());
+        let material = (
+            &copy.schema_version,
+            &copy.execution_identity,
+            &copy.policy,
+            &copy.completeness,
+            &copy.frames,
+            &copy.values,
+            &copy.effects,
+            &copy.events,
+        );
+        let canonical = match canonical_json_value(&material) {
+            Ok(value) => value,
+            Err(_) => return false,
+        };
+        identity
+            == SemanticId(format!(
+                "mncs:language:observation:{}",
+                sha256_hex(canonical.as_bytes())
+            ))
+    }
+}
+
+struct ObservationRecorder {
+    stream: ExecutionObservationStream,
+    next_sequence: u64,
+    next_frame_ordinal: BTreeMap<(SemanticId, SemanticId), u64>,
+    next_effect_ordinal: BTreeMap<(SemanticId, SemanticId), u64>,
+    next_value_version: BTreeMap<(SemanticId, String), u64>,
+    current_values: BTreeMap<(SemanticId, String), SemanticId>,
+    pending_effects: BTreeMap<(SemanticId, SemanticId), Vec<SemanticId>>,
+    child_frames: BTreeMap<(SemanticId, SemanticId), Vec<SemanticId>>,
+    frame_returns: BTreeMap<SemanticId, Vec<SemanticId>>,
+    dropped_events: usize,
+    dropped_values: usize,
+    root_frame: Option<SemanticId>,
+    recorded_failures: BTreeSet<(Option<SemanticId>, String)>,
+}
+
+impl ObservationRecorder {
+    fn new(
+        program_identity: Option<&SemanticId>,
+        program_fingerprint: Option<&str>,
+        request: &ExecutionRequest,
+        policy: ExecutionObservationPolicy,
+    ) -> Self {
+        let policy = policy.normalized();
+        Self {
+            stream: ExecutionObservationStream {
+                schema_version: EXECUTION_OBSERVATION_SCHEMA_VERSION.to_owned(),
+                identity: SemanticId(String::new()),
+                execution_identity: semantic_execution_identity(
+                    program_identity,
+                    program_fingerprint,
+                    request,
+                ),
+                policy,
+                completeness: ExecutionObservationCompleteness {
+                    status: ObservationCompletenessStatus::Disabled,
+                    captured_events: 0,
+                    dropped_events: 0,
+                    captured_values: 0,
+                    dropped_values: 0,
+                    captured_effects: 0,
+                    truncated: false,
+                },
+                frames: Vec::new(),
+                values: Vec::new(),
+                effects: Vec::new(),
+                events: Vec::new(),
+            },
+            next_sequence: 0,
+            next_frame_ordinal: BTreeMap::new(),
+            next_effect_ordinal: BTreeMap::new(),
+            next_value_version: BTreeMap::new(),
+            current_values: BTreeMap::new(),
+            pending_effects: BTreeMap::new(),
+            child_frames: BTreeMap::new(),
+            frame_returns: BTreeMap::new(),
+            dropped_events: 0,
+            dropped_values: 0,
+            root_frame: None,
+            recorded_failures: BTreeSet::new(),
+        }
+    }
+
+    fn enabled(&self) -> bool {
+        self.stream.policy.captures_events()
+    }
+
+    fn hash_identity(label: &str, material: impl Serialize) -> SemanticId {
+        let canonical =
+            canonical_json_value(&material).expect("observation identity is serializable");
+        SemanticId(format!(
+            "mncs:language:{label}:{}",
+            sha256_hex(canonical.as_bytes())
+        ))
+    }
+
+    fn frame_identity(
+        &mut self,
+        function: &SemanticId,
+        parent: Option<&SemanticId>,
+        call_operation: Option<&SemanticId>,
+    ) -> SemanticId {
+        let ordinal_key = (
+            parent
+                .cloned()
+                .unwrap_or_else(|| SemanticId("root".to_owned())),
+            call_operation
+                .cloned()
+                .unwrap_or_else(|| SemanticId("entry".to_owned())),
+        );
+        let ordinal = self
+            .next_frame_ordinal
+            .entry(ordinal_key.clone())
+            .or_default();
+        let current = *ordinal;
+        *ordinal = ordinal.saturating_add(1);
+        Self::hash_identity(
+            "frame",
+            (
+                &self.stream.execution_identity,
+                function,
+                parent,
+                call_operation,
+                current,
+            ),
+        )
+    }
+
+    fn enter_frame(
+        &mut self,
+        function: &SemanticId,
+        function_namespace: &str,
+        function_name: &str,
+        parent: Option<&SemanticId>,
+        call_operation: Option<&SemanticId>,
+        depth: u64,
+        parameters: &[BodyParameter],
+        arguments: &[ExecutionValue],
+        argument_sources: &[Option<SemanticId>],
+    ) -> SemanticId {
+        let frame = self.frame_identity(function, parent, call_operation);
+        if parent.is_none() {
+            self.root_frame = Some(frame.clone());
+        } else if let Some(call_operation) = call_operation {
+            self.child_frames
+                .entry((
+                    parent.cloned().expect("parent frame"),
+                    call_operation.clone(),
+                ))
+                .or_default()
+                .push(frame.clone());
+        }
+        let mut argument_refs = Vec::new();
+        for (index, parameter) in parameters.iter().enumerate() {
+            let Some(value) = arguments.get(index) else {
+                continue;
+            };
+            let origin = argument_sources.get(index).cloned().flatten();
+            if let Some(identity) = self.observe_value(
+                &frame,
+                &parameter.id,
+                parameter_id(function_namespace, function_name, &parameter.id),
+                0,
+                &parameter.ty.semantic_name(),
+                "argument",
+                None,
+                origin,
+                value,
+            ) {
+                argument_refs.push(identity);
+            }
+        }
+        if self.stream.policy.include_frames && self.enabled() {
+            self.stream.frames.push(ExecutionObservedFrame {
+                identity: frame.clone(),
+                function: function.clone(),
+                parent: parent.cloned(),
+                call_operation: call_operation.cloned(),
+                depth,
+                arguments: argument_refs.clone(),
+            });
+        }
+        if parent.is_none() {
+            self.emit_event(
+                "execution_enter",
+                Some(&frame),
+                None,
+                None,
+                Vec::new(),
+                Vec::new(),
+                None,
+                None,
+                Some("running"),
+            );
+        }
+        self.emit_event(
+            "frame_enter",
+            Some(&frame),
+            None,
+            None,
+            argument_refs,
+            Vec::new(),
+            None,
+            None,
+            Some("running"),
+        );
+        frame
+    }
+
+    fn child_frame(&self, parent: &SemanticId, operation: &SemanticId) -> Option<SemanticId> {
+        self.child_frames
+            .get(&(parent.clone(), operation.clone()))
+            .and_then(|frames| frames.last().cloned())
+    }
+
+    fn exit_frame(&mut self, frame: &SemanticId, status: ExecutionStatus) {
+        self.emit_event(
+            "frame_exit",
+            Some(frame),
+            None,
+            None,
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            Some(format_execution_status(status).as_str()),
+        );
+        if self.root_frame.as_ref() == Some(frame) {
+            self.emit_event(
+                "execution_exit",
+                Some(frame),
+                None,
+                None,
+                Vec::new(),
+                Vec::new(),
+                None,
+                None,
+                Some(format_execution_status(status).as_str()),
+            );
+        }
+    }
+
+    fn observe_value(
+        &mut self,
+        frame: &SemanticId,
+        binding: &str,
+        logical_identity: SemanticId,
+        version_hint: u64,
+        type_name: &str,
+        observation: &str,
+        operation: Option<&SemanticId>,
+        origin: Option<SemanticId>,
+        value: &ExecutionValue,
+    ) -> Option<SemanticId> {
+        if !self.enabled() {
+            return None;
+        }
+        let key = (frame.clone(), binding.to_owned());
+        let version = self
+            .next_value_version
+            .entry(key.clone())
+            .or_insert(version_hint);
+        let current_version = *version;
+        *version = version.saturating_add(1);
+        if self.stream.values.len() >= self.stream.policy.max_values {
+            self.dropped_values = self.dropped_values.saturating_add(1);
+            return None;
+        }
+        let identity = Self::hash_identity(
+            "value",
+            (
+                &self.stream.execution_identity,
+                frame,
+                binding,
+                current_version,
+            ),
+        );
+        let capture = capture_execution_value(value, self.stream.policy.max_value_bytes);
+        self.stream.values.push(ExecutionObservedValue {
+            identity: identity.clone(),
+            logical_identity,
+            binding: binding.to_owned(),
+            version: current_version,
+            type_name: type_name.to_owned(),
+            observation: observation.to_owned(),
+            frame: frame.clone(),
+            operation: operation.cloned(),
+            origin,
+            capture,
+        });
+        self.current_values.insert(key, identity.clone());
+        Some(identity)
+    }
+
+    fn read_value(
+        &mut self,
+        frame: &SemanticId,
+        binding: &str,
+        logical_identity: SemanticId,
+        type_name: &str,
+        value: Option<&ExecutionValue>,
+        operation: &SemanticId,
+    ) -> Option<SemanticId> {
+        let key = (frame.clone(), binding.to_owned());
+        if let Some(identity) = self.current_values.get(&key) {
+            return Some(identity.clone());
+        }
+        let value = value?;
+        self.observe_value(
+            frame,
+            binding,
+            logical_identity,
+            0,
+            type_name,
+            "read",
+            Some(operation),
+            None,
+            value,
+        )
+    }
+
+    fn current_reference(&self, frame: &SemanticId, binding: &str) -> Option<SemanticId> {
+        self.current_values
+            .get(&(frame.clone(), binding.to_owned()))
+            .cloned()
+    }
+
+    fn operation_inputs(
+        &mut self,
+        frame: &SemanticId,
+        operation: &BodyOperation,
+        operation_identity: &SemanticId,
+        values: &BTreeMap<String, ExecutionValue>,
+        value_types: &BTreeMap<String, BodyType>,
+        function_namespace: &str,
+        function_name: &str,
+        block_id: &str,
+        block_identity: &SemanticId,
+    ) -> (Vec<Option<SemanticId>>, Option<SemanticId>) {
+        let inputs = operation
+            .operands
+            .iter()
+            .map(|binding| {
+                self.read_value(
+                    frame,
+                    binding,
+                    SemanticId(format!(
+                        "mncs:0.2:value:{}::{}::{}::{}",
+                        function_namespace, function_name, block_id, binding
+                    )),
+                    value_types
+                        .get(binding)
+                        .map(BodyType::semantic_name)
+                        .unwrap_or_else(|| "unknown".to_owned())
+                        .as_str(),
+                    values.get(binding),
+                    operation_identity,
+                )
+            })
+            .collect::<Vec<_>>();
+        let effect = self.record_effect_invoke(frame, operation, operation_identity, &inputs);
+        self.emit_event(
+            "operation_enter",
+            Some(frame),
+            Some(block_identity),
+            Some(operation_identity),
+            inputs.iter().flatten().cloned().collect(),
+            Vec::new(),
+            effect.clone(),
+            None,
+            Some("running"),
+        );
+        (inputs, effect)
+    }
+
+    fn operation_result(
+        &mut self,
+        frame: &SemanticId,
+        operation: &BodyOperation,
+        operation_identity: &SemanticId,
+        values: &BTreeMap<String, ExecutionValue>,
+        value_types: &BTreeMap<String, BodyType>,
+        function_namespace: &str,
+        function_name: &str,
+        block_id: &str,
+        block_identity: &SemanticId,
+        inputs: &[Option<SemanticId>],
+        result: &ExecutionResult,
+    ) -> Vec<SemanticId> {
+        let call_origin = if matches!(&operation.kind, BodyOperationKind::Call { .. }) {
+            self.child_frame(frame, operation_identity)
+                .and_then(|child| {
+                    self.frame_returns
+                        .get(&child)
+                        .and_then(|values| values.first())
+                        .cloned()
+                })
+        } else {
+            None
+        };
+        let outputs = operation
+            .results
+            .iter()
+            .filter_map(|output| {
+                let value = values.get(&output.id)?;
+                self.observe_value(
+                    frame,
+                    &output.id,
+                    operation.result_identity(
+                        function_namespace,
+                        function_name,
+                        block_id,
+                        &output.id,
+                    ),
+                    0,
+                    value_types
+                        .get(&output.id)
+                        .unwrap_or(&output.ty)
+                        .semantic_name()
+                        .as_str(),
+                    "result",
+                    Some(operation_identity),
+                    call_origin.clone(),
+                    value,
+                )
+            })
+            .collect::<Vec<_>>();
+        let failure = result.failure.as_ref().map(|failure| {
+            failure.identity.clone().unwrap_or_else(|| {
+                Self::hash_identity(
+                    "failure",
+                    (
+                        &self.stream.execution_identity,
+                        frame,
+                        operation_identity,
+                        &failure.reason,
+                    ),
+                )
+            })
+        });
+        let effect =
+            self.finish_effect(frame, operation_identity, outputs.first().cloned(), result);
+        self.emit_event(
+            "operation_result",
+            Some(frame),
+            Some(block_identity),
+            Some(operation_identity),
+            inputs.iter().flatten().cloned().collect(),
+            outputs.clone(),
+            effect,
+            failure,
+            Some(format_execution_status(result.status).as_str()),
+        );
+        outputs
+    }
+
+    fn record_block(&mut self, frame: &SemanticId, block: &SemanticId) {
+        self.emit_event(
+            "block_enter",
+            Some(frame),
+            Some(block),
+            None,
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+            Some("running"),
+        );
+    }
+
+    fn record_block_arguments(
+        &mut self,
+        frame: &SemanticId,
+        function_namespace: &str,
+        function_name: &str,
+        block: &BodyBlock,
+        values: &BTreeMap<String, ExecutionValue>,
+        origins: &[Option<SemanticId>],
+        value_types: &BTreeMap<String, BodyType>,
+    ) {
+        for (index, parameter) in block.parameters.iter().enumerate() {
+            let Some(value) = values.get(&parameter.id) else {
+                continue;
+            };
+            self.observe_value(
+                frame,
+                &parameter.id,
+                value_id(
+                    function_namespace,
+                    function_name,
+                    &block.id,
+                    "parameter",
+                    &parameter.id,
+                ),
+                0,
+                value_types
+                    .get(&parameter.id)
+                    .unwrap_or(&parameter.ty)
+                    .semantic_name()
+                    .as_str(),
+                "block_argument",
+                None,
+                origins.get(index).cloned().flatten(),
+                value,
+            );
+        }
+    }
+
+    fn record_return(
+        &mut self,
+        frame: &SemanticId,
+        value_refs: Vec<SemanticId>,
+        status: ExecutionStatus,
+    ) {
+        self.frame_returns.insert(frame.clone(), value_refs.clone());
+        self.emit_event(
+            "return",
+            Some(frame),
+            None,
+            None,
+            Vec::new(),
+            value_refs,
+            None,
+            None,
+            Some(format_execution_status(status).as_str()),
+        );
+    }
+
+    fn record_failure(&mut self, frame: Option<&SemanticId>, result: &ExecutionResult) {
+        let Some(failure) = result.failure.as_ref() else {
+            return;
+        };
+        // A failure is reported at the operation boundary, then may bubble
+        // through a nested call and finally reach the root execution. Keep
+        // one native failure fact for that semantic failure instead of
+        // making the debugger deduplicate a projection artifact. When the
+        // runtime has no operation identity (for example a failure
+        // terminator), the reason is the only stable key available in this
+        // bounded execution.
+        let failure_key = (failure.identity.clone(), failure.reason.clone());
+        if !self.recorded_failures.insert(failure_key) {
+            return;
+        }
+        let identity = failure.identity.clone().unwrap_or_else(|| {
+            Self::hash_identity(
+                "failure",
+                (&self.stream.execution_identity, frame, &failure.reason),
+            )
+        });
+        self.emit_event(
+            "failure",
+            frame,
+            None,
+            failure.identity.as_ref(),
+            Vec::new(),
+            Vec::new(),
+            None,
+            Some(identity),
+            Some(format_execution_status(result.status).as_str()),
+        );
+    }
+
+    fn record_effect_invoke(
+        &mut self,
+        frame: &SemanticId,
+        operation: &BodyOperation,
+        operation_identity: &SemanticId,
+        inputs: &[Option<SemanticId>],
+    ) -> Option<SemanticId> {
+        if !self.stream.policy.include_effects || !self.enabled() {
+            return None;
+        }
+        let (kind, target, capability) = match &operation.kind {
+            BodyOperationKind::Effect { effect, capability } => (
+                effect.kind.clone(),
+                effect.target.clone(),
+                capability.clone(),
+            ),
+            BodyOperationKind::HostCall {
+                capability,
+                operation,
+            } => (
+                "host_call".to_owned(),
+                operation.clone(),
+                capability.clone(),
+            ),
+            _ => return None,
+        };
+        let key = (frame.clone(), operation_identity.clone());
+        let ordinal = self.next_effect_ordinal.entry(key.clone()).or_default();
+        let current = *ordinal;
+        *ordinal = ordinal.saturating_add(1);
+        let identity = Self::hash_identity(
+            "effect",
+            (
+                &self.stream.execution_identity,
+                frame,
+                operation_identity,
+                current,
+            ),
+        );
+        self.pending_effects
+            .entry(key)
+            .or_default()
+            .push(identity.clone());
+        self.stream.effects.push(ExecutionObservedEffect {
+            identity: identity.clone(),
+            operation: operation_identity.clone(),
+            frame: frame.clone(),
+            kind,
+            target,
+            capability,
+            input_values: inputs.iter().flatten().cloned().collect(),
+            result_value: None,
+            provenance: None,
+            replayability: "lineage_only".to_owned(),
+            status: "invoked".to_owned(),
+        });
+        self.emit_event(
+            "effect_invoke",
+            Some(frame),
+            None,
+            Some(operation_identity),
+            inputs.iter().flatten().cloned().collect(),
+            Vec::new(),
+            Some(identity.clone()),
+            None,
+            Some("invoked"),
+        );
+        Some(identity)
+    }
+
+    fn finish_effect(
+        &mut self,
+        frame: &SemanticId,
+        operation: &SemanticId,
+        result_value: Option<SemanticId>,
+        result: &ExecutionResult,
+    ) -> Option<SemanticId> {
+        let key = (frame.clone(), operation.clone());
+        let identity = self.pending_effects.get_mut(&key).and_then(Vec::pop)?;
+        let provenance = result
+            .effects
+            .iter()
+            .rev()
+            .find(|effect| effect.operation == *operation)
+            .and_then(|effect| effect.provenance.clone());
+        let effect_status = if result.failure.is_some() {
+            format_execution_status(result.status)
+        } else if result
+            .effects
+            .iter()
+            .rev()
+            .any(|candidate| candidate.operation == *operation)
+        {
+            "realized_or_recorded".to_owned()
+        } else {
+            "completed".to_owned()
+        };
+        if let Some(effect) = self
+            .stream
+            .effects
+            .iter_mut()
+            .find(|effect| effect.identity == identity)
+        {
+            effect.result_value = result_value.clone();
+            effect.provenance = provenance;
+            effect.status = effect_status.clone();
+        }
+        self.emit_event(
+            "effect_result",
+            Some(frame),
+            None,
+            Some(operation),
+            Vec::new(),
+            result_value.into_iter().collect(),
+            Some(identity.clone()),
+            result
+                .failure
+                .as_ref()
+                .and_then(|failure| failure.identity.clone()),
+            Some(effect_status.as_str()),
+        );
+        Some(identity)
+    }
+
+    fn emit_event(
+        &mut self,
+        kind: &str,
+        frame: Option<&SemanticId>,
+        block: Option<&SemanticId>,
+        operation: Option<&SemanticId>,
+        inputs: Vec<SemanticId>,
+        outputs: Vec<SemanticId>,
+        effect: Option<SemanticId>,
+        failure: Option<SemanticId>,
+        status: Option<&str>,
+    ) {
+        if !self.stream.policy.captures_operation(operation) {
+            return;
+        }
+        let sequence = self.next_sequence;
+        self.next_sequence = self.next_sequence.saturating_add(1);
+        if self.stream.events.len() >= self.stream.policy.max_events {
+            self.dropped_events = self.dropped_events.saturating_add(1);
+            return;
+        }
+        let identity = Self::hash_identity(
+            "event",
+            (
+                &self.stream.execution_identity,
+                sequence,
+                kind,
+                frame,
+                block,
+                operation,
+                &inputs,
+                &outputs,
+                &effect,
+                &failure,
+                status,
+            ),
+        );
+        self.stream.events.push(ExecutionObservationEvent {
+            identity,
+            sequence,
+            kind: kind.to_owned(),
+            frame: frame.cloned(),
+            block: block.cloned(),
+            operation: operation.cloned(),
+            inputs,
+            outputs,
+            effect,
+            failure,
+            status: status.map(str::to_owned),
+        });
+    }
+
+    fn finish(mut self, result: &ExecutionResult) -> ExecutionObservationStream {
+        if matches!(self.stream.policy.capture, ObservationCapturePolicy::None) {
+            self.stream.frames.clear();
+            self.stream.values.clear();
+            self.stream.effects.clear();
+            self.stream.events.clear();
+        } else if matches!(
+            self.stream.policy.capture,
+            ObservationCapturePolicy::FailureOnly
+        ) && result.status == ExecutionStatus::Returned
+        {
+            self.stream.frames.clear();
+            self.stream.values.clear();
+            self.stream.effects.clear();
+            self.stream.events.clear();
+        }
+        let not_captured = matches!(self.stream.policy.capture, ObservationCapturePolicy::None)
+            || (matches!(
+                self.stream.policy.capture,
+                ObservationCapturePolicy::FailureOnly
+            ) && result.status == ExecutionStatus::Returned);
+        let truncated = self.dropped_events > 0 || self.dropped_values > 0;
+        self.stream.completeness = ExecutionObservationCompleteness {
+            status: if not_captured {
+                if matches!(self.stream.policy.capture, ObservationCapturePolicy::None) {
+                    ObservationCompletenessStatus::Disabled
+                } else {
+                    ObservationCompletenessStatus::NotCaptured
+                }
+            } else if truncated {
+                ObservationCompletenessStatus::Truncated
+            } else {
+                ObservationCompletenessStatus::Complete
+            },
+            captured_events: self.stream.events.len(),
+            dropped_events: self.dropped_events,
+            captured_values: self.stream.values.len(),
+            dropped_values: self.dropped_values,
+            captured_effects: self.stream.effects.len(),
+            truncated,
+        };
+        self.stream.identity = SemanticId(String::new());
+        let material = (
+            &self.stream.schema_version,
+            &self.stream.execution_identity,
+            &self.stream.policy,
+            &self.stream.completeness,
+            &self.stream.frames,
+            &self.stream.values,
+            &self.stream.effects,
+            &self.stream.events,
+        );
+        let canonical =
+            canonical_json_value(&material).expect("observation stream is serializable");
+        self.stream.identity = SemanticId(format!(
+            "mncs:language:observation:{}",
+            sha256_hex(canonical.as_bytes())
+        ));
+        self.stream
+    }
+}
+
+fn capture_execution_value(value: &ExecutionValue, max_bytes: usize) -> ExecutionValueCapture {
+    let Ok(encoded) = serde_json::to_vec(value) else {
+        return ExecutionValueCapture::Unavailable {
+            reason: "value serialization failed".to_owned(),
+        };
+    };
+    let digest = sha256_hex(&encoded);
+    if max_bytes == 0 {
+        ExecutionValueCapture::DigestOnly {
+            sha256: digest,
+            bytes: encoded.len(),
+        }
+    } else if encoded.len() > max_bytes {
+        ExecutionValueCapture::Truncated {
+            sha256: digest,
+            bytes: encoded.len(),
+        }
+    } else {
+        ExecutionValueCapture::Full {
+            value: value.clone(),
+        }
+    }
+}
+
+fn format_execution_status(status: ExecutionStatus) -> String {
+    match status {
+        ExecutionStatus::Returned => "returned",
+        ExecutionStatus::RuntimeFailure => "runtime_failure",
+        ExecutionStatus::Unsupported => "unsupported",
+        ExecutionStatus::BudgetExhausted => "budget_exhausted",
+        ExecutionStatus::InvalidRequest => "invalid_request",
+    }
+    .to_owned()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1756,6 +2875,10 @@ impl<'a> BodyExecutionSession<'a> {
             request,
             matches!(request.policy.effects, EffectExecutionPolicy::Record),
             0,
+            None,
+            None,
+            None,
+            Vec::new(),
         )
     }
 }
@@ -1764,11 +2887,56 @@ pub fn execute(program: &Program, request: &ExecutionRequest) -> ExecutionResult
     BodyExecutionSession::new(program).execute(request)
 }
 
+/// Execute one semantic request and retain a bounded, native observation
+/// stream.  The semantic result is produced by the same body executor as
+/// [`execute`]; the capture policy is never folded into the request and
+/// therefore cannot alter the execution subject.
+pub fn execute_observed(
+    program: &Program,
+    request: &ExecutionRequest,
+    policy: &ExecutionObservationPolicy,
+) -> ObservedExecutionResult {
+    let session = BodyExecutionSession::new(program);
+    let mut recorder = ObservationRecorder::new(
+        session.program_identity.as_ref(),
+        session.program_fingerprint.as_deref(),
+        request,
+        policy.clone(),
+    );
+    let result = execute_inner(
+        &session,
+        request,
+        matches!(request.policy.effects, EffectExecutionPolicy::Record),
+        0,
+        Some(&mut recorder),
+        None,
+        None,
+        Vec::new(),
+    );
+    if recorder.enabled() {
+        let root_frame = recorder.root_frame.clone();
+        recorder.record_failure(root_frame.as_ref(), &result);
+        if let Some(frame) = root_frame.as_ref() {
+            recorder.exit_frame(frame, result.status);
+        }
+    }
+    let observation = recorder.finish(&result);
+    ObservedExecutionResult {
+        schema_version: EXECUTION_OBSERVED_SCHEMA_VERSION.to_owned(),
+        execution: result,
+        observation,
+    }
+}
+
 fn execute_inner(
     session: &BodyExecutionSession,
     request: &ExecutionRequest,
     record_effects: bool,
     call_depth: u64,
+    mut observer: Option<&mut ObservationRecorder>,
+    parent_frame: Option<SemanticId>,
+    call_operation: Option<SemanticId>,
+    argument_sources: Vec<Option<SemanticId>>,
 ) -> ExecutionResult {
     let program = session.program;
     if request.schema_version != EXECUTION_REQUEST_SCHEMA_VERSION {
@@ -1878,6 +3046,33 @@ fn execute_inner(
         };
         values.insert(parameter.id.clone(), argument);
     }
+    let mut value_types = BTreeMap::new();
+    for parameter in &body.parameters {
+        value_types.insert(parameter.id.clone(), parameter.ty.clone());
+    }
+    for block in &body.blocks {
+        for parameter in &block.parameters {
+            value_types.insert(parameter.id.clone(), parameter.ty.clone());
+        }
+        for operation in &block.operations {
+            for output in &operation.results {
+                value_types.insert(output.id.clone(), output.ty.clone());
+            }
+        }
+    }
+    let frame_id = observer.as_deref_mut().map(|recorder| {
+        recorder.enter_frame(
+            &function_id(namespace, &function.name),
+            namespace,
+            &function.name,
+            parent_frame.as_ref(),
+            call_operation.as_ref(),
+            call_depth,
+            &body.parameters,
+            &request.arguments,
+            &argument_sources,
+        )
+    });
     let blocks = body
         .blocks
         .iter()
@@ -1892,6 +3087,9 @@ fn execute_inner(
                 None,
                 format!("runtime reached unknown block {current:?}"),
             );
+            if let Some(recorder) = observer.as_deref_mut() {
+                recorder.record_failure(frame_id.as_ref(), &result);
+            }
             return result;
         };
         record_trace(
@@ -1903,6 +3101,13 @@ fn execute_inner(
             None,
             "block_enter",
         );
+        if let Some(recorder) = observer.as_deref_mut() {
+            let block_identity = body.block_identity(namespace, &function.name, &block.id);
+            recorder.record_block(
+                frame_id.as_ref().expect("observed frame exists"),
+                &block_identity,
+            );
+        }
         for operation in &block.operations {
             if !consume_step(&mut result, request.step_budget) {
                 result.fail(
@@ -1922,6 +3127,24 @@ fn execute_inner(
                 Some(operation),
                 "operation",
             );
+            let (input_sources, _effect_identity) = if let (Some(recorder), Some(frame)) =
+                (observer.as_deref_mut(), frame_id.as_ref())
+            {
+                let block_identity = body.block_identity(namespace, &function.name, &block.id);
+                recorder.operation_inputs(
+                    frame,
+                    operation,
+                    &identity,
+                    &values,
+                    &value_types,
+                    namespace,
+                    &function.name,
+                    &block.id,
+                    &block_identity,
+                )
+            } else {
+                (Vec::new(), None)
+            };
             if let Some(stop) = execute_operation(
                 session,
                 operation,
@@ -1931,8 +3154,44 @@ fn execute_inner(
                 request,
                 record_effects,
                 call_depth,
+                frame_id.as_ref(),
+                observer.as_deref_mut(),
+                &input_sources,
             ) {
+                if let (Some(recorder), Some(frame)) = (observer.as_deref_mut(), frame_id.as_ref())
+                {
+                    let block_identity = body.block_identity(namespace, &function.name, &block.id);
+                    recorder.operation_result(
+                        frame,
+                        operation,
+                        &identity,
+                        &values,
+                        &value_types,
+                        namespace,
+                        &function.name,
+                        &block.id,
+                        &block_identity,
+                        &input_sources,
+                        &stop,
+                    );
+                    recorder.record_failure(Some(frame), &stop);
+                }
                 return stop;
+            }
+            if let (Some(recorder), Some(frame)) = (observer.as_deref_mut(), frame_id.as_ref()) {
+                recorder.operation_result(
+                    frame,
+                    operation,
+                    &identity,
+                    &values,
+                    &value_types,
+                    namespace,
+                    &function.name,
+                    &block.id,
+                    &body.block_identity(namespace, &function.name, &block.id),
+                    &input_sources,
+                    &result,
+                );
             }
         }
         if !consume_step(&mut result, request.step_budget) {
@@ -1978,10 +3237,28 @@ fn execute_inner(
                     }
                 };
                 result.status = ExecutionStatus::Returned;
+                if let (Some(recorder), Some(frame)) = (observer.as_deref_mut(), frame_id.as_ref())
+                {
+                    let returned_refs = returned
+                        .iter()
+                        .filter_map(|value| recorder.current_reference(frame, value))
+                        .collect::<Vec<_>>();
+                    recorder.record_return(frame, returned_refs, result.status);
+                }
                 return result;
             }
             BodyTerminator::Branch { target, arguments } => {
                 let incoming = values.clone();
+                let incoming_sources = if let (Some(recorder), Some(frame)) =
+                    (observer.as_deref(), frame_id.as_ref())
+                {
+                    arguments
+                        .iter()
+                        .map(|argument| recorder.current_reference(frame, argument))
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
                 if !assign_block_arguments(&blocks, target, arguments, &incoming, &mut values) {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
@@ -1989,6 +3266,21 @@ fn execute_inner(
                         "branch arguments did not match target parameters".to_owned(),
                     );
                     return result;
+                }
+                if let (Some(recorder), Some(frame), Some(target_block)) = (
+                    observer.as_deref_mut(),
+                    frame_id.as_ref(),
+                    blocks.get(target.as_str()),
+                ) {
+                    recorder.record_block_arguments(
+                        frame,
+                        namespace,
+                        &function.name,
+                        target_block,
+                        &values,
+                        &incoming_sources,
+                        &value_types,
+                    );
                 }
                 current = target;
             }
@@ -2013,6 +3305,16 @@ fn execute_inner(
                     (else_target, else_arguments)
                 };
                 let incoming = values.clone();
+                let incoming_sources = if let (Some(recorder), Some(frame)) =
+                    (observer.as_deref(), frame_id.as_ref())
+                {
+                    arguments
+                        .iter()
+                        .map(|argument| recorder.current_reference(frame, argument))
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
                 if !assign_block_arguments(&blocks, target, arguments, &incoming, &mut values) {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
@@ -2020,6 +3322,21 @@ fn execute_inner(
                         "conditional branch arguments did not match target parameters".to_owned(),
                     );
                     return result;
+                }
+                if let (Some(recorder), Some(frame), Some(target_block)) = (
+                    observer.as_deref_mut(),
+                    frame_id.as_ref(),
+                    blocks.get(target.as_str()),
+                ) {
+                    recorder.record_block_arguments(
+                        frame,
+                        namespace,
+                        &function.name,
+                        target_block,
+                        &values,
+                        &incoming_sources,
+                        &value_types,
+                    );
                 }
                 current = target;
             }
@@ -2037,6 +3354,9 @@ fn execute_operation(
     request: &ExecutionRequest,
     record_effects: bool,
     call_depth: u64,
+    frame: Option<&SemanticId>,
+    mut observer: Option<&mut ObservationRecorder>,
+    input_sources: &[Option<SemanticId>],
 ) -> Option<ExecutionResult> {
     let program = session.program;
     match &operation.kind {
@@ -3435,7 +4755,22 @@ fn execute_operation(
                 // request's budget while the depth grows by one (RFC 0047).
                 call_depth_budget: request.call_depth_budget,
             };
-            let nested = execute_inner(session, &nested_request, record_effects, call_depth + 1);
+            let nested = execute_inner(
+                session,
+                &nested_request,
+                record_effects,
+                call_depth + 1,
+                observer.as_deref_mut(),
+                frame.cloned(),
+                Some(identity.clone()),
+                input_sources.to_vec(),
+            );
+            if let (Some(recorder), Some(parent)) = (observer.as_deref_mut(), frame) {
+                if let Some(child) = recorder.child_frame(parent, identity) {
+                    recorder.record_failure(Some(&child), &nested);
+                    recorder.exit_frame(&child, nested.status);
+                }
+            }
             let trace_offset = result.steps;
             result.steps = result.steps.saturating_add(nested.steps);
             result.effects.extend(nested.effects.clone());

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/epi13/mncs-language/blob/main/spec/execution-source-map.schema.json",
+  "title": "MNCS compiler execution source map",
+  "type": "object",
+  "required": ["schema_version", "identity", "source_identity", "source_profile", "module", "module_identity", "functions", "blocks", "operations"],
+  "properties": {
+    "schema_version": {"const": "mncs.execution-source-map/1"},
+    "identity": {"type": "string", "minLength": 1},
+    "source_identity": {"type": "string", "minLength": 1},
+    "source_profile": {"type": "string", "minLength": 1},
+    "module": {"type": "string", "minLength": 1},
+    "module_identity": {"type": "string", "minLength": 1},
+    "functions": {"type": "array", "items": {"$ref": "#/$defs/function"}},
+    "blocks": {"type": "array", "items": {"$ref": "#/$defs/block"}},
+    "operations": {"type": "array", "items": {"$ref": "#/$defs/operation"}}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "span": {
+      "type": "object",
+      "required": ["start", "end", "line", "column"],
+      "properties": {
+        "start": {"type": "integer", "minimum": 0},
+        "end": {"type": "integer", "minimum": 0},
+        "line": {"type": "integer", "minimum": 1},
+        "column": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "function": {
+      "type": "object",
+      "required": ["identity", "name", "declaration_span"],
+      "properties": {
+        "identity": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "declaration_span": {"$ref": "#/$defs/span"},
+        "test_declaration_identity": {"type": "string"},
+        "body_identity": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "block": {
+      "type": "object",
+      "required": ["identity", "function_identity"],
+      "properties": {
+        "identity": {"type": "string", "minLength": 1},
+        "function_identity": {"type": "string", "minLength": 1},
+        "source_span": {"$ref": "#/$defs/span"}
+      },
+      "additionalProperties": false
+    },
+    "operation": {
+      "type": "object",
+      "required": ["identity", "function_identity", "block_identity", "synthetic", "correspondence"],
+      "properties": {
+        "identity": {"type": "string", "minLength": 1},
+        "function_identity": {"type": "string", "minLength": 1},
+        "block_identity": {"type": "string", "minLength": 1},
+        "source_span": {"$ref": "#/$defs/span"},
+        "synthetic": {"type": "boolean"},
+        "correspondence": {"type": "string", "enum": ["semantic-operation-to-source-span", "synthetic-operation-no-source-span"]}
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -17,6 +17,8 @@ Normative terms such as **MUST**, **SHOULD**, and **MAY** indicate intended requ
 - [Verified Intermediate Representation](verified-ir.md)
 - [Compiler Pipeline Contracts](compiler-pipeline.md)
 - [Bounded Reference Execution](reference-execution.md)
+- [Bounded Execution Observability](execution-observation.md)
+- [Execution Source Map](execution-source-map.schema.json)
 - [Recursive Introspection and Refinement](recursive-refinement.md)
 - [Host ABI](host-abi.md)
 
