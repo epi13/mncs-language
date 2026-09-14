@@ -106,6 +106,7 @@ fn compiler_source_map_and_runtime_stream_join_nested_calls_without_inference() 
         .iter()
         .find(|event| event["kind"] == "operation_result")
         .expect("native operation result");
+    assert_eq!(operation_event["status"], "completed");
     let operation_id = operation_event["operation"].as_str().unwrap();
     assert!(operation_ids.contains(operation_id));
     let mapped = operations
