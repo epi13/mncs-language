@@ -51,7 +51,10 @@ fn semantic_commands_emit_deterministic_machine_json() {
     assert!(impact.status.success());
     let impact_json: Value = serde_json::from_slice(&impact.stdout).expect("impact JSON");
     assert_eq!(impact_json["schema_version"], "mncs.semantic-impact/1");
-    assert_eq!(impact_json["roots"][0], "mncs:0.2:function:Banking.Transfer::transfer");
+    assert_eq!(
+        impact_json["roots"][0],
+        "mncs:0.2:function:Banking.Transfer::transfer"
+    );
     assert!(impact_json["graph_identity"].as_str().unwrap().len() == 64);
 }
 

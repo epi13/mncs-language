@@ -180,11 +180,17 @@ impl SemanticGraph {
             .collect();
         let mut distances: BTreeMap<SemanticId, usize> = BTreeMap::new();
         let mut queue = std::collections::VecDeque::new();
+        let mut seeded_roots = BTreeSet::new();
+        let mut truncated = false;
         for root in &known_roots {
+            if distances.len() >= max_nodes {
+                truncated = true;
+                break;
+            }
             distances.insert(root.clone(), 0);
             queue.push_back(root.clone());
+            seeded_roots.insert(root.clone());
         }
-        let mut truncated = false;
         while let Some(current) = queue.pop_front() {
             let distance = distances[&current];
             if distance >= max_depth {
@@ -231,7 +237,7 @@ impl SemanticGraph {
         let direct_dependents = self
             .edges
             .iter()
-            .filter(|edge| known_roots.contains(&edge.to) && affected.contains(&edge.from))
+            .filter(|edge| seeded_roots.contains(&edge.to) && affected.contains(&edge.from))
             .map(|edge| edge.from.clone())
             .collect::<BTreeSet<_>>()
             .into_iter()
@@ -240,7 +246,7 @@ impl SemanticGraph {
             .iter()
             .filter(|node| node.kind == IdentityKind::Function)
             .map(|node| node.identity.clone())
-            .chain(known_roots.iter().filter_map(|root| {
+            .chain(seeded_roots.iter().filter_map(|root| {
                 node_index
                     .get(root)
                     .and_then(|node| (node.kind == IdentityKind::Function).then(|| root.clone()))
@@ -272,14 +278,13 @@ impl SemanticGraph {
         let mut risk_flags = BTreeSet::new();
         for root in &roots {
             match node_index.get(root).map(|node| node.kind) {
-                Some(
-                    IdentityKind::Contract
-                    | IdentityKind::Function
-                    | IdentityKind::FiniteType
-                    | IdentityKind::RecordType
-                    | IdentityKind::RecordField,
-                ) => {
+                Some(IdentityKind::Contract) => {
                     risk_flags.insert(ImpactRisk::PublicContract);
+                }
+                Some(
+                    IdentityKind::FiniteType | IdentityKind::RecordType | IdentityKind::RecordField,
+                ) => {
+                    risk_flags.insert(ImpactRisk::SharedType);
                 }
                 Some(IdentityKind::Effect | IdentityKind::Capability) => {
                     risk_flags.insert(ImpactRisk::EffectSemantics);
@@ -1079,14 +1084,36 @@ mod tests {
         assert_eq!(impact.schema_version, super::SEMANTIC_IMPACT_SCHEMA_VERSION);
         assert_eq!(impact.roots, vec![root]);
         assert!(!impact.test_identities.is_empty());
-        assert!(impact
-            .risk_flags
-            .contains(&super::ImpactRisk::PublicContract));
+        assert!(impact.risk_flags.is_empty());
         assert!(impact.nodes.len() <= 8);
         assert!(impact
             .limitations
             .iter()
             .any(|item| item.contains("cross-repository")));
+    }
+
+    #[test]
+    fn impact_bounds_root_seeding_and_classifies_shared_types() {
+        let mut program = valid_program();
+        let type_identity = crate::finite_type_id(&program.module, "Ledger");
+        program.finite_types.push(crate::FiniteType {
+            identity: type_identity.clone(),
+            name: "Ledger".to_owned(),
+            variants: vec![crate::FiniteVariant {
+                identity: crate::finite_variant_id(&program.module, "Ledger", "Open"),
+                name: "Open".to_owned(),
+                discriminant: 0,
+                payload: Vec::new(),
+            }],
+        });
+        let graph = program.semantic_graph().expect("graph");
+        let function_root = crate::function_id(&program.module, "transfer");
+        let type_root = type_identity;
+        let impact = graph.impact_neighborhood(&[function_root, type_root], 2, 1);
+        assert!(impact.nodes.len() <= 1);
+        assert!(!impact.complete);
+        assert!(impact.risk_flags.contains(&super::ImpactRisk::Truncated));
+        assert!(impact.risk_flags.contains(&super::ImpactRisk::SharedType));
     }
 
     #[test]
