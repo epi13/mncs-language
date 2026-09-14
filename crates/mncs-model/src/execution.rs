@@ -1498,6 +1498,11 @@ impl ObservationRecorder {
         });
         let effect =
             self.finish_effect(frame, operation_identity, outputs.first().cloned(), result);
+        let operation_status = if result.failure.is_some() {
+            format_execution_status(result.status)
+        } else {
+            "completed".to_owned()
+        };
         self.emit_event(
             "operation_result",
             Some(frame),
@@ -1507,7 +1512,7 @@ impl ObservationRecorder {
             outputs.clone(),
             effect,
             failure,
-            Some(format_execution_status(result.status).as_str()),
+            Some(operation_status.as_str()),
         );
         outputs
     }
