@@ -80,6 +80,10 @@ pub const TEST_INVENTORY_SCHEMA_VERSION: &str = "mncs.test-inventory/1";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TestInventory {
     pub schema_version: String,
+    /// The compiler can prove a source/module inventory here.  A repository
+    /// canonical proof is a separate executor boundary and must not be
+    /// inferred from this per-source inventory.
+    pub scope: String,
     pub module: String,
     pub source_artifact_identity: String,
     pub source_profile: String,
@@ -191,6 +195,7 @@ fn build_test_inventory(
     });
     TestInventory {
         schema_version: TEST_INVENTORY_SCHEMA_VERSION.to_owned(),
+        scope: "source_module".to_owned(),
         module: program.module.clone(),
         source_artifact_identity: envelope.identity.clone(),
         source_profile: ast.language_version.text.clone(),

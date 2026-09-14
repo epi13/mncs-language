@@ -18,6 +18,7 @@ fn compiler_emits_a_deterministic_structural_test_inventory() {
     assert!(output.is_valid(), "{:#?}", output.diagnostics);
     let inventory = output.test_inventory.expect("valid source has inventory");
     assert_eq!(inventory.schema_version, "mncs.test-inventory/1");
+    assert_eq!(inventory.scope, "source_module");
     assert_eq!(inventory.subject_identity, program_id("example.inventory"));
     assert_eq!(inventory.tests.len(), 2);
     assert!(inventory
