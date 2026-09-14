@@ -44,6 +44,7 @@ pub enum ArtifactRepresentation {
     SemanticGraph,
     IdentityMap,
     Validation,
+    ExecutionSourceMap,
     Hir,
     Ssa,
     SelectedSsa,

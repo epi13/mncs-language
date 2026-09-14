@@ -22,8 +22,6 @@ mncs 0.13;
 // no composite-valued select appears anywhere.
 module mncs.std.relation.v1;
 
-use mncs.core.logic.v1 as logic;
-
 record Edge { src: u64, dst: u64 }
 
 record EdgeSet { edges: [Edge; 16], count: u64 }
@@ -46,7 +44,7 @@ fn contains(set: EdgeSet, src: u64, dst: u64) -> (result: bool) {
 fn insert(set: EdgeSet, src: u64, dst: u64) -> (result: InsertOut) {
     let full: bool = set.count >= 16;
     let known: bool = contains(set, src, dst);
-    let accepted: bool = logic.bool_not(full) && logic.bool_not(known);
+    let accepted: bool = !full && !known;
     let slot: u64 = select(accepted, set.count, 0);
     let grown: EdgeSet = EdgeSet {
         edges: replace(set.edges, slot, Edge { src: src, dst: dst }),
@@ -54,7 +52,6 @@ fn insert(set: EdgeSet, src: u64, dst: u64) -> (result: InsertOut) {
     };
     if accepted {
         return InsertOut { set: grown, accepted: true };
-    } else {
     }
     return InsertOut { set: set, accepted: false };
 }
@@ -145,14 +142,14 @@ fn expand_round(set: EdgeSet, base: [u64; 16], base_count: u64, st: ExpandOut, m
     iterate i over set.edges carrying acc: ExpandOut = st {
         let live: bool = i < set.count;
         let edge: Edge = set.edges[i];
-        let nominated: bool = live && visited_has(base, base_count, edge.src) && logic.bool_not(visited_has(acc.reached, acc.count, edge.dst));
+        let nominated: bool = live && visited_has(base, base_count, edge.src) && !visited_has(acc.reached, acc.count, edge.dst);
         let room: bool = acc.count < max_nodes;
         let join: bool = nominated && room && active;
         let slot: u64 = select(join, acc.count, 0);
         next acc = ExpandOut {
             reached: replace(acc.reached, slot, select(join, edge.dst, acc.reached[slot])),
             count: acc.count +% select(join, 1, 0),
-            refused: acc.refused || (nominated && logic.bool_not(room) && active)
+            refused: acc.refused || (nominated && !room && active)
         };
     }
     return acc;
@@ -174,14 +171,14 @@ fn closure(set: EdgeSet, roots: [u64; 16], root_count: u64, max_depth: u64, max_
     iterate r over roots carrying st: ExpandOut = seed {
         let live: bool = r < root_count && r < 16;
         let node: u64 = roots[select(live, r, 0)];
-        let fresh: bool = live && logic.bool_not(visited_has(st.reached, st.count, node));
+        let fresh: bool = live && !visited_has(st.reached, st.count, node);
         let room: bool = st.count < capped_nodes;
         let join: bool = fresh && room;
         let slot: u64 = select(join, st.count, 0);
         next st = ExpandOut {
             reached: replace(st.reached, slot, select(join, node, st.reached[slot])),
             count: st.count +% select(join, 1, 0),
-            refused: st.refused || (fresh && logic.bool_not(room))
+            refused: st.refused || (fresh && !room)
         };
     }
     // The `up_to` counter is intentionally unbound (countdown semantics
@@ -282,5 +279,5 @@ fn candidate_missing_order() -> (result: i64) {
     let first: Edge = canon.edges[0];
     let roots: [u64; 16] = [9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     let leaf: ClosureOut = closure(canon, roots, 1, 8, 16);
-    return first.src as i64 * 100000 + first.dst as i64 * 1000 + leaf.count as i64 * 10 + select(leaf.count >= 1, leaf.reached[0] as i64, 0 - 1);
+    return first.src as i64 * 100000 + first.dst as i64 * 1000 + leaf.count as i64 * 10 + select(leaf.count >= 1, leaf.reached[0] as i64, -1);
 }

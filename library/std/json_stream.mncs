@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.std.json_stream — scalar structural JSON stream state.
 //
@@ -137,10 +137,10 @@ fn feed_chunk(state: i64, input: [byte; up_to 64]) -> (result: i64) {
 }
 
 fn finish(state: i64) -> (result: i64) {
-    if state == 0 { return 0 - 101; }
+    if state == 0 { return -101; }
     if depth(state) == 0 && started(state) {
-        if string_mode(state) || unicode_remaining(state) > 0 { return 0 - 1; }
+        if string_mode(state) || unicode_remaining(state) > 0 { return -1; }
         return 1;
     }
-    return 0 - 1;
+    return -1;
 }

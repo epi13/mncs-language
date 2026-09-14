@@ -1,0 +1,67 @@
+{
+  "schema_version": "0.1",
+  "name": "pressure-branch-hygiene",
+  "cases": [
+    {
+      "id": "inner-true",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.pressure_branch_hygiene", "function": "probe" },
+        "arguments": [
+          { "boolean": { "value": true } },
+          { "boolean": { "value": true } },
+          { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "integer": { "value": 10, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "inner-false",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.pressure_branch_hygiene", "function": "probe" },
+        "arguments": [
+          { "boolean": { "value": false } },
+          { "boolean": { "value": true } },
+          { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "integer": { "value": 3, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "outer-true",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.pressure_branch_hygiene", "function": "probe" },
+        "arguments": [
+          { "boolean": { "value": true } },
+          { "boolean": { "value": false } },
+          { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "integer": { "value": 13, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "outer-false",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "examples.pressure_branch_hygiene", "function": "probe" },
+        "arguments": [
+          { "boolean": { "value": false } },
+          { "boolean": { "value": false } },
+          { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 3, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "integer": { "value": -7, "type": { "bits": 64, "signed": true } } }]
+    }
+  ],
+  "properties": []
+}

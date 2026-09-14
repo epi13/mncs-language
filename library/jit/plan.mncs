@@ -35,7 +35,6 @@ mncs 0.13;
 // allocates; every function is total.
 module mncs.jit.plan.v1;
 
-use mncs.core.logic.v1 as logic;
 use mncs.jit.types.v1 as types;
 
 // Provider selection outcome. `ok` false means no provider was
@@ -51,7 +50,7 @@ record PlanDecision {
 }
 
 fn select_provider(class_code: u64, cranelift_ready: bool, llvm_ready: bool) -> (result: PlanDecision) {
-    if logic.bool_not(types.workload_is_known(class_code)) {
+    if !types.workload_is_known(class_code) {
         return PlanDecision { provider_code: 9, ok: false, deferred: false, llvm_advisory: false };
     }
     if class_code == 0 {
@@ -62,7 +61,6 @@ fn select_provider(class_code: u64, cranelift_ready: bool, llvm_ready: bool) -> 
     }
     if cranelift_ready && types.provider_is_implemented(1) {
         return PlanDecision { provider_code: 1, ok: true, deferred: false, llvm_advisory: class_code == 2 && llvm_ready };
-    } else {
     }
     return PlanDecision { provider_code: 0, ok: true, deferred: true, llvm_advisory: false };
 }
@@ -105,7 +103,6 @@ fn build_plan(logical: u64, generation: u64, artifact: u64, provider_code: u64, 
     let ok: bool = logical != 0 && generation != 0 && artifact != 0 && types.provider_is_implemented(provider_code) && types.tier_is_known(tier_code);
     if ok {
         return Plan { logical: logical, generation: generation, artifact: artifact, provider_code: provider_code, tier_code: tier_code, accepted: true };
-    } else {
     }
     return Plan { logical: 0, generation: 0, artifact: 0, provider_code: 9, tier_code: 0, accepted: false };
 }

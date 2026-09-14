@@ -109,23 +109,31 @@ pub use evidence::{
 };
 pub use execution::{
     compare as compare_execution, compare_floats, compare_stateful_results, evaluate_float,
-    execute, execute_stateful_case, execute_stateful_case_owned,
+    execute, execute_observed, execute_stateful_case, execute_stateful_case_owned,
     execute_stateful_case_with_checkpoint, execute_stateful_case_with_checkpoint_scoped,
     execute_with_policy, execution_corpus_schema_supported, float_value,
     generic_entry_failure_reason, host_seed_requests, lint_corpus, parse_host_generic_args,
-    resolve_generic_entry, stateful_prefix_identity, BodyExecutionSession, ComparisonStatus,
-    CorpusLintCase, CorpusLintReport, EffectExecutionPolicy, ExecutionCase, ExecutionComparison,
-    ExecutionCorpus, ExecutionEffectEvent, ExecutionFailure, ExecutionPolicy, ExecutionProperty,
-    ExecutionRequest, ExecutionResult, ExecutionStatus, ExecutionSubject, ExecutionTarget,
-    ExecutionTraceEntry, ExecutionTypeArgument, ExecutionValue, ExpectedEffectObservation,
-    GenericEntryFailure, GenericEntryTarget, HostGenericSeedRequest, HostGrant, HostSeedError,
-    StatefulArgument, StatefulCallResult, StatefulExecutionCase, StatefulExecutionCheckpoint,
-    StatefulExecutionComparison, StatefulExecutionMismatch, StatefulExecutionResult,
-    StatefulExecutionStep, StatefulStepObservation, CORPUS_LINT_REPORT_SCHEMA_VERSION,
+    resolve_generic_entry, semantic_execution_identity, stateful_prefix_identity,
+    BodyExecutionSession, ComparisonStatus, CorpusLintCase, CorpusLintReport,
+    EffectExecutionPolicy, ExecutionCase, ExecutionComparison, ExecutionCorpus,
+    ExecutionEffectEvent, ExecutionFailure, ExecutionObservationCompleteness,
+    ExecutionObservationEvent, ExecutionObservationPolicy, ExecutionObservationStream,
+    ExecutionObservedEffect, ExecutionObservedFrame, ExecutionObservedValue, ExecutionPolicy,
+    ExecutionProperty, ExecutionRequest, ExecutionResult, ExecutionStatus, ExecutionSubject,
+    ExecutionTarget, ExecutionTraceEntry, ExecutionTypeArgument, ExecutionValue,
+    ExecutionValueCapture, ExpectedEffectObservation, GenericEntryFailure, GenericEntryTarget,
+    HostGenericSeedRequest, HostGrant, HostSeedError, ObservationCapturePolicy,
+    ObservationCompletenessStatus, ObservedExecutionResult, StatefulArgument, StatefulCallResult,
+    StatefulExecutionCase, StatefulExecutionCheckpoint, StatefulExecutionComparison,
+    StatefulExecutionMismatch, StatefulExecutionResult, StatefulExecutionStep,
+    StatefulStepObservation, CORPUS_LINT_REPORT_SCHEMA_VERSION,
     EXECUTION_COMPARISON_SCHEMA_VERSION, EXECUTION_CORPUS_SCHEMA_VERSION,
     EXECUTION_CORPUS_SCHEMA_VERSION_0_2, EXECUTION_CORPUS_SCHEMA_VERSION_0_3,
-    EXECUTION_REQUEST_SCHEMA_VERSION, EXECUTION_RESULT_SCHEMA_VERSION, HOST_GRANT_MAX_BYTES,
-    MAX_EXECUTION_BUDGET, MAX_STATEFUL_CALLS, STATEFUL_EXECUTION_COMPARISON_SCHEMA_VERSION,
+    EXECUTION_OBSERVATION_POLICY_SCHEMA_VERSION, EXECUTION_OBSERVATION_SCHEMA_VERSION,
+    EXECUTION_OBSERVED_SCHEMA_VERSION, EXECUTION_REQUEST_SCHEMA_VERSION,
+    EXECUTION_RESULT_SCHEMA_VERSION, HOST_GRANT_MAX_BYTES, MAX_EXECUTION_BUDGET,
+    MAX_OBSERVATION_EVENTS, MAX_OBSERVATION_VALUES, MAX_OBSERVATION_VALUE_BYTES,
+    MAX_STATEFUL_CALLS, STATEFUL_EXECUTION_COMPARISON_SCHEMA_VERSION,
     STATEFUL_EXECUTION_SCHEMA_VERSION,
 };
 pub use experiment::{
@@ -138,14 +146,14 @@ pub use experiment::{
     LANGUAGE_EXPERIMENT_RESULT_CONTRACT_ID, LANGUAGE_EXPERIMENT_SCHEMA_VERSION,
 };
 pub use graph::{
-    EdgeKind, GraphEdge, GraphError, GraphNode, InvalidationReason, InvalidationReport,
-    SemanticGraph,
+    EdgeKind, GraphEdge, GraphError, GraphNode, ImpactNode, ImpactRisk, InvalidationReason,
+    InvalidationReport, SemanticGraph, SemanticImpact, SEMANTIC_IMPACT_SCHEMA_VERSION,
 };
 pub use identity::{
     binding_id, binding_id_for, contract_id, finite_type_id, finite_variant_id, function_id,
-    generic_param_id, instantiation_id, module_id, record_field_id, record_type_id, reference_id,
-    scope_id, specialization_id, IdentityChange, IdentityKind, IdentityRecord, SemanticDiff,
-    SemanticId, SemanticIdentities,
+    generic_param_id, instantiation_id, module_id, parameter_id, program_id, record_field_id,
+    record_type_id, reference_id, scope_id, specialization_id, test_case_id, test_declaration_id,
+    IdentityChange, IdentityKind, IdentityRecord, SemanticDiff, SemanticId, SemanticIdentities,
 };
 pub use ir::{
     CapabilityUse, FailurePathKind, HighLevelIr, IrBlock, IrBoundedIteration, IrError, IrFunction,

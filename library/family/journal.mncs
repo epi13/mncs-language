@@ -31,7 +31,7 @@ mncs 0.10;
 module mncs.family.journal.v1;
 
 use mncs.core.status.v1;
-use mncs.core.identity as idlib;
+use mncs.core.identity.v1 as idlib;
 use mncs.core.lineage.v1;
 
 // Bounded semantic vocabulary for meaningful ecosystem progress. Routine

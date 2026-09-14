@@ -1,4 +1,4 @@
-mncs 0.9;
+mncs 0.13;
 
 // mncs.core.vision — MNCS-native visual observer: pixels to scene graphs.
 //
@@ -44,7 +44,7 @@ fn empty_sample() -> (result: EdgeSample) {
 
 fn empty_edge_set() -> (result: EdgeSet) {
     let e: EdgeSample = empty_sample();
-    return EdgeSet { samples: [e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e], count: 0, truncated: false };
+    return EdgeSet { samples: [e; 64], count: 0, truncated: false };
 }
 
 fn push_sample_if(set: EdgeSet, sample: EdgeSample, push: bool) -> (result: EdgeSet) {
@@ -97,14 +97,14 @@ fn empty_segment() -> (result: EdgeSegment) {
 
 fn empty_segment_set() -> (result: SegmentSet) {
     let e: EdgeSegment = empty_segment();
-    return SegmentSet { segments: [e, e, e, e, e, e, e, e, e, e, e, e, e, e, e, e], count: 0, truncated: false };
+    return SegmentSet { segments: [e; 16], count: 0, truncated: false };
 }
 
 fn push_segment(set: SegmentSet, seg: EdgeSegment) -> (result: SegmentSet) {
-        if set.count >= 16 {
+    if set.count >= 16 {
         return SegmentSet { segments: set.segments, count: set.count, truncated: true };
     }
-        let updated: [EdgeSegment; 16] = replace(set.segments, set.count, seg);
+    let updated: [EdgeSegment; 16] = replace(set.segments, set.count, seg);
     return SegmentSet { segments: updated, count: set.count + 1, truncated: set.truncated };
 }
 
@@ -160,7 +160,7 @@ fn index_to_point(index: u64) -> (result: Point) {
 
 fn empty_corner_set() -> (result: CornerSet) {
     let origin: Point = Point { column: 0, row: 0 };
-    return CornerSet { points: [origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin, origin], count: 0, truncated: false };
+    return CornerSet { points: [origin; 16], count: 0, truncated: false };
 }
 
 fn corner_contains(corners: CornerSet, index: u64) -> (result: bool) {
@@ -175,10 +175,10 @@ fn add_corner_if_new(corners: CornerSet, index: u64) -> (result: CornerSet) {
     if corner_contains(corners, index) {
         return corners;
     }
-        if corners.count >= 16 {
+    if corners.count >= 16 {
         return CornerSet { points: corners.points, count: corners.count, truncated: true };
     }
-        let updated: [Point; 16] = replace(corners.points, corners.count, index_to_point(index));
+    let updated: [Point; 16] = replace(corners.points, corners.count, index_to_point(index));
     return CornerSet { points: updated, count: corners.count + 1, truncated: corners.truncated };
 }
 
@@ -312,12 +312,12 @@ fn empty_node() -> (result: SceneNode) {
 
 fn empty_scene(frame: u64) -> (result: SceneGraph) {
     let e: SceneNode = empty_node();
-    return SceneGraph { nodes: [e, e, e, e, e, e, e, e], count: 0, frame: frame };
+    return SceneGraph { nodes: [e; 8], count: 0, frame: frame };
 }
 
 fn singleton_scene(frame: u64, node: SceneNode) -> (result: SceneGraph) {
     let e: SceneNode = empty_node();
-    let base: [SceneNode; 8] = [e, e, e, e, e, e, e, e];
+    let base: [SceneNode; 8] = [e; 8];
     let placed: [SceneNode; 8] = replace(base, 0, node);
     return SceneGraph { nodes: placed, count: 1, frame: frame };
 }

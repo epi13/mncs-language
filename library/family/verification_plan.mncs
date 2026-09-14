@@ -1,0 +1,128 @@
+mncs 0.17;
+
+// Native bounded verification-selection policy.  JSON, filesystem, and
+// subprocess work remain Ravel transport; this module owns the level and
+// reason-mask decision used by the normal Ravel entrypoint.
+module mncs.family.verification_plan.v1;
+
+record SelectionInput {
+    cross_repository: i32,
+    impact_complete: i32,
+    unknown_root: i32,
+    truncated: i32,
+    change_class: i32,
+    high_connectivity: i32,
+    shared_type: i32,
+    effect_semantics: i32,
+    abi_boundary: i32,
+    public_contract: i32,
+    direct_dependents: i32,
+    selected_tests: i32,
+}
+
+record SelectionDecision {
+    level_code: i32,
+    reason_mask: i32,
+    sufficient_local: i32,
+}
+
+fn change_reason(change_class: i32) -> (result: i32) {
+    if change_class == 1 { return 16; }
+    if change_class == 2 { return 32; }
+    if change_class == 3 { return 64; }
+    if change_class == 4 { return 128; }
+    if change_class == 5 { return 256; }
+    if change_class == 6 { return 512; }
+    if change_class == 7 { return 1024; }
+    if change_class == 8 { return 2048; }
+    if change_class == 9 { return 1; }
+    return 0;
+}
+
+fn broad_reasons(input: SelectionInput) -> (result: i32) {
+    return flag(input.impact_complete, 0, 2)
+        + flag(input.unknown_root, 1, 4)
+        + flag(input.truncated, 1, 8)
+        + change_reason(input.change_class);
+}
+
+fn risk_reasons(input: SelectionInput) -> (result: i32) {
+    return flag(input.high_connectivity, 1, 4096)
+        + flag(input.shared_type, 1, 32)
+        + flag(input.effect_semantics, 1, 256)
+        + flag(input.abi_boundary, 1, 512)
+        + flag(input.public_contract, 1, 16);
+}
+
+fn flag(value: i32, expected: i32, code: i32) -> (result: i32) {
+    if value == expected { return code; }
+    return 0;
+}
+
+fn level_for(input: SelectionInput) -> (result: i32) {
+    if input.cross_repository == 1 { return 4; }
+    if input.change_class == 9 { return 4; }
+    if broad_reasons(input) > 0 { return 3; }
+    if input.public_contract == 1 { return 3; }
+    if risk_reasons(input) > 0 { return 2; }
+    if input.direct_dependents == 1 { return 1; }
+    return 0;
+}
+
+fn reason_for(input: SelectionInput) -> (result: i32) {
+    if input.cross_repository == 1 { return 1; }
+    if input.change_class == 9 { return 1; }
+    if broad_reasons(input) > 0 { return broad_reasons(input); }
+    if input.public_contract == 1 { return 16; }
+    if risk_reasons(input) > 0 { return risk_reasons(input); }
+    if input.direct_dependents == 1 { return 8192; }
+    return 0;
+}
+
+fn choose(input: SelectionInput) -> (result: SelectionDecision) {
+    let level: i32 = level_for(input);
+    if input.selected_tests > 0 {
+        if level == 3 { return make_decision(level, reason_for(input), 0); }
+        if level == 4 { return make_decision(level, reason_for(input), 0); }
+        return make_decision(level, reason_for(input), 1);
+    }
+    return make_decision(level, reason_for(input), 0);
+}
+
+fn select_codes(
+    cross_repository: i32,
+    impact_complete: i32,
+    unknown_root: i32,
+    truncated: i32,
+    change_class: i32,
+    high_connectivity: i32,
+    shared_type: i32,
+    effect_semantics: i32,
+    abi_boundary: i32,
+    public_contract: i32,
+    direct_dependents: i32,
+    selected_tests: i32,
+) -> (result: SelectionDecision) {
+    return choose(SelectionInput {
+        cross_repository: cross_repository,
+        impact_complete: impact_complete,
+        unknown_root: unknown_root,
+        truncated: truncated,
+        change_class: change_class,
+        high_connectivity: high_connectivity,
+        shared_type: shared_type,
+        effect_semantics: effect_semantics,
+        abi_boundary: abi_boundary,
+        public_contract: public_contract,
+        direct_dependents: direct_dependents,
+        selected_tests: selected_tests,
+    });
+}
+
+fn make_decision(level: i32, reasons: i32, sufficient: i32) -> (result: SelectionDecision) {
+    return SelectionDecision {
+        level_code: level,
+        reason_mask: reasons,
+        sufficient_local: sufficient,
+    };
+}

@@ -277,16 +277,18 @@ fn json_cursor_retains_known_keys_through_the_wider_window() {
     }
 }
 
-/// Differential binding against the frozen RAVEL consumer snapshot: the
-/// consumer's local `dominate` and the library's `dominate` must agree over
-/// the full 3x3 lattice on the bytecode realization until RFC 0014 linking
-/// lets consumers import `mncs.core` directly.
+/// Linked-consumer binding against the RAVEL snapshot: the snapshot imports
+/// the lattice (`use mncs.core.status.v1`) instead of re-declaring it, so
+/// agreement is checked through the consumer's own `combine_evidence` —
+/// which calls the imported `dominate` — against the library's `combine`
+/// over the full 3x3 join on the bytecode realization. This pins the
+/// import binding, not a historical duplicate.
 #[test]
 fn ravel_snapshot_agrees_with_core_status_lattice_on_bytecode() {
-    let (_, snapshot_result, _) = run_experiment(
+    let (_, snapshot_result, _) = run_library_experiment(
         &example("consumers/ravel-core-snapshot.mncs"),
         "mncs-research-bytecode",
-        &example("execution/library-core-ravel-differential-corpus.json"),
+        &example("execution/library-core-ravel-linked-corpus.json"),
     );
     let (_, core_result, _) = run_experiment(
         &library("core/status.mncs"),
@@ -307,7 +309,7 @@ fn ravel_snapshot_agrees_with_core_status_lattice_on_bytecode() {
         if case_["case_id"]
             .as_str()
             .unwrap()
-            .starts_with("ravel-dominate-")
+            .starts_with("ravel-combine-")
         {
             snapshot_cases.push((
                 case_["case_id"].as_str().unwrap().to_owned(),
@@ -319,7 +321,7 @@ fn ravel_snapshot_agrees_with_core_status_lattice_on_bytecode() {
     }
     let mut core_cases = Vec::new();
     for case_ in core_result["cases"].as_array().unwrap() {
-        if case_["case_id"].as_str().unwrap().starts_with("dominate-") {
+        if case_["case_id"].as_str().unwrap().starts_with("combine-") {
             core_cases.push((
                 format!("ravel-{}", case_["case_id"].as_str().unwrap()),
                 case_["returned"][0]["finite"]["discriminant"]
@@ -332,32 +334,63 @@ fn ravel_snapshot_agrees_with_core_status_lattice_on_bytecode() {
     assert_eq!(snapshot_cases, core_cases);
 }
 
-/// The frozen consumer snapshot is a witness of what RAVEL ships: its
-/// canonical form must stay identical to the upstream file's canonical form
-/// (fingerprint computed at tranche time from both files).
+fn canonical_fingerprint(path: &str) -> String {
+    let output = binary()
+        .env("MNCS_LIBRARY_PATH", library(""))
+        .args(["canonicalize", path])
+        .output()
+        .expect("canonicalize");
+    let value: Value = serde_json::from_slice(&output.stdout).expect("canonical JSON");
+    value["fingerprint"]
+        .as_str()
+        .unwrap_or_else(|| panic!("canonical fingerprint for {path}"))
+        .to_owned()
+}
+
+/// The linked consumer snapshot is a witness of what RAVEL ships: its
+/// canonical form must stay identical to the upstream file's canonical form.
 ///
-/// Fingerprint history: `4bfaff83...` (pre-pressure) rotated to `1cc17f37...`
-/// by the native-soundness tranche, whose hygienic `$mncs$` elaborator
-/// temporaries (MNB011) are the sole canonical delta — verified by
-/// rebuilding with legacy IDs restored and observing the old fingerprint
+/// Fingerprint history: `4bfaff83...` (pre-pressure) rotated to
+/// `1cc17f37...` by the native-soundness tranche, whose hygienic `$mncs$`
+/// elaborator temporaries (MNB011) are the sole canonical delta — verified
+/// by rebuilding with legacy IDs restored and observing the old fingerprint
 /// return exactly, with all other tranche changes held constant.
+/// `1cc17f37...` then drifted to `346e6342...` with the source untouched:
+/// the type-architecture campaign (semantic Bool, resolved-type invariant,
+/// typed ABI nominal resolution) changed canonical representation after
+/// the rotation. The snapshot now tracks the upstream linked Profile-0.10
+/// model (local `Status`/`dominate` replaced by
+/// `use mncs.core.status.v1`, plus the generic evidence envelope), whose
+/// rotation to `2fd0d19d...` was verified by proving a header-comment-only
+/// delta canonicalizes identically to the upstream file.
+/// `2fd0d19d...` then rotated to `8bb6640b...` with the source untouched:
+/// the stdlib modernization moved `mncs.core.status.v1` to Profile 0.13
+/// (generic-argument inference at the `summarize8` delegation), changing
+/// the linked canonical form. Snapshot and upstream agree with each other
+/// on the new fingerprint, which is the robust relationship.
+///
+/// The test compares the snapshot against upstream RAVEL directly (the
+/// robust relationship) in addition to the hardcoded rotation detector,
+/// which keeps the witness offline-deterministic when no sibling checkout
+/// is present.
 #[test]
 fn ravel_snapshot_is_canonically_identical_to_upstream() {
-    let mut paths = vec![example("consumers/ravel-core-snapshot.mncs")];
+    const EXPECTED: &str = "8bb6640bbd4226360a4729df60b06642bf54e39bd8a63978446db597e421e16f";
+    let snapshot = example("consumers/ravel-core-snapshot.mncs");
+    let snapshot_fingerprint = canonical_fingerprint(&snapshot);
+    assert_eq!(snapshot_fingerprint, EXPECTED, "{snapshot}");
     // When the sibling checkout is available, compare against it directly.
-    if let Ok(upstream) = std::env::var("RAVEL_UPSTREAM_CORE") {
-        paths.push(upstream);
-    }
-    for path in paths {
-        let output = binary()
-            .args(["canonicalize", &path])
-            .output()
-            .expect("canonicalize");
-        let value: Value = serde_json::from_slice(&output.stdout).expect("canonical JSON");
+    let upstream = std::env::var("RAVEL_UPSTREAM_CORE").unwrap_or_else(|_| {
+        format!(
+            "{}/../../../RAVEL/mncs/workspace/ravel/core.mncs",
+            env!("CARGO_MANIFEST_DIR")
+        )
+    });
+    if std::path::Path::new(&upstream).is_file() {
+        let upstream_fingerprint = canonical_fingerprint(&upstream);
         assert_eq!(
-            value["fingerprint"],
-            "1cc17f37bc2859f38a5e0eb85953829d4a3d4b706a7bbec601f402f18a38332c",
-            "{path}"
+            snapshot_fingerprint, upstream_fingerprint,
+            "snapshot diverged from upstream RAVEL core"
         );
     }
 }
@@ -410,7 +443,20 @@ fn sequence_typed_library_exports_agree_per_backend() {
     let corpus = example("execution/library-core-sequences-corpus.json");
     for backend in EXECUTABLE_BACKENDS {
         let (code, result, stderr) = run_experiment(&source, backend, &corpus);
-        assert_value_agreement(backend, code, &result, &stderr, 9);
+        assert_value_agreement(backend, code, &result, &stderr, 14);
+    }
+}
+
+/// Contract combinators execute identically on every executable backend,
+/// including the `logic`-delegated implication and native boolean
+/// equality paths.
+#[test]
+fn contract_combinators_agree_per_backend() {
+    let source = library("core/contracts.mncs");
+    let corpus = example("execution/library-core-contracts-corpus.json");
+    for backend in EXECUTABLE_BACKENDS {
+        let (code, result, stderr) = run_experiment(&source, backend, &corpus);
+        assert_value_agreement(backend, code, &result, &stderr, 8);
     }
 }
 

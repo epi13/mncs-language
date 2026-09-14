@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.std.text_scan — bounded literal text scanning over byte views.
 //
@@ -15,7 +15,8 @@ mncs 0.10;
 // re-derived. ASCII-class decisions (`count_words`) reuse the byte-domain
 // predicates from `mncs.core.bytes.v1`, never restated code points.
 //
-// Complexity bounds (H, N <= 64 by MAX_SEQUENCE_BOUND):
+// Complexity bounds (the 64-wide window is this module's chosen substrate
+// width; N, M range over any admitted bound):
 //   window_equal / starts_with / ends_with   <= N byte comparisons
 //   contains / find                          <= 64*N + 64 byte comparisons
 //   compare                                  <= max(N, M) byte comparisons
@@ -33,7 +34,6 @@ mncs 0.10;
 module mncs.std.text_scan.v1;
 
 use mncs.core.bytes.v1 as bytes;
-use mncs.core.logic.v1 as logic;
 
 // Window equality: the N-byte needle matches the haystack at `start`.
 // Guards keep the verdict inside both declared lengths, and every
@@ -59,14 +59,14 @@ fn window_equal<N: Nat>(hay: [byte; up_to 64], hay_length: u64, start: u64, need
 // Literal-term detection: the needle occurs anywhere in the view.
 fn contains<N: Nat>(hay: [byte; up_to 64], hay_length: u64, needle: [byte; N], needle_length: u64) -> (result: bool) {
     iterate i over hay carrying found: bool = false {
-        next found = found || window_equal<N>(hay, hay_length, i, needle, needle_length);
+        next found = found || window_equal(hay, hay_length, i, needle, needle_length);
     }
     return found;
 }
 
 // Bounded prefix check.
 fn starts_with<N: Nat>(hay: [byte; up_to 64], hay_length: u64, needle: [byte; N], needle_length: u64) -> (result: bool) {
-    return window_equal<N>(hay, hay_length, 0, needle, needle_length);
+    return window_equal(hay, hay_length, 0, needle, needle_length);
 }
 
 // Bounded suffix check. The start is computed with wrapping subtraction,
@@ -75,7 +75,7 @@ fn starts_with<N: Nat>(hay: [byte; up_to 64], hay_length: u64, needle: [byte; N]
 fn ends_with<N: Nat>(hay: [byte; up_to 64], hay_length: u64, needle: [byte; N], needle_length: u64) -> (result: bool) {
     let fits: bool = needle_length <= hay_length;
     let start: u64 = hay_length -% needle_length;
-    return select(fits, window_equal<N>(hay, hay_length, start, needle, needle_length), false);
+    return select(fits, window_equal(hay, hay_length, start, needle, needle_length), false);
 }
 
 // Exact view equality over explicit lengths: true when both declared
@@ -119,9 +119,9 @@ fn equals_folded<N: Nat>(value: [byte; up_to 64], value_length: u64, target: [by
 // First occurrence index as i64, or -1 when the needle is absent. The
 // sentinel stays inside the i64 vocabulary; -1 can never be a valid index.
 fn find<N: Nat>(hay: [byte; up_to 64], hay_length: u64, needle: [byte; N], needle_length: u64) -> (result: i64) {
-    iterate i over hay carrying found: i64 = 0 - 1 {
-        let hit: bool = window_equal<N>(hay, hay_length, i, needle, needle_length);
-        next found = select(found == 0 - 1 && hit, i as i64, found);
+    iterate i over hay carrying found: i64 = -1 {
+        let hit: bool = window_equal(hay, hay_length, i, needle, needle_length);
+        next found = select(found == -1 && hit, i as i64, found);
     }
     return found;
 }
@@ -135,7 +135,7 @@ record Cmp { ord: i64, decided: bool }
 fn compare<N: Nat, M: Nat>(left: [byte; N], left_length: u64, right: [byte; M], right_length: u64) -> (result: i64) {
     let llen: u64 = select(left_length <= left.len, left_length, left.len);
     let rlen: u64 = select(right_length <= right.len, right_length, right.len);
-    let tie: i64 = select(llen == rlen, 0, select(llen <= rlen, 0 - 1, 1));
+    let tie: i64 = select(llen == rlen, 0, select(llen <= rlen, -1, 1));
     if right.len == 0 {
         return tie;
     }
@@ -148,7 +148,7 @@ fn compare<N: Nat, M: Nat>(left: [byte; N], left_length: u64, right: [byte; M], 
         let diff: bool = left[i] != right[slot];
         let less: bool = left[i] <= right[slot];
         next st = Cmp {
-            ord: select(logic.bool_not(st.decided) && live && diff, select(less, 0 - 1, 1), st.ord),
+            ord: select(!st.decided && live && diff, select(less, -1, 1), st.ord),
             decided: st.decided || (live && diff)
         };
     }
@@ -173,9 +173,9 @@ fn count_words(hay: [byte; up_to 64], hay_length: u64) -> (result: u64) {
     let seed: WordScan = WordScan { count: 0, in_word: false };
     iterate i over hay carrying st: WordScan = seed {
         let live: bool = i < hay_length;
-        let word_byte: bool = live && logic.bool_not(bytes.is_ascii_space(hay[i]));
+        let word_byte: bool = live && !bytes.is_ascii_space(hay[i]);
         next st = WordScan {
-            count: st.count +% select(logic.bool_not(st.in_word) && word_byte, 1, 0),
+            count: st.count +% select(!st.in_word && word_byte, 1, 0),
             in_word: word_byte
         };
     }
@@ -185,23 +185,23 @@ fn count_words(hay: [byte; up_to 64], hay_length: u64) -> (result: u64) {
 // Executable entry points with concrete shapes for backend corpora.
 
 fn candidate_contains(hay: [byte; up_to 64], hay_length: u64, needle: [byte; 4], needle_length: u64) -> (result: bool) {
-    return contains<4>(hay, hay_length, needle, needle_length);
+    return contains(hay, hay_length, needle, needle_length);
 }
 
 fn candidate_starts_with(hay: [byte; up_to 64], hay_length: u64, needle: [byte; 4], needle_length: u64) -> (result: bool) {
-    return starts_with<4>(hay, hay_length, needle, needle_length);
+    return starts_with(hay, hay_length, needle, needle_length);
 }
 
 fn candidate_ends_with(hay: [byte; up_to 64], hay_length: u64, needle: [byte; 4], needle_length: u64) -> (result: bool) {
-    return ends_with<4>(hay, hay_length, needle, needle_length);
+    return ends_with(hay, hay_length, needle, needle_length);
 }
 
 fn candidate_find(hay: [byte; up_to 64], hay_length: u64, needle: [byte; 4], needle_length: u64) -> (result: i64) {
-    return find<4>(hay, hay_length, needle, needle_length);
+    return find(hay, hay_length, needle, needle_length);
 }
 
 fn candidate_compare(left: [byte; 8], left_length: u64, right: [byte; 8], right_length: u64) -> (result: i64) {
-    return compare<8, 8>(left, left_length, right, right_length);
+    return compare(left, left_length, right, right_length);
 }
 
 fn candidate_count_byte(hay: [byte; up_to 64], hay_length: u64, target: byte) -> (result: u64) {
@@ -213,9 +213,9 @@ fn candidate_count_words(hay: [byte; up_to 64], hay_length: u64) -> (result: u64
 }
 
 fn candidate_equals(value: [byte; up_to 64], value_length: u64, target: [byte; 4], target_length: u64) -> (result: bool) {
-    return equals<4>(value, value_length, target, target_length);
+    return equals(value, value_length, target, target_length);
 }
 
 fn candidate_equals_folded(value: [byte; up_to 64], value_length: u64, target: [byte; 4], target_length: u64) -> (result: bool) {
-    return equals_folded<4>(value, value_length, target, target_length);
+    return equals_folded(value, value_length, target, target_length);
 }

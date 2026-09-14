@@ -10,14 +10,12 @@ mncs 0.13;
 // is a total bounded fold, overflow is an explicit verdict (never silent
 // truncation), and ties always resolve to the lowest index.
 //
-// Complexity bounds (N, M <= 64 by MAX_SEQUENCE_BOUND):
+// Complexity bounds (N, M <= MAX_SEQUENCE_BOUND):
 //   contains / first_free_or_duplicate  <= N byte comparisons
 //   require_all / forbid_any / prefer_hits / dedup_count  <= N*M steps
 //   top_index                             <= N comparisons
 // No operation allocates; every function is total over its declared domain.
 module mncs.std.token_set.v1;
-
-use mncs.core.logic.v1 as logic;
 
 // Membership: the token occupies a live slot.
 fn contains<N: Nat>(set: [byte; N], count: u64, token: byte) -> (result: bool) {
@@ -35,11 +33,11 @@ fn contains<N: Nat>(set: [byte; N], count: u64, token: byte) -> (result: bool) {
 // insertion/deduplication never silently drops a token.
 fn first_free_or_duplicate<N: Nat>(set: [byte; N], count: u64, token: byte) -> (result: i64) {
     let full: bool = count >= set.len;
-    iterate i over set carrying slot: i64 = 0 - 1 {
+    iterate i over set carrying slot: i64 = -1 {
         let live: bool = i < count;
         let hit: bool = live && set[i] == token;
-        let free: bool = logic.bool_not(full) && i == count;
-        next slot = select(slot == 0 - 1 && (hit || free), i as i64, slot);
+        let free: bool = !full && i == count;
+        next slot = select(slot == -1 && (hit || free), i as i64, slot);
     }
     return slot;
 }
@@ -48,7 +46,7 @@ fn first_free_or_duplicate<N: Nat>(set: [byte; N], count: u64, token: byte) -> (
 fn require_all<N: Nat, M: Nat>(have: [byte; N], have_count: u64, need: [byte; M], need_count: u64) -> (result: bool) {
     iterate j over need carrying ok: bool = true {
         let live: bool = j < need_count;
-        next ok = ok && select(live, contains<N>(have, have_count, need[j]), true);
+        next ok = ok && select(live, contains(have, have_count, need[j]), true);
     }
     return ok;
 }
@@ -57,7 +55,7 @@ fn require_all<N: Nat, M: Nat>(have: [byte; N], have_count: u64, need: [byte; M]
 fn forbid_any<N: Nat, M: Nat>(have: [byte; N], have_count: u64, banned: [byte; M], banned_count: u64) -> (result: bool) {
     iterate j over banned carrying ok: bool = true {
         let live: bool = j < banned_count;
-        next ok = ok && select(live, logic.bool_not(contains<N>(have, have_count, banned[j])), true);
+        next ok = ok && select(live, !contains(have, have_count, banned[j]), true);
     }
     return ok;
 }
@@ -67,7 +65,7 @@ fn forbid_any<N: Nat, M: Nat>(have: [byte; N], have_count: u64, banned: [byte; M
 fn prefer_hits<N: Nat, M: Nat>(have: [byte; N], have_count: u64, prefer: [byte; M], prefer_count: u64) -> (result: u64) {
     iterate j over prefer carrying hits: u64 = 0 {
         let live: bool = j < prefer_count;
-        next hits = hits +% select(live && contains<N>(have, have_count, prefer[j]), 1, 0);
+        next hits = hits +% select(live && contains(have, have_count, prefer[j]), 1, 0);
     }
     return hits;
 }
@@ -77,7 +75,7 @@ fn prefer_hits<N: Nat, M: Nat>(have: [byte; N], have_count: u64, prefer: [byte; 
 fn dedup_count<N: Nat>(tokens: [byte; N], count: u64) -> (result: u64) {
     iterate i over tokens carrying distinct: u64 = 0 {
         let live: bool = i < count;
-        next distinct = distinct +% select(live && is_first_occurrence<N>(tokens, count, i), 1, 0);
+        next distinct = distinct +% select(live && is_first_occurrence(tokens, count, i), 1, 0);
     }
     return distinct;
 }
@@ -86,7 +84,7 @@ fn is_first_occurrence<N: Nat>(tokens: [byte; N], count: u64, at: u64) -> (resul
     iterate k over tokens carrying seen: bool = false {
         next seen = seen || (k < at && k < count && tokens[k] == tokens[at]);
     }
-    return logic.bool_not(seen);
+    return !seen;
 }
 
 // Deterministic ranking state: the incumbent maximum index plus whether
@@ -105,41 +103,41 @@ fn top_index<N: Nat>(scores: [u64; N], count: u64) -> (result: i64) {
     let seed: Top = Top { index: 0, has: false };
     iterate i over scores carrying st: Top = seed {
         let live: bool = i < count;
-        let better: bool = live && (logic.bool_not(st.has) || scores[i] > scores[st.index]);
+        let better: bool = live && (!st.has || scores[i] > scores[st.index]);
         next st = Top {
             index: select(better, i, st.index),
             has: st.has || live
         };
     }
-    return select(st.has, st.index as i64, 0 - 1);
+    return select(st.has, st.index as i64, -1);
 }
 
 // Executable entry points with concrete shapes for backend corpora.
 
 fn candidate_contains(set: [byte; 8], count: u64, token: byte) -> (result: bool) {
-    return contains<8>(set, count, token);
+    return contains(set, count, token);
 }
 
 fn candidate_require_all(have: [byte; 8], have_count: u64, need: [byte; 4], need_count: u64) -> (result: bool) {
-    return require_all<8, 4>(have, have_count, need, need_count);
+    return require_all(have, have_count, need, need_count);
 }
 
 fn candidate_forbid_any(have: [byte; 8], have_count: u64, banned: [byte; 4], banned_count: u64) -> (result: bool) {
-    return forbid_any<8, 4>(have, have_count, banned, banned_count);
+    return forbid_any(have, have_count, banned, banned_count);
 }
 
 fn candidate_prefer_hits(have: [byte; 8], have_count: u64, prefer: [byte; 4], prefer_count: u64) -> (result: u64) {
-    return prefer_hits<8, 4>(have, have_count, prefer, prefer_count);
+    return prefer_hits(have, have_count, prefer, prefer_count);
 }
 
 fn candidate_dedup_count(tokens: [byte; 8], count: u64) -> (result: u64) {
-    return dedup_count<8>(tokens, count);
+    return dedup_count(tokens, count);
 }
 
 fn candidate_first_free(set: [byte; 4], count: u64, token: byte) -> (result: i64) {
-    return first_free_or_duplicate<4>(set, count, token);
+    return first_free_or_duplicate(set, count, token);
 }
 
 fn candidate_top_index(scores: [u64; 8], count: u64) -> (result: i64) {
-    return top_index<8>(scores, count);
+    return top_index(scores, count);
 }

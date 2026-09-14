@@ -1,0 +1,21 @@
+mncs 0.17;
+
+// Representative language behavior verified through the canonical mncs-test
+// provider. The production declaration is intentionally separate from the
+// verification declarations so its subject identity can be tracked alone.
+module mncs.language.first_class_tests;
+
+use mncs.test.assertions.v1;
+use mncs.test.suite.v1;
+
+fn add_operands(left: i64, right: i64) -> (result: i64) {
+    return left +% right;
+}
+
+test checked_arithmetic() -> (result: TestResult) {
+    return from_assertion(equals_i64(42, add_operands(19, 23), 1701));
+}
+
+test branch_selection() -> (result: TestResult) {
+    return from_assertion(equals_bool(true, select(4 > 2, true, false), 1702));
+}

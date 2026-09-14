@@ -1290,6 +1290,7 @@ mod tests {
             functions: vec![Function {
                 name: "probe".to_owned(),
                 home_module: None,
+                is_test: false,
                 generic_params: Vec::new(),
                 inputs: Vec::new(),
                 outputs: Vec::new(),
@@ -1523,6 +1524,7 @@ mod tests {
             functions: vec![Function {
                 name: "probe".to_owned(),
                 home_module: None,
+                is_test: false,
                 generic_params: Vec::new(),
                 inputs: Vec::new(),
                 outputs: Vec::new(),

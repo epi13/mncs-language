@@ -1,6 +1,6 @@
 # Source Profile 0.16 — durable filesystem mutation
 
-Status: **implemented, experimental (current)**. Profile 0.16 is
+Status: **implemented, experimental (sealed)**. Profile 0.16 is
 additive over Profiles 0.1–0.15 and is the explicit evolution home
 (RFC 0036) for the durable filesystem-mutation family (Tranche A:
 P1-001/P1-002/P1-003, P2-005 atomic publication). Older profiles
@@ -9,6 +9,10 @@ the `crates/mncs-cli/tests/profile_compat.rs` suite pins both directions
 (old-profile refusals and 0.16 admissions).
 
 Predecessor: Profile 0.15 (`docs/source-profile-0.15.md`).
+
+Profile 0.17 is the additive current profile for first-class test
+declarations. Profile 0.16 remains available for compatibility and retains
+its frozen syntax and canonical behavior.
 Machine-readable policy: `mncs-syntax` registry
 (`crates/mncs-syntax/src/profile.rs`,
 `spec/source-profile-registry.json`).

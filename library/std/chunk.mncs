@@ -22,8 +22,6 @@ mncs 0.13;
 // the language decides boundaries, spans, and slices.
 module mncs.std.chunk.v1;
 
-use mncs.core.logic.v1 as logic;
-
 // A span of bytes starting at `start` in chunk `chunk`, `length` bytes
 // long. Spans never dangle: producers construct them from scanned
 // boundaries, and consumers clamp them into the view they read.
@@ -39,10 +37,10 @@ record Cursor { chunk: u64, offset: u64 }
 // from `from`. Total: overlong `from` simply matches nothing.
 fn find_newline_generic<N: Nat>(view: [byte; up_to N], view_length: u64, from: u64) -> (result: i64) {
     let vlen: u64 = select(view_length <= view.len, view_length, view.len);
-    iterate i over view carrying found: i64 = 0 - 1 {
+    iterate i over view carrying found: i64 = -1 {
         let live: bool = i < vlen && i >= from;
         let hit: bool = live && view[i] == 10;
-        next found = select(found == 0 - 1 && hit, i as i64, found);
+        next found = select(found == -1 && hit, i as i64, found);
     }
     return found;
 }
@@ -51,7 +49,7 @@ fn find_newline_generic<N: Nat>(view: [byte; up_to N], view_length: u64, from: u
 // or -1 when the window holds no newline. The 64-byte historical shape is
 // preserved exactly; it delegates to the generic scan.
 fn find_newline(view: [byte; up_to 64], view_length: u64, from: u64) -> (result: i64) {
-    return find_newline_generic<64>(view, view_length, from);
+    return find_newline_generic(view, view_length, from);
 }
 
 // Length of the line starting at `from`, excluding the newline: the
@@ -61,12 +59,12 @@ fn find_newline(view: [byte; up_to 64], view_length: u64, from: u64) -> (result:
 fn line_length_generic<N: Nat>(view: [byte; up_to N], view_length: u64, from: u64) -> (result: u64) {
     let vlen: u64 = select(view_length <= view.len, view_length, view.len);
     let start: u64 = select(from <= vlen, from, vlen);
-    let end: i64 = find_newline_generic<N>(view, view_length, start);
-    return select(end == 0 - 1, vlen -% start, (end as u64) -% start);
+    let end: i64 = find_newline_generic(view, view_length, start);
+    return select(end == -1, vlen -% start, (end as u64) -% start);
 }
 
 fn line_length(view: [byte; up_to 64], view_length: u64, from: u64) -> (result: u64) {
-    return line_length_generic<64>(view, view_length, from);
+    return line_length_generic(view, view_length, from);
 }
 
 // Advance a cursor past one line: the span of the line content plus the
@@ -77,7 +75,7 @@ record LineStep { span: Span, after: Cursor, terminated: bool }
 fn next_line_generic<N: Nat>(view: [byte; up_to N], view_length: u64, cursor: Cursor) -> (result: LineStep) {
     let vlen: u64 = select(view_length <= view.len, view_length, view.len);
     let start: u64 = select(cursor.offset <= vlen, cursor.offset, vlen);
-    let length: u64 = line_length_generic<N>(view, view_length, start);
+    let length: u64 = line_length_generic(view, view_length, start);
     let end: u64 = start +% length;
     let terminated: bool = end < vlen;
     let after: u64 = select(terminated, end +% 1, end);
@@ -89,7 +87,7 @@ fn next_line_generic<N: Nat>(view: [byte; up_to N], view_length: u64, cursor: Cu
 }
 
 fn next_line(view: [byte; up_to 64], view_length: u64, cursor: Cursor) -> (result: LineStep) {
-    return next_line_generic<64>(view, view_length, cursor);
+    return next_line_generic(view, view_length, cursor);
 }
 
 // Measure a line that starts in an earlier chunk: `prefix_length` bytes
@@ -100,14 +98,14 @@ fn next_line(view: [byte; up_to 64], view_length: u64, cursor: Cursor) -> (resul
 record JoinedLine { total_length: u64, terminated: bool }
 
 fn continue_line_generic<N: Nat>(view: [byte; up_to N], view_length: u64, prefix_length: u64) -> (result: JoinedLine) {
-    let end: i64 = find_newline_generic<N>(view, view_length, 0);
-    let terminated: bool = logic.bool_not(end == 0 - 1);
+    let end: i64 = find_newline_generic(view, view_length, 0);
+    let terminated: bool = !(end == -1);
     let tail: u64 = select(terminated, end as u64, select(view_length <= view.len, view_length, view.len));
     return JoinedLine { total_length: prefix_length +% tail, terminated: terminated };
 }
 
 fn continue_line(view: [byte; up_to 64], view_length: u64, prefix_length: u64) -> (result: JoinedLine) {
-    return continue_line_generic<64>(view, view_length, prefix_length);
+    return continue_line_generic(view, view_length, prefix_length);
 }
 
 // --- Executable entry points (scalar shapes for backend corpora) ---
@@ -118,7 +116,7 @@ fn continue_line(view: [byte; up_to 64], view_length: u64, prefix_length: u64) -
 fn candidate_find_newline(view: [byte; up_to 64], view_length: u64) -> (result: i64) {
     let first: i64 = find_newline(view, view_length, 0);
     let second: i64 = find_newline(view, view_length, 3);
-    return first * 100 + select(second == 0 - 1, 1, 0);
+    return first * 100 + select(second == -1, 1, 0);
 }
 
 // Single-chunk line step: "ab\ncd" from 0 spans (0, 2), terminates, and

@@ -35,6 +35,8 @@ pub enum IdentityKind {
     RecordType,
     RecordField,
     Function,
+    Test,
+    TestCase,
     Contract,
     Assumption,
     Effect,
@@ -153,6 +155,21 @@ impl Program {
                 kind: IdentityKind::Function,
                 fingerprint: fingerprint_json(&canonical_function(function).to_string()),
             });
+            if function.is_test {
+                let declaration_identity = test_declaration_id(namespace, &function.name);
+                objects.push(IdentityRecord {
+                    identity: declaration_identity,
+                    kind: IdentityKind::Test,
+                    fingerprint: fingerprint_json(&canonical_function(function).to_string()),
+                });
+                let function_fingerprint =
+                    fingerprint_json(&canonical_function(function).to_string());
+                objects.push(IdentityRecord {
+                    identity: test_case_id(namespace, &function.name, &function_fingerprint),
+                    kind: IdentityKind::TestCase,
+                    fingerprint: function_fingerprint,
+                });
+            }
             if let Some(body) = &function.body {
                 let body_identity = body_id(namespace, &function.name);
                 objects.push(IdentityRecord {
@@ -597,7 +614,7 @@ impl SemanticIdentities {
     }
 }
 
-pub(crate) fn program_id(module: &str) -> SemanticId {
+pub fn program_id(module: &str) -> SemanticId {
     make_id(IdentityKind::Program, &[module])
 }
 
@@ -675,6 +692,20 @@ pub fn finite_variant_id(module: &str, type_name: &str, variant: &str) -> Semant
 
 pub fn function_id(module: &str, function: &str) -> SemanticId {
     make_id(IdentityKind::Function, &[module, function])
+}
+
+/// Stable declaration identity for a first-class source test. This identity
+/// names the declaration slot, not its current body. Use [`test_case_id`] for
+/// the body-sensitive identity consumed by empirical execution records.
+pub fn test_declaration_id(module: &str, test: &str) -> SemanticId {
+    make_id(IdentityKind::Test, &[module, test])
+}
+
+/// Body-sensitive identity for one first-class test case. A body edit creates
+/// a new empirical case/experiment identity while the declaration identity
+/// remains stable for source navigation and filtering.
+pub fn test_case_id(module: &str, test: &str, test_fingerprint: &str) -> SemanticId {
+    make_id(IdentityKind::TestCase, &[module, test, test_fingerprint])
 }
 
 pub fn generic_param_id(module: &str, function: &str, param: &str) -> SemanticId {
@@ -790,6 +821,8 @@ fn make_id(kind: IdentityKind, components: &[&str]) -> SemanticId {
         IdentityKind::RecordType => "record-type",
         IdentityKind::RecordField => "record-field",
         IdentityKind::Function => "function",
+        IdentityKind::Test => "test",
+        IdentityKind::TestCase => "test-case",
         IdentityKind::Contract => "contract",
         IdentityKind::Assumption => "assumption",
         IdentityKind::Effect => "effect",
@@ -854,7 +887,12 @@ pub(crate) fn operation_id(
     )
 }
 
-pub(crate) fn parameter_id(module: &str, function: &str, value: &str) -> SemanticId {
+/// Stable semantic identity for a function parameter value.
+///
+/// Runtime observation uses this same identity for an argument rather than
+/// inventing an execution-only binding namespace. The observed value still
+/// receives a distinct execution-scoped version identity.
+pub fn parameter_id(module: &str, function: &str, value: &str) -> SemanticId {
     make_id(IdentityKind::Value, &[module, function, "parameter", value])
 }
 

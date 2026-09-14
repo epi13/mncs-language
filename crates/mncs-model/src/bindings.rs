@@ -15,6 +15,7 @@ pub const SEMANTIC_BINDING_SCHEMA_VERSION: &str = "0.1";
 #[serde(rename_all = "snake_case")]
 pub enum SemanticBindingKind {
     Function,
+    Test,
     Parameter,
     Local,
     IterationState,

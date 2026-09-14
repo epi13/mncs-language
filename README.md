@@ -43,6 +43,13 @@ An MNCS-oriented program should make it possible to answer:
 
 Canonical semantic JSON remains an experimental bootstrap transport. Source Profile 0.1 is an executable but intentionally narrow grammar experiment, not a selected production grammar.
 
+The Atlas stateful JSON model is a current profile `0.16` backend workload.
+Its two resolved backend pressures—nested-cell address normalization and
+packed bounded-view region reclamation—are documented in the
+[Atlas WASM backend evidence record](docs/development-evidence/atlas-wasm-backend-2026-09.md)
+and tracked canonically in the
+[MNCS Commons pressure exchange](https://github.com/epi13/MNCS-Commons/tree/main/pressures).
+
 The complete logical compiler stage contract, including explicitly missing frontend and executable-backend stages, is available as deterministic machine JSON:
 
 ```bash
@@ -164,7 +171,7 @@ The 0.1 model contains:
 
 A key initial rule is that every effect must identify an authorizing capability, and that capability must be declared by the function. Evidence must reference a declared contract property rather than floating as unbound metadata.
 
-The experimental 0.2 layer adds deterministic SHA-256 content fingerprints, structural semantic identities, a typed semantic graph, dependency-aware evidence manifests, conservative invalidation, diagnostic obligations, backward causal slices, finite refinement budgets, typed isolated repair patches, explicit promotion records, semantic/authority/evidence deltas, and versioned verifier artifact import checks. The 0.3 layer accepts a small syntax-independent executable body model, computes deterministic CFG reachability/dominance, and lowers symbolic values, state regions, normal and failure paths, explicit effect capability uses, contract/evidence traceability, generated obligations, machine-intent links, lowering/portability envelopes, and transformation provenance into HIR. The experimental 0.4 layer projects that subset into validated block-parameter SSA while retaining semantic/HIR/SSA identities. Roadmap 0.5 adds explicit saturating/widening semantics, bounded plural-backend execution, machine-readable emitted/withheld promise decisions, a release-path checked constant-range certificate for LLVM `nsw`/`nuw`, Rust-control comparison, and a sealed bounded refinement-cycle artifact. Forge is a local development/evidence harness, not a sandbox, independent evaluator, or promotion authority. This is not a production compiler or backend.
+The experimental 0.2 layer adds deterministic SHA-256 content fingerprints, structural semantic identities, a typed semantic graph, dependency-aware evidence manifests, conservative invalidation, the bounded `mncs.semantic-impact/1` neighborhood, diagnostic obligations, backward causal slices, finite refinement budgets, typed isolated repair patches, explicit promotion records, semantic/authority/evidence deltas, and versioned verifier artifact import checks. The 0.3 layer accepts a small syntax-independent executable body model, computes deterministic CFG reachability/dominance, and lowers symbolic values, state regions, normal and failure paths, explicit effect capability uses, contract/evidence traceability, generated obligations, machine-intent links, lowering/portability envelopes, and transformation provenance into HIR. The experimental 0.4 layer projects that subset into validated block-parameter SSA while retaining semantic/HIR/SSA identities. Roadmap 0.5 adds explicit saturating/widening semantics, bounded plural-backend execution, machine-readable emitted/withheld promise decisions, a release-path checked constant-range certificate for LLVM `nsw`/`nuw`, Rust-control comparison, and a sealed bounded refinement-cycle artifact. Forge is a local development/evidence harness, not a sandbox, independent evaluator, or promotion authority. This is not a production compiler or backend.
 
 ## Try the semantic prototype
 

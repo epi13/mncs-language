@@ -321,6 +321,7 @@ fn declaration_only_record_short_name_keeps_identity_in_ssa() {
         binding_table: None,
         functions: vec![Function {
             name: "take".to_owned(),
+            is_test: false,
             home_module: None,
             generic_params: Vec::new(),
             inputs: vec![Value {

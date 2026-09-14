@@ -120,6 +120,10 @@ pub fn profile_support_for(backend_name: &str) -> Vec<BackendProfileSupport> {
                 // with overall status PASS (independent observed replay
                 // agrees layer-by-layer).
                 realized("0.16"),
+                // Profile 0.17 adds declaration metadata and compiler-owned
+                // test inventory; its executable function bodies retain the
+                // Profile 0.16 backend envelope.
+                realized("0.17"),
             ])
             .collect(),
         "mncs-portable-wasm-mvp" | "mncs-c11" | "mncs-llvm-ir" | "mncs-cranelift" => core
@@ -143,6 +147,10 @@ pub fn profile_support_for(backend_name: &str) -> Vec<BackendProfileSupport> {
                 // pure neighbors realizable), so compiled backends stay
                 // partial with the mutation gap named.
                 support("0.16", "partial", &["fs_mutation"]),
+                // First-class test declarations are metadata-only at this
+                // boundary; their bodies retain the compiled Profile 0.16
+                // envelope.
+                support("0.17", "partial", &["fs_mutation"]),
             ])
             .collect(),
         "mncs-riscv32" | "mncs-ebpf" | "mncs-ptx64" => ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6"]
@@ -151,6 +159,7 @@ pub fn profile_support_for(backend_name: &str) -> Vec<BackendProfileSupport> {
             .chain(
                 [
                     "0.7", "0.8", "0.9", "0.10", "0.11", "0.12", "0.13", "0.14", "0.15", "0.16",
+                    "0.17",
                 ]
                 .iter()
                 .map(|profile| {

@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.core.status — authoritative MNCS status/evidence-dominance lattice.
 //
@@ -138,7 +138,7 @@ fn summarize_prefix<N: Nat>(statuses: [Status; N], count: byte) -> (result: Stat
 // Compatibility entrypoint retained for consumers of the original eight-slot
 // envelope. Its semantics are delegated to the generic bounded-prefix form.
 fn summarize8(statuses: [Status; 8], count: byte) -> (result: StatusSummary) {
-    return summarize_prefix<8>(statuses, count);
+    return summarize_prefix(statuses, count);
 }
 
 // A decided status is settled truth: PASS or FAIL. UNKNOWN is undecided by

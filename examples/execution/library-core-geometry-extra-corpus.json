@@ -473,6 +473,48 @@
           ]
         }
       }]
+    },
+    {
+      "id": "clamp-between-inside",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.geometry.v1", "function": "clamp_between" },
+        "arguments": [
+          { "integer": { "value": 5, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "integer": { "value": 5, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "clamp-between-below",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.geometry.v1", "function": "clamp_between" },
+        "arguments": [
+          { "integer": { "value": -5, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "integer": { "value": 0, "type": { "bits": 64, "signed": true } } }]
+    },
+    {
+      "id": "clamp-between-above",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.geometry.v1", "function": "clamp_between" },
+        "arguments": [
+          { "integer": { "value": 15, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 0, "type": { "bits": 64, "signed": true } } },
+          { "integer": { "value": 10, "type": { "bits": 64, "signed": true } } }
+        ],
+        "step_budget": 4096
+      },
+      "expected": [{ "integer": { "value": 10, "type": { "bits": 64, "signed": true } } }]
     }
   ],
   "properties": []

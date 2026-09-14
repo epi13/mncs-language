@@ -8,13 +8,16 @@ pub mod bundle;
 mod frontend;
 pub mod proof_admission;
 mod resolution;
+pub mod source_map;
 
 pub use frontend::{
     elaborate_program, elaborate_program_with_resolutions, elaborate_program_with_resolver,
     elaborate_program_with_resolver_and_modules,
-    elaborate_program_with_resolver_and_modules_and_seeds, specialize_program_with_host_seeds,
-    ModuleResolution, ModuleResolutionOutcome, ModuleResolver, NullResolver, SourceFrontEndResult,
-    SourceStudyOutput,
+    elaborate_program_with_resolver_and_modules_and_seeds,
+    elaborate_program_with_resolver_and_modules_and_seeds_with_map,
+    specialize_program_with_host_seeds, ModuleResolution, ModuleResolutionOutcome, ModuleResolver,
+    NullResolver, SourceFrontEndResult, SourceStudyOutput, TestInventory, TestInventoryEntry,
+    TEST_INVENTORY_SCHEMA_VERSION,
 };
 pub use proof_admission::{
     admission_library_roots, admit_artifact, authorize_reuse, lower_with_proofs, AdmissionError,
@@ -22,6 +25,10 @@ pub use proof_admission::{
 };
 pub use resolution::{
     NameResolution, NameResolutionIndex, ResolvedNameKind, NAME_RESOLUTION_SCHEMA_VERSION,
+};
+pub use source_map::{
+    ExecutionSourceBlock, ExecutionSourceFunction, ExecutionSourceMap, ExecutionSourceOperation,
+    EXECUTION_SOURCE_MAP_SCHEMA_VERSION,
 };
 
 use std::collections::{BTreeMap, BTreeSet};

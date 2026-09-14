@@ -40,7 +40,7 @@ record ValidateState { remaining: u64, lead: byte, error: i64 }
 
 // Keep the first recorded error index; later lanes must not overwrite it.
 fn first_error(current: i64, index: u64) -> (result: i64) {
-    return select(current == 0 - 1, index as i64, current);
+    return select(current == -1, index as i64, current);
 }
 
 // One validation lane: total over every byte value. Dead lanes (past the
@@ -77,16 +77,16 @@ fn validate_step(state: ValidateState, value: byte, index: u64, live: bool) -> (
 // first continuation, or truncated tail. The empty window is valid.
 fn validate_generic<N: Nat>(view: [byte; up_to N], view_length: u64) -> (result: i64) {
     let window: u64 = select(view_length <= view.len, view_length, view.len);
-    iterate i over view carrying state: ValidateState = ValidateState { remaining: 0, lead: 0, error: 0 - 1 } {
+    iterate i over view carrying state: ValidateState = ValidateState { remaining: 0, lead: 0, error: -1 } {
         next state = validate_step(state, view[i], i, i < window);
     }
-    if state.error != 0 - 1 {
+    if state.error != -1 {
         return state.error;
     }
     if state.remaining != 0 {
         return window as i64;
     }
-    return 0 - 1;
+    return -1;
 }
 
 // Decode the scalar starting at `at`: ASCII passes through, 2-/3-/4-byte
@@ -183,14 +183,14 @@ fn fold_scalar(scalar: u32) -> (result: u32) {
 // truncated tail at the window end, and the empty window as valid.
 fn candidate_validate(buf: [byte; 16], view_length: u64) -> (result: i64) {
     let view: [byte; up_to 16] = buf[0..view_length];
-    let error: i64 = validate_generic<16>(view, view_length);
-    return select(error == 0 - 1, 100000, error);
+    let error: i64 = validate_generic(view, view_length);
+    return select(error == -1, 100000, error);
 }
 
 // Step one scalar at `at`: packs valid * 100000000 + scalar * 100 + next.
 fn candidate_step(buf: [byte; 16], view_length: u64, at: u64) -> (result: i64) {
     let view: [byte; up_to 16] = buf[0..view_length];
-    let step: ScalarStep = step_scalar_generic<16>(view, view_length, at);
+    let step: ScalarStep = step_scalar_generic(view, view_length, at);
     return select(step.valid, 100000000, 0) + (step.scalar as i64) * 100 + step.next as i64;
 }
 

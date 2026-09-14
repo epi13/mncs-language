@@ -1,4 +1,4 @@
-mncs 0.10;
+mncs 0.13;
 
 // mncs.core.identity — bounded opaque digest values.
 //
@@ -14,8 +14,7 @@ record Digest32 { bytes: [byte; 32] }
 record OrderState { decided: i64, before: i64 }
 
 fn zero_bytes() -> (result: [byte; 32]) {
-    return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    return [0; 32];
 }
 
 fn make(bytes: [byte; 32]) -> (result: Digest32) {

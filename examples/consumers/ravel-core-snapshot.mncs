@@ -1,26 +1,46 @@
-mncs 0.5;
+mncs 0.10;
 
-// Frozen consumer snapshot: RAVEL ravel.core.v1 as reconstructed in
-// epi13/RAVEL (RAVEL/mncs/workspace/ravel_core.mncs), byte-equivalent modulo
+// Linked consumer snapshot: RAVEL ravel.core.v1 as shipped upstream in
+// epi13/RAVEL (RAVEL/mncs/workspace/ravel/core.mncs), byte-equivalent modulo
 // this provenance comment block.
 //
-// Purpose: identity-bound differential binding against mncs.core.status.v1
-// until RFC 0014 module linking lets consumers import the library directly.
-// This snapshot is a witness of what the consumer actually ships; edits here
-// must only track the upstream file verbatim.
-//
+// Purpose: witness that the linked consumer model — profile header,
+// `use mncs.core.status.v1` import binding, and every RAVEL declaration —
+// canonicalizes identically to what upstream RAVEL ships. The pre-link era
+// local `Status`/`dominate` copy is gone on purpose: RFC 0014-style module
+// linking is how consumers bind the lattice now, and this witness pins that
+// binding instead of a historical duplicate. Edits here must only track the
+// upstream file verbatim.
+
 // MNCS-native RAVEL core: the status lattice, evidence combination, and
-// candidate disposition. This module is a direct logical reconstruction of
-// RAVEL's authority boundary: RAVEL may combine and interpret bounded
-// evidence, but it can never convert UNKNOWN into PASS, never delete FAIL,
-// and never certify its own candidates.
+// candidate disposition, bound to the authoritative mncs.core.status
+// standard-library module.
+//
+// RAVEL may combine and interpret bounded evidence, but it can never convert
+// UNKNOWN into PASS, never delete FAIL, and never certify its own candidates.
+// Dominance semantics are no longer re-declared here: they are imported from
+// mncs.core.status.v1, whose identity-bound lattice is the standard-library
+// definition of the three-valued status domain.
+//
+// Source Profile 0.10 (the lowest profile with explicit bounded
+// polymorphism) is used for the fixed-capacity evidence envelope below:
+// the four hard gates travel as one `[Status; 4]` value aggregated by the
+// authoritative generic fold `summarize<4>` instead of a hand-rolled
+// dominate chain. The legacy GateSet/disposition surface is retained
+// unchanged for compatibility and differential parity.
 //
 // Identities are opaque i64 digest halves. Host boundaries bind them to full
 // content identities; inside RAVEL reasoning they are ordered, comparable,
 // and never re-derived from text.
+//
+// The stdlib fold is fail-closed by construction: its running status starts
+// UNKNOWN and UNKNOWN dominates PASS, so the summary status is FAIL when any
+// lane failed and UNKNOWN otherwise. Positive information lives in the
+// counts, which stay visible instead of collapsing: PASS lanes, FAIL lanes,
+// and UNKNOWN lanes are reported separately with the observed total.
 module ravel.core.v1;
 
-enum Status { PASS, FAIL, UNKNOWN }
+use mncs.core.status.v1;
 
 enum Disposition { COMMIT, REJECT, HOLD }
 
@@ -32,22 +52,43 @@ record EvidenceRef {
 
 record GateSet { a: Status, b: Status, c: Status, d: Status }
 
-// Lattice join of evidence status under MNCS dominance:
-// FAIL dominates UNKNOWN dominates PASS.
-fn dominate(left: Status, right: Status) -> (result: Status) {
-    return match left {
-        PASS => right,
-        FAIL => Status.FAIL,
-        UNKNOWN => match right {
-            PASS => Status.UNKNOWN,
-            FAIL => Status.FAIL,
-            UNKNOWN => Status.UNKNOWN,
-        },
-    };
-}
+// The genuine architectural bound: RAVEL commits a candidate only when four
+// hard gates are all PASS. The envelope carries exactly those four lanes;
+// no missing lane is silently PASS and no fifth lane exists.
+record EvidenceEnvelope { statuses: [Status; 4] }
 
 fn combine_evidence(left: EvidenceRef, right: EvidenceRef) -> (result: Status) {
     return dominate(left.status, right.status);
+}
+
+// Authoritative aggregation of the envelope: one generic fold over the
+// fixed-capacity lanes. Conflict stays visible in the counts — a mixed
+// envelope reports both its PASS and FAIL lanes rather than reducing to
+// one apparently authoritative status.
+fn envelope_summary(input: EvidenceEnvelope) -> (result: StatusSummary) {
+    return summarize<4>(input.statuses);
+}
+
+// Disposition through the envelope. Exactly the legacy GateSet semantics:
+// any FAIL rejects (it dominates the fold), any unresolved lane holds, and
+// only all-PASS commits. UNKNOWN is never promoted: the all-PASS commit is
+// decided by the observed counts, not by upgrading the fold's UNKNOWN floor.
+fn envelope_disposition(input: EvidenceEnvelope) -> (result: Disposition) {
+    let summary: StatusSummary = summarize<4>(input.statuses);
+    return match summary.status {
+        PASS => Disposition.COMMIT,
+        FAIL => Disposition.REJECT,
+        UNKNOWN => hold_unless_resolved(summary.unknown_count),
+    };
+}
+
+// An UNKNOWN floor with no unresolved lanes means every lane was observed
+// PASS: the candidate may commit. Any unresolved lane holds it.
+fn hold_unless_resolved(unknowns: i64) -> (result: Disposition) {
+    if unknowns > 0 {
+        return Disposition.HOLD;
+    }
+    return Disposition.COMMIT;
 }
 
 // A candidate may commit only when every hard gate is PASS. Any FAIL is a

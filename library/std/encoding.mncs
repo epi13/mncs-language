@@ -166,7 +166,7 @@ fn read_u16_le_generic<N: Nat>(window: [byte; up_to N], offset: u64) -> (result:
 }
 
 fn read_u16_le(window: [byte; up_to 64], offset: u64) -> (result: u16) {
-    return read_u16_le_generic<64>(window, offset);
+    return read_u16_le_generic(window, offset);
 }
 
 fn read_u32_le_generic<N: Nat>(window: [byte; up_to N], offset: u64) -> (result: u32) {
@@ -178,7 +178,7 @@ fn read_u32_le_generic<N: Nat>(window: [byte; up_to N], offset: u64) -> (result:
 }
 
 fn read_u32_le(window: [byte; up_to 64], offset: u64) -> (result: u32) {
-    return read_u32_le_generic<64>(window, offset);
+    return read_u32_le_generic(window, offset);
 }
 
 // NOTE (INGEST-P-011): 256-/392-byte stage entry points live in

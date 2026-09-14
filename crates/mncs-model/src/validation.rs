@@ -380,6 +380,7 @@ pub(crate) mod tests {
             generic_specializations: Vec::new(),
             functions: vec![Function {
                 home_module: None,
+                is_test: false,
                 generic_params: Vec::new(),
                 name: "transfer".to_owned(),
                 inputs: vec![Value {

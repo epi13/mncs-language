@@ -4,17 +4,18 @@ use std::time::Instant;
 
 use mncs_model::{
     binding_id, binding_id_for, finite_type_id, finite_variant_id, function_id, module_id,
-    record_field_id, record_type_id, reference_id, scope_id, ArithmeticIntent,
-    ArtifactRepresentation, BodyBlock, BodyBoundedIteration, BodyCyclePolicy, BodyOperation,
-    BodyOperationKind, BodyParameter, BodyTerminator, BodyType, BodyValue,
-    BoundedIterationCompletion, CompilationStatus, CompilationStudyRequest, CompilationStudyResult,
-    CompilerArtifactRef, CompilerNodeProfile, CompilerPassExecutionObservation, ContractClause,
-    ContractKind, Effect, FailureMode, FiniteType, FiniteVariant, FloatType, Function,
-    FunctionBody, IntegerType, Intent, IterationDomain, MachineIntentSpec, MachinePreference,
-    Program, RecordField, RecordType, Requirement, ResolutionProvenance, SemanticBinding,
-    SemanticBindingKind, SemanticBindingTable, SemanticGraph, SemanticId, SemanticIdentities,
-    SemanticNamespace, SemanticReference, SemanticScope, TransformationEdge, TransformationStatus,
-    ValidationReport, Value, EXECUTABLE_BODY_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSION,
+    program_id, record_field_id, record_type_id, reference_id, scope_id, test_case_id,
+    test_declaration_id, ArithmeticIntent, ArtifactRepresentation, BodyBlock, BodyBoundedIteration,
+    BodyCyclePolicy, BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator, BodyType,
+    BodyValue, BoundedIterationCompletion, CompilationStatus, CompilationStudyRequest,
+    CompilationStudyResult, CompilerArtifactRef, CompilerNodeProfile,
+    CompilerPassExecutionObservation, ContractClause, ContractKind, Effect, FailureMode,
+    FiniteType, FiniteVariant, FloatType, Function, FunctionBody, IntegerType, Intent,
+    IterationDomain, MachineIntentSpec, MachinePreference, Program, RecordField, RecordType,
+    Requirement, ResolutionProvenance, SemanticBinding, SemanticBindingKind, SemanticBindingTable,
+    SemanticGraph, SemanticId, SemanticIdentities, SemanticNamespace, SemanticReference,
+    SemanticScope, TransformationEdge, TransformationStatus, ValidationReport, Value,
+    EXECUTABLE_BODY_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSION,
 };
 use mncs_syntax::{
     parse, AbstractSyntaxTree, AstBinaryOp, AstExpr, AstFunction, AstMatchArm, AstMatchPattern,
@@ -37,6 +38,7 @@ fn trace_timing(stage: &str, started: Instant) {
 }
 
 use crate::resolution::{NameResolution, NameResolutionIndex, ResolvedNameKind};
+use crate::source_map::ExecutionSourceMap;
 use crate::{fingerprint, native_node_profile, ReferenceCompiler};
 
 #[derive(Debug, Clone, Serialize)]
@@ -62,6 +64,55 @@ pub struct SourceFrontEndResult {
     pub module_resolutions: Vec<ModuleResolution>,
     pub artifacts: Vec<CompilerArtifactRef>,
     pub diagnostics: Vec<SourceDiagnostic>,
+    /// Compiler-owned inventory of local first-class `test` declarations.
+    /// This is absent when the source cannot be elaborated into a valid
+    /// program; consumers never reconstruct it by scanning source text.
+    pub test_inventory: Option<TestInventory>,
+    /// Compiler-owned mapping from executable semantic operation identities
+    /// to exact source spans. Runtime observation events join this map by
+    /// operation identity; consumers do not infer locations from order or
+    /// rendered text.
+    pub execution_source_map: Option<ExecutionSourceMap>,
+}
+
+pub const TEST_INVENTORY_SCHEMA_VERSION: &str = "mncs.test-inventory/1";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TestInventory {
+    pub schema_version: String,
+    /// The compiler can prove a source/module inventory here.  A repository
+    /// canonical proof is a separate executor boundary and must not be
+    /// inferred from this per-source inventory.
+    pub scope: String,
+    pub module: String,
+    pub source_artifact_identity: String,
+    pub source_profile: String,
+    pub subject_identity: SemanticId,
+    pub subject_fingerprint: String,
+    pub tests: Vec<TestInventoryEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TestInventoryEntry {
+    /// Stable declaration slot used for filtering and source navigation.
+    pub declaration_identity: SemanticId,
+    /// Body-sensitive case identity used to bind an RFC 0034 experiment.
+    pub test_case_identity: SemanticId,
+    /// Callable function identity used only by the execution ABI.
+    pub function_identity: SemanticId,
+    pub module: String,
+    pub name: String,
+    pub qualified_name: String,
+    pub source_span: SourceSpan,
+    pub profile: String,
+    pub generic_params: Vec<mncs_model::GenericParam>,
+    pub inputs: Vec<Value>,
+    pub outputs: Vec<Value>,
+    pub effects: Vec<Effect>,
+    pub capabilities: Vec<String>,
+    pub semantic_fingerprint: String,
+    pub subject_identity: SemanticId,
+    pub subject_fingerprint: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,6 +141,67 @@ impl SourceFrontEndResult {
         self.artifacts
             .iter()
             .find(|artifact| artifact.representation == representation)
+    }
+}
+
+fn build_test_inventory(
+    envelope: &SourceEnvelope,
+    ast: &AbstractSyntaxTree,
+    program: &Program,
+) -> TestInventory {
+    let identities = program.semantic_identities();
+    let subject_identity = program_id(&program.module);
+    let subject_fingerprint = program
+        .production_content_fingerprint()
+        .expect("validated production program is canonicalizable");
+    let mut tests = ast
+        .functions
+        .iter()
+        .filter(|function| function.is_test)
+        .filter_map(|ast_function| {
+            let function = program.functions.iter().find(|candidate| {
+                candidate.home_module.is_none() && candidate.name == ast_function.name.text
+            })?;
+            let function_identity = function_id(&program.module, &function.name);
+            let semantic_fingerprint = identities.fingerprint(&function_identity)?.to_owned();
+            Some(TestInventoryEntry {
+                declaration_identity: test_declaration_id(&program.module, &function.name),
+                test_case_identity: test_case_id(
+                    &program.module,
+                    &function.name,
+                    &semantic_fingerprint,
+                ),
+                function_identity,
+                module: program.module.clone(),
+                name: function.name.clone(),
+                qualified_name: format!("{}::{}", program.module, function.name),
+                source_span: ast_function.span,
+                profile: ast.language_version.text.clone(),
+                generic_params: function.generic_params.clone(),
+                inputs: function.inputs.clone(),
+                outputs: function.outputs.clone(),
+                effects: function.effects.clone(),
+                capabilities: function.capabilities.clone(),
+                semantic_fingerprint,
+                subject_identity: subject_identity.clone(),
+                subject_fingerprint: subject_fingerprint.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+    tests.sort_by(|left, right| {
+        left.declaration_identity
+            .cmp(&right.declaration_identity)
+            .then_with(|| left.qualified_name.cmp(&right.qualified_name))
+    });
+    TestInventory {
+        schema_version: TEST_INVENTORY_SCHEMA_VERSION.to_owned(),
+        scope: "source_module".to_owned(),
+        module: program.module.clone(),
+        source_artifact_identity: envelope.identity.clone(),
+        source_profile: ast.language_version.text.clone(),
+        subject_identity,
+        subject_fingerprint,
+        tests,
     }
 }
 
@@ -168,6 +280,7 @@ impl ReferenceCompiler {
         let mut name_resolutions = NameResolutionIndex::default();
         let mut binding_table = None;
         let mut module_resolutions = Vec::new();
+        let mut execution_source_map = None;
         if let Some(tree) = &ast {
             artifacts.push(CompilerArtifactRef::new(
                 ArtifactRepresentation::AbstractSyntaxTree,
@@ -182,11 +295,12 @@ impl ReferenceCompiler {
                 ));
             } else {
                 let elaboration_started = Instant::now();
-                let elaboration =
-                    elaborate_program_with_resolver_and_modules_and_seeds(tree, resolver, seeds);
+                let elaboration = elaborate_program_with_resolver_and_modules_and_seeds_with_map(
+                    tree, resolver, seeds,
+                );
                 trace_timing("elaboration", elaboration_started);
                 match elaboration {
-                    (Ok(elaborated), resolutions, resolved_modules) => {
+                    (Ok(elaborated), resolutions, resolved_modules, operation_sources) => {
                         module_resolutions = resolved_modules;
                         let report = elaborated.validate();
                         binding_table = elaborated.binding_table.clone();
@@ -229,11 +343,26 @@ impl ReferenceCompiler {
                             SUPPORTED_SCHEMA_VERSION,
                             fingerprint(&report),
                         ));
+                        let report_valid = report.valid;
                         validation = Some(report);
+                        if report_valid {
+                            let source_map = ExecutionSourceMap::from_parts(
+                                &envelope,
+                                tree,
+                                &elaborated,
+                                operation_sources.as_ref().unwrap_or(&BTreeMap::new()),
+                            );
+                            artifacts.push(CompilerArtifactRef::new(
+                                ArtifactRepresentation::ExecutionSourceMap,
+                                crate::source_map::EXECUTION_SOURCE_MAP_SCHEMA_VERSION,
+                                source_map.fingerprint(),
+                            ));
+                            execution_source_map = Some(source_map);
+                        }
                         program = Some(elaborated);
                         name_resolutions = NameResolutionIndex::new(resolutions);
                     }
-                    (Err(mut errors), resolutions, resolved_modules) => {
+                    (Err(mut errors), resolutions, resolved_modules, _operation_sources) => {
                         module_resolutions = resolved_modules;
                         name_resolutions = NameResolutionIndex::new(resolutions);
                         diagnostics.append(&mut errors)
@@ -241,6 +370,16 @@ impl ReferenceCompiler {
                 }
             }
         }
+        let test_inventory = if program
+            .as_ref()
+            .is_some_and(|_| validation.as_ref().is_some_and(|report| report.valid))
+        {
+            ast.as_ref()
+                .zip(program.as_ref())
+                .map(|(ast, program)| build_test_inventory(&envelope, ast, program))
+        } else {
+            None
+        };
         SourceFrontEndResult {
             envelope,
             lexical,
@@ -255,6 +394,8 @@ impl ReferenceCompiler {
             module_resolutions,
             artifacts,
             diagnostics,
+            test_inventory,
+            execution_source_map,
         }
     }
 
@@ -542,6 +683,24 @@ pub fn elaborate_program_with_resolver_and_modules_and_seeds(
     Vec<NameResolution>,
     Vec<ModuleResolution>,
 ) {
+    let (result, resolutions, modules, _) =
+        elaborate_program_with_resolver_and_modules_and_seeds_with_map(ast, resolver, seeds);
+    (result, resolutions, modules)
+}
+
+/// Source-map-bearing variant used by the front end's execution/debugging
+/// path. The historical public elaboration API above remains unchanged for
+/// callers that only need the semantic program.
+pub fn elaborate_program_with_resolver_and_modules_and_seeds_with_map(
+    ast: &AbstractSyntaxTree,
+    resolver: &dyn ModuleResolver,
+    seeds: &[mncs_model::HostGenericSeedRequest],
+) -> (
+    Result<Program, Vec<SourceDiagnostic>>,
+    Vec<NameResolution>,
+    Vec<ModuleResolution>,
+    Option<BTreeMap<SemanticId, SourceSpan>>,
+) {
     let recording_resolver = RecordingResolver {
         inner: resolver,
         sources: RefCell::new(BTreeMap::new()),
@@ -552,6 +711,7 @@ pub fn elaborate_program_with_resolver_and_modules_and_seeds(
     let mut declaration_spans = BTreeMap::new();
     let mut visiting = BTreeSet::new();
     let mut module_ceilings = BTreeMap::new();
+    let mut operation_sources = None;
     let result = if let Err(mut errors) = elaborate_import_closure(
         ast,
         &recording_resolver,
@@ -563,14 +723,14 @@ pub fn elaborate_program_with_resolver_and_modules_and_seeds(
         diagnostics.append(&mut errors);
         Err(diagnostics)
     } else {
-        match link_module_with_closure(
+        match link_module_with_closure_and_source_map(
             ast,
             &elaborated,
             &mut declaration_spans,
             &mut resolutions,
             &ast.module.text,
         ) {
-            Ok(program) => {
+            Ok((program, root_operation_sources)) => {
                 // Admitted-ceiling enforcement for concrete bounds
                 // substituted into generic specializations (RFC 0036) lives
                 // inside `specialize_program_with_host_seeds`, which also
@@ -586,7 +746,10 @@ pub fn elaborate_program_with_resolver_and_modules_and_seeds(
                     ast.module.span,
                     None,
                 ) {
-                    Ok(specialized) => Ok(specialized),
+                    Ok(specialized) => {
+                        operation_sources = Some(root_operation_sources);
+                        Ok(specialized)
+                    }
                     Err(mut errors) => {
                         diagnostics.append(&mut errors);
                         Err(diagnostics)
@@ -614,7 +777,7 @@ pub fn elaborate_program_with_resolver_and_modules_and_seeds(
             })
         })
         .collect();
-    (result, resolutions, module_resolutions)
+    (result, resolutions, module_resolutions, operation_sources)
 }
 
 fn module_names_compatible(requested: &str, declared: &str) -> bool {
@@ -838,6 +1001,23 @@ fn link_module_with_closure(
     resolutions: &mut Vec<NameResolution>,
     declaration_key: &str,
 ) -> Result<Program, Vec<SourceDiagnostic>> {
+    link_module_with_closure_and_source_map(
+        ast,
+        elaborated,
+        declaration_spans,
+        resolutions,
+        declaration_key,
+    )
+    .map(|(program, _)| program)
+}
+
+fn link_module_with_closure_and_source_map(
+    ast: &AbstractSyntaxTree,
+    elaborated: &BTreeMap<String, Program>,
+    declaration_spans: &mut BTreeMap<String, DeclarationSpans>,
+    resolutions: &mut Vec<NameResolution>,
+    declaration_key: &str,
+) -> Result<(Program, BTreeMap<SemanticId, SourceSpan>), Vec<SourceDiagnostic>> {
     let mut diagnostics = Vec::new();
     let mut imported = Vec::new();
     let mut seen = BTreeSet::new();
@@ -873,7 +1053,8 @@ fn link_module_with_closure(
     let mut linked_declarations = DeclarationSpans::from_ast(ast);
     linked_declarations.merge_missing(&context.imported_declarations);
     declaration_spans.insert(declaration_key.to_owned(), linked_declarations);
-    let mut program = elaborate_linked_module(ast, &context, resolutions)?;
+    let (mut program, operation_sources) =
+        elaborate_linked_module_with_source_map(ast, &context, resolutions)?;
     if mncs_syntax::profile_at_least(&ast.language_version.text, SOURCE_PROFILE_VERSION_0_9) {
         let imported_tables = imported
             .iter()
@@ -881,7 +1062,7 @@ fn link_module_with_closure(
             .collect::<Vec<_>>();
         program.binding_table = Some(build_binding_table(&program, resolutions, &imported_tables));
     }
-    Ok(program)
+    Ok((program, operation_sources))
 }
 
 /// Binds imported declarations into this module's namespace. Collisions fail
@@ -1460,19 +1641,11 @@ fn canonicalize_function_types(function: &mut Function, module: &ImportedModule)
     }
 }
 
-/// Elaborate `ast` alone (no imports) and additionally return every name
-/// resolution that elaboration decided. The resolutions are authoritative:
-/// each entry is the exact binding decision used to accept the corresponding
-/// occurrence.
-///
-/// Recording is best-effort; when elaboration fails, the resolutions decided
-/// before the failure are still returned so tools can navigate partially valid
-/// documents without re-implementing binding rules.
-fn elaborate_linked_module(
+fn elaborate_linked_module_with_source_map(
     ast: &AbstractSyntaxTree,
     context: &MergedContext,
     resolutions: &mut Vec<NameResolution>,
-) -> Result<Program, Vec<SourceDiagnostic>> {
+) -> Result<(Program, BTreeMap<SemanticId, SourceSpan>), Vec<SourceDiagnostic>> {
     let mut diagnostics = Vec::new();
 
     // A local declaration may not shadow an imported binding under a
@@ -1856,6 +2029,7 @@ fn elaborate_linked_module(
         record_types_by_name.extend(context.qualified_record_types.clone());
     }
     let mut functions = Vec::new();
+    let mut operation_sources = BTreeMap::new();
     let mut names = std::collections::BTreeSet::new();
     for function in &ast.functions {
         if !names.insert(function.name.text.clone()) {
@@ -1899,7 +2073,10 @@ fn elaborate_linked_module(
             &context.direct_imports,
             resolutions,
         ) {
-            Ok(elaborated) => functions.push(elaborated),
+            Ok(elaborated) => {
+                operation_sources.extend(elaborated.operation_sources);
+                functions.push(elaborated.function);
+            }
             Err(mut errors) => diagnostics.append(&mut errors),
         }
     }
@@ -1914,17 +2091,20 @@ fn elaborate_linked_module(
         dependencies.extend(context.imported_dependencies.iter().cloned());
         dependencies.sort();
         dependencies.dedup();
-        Ok(Program {
-            schema_version: SUPPORTED_SCHEMA_VERSION.to_owned(),
-            module: ast.module.text.clone(),
-            dependencies,
-            finite_types,
-            record_types: all_records,
-            assumptions: Vec::new(),
-            binding_table: None,
-            functions: all_functions,
-            generic_specializations: Vec::new(),
-        })
+        Ok((
+            Program {
+                schema_version: SUPPORTED_SCHEMA_VERSION.to_owned(),
+                module: ast.module.text.clone(),
+                dependencies,
+                finite_types,
+                record_types: all_records,
+                assumptions: Vec::new(),
+                binding_table: None,
+                functions: all_functions,
+                generic_specializations: Vec::new(),
+            },
+            operation_sources,
+        ))
     } else {
         Err(diagnostics)
     }
@@ -2023,7 +2203,11 @@ fn build_binding_table(
             namespace: namespace.clone(),
             scope: module_scope,
             declaration: identity,
-            kind: SemanticBindingKind::Function,
+            kind: if function.is_test {
+                SemanticBindingKind::Test
+            } else {
+                SemanticBindingKind::Function
+            },
             projected_from: None,
         });
     }
@@ -2481,6 +2665,11 @@ fn annotation_identity(
 }
 
 #[allow(clippy::too_many_arguments)]
+struct ElaboratedFunction {
+    function: Function,
+    operation_sources: BTreeMap<SemanticId, SourceSpan>,
+}
+
 fn elaborate_function(
     ast: &AbstractSyntaxTree,
     function: &AstFunction,
@@ -2491,7 +2680,7 @@ fn elaborate_function(
     namespace_aliases: &BTreeMap<String, String>,
     direct_imports: &BTreeSet<String>,
     resolutions: &mut Vec<NameResolution>,
-) -> Result<Function, Vec<SourceDiagnostic>> {
+) -> Result<ElaboratedFunction, Vec<SourceDiagnostic>> {
     let mut diagnostics = Vec::new();
     // ---- Generic parameter elaboration (Profile 0.10) ----
     let generic_params = if function.generic_params.is_empty() {
@@ -2795,7 +2984,7 @@ fn elaborate_function(
                     && exact_view_borrow_dimensions(&returned.ty, &output_type).is_some()
             })
     });
-    let (blocks, bounded_iterations, builder_resolutions, structural_evidence) =
+    let (blocks, bounded_iterations, builder_resolutions, structural_evidence, operation_sources) =
         if function.body.statements.is_empty() && tail_name.is_some() && !tail_borrows {
             let AstExpr::Name(returned_name) = &function.body.returned_value else {
                 unreachable!("guarded above")
@@ -2830,6 +3019,7 @@ fn elaborate_function(
                 Vec::new(),
                 Vec::new(),
                 Vec::new(),
+                BTreeMap::new(),
             )
         } else {
             let mut builder = BodyBuilder::new(
@@ -2861,11 +3051,13 @@ fn elaborate_function(
             }
             let builder_resolutions = std::mem::take(&mut builder.resolutions);
             let structural_evidence = std::mem::take(&mut builder.structural_evidence);
+            let operation_sources = std::mem::take(&mut builder.operation_sources);
             (
                 builder.blocks,
                 builder.bounded_iterations,
                 builder_resolutions,
                 structural_evidence,
+                operation_sources,
             )
         };
     resolutions.extend(env.take_resolutions());
@@ -2875,44 +3067,48 @@ fn elaborate_function(
     }
     let _ = ast;
     let _ = assumptions;
-    Ok(Function {
-        name: function.name.text.clone(),
-        home_module: None,
-        generic_params: generic_params.clone(),
-        inputs,
-        outputs,
-        contracts,
-        effects,
-        capabilities,
-        assumptions: function
-            .contracts
-            .iter()
-            .filter(|clause| clause.kind.text == "assumes")
-            .map(|clause| clause.name.text.clone())
-            .collect(),
-        evidence: structural_evidence
-            .into_iter()
-            .map(|claim| mncs_model::EvidenceClaim {
-                property: mncs_model::STRUCTURAL_DECREASE_PROPERTY.to_owned(),
-                verifier: "structural-decrease-rederivation".to_owned(),
-                status: mncs_model::EvidenceStatus::Claimed,
-                artifact: serde_json::to_string(&claim).ok(),
-            })
-            .collect(),
-        failure: FailureMode::Isolated,
-        body: Some(FunctionBody {
-            schema_version: EXECUTABLE_BODY_SCHEMA_VERSION.to_owned(),
-            entry: "entry".to_owned(),
-            parameters,
+    Ok(ElaboratedFunction {
+        function: Function {
+            name: function.name.text.clone(),
+            is_test: function.is_test,
+            home_module: None,
             generic_params: generic_params.clone(),
-            cycle_policy: if ast.language_version.text == SOURCE_PROFILE_VERSION_0_4 {
-                BodyCyclePolicy::BoundedIterationOnly
-            } else {
-                BodyCyclePolicy::Legacy
-            },
-            bounded_iterations,
-            blocks,
-        }),
+            inputs,
+            outputs,
+            contracts,
+            effects,
+            capabilities,
+            assumptions: function
+                .contracts
+                .iter()
+                .filter(|clause| clause.kind.text == "assumes")
+                .map(|clause| clause.name.text.clone())
+                .collect(),
+            evidence: structural_evidence
+                .into_iter()
+                .map(|claim| mncs_model::EvidenceClaim {
+                    property: mncs_model::STRUCTURAL_DECREASE_PROPERTY.to_owned(),
+                    verifier: "structural-decrease-rederivation".to_owned(),
+                    status: mncs_model::EvidenceStatus::Claimed,
+                    artifact: serde_json::to_string(&claim).ok(),
+                })
+                .collect(),
+            failure: FailureMode::Isolated,
+            body: Some(FunctionBody {
+                schema_version: EXECUTABLE_BODY_SCHEMA_VERSION.to_owned(),
+                entry: "entry".to_owned(),
+                parameters,
+                generic_params: generic_params.clone(),
+                cycle_policy: if ast.language_version.text == SOURCE_PROFILE_VERSION_0_4 {
+                    BodyCyclePolicy::BoundedIterationOnly
+                } else {
+                    BodyCyclePolicy::Legacy
+                },
+                bounded_iterations,
+                blocks,
+            }),
+        },
+        operation_sources,
     })
 }
 
@@ -3866,6 +4062,11 @@ struct BodyBuilder<'a> {
     /// Admitted structural-decrease records for this function (R5), drained
     /// into `Function.evidence` when elaboration succeeds.
     structural_evidence: Vec<mncs_model::StructuralDecreaseClaim>,
+    /// Exact source span captured at the AST construct currently being
+    /// lowered. The map is emitted as compiler-owned correspondence; it is
+    /// never reconstructed from operation order after lowering.
+    operation_sources: BTreeMap<SemanticId, SourceSpan>,
+    current_source_span: Option<SourceSpan>,
 }
 
 /// Admissible literal range of an integer type as `(min, max)` (CP-0010).
@@ -3986,7 +4187,18 @@ impl<'a> BodyBuilder<'a> {
             recursion_provenance,
             measure,
             structural_evidence: Vec::new(),
+            operation_sources: BTreeMap::new(),
+            current_source_span: None,
         }
+    }
+
+    fn push_operation(&mut self, operation: BodyOperation) {
+        let block_id = self.blocks[self.current].id.clone();
+        if let Some(span) = self.current_source_span {
+            let identity = operation.identity(&self.namespace, &self.function, &block_id);
+            self.operation_sources.insert(identity, span);
+        }
+        self.blocks[self.current].operations.push(operation);
     }
 
     fn profile_at_least(&self, version: &str) -> bool {
@@ -4251,6 +4463,7 @@ impl<'a> BodyBuilder<'a> {
         env: &mut BindingEnv,
         diagnostics: &mut Vec<SourceDiagnostic>,
     ) {
+        self.current_source_span = Some(statement_span(statement));
         match statement {
             AstStmt::Let {
                 name,
@@ -4513,7 +4726,7 @@ impl<'a> BodyBuilder<'a> {
                 // The runtime length observation drives both exact sequences
                 // (constant-foldable) and views (runtime length).
                 let length_id = self.new_value("iteration_domain_len");
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: length_id.clone(),
                     kind: BodyOperationKind::SequenceLength {
                         bound: bound.clone(),
@@ -4684,7 +4897,7 @@ impl<'a> BodyBuilder<'a> {
             length_id.clone()
         } else {
             let bound_id = self.new_value("iteration_bound");
-            self.blocks[self.current].operations.push(BodyOperation {
+            self.push_operation(BodyOperation {
                 id: bound_id.clone(),
                 kind: BodyOperationKind::Constant {
                     value: i128::from(bound_u32),
@@ -4725,7 +4938,7 @@ impl<'a> BodyBuilder<'a> {
         };
         self.current = header_index;
         let zero_id = self.new_value("iteration_zero");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: zero_id.clone(),
             kind: BodyOperationKind::Constant {
                 value: 0,
@@ -4743,7 +4956,7 @@ impl<'a> BodyBuilder<'a> {
             portability: None,
         });
         let has_attempt_id = self.new_value("iteration_has_attempt");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: has_attempt_id.clone(),
             kind: BodyOperationKind::IntegerCompare {
                 predicate: "gt".to_owned(),
@@ -4786,7 +4999,7 @@ impl<'a> BodyBuilder<'a> {
         // domain fact (0 .. len) is machine knowledge, not a runtime check.
         if let Some((_, length_id)) = &traversal_length {
             let index_id = self.new_value("iteration_index");
-            self.blocks[self.current].operations.push(BodyOperation {
+            self.push_operation(BodyOperation {
                 id: index_id.clone(),
                 kind: BodyOperationKind::Integer {
                     operator: "sub".to_owned(),
@@ -4828,7 +5041,7 @@ impl<'a> BodyBuilder<'a> {
             // counted position proves nothing about sequence bounds, so it
             // binds as CountedIndex, never as TraversalIndex.
             let index_id = self.new_value("counted_index");
-            self.blocks[self.current].operations.push(BodyOperation {
+            self.push_operation(BodyOperation {
                 id: index_id.clone(),
                 kind: BodyOperationKind::Integer {
                     operator: "sub".to_owned(),
@@ -4910,7 +5123,7 @@ impl<'a> BodyBuilder<'a> {
             ));
         }
         let one_id = self.new_value("iteration_one");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: one_id.clone(),
             kind: BodyOperationKind::Constant {
                 value: 1,
@@ -4928,7 +5141,7 @@ impl<'a> BodyBuilder<'a> {
             portability: None,
         });
         let decremented = self.new_value("iteration_decrement");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: decremented.clone(),
             kind: BodyOperationKind::Integer {
                 operator: "sub".to_owned(),
@@ -5314,7 +5527,7 @@ impl<'a> BodyBuilder<'a> {
             } else {
                 let literal = literal.expect("non-terminal scalar arm covers a literal");
                 let constant = self.new_value("matchlit");
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: constant.clone(),
                     kind: BodyOperationKind::Constant {
                         value: literal,
@@ -5332,7 +5545,7 @@ impl<'a> BodyBuilder<'a> {
                     portability: None,
                 });
                 let condition = self.new_value("match");
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: condition.clone(),
                     kind: BodyOperationKind::IntegerCompare {
                         predicate: "eq".to_owned(),
@@ -5485,7 +5698,7 @@ impl<'a> BodyBuilder<'a> {
         let capability =
             self.check_host_authority("clock_read", "MNE238", "MNE239", span, diagnostics)?;
         let id = self.new_value("clockread");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::HostCall {
                 capability,
@@ -5534,7 +5747,7 @@ impl<'a> BodyBuilder<'a> {
         let capability =
             self.check_host_authority("host_read", "MNE235", "MNE236", span, diagnostics)?;
         let id = self.new_value("hostread");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::HostCall {
                 capability,
@@ -5585,7 +5798,7 @@ impl<'a> BodyBuilder<'a> {
         let capability =
             self.check_host_authority(effect_kind, "MNE257", "MNE258", span, diagnostics)?;
         let id = self.new_value("fslist");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::HostCall {
                 capability,
@@ -5671,7 +5884,7 @@ impl<'a> BodyBuilder<'a> {
             self.check_host_authority("fs_list", "MNE257", "MNE258", span, diagnostics)?;
         let operand = self.elaborate_fs_index(operation, index, env, diagnostics)?;
         let id = self.new_value("fsentry");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::HostCall {
                 capability,
@@ -5728,7 +5941,7 @@ impl<'a> BodyBuilder<'a> {
         let length_binding =
             self.elaborate_fs_index("fs_read_bytes_at", length, env, diagnostics)?;
         let id = self.new_value("fsread");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::HostCall {
                 capability,
@@ -5785,7 +5998,7 @@ impl<'a> BodyBuilder<'a> {
         let capability =
             self.check_host_authority("fs_write", "MNE277", "MNE278", span, diagnostics)?;
         let id = self.new_value("fswrite");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::HostCall {
                 capability,
@@ -6029,7 +6242,7 @@ impl<'a> BodyBuilder<'a> {
         let operand =
             self.elaborate_crypto_view(view, "sha256_digest", "MNE243", env, diagnostics)?;
         let id = self.new_value("sha256");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::HostCall {
                 capability,
@@ -6084,7 +6297,7 @@ impl<'a> BodyBuilder<'a> {
             self.check_host_authority("host_write", "MNE253", "MNE254", span, diagnostics)?;
         let operand = self.elaborate_crypto_view(view, "host_write", "MNE255", env, diagnostics)?;
         let id = self.new_value("hostwrite");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::HostCall {
                 capability,
@@ -6157,7 +6370,7 @@ impl<'a> BodyBuilder<'a> {
             return None;
         }
         let id = self.new_value("fi");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::FloatIntrinsic {
                 function: name.to_owned(),
@@ -6216,7 +6429,7 @@ impl<'a> BodyBuilder<'a> {
         let sig =
             self.elaborate_crypto_view(signature, "ed25519_verify", "MNE246", env, diagnostics)?;
         let id = self.new_value("edverify");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::HostCall {
                 capability,
@@ -6237,6 +6450,20 @@ impl<'a> BodyBuilder<'a> {
     }
 
     fn elaborate_expr(
+        &mut self,
+        expr: &AstExpr,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let previous = self.current_source_span;
+        self.current_source_span = Some(expr.span());
+        let result = self.elaborate_expr_inner(expr, expected, env, diagnostics);
+        self.current_source_span = previous;
+        result
+    }
+
+    fn elaborate_expr_inner(
         &mut self,
         expr: &AstExpr,
         expected: Option<&BodyType>,
@@ -6338,7 +6565,7 @@ impl<'a> BodyBuilder<'a> {
                         let bits = (*value as f64).to_bits();
                         let ty = BodyType::Float(FloatType::f64());
                         let id = self.new_value("fc");
-                        self.blocks[self.current].operations.push(BodyOperation {
+                        self.push_operation(BodyOperation {
                             id: id.clone(),
                             kind: BodyOperationKind::FloatConstant {
                                 bits,
@@ -6387,7 +6614,7 @@ impl<'a> BodyBuilder<'a> {
                     }),
                 };
                 let id = self.new_value("c");
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::Constant {
                         value: *value,
@@ -6429,7 +6656,7 @@ impl<'a> BodyBuilder<'a> {
                     None => BodyType::Float(FloatType::f64()),
                 };
                 let id = self.new_value("fc");
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::FloatConstant {
                         bits: *bits,
@@ -6458,7 +6685,7 @@ impl<'a> BodyBuilder<'a> {
                     ));
                 }
                 let id = self.new_value("b");
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::Constant {
                         value: i128::from(*value),
@@ -6640,7 +6867,7 @@ impl<'a> BodyBuilder<'a> {
                     operands.push(resolved.id);
                 }
                 let id = self.new_value("e");
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::FiniteConstruct {
                         type_identity: finite_type.identity.clone(),
@@ -6953,8 +7180,59 @@ impl<'a> BodyBuilder<'a> {
                         _ => false,
                     });
                     if has_forwarding {
-                        // Keep signature generic inputs as is; validation will be performed after specialization when caller is specialized.
-                        (signature.inputs.clone(), signature.output.clone())
+                        // Partially symbolic: concretize the parameters
+                        // inference solved to values, and rename the
+                        // forwarded ones to the caller's own parameter
+                        // names, so the argument/result checks below
+                        // compare caller-side facts. The recorded call
+                        // keeps the symbolic `ValueParam`/generic `Type`
+                        // arguments; full validation completes at
+                        // specialization when the caller is specialized.
+                        // (Without the rename, only same-named parameters
+                        // compared equal and genuine forwarding refused
+                        // with MNE117/MNE133/MNE135.)
+                        let mut nat_forward = std::collections::BTreeMap::new();
+                        let mut type_forward = std::collections::BTreeMap::new();
+                        for (param, arg) in signature
+                            .generic_params
+                            .iter()
+                            .zip(&elaborated_generic_args)
+                        {
+                            match (param.kind, arg) {
+                                (
+                                    mncs_model::GenericParamKind::Nat,
+                                    mncs_model::GenericArg::ValueParam { name },
+                                ) => {
+                                    nat_forward.insert(param.name.clone(), name.clone());
+                                }
+                                (
+                                    mncs_model::GenericParamKind::Type,
+                                    mncs_model::GenericArg::Type {
+                                        ty: mncs_model::BodyType::GenericParam { name },
+                                    },
+                                ) => {
+                                    type_forward.insert(param.name.clone(), name.clone());
+                                }
+                                _ => {}
+                            }
+                        }
+                        let forwarded_inputs: Vec<mncs_model::BodyType> = signature
+                            .inputs
+                            .iter()
+                            .map(|ty| {
+                                rename_forwarded_params(
+                                    substitute_body_type(ty.clone(), &type_map, &value_map),
+                                    &nat_forward,
+                                    &type_forward,
+                                )
+                            })
+                            .collect();
+                        let forwarded_output = rename_forwarded_params(
+                            substitute_body_type(signature.output.clone(), &type_map, &value_map),
+                            &nat_forward,
+                            &type_forward,
+                        );
+                        (forwarded_inputs, forwarded_output)
                     } else {
                         // Fully concrete substitution
                         let substituted_inputs: Vec<mncs_model::BodyType> = signature
@@ -7086,7 +7364,7 @@ impl<'a> BodyBuilder<'a> {
                     let hash = mncs_model::sha256_hex(canonical.as_bytes());
                     Some(mncs_model::instantiation_id(&signature.identity, &hash))
                 };
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::Call {
                         function: signature.identity.clone(),
@@ -7422,7 +7700,7 @@ impl<'a> BodyBuilder<'a> {
                         };
                     } else {
                         let condition = self.new_value("match");
-                        self.blocks[self.current].operations.push(BodyOperation {
+                        self.push_operation(BodyOperation {
                             id: condition.clone(),
                             kind: BodyOperationKind::FiniteIsVariant {
                                 type_identity: type_identity.clone(),
@@ -7464,7 +7742,7 @@ impl<'a> BodyBuilder<'a> {
                     // explicit payload projection inside this arm's block.
                     for (field_name, binding_name, expected_field) in bindings {
                         let projected = self.new_value(binding_name.text.as_str());
-                        self.blocks[self.current].operations.push(BodyOperation {
+                        self.push_operation(BodyOperation {
                             id: projected.clone(),
                             kind: BodyOperationKind::FinitePayloadProject {
                                 type_identity: type_identity.clone(),
@@ -7686,7 +7964,7 @@ impl<'a> BodyBuilder<'a> {
                     operands.push(operand_id);
                 }
                 let id = self.new_value("rec");
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::RecordConstruct {
                         type_identity: record_type.identity.clone(),
@@ -7716,7 +7994,7 @@ impl<'a> BodyBuilder<'a> {
                     let subject = self.elaborate_expr(base, None, env, diagnostics)?;
                     if let BodyType::Sequence { bound, .. } = &subject.ty {
                         let id = self.new_value("seqlen");
-                        self.blocks[self.current].operations.push(BodyOperation {
+                        self.push_operation(BodyOperation {
                             id: id.clone(),
                             kind: match &subject.ty {
                                 BodyType::Sequence { bound, .. } => {
@@ -7965,7 +8243,7 @@ impl<'a> BodyBuilder<'a> {
                     }],
                     obligations: Vec::new(),
                 };
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::Select {
                         operand_type: Box::new(operand_type.clone()),
@@ -8074,7 +8352,7 @@ impl<'a> BodyBuilder<'a> {
                     bound: bound.clone(),
                 };
                 let id = self.new_value("rep");
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::SequenceReplace {
                         element_type: element_type.clone(),
@@ -8281,7 +8559,7 @@ impl<'a> BodyBuilder<'a> {
                     operands.push(resolved.id);
                 }
                 let id = self.new_value("seq");
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::SequenceConstruct {
                         element_type,
@@ -8382,7 +8660,7 @@ impl<'a> BodyBuilder<'a> {
                 let expected_ty = expected
                     .cloned()
                     .unwrap_or_else(|| BodyType::Named("invalid".to_owned()));
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::SequenceConstruct {
                         element_type,
@@ -8474,7 +8752,7 @@ impl<'a> BodyBuilder<'a> {
                     ));
                 }
                 let id = self.new_value("elem");
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::SequenceProject {
                         bound: bound.clone(),
@@ -8528,7 +8806,7 @@ impl<'a> BodyBuilder<'a> {
                     bound: mncs_model::SequenceBound::UpTo(view_cap),
                 };
                 let id = self.new_value("view");
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::ViewConstruct {
                         source_bound: source_bound.clone(),
@@ -8627,7 +8905,7 @@ impl<'a> BodyBuilder<'a> {
                 }
                 let from = subject.ty.clone();
                 let id = self.new_value("cast");
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::Convert {
                         from,
@@ -8675,7 +8953,7 @@ impl<'a> BodyBuilder<'a> {
                     return None;
                 }
                 let id = self.new_value("b");
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: id.clone(),
                     kind: BodyOperationKind::BooleanNot,
                     operands: vec![operand.id],
@@ -8735,7 +9013,7 @@ impl<'a> BodyBuilder<'a> {
                             return None;
                         }
                     };
-                    self.blocks[self.current].operations.push(BodyOperation {
+                    self.push_operation(BodyOperation {
                         id: id.clone(),
                         kind,
                         operands: vec![left_value.id, count_value.id],
@@ -8820,7 +9098,7 @@ impl<'a> BodyBuilder<'a> {
                         return None;
                     }
                     let id = self.new_value("b");
-                    self.blocks[self.current].operations.push(BodyOperation {
+                    self.push_operation(BodyOperation {
                         id: id.clone(),
                         kind: BodyOperationKind::BooleanOp {
                             operator: match op {
@@ -8853,7 +9131,7 @@ impl<'a> BodyBuilder<'a> {
                     let bool_type = BodyType::Bool;
                     if left_value.ty == bool_type && right_value.ty == bool_type {
                         let id = self.new_value("b");
-                        self.blocks[self.current].operations.push(BodyOperation {
+                        self.push_operation(BodyOperation {
                             id: id.clone(),
                             kind: BodyOperationKind::BooleanCompare {
                                 predicate: match op {
@@ -8928,7 +9206,7 @@ impl<'a> BodyBuilder<'a> {
                             BodyType::Byte,
                         )
                     };
-                    self.blocks[self.current].operations.push(BodyOperation {
+                    self.push_operation(BodyOperation {
                         id: id.clone(),
                         kind,
                         operands: vec![left_value.id, right_value.id],
@@ -8966,7 +9244,7 @@ impl<'a> BodyBuilder<'a> {
                             intent: ArithmeticIntent::Wrapping,
                         };
                         let result_ty = BodyType::Integer(operand_type);
-                        self.blocks[self.current].operations.push(BodyOperation {
+                        self.push_operation(BodyOperation {
                             id: id.clone(),
                             kind,
                             operands: vec![left_value.id, right_value.id],
@@ -9055,7 +9333,7 @@ impl<'a> BodyBuilder<'a> {
                             BodyType::Float(float),
                         )
                     };
-                    self.blocks[self.current].operations.push(BodyOperation {
+                    self.push_operation(BodyOperation {
                         id: id.clone(),
                         kind,
                         operands: vec![left_value.id, right_value.id],
@@ -9166,7 +9444,7 @@ impl<'a> BodyBuilder<'a> {
                         )
                     }
                 };
-                self.blocks[self.current].operations.push(BodyOperation {
+                self.push_operation(BodyOperation {
                     id: id.clone(),
                     kind,
                     operands: vec![left_value.id, right_value.id],
@@ -9595,7 +9873,7 @@ impl<'a> BodyBuilder<'a> {
         ty: BodyType,
     ) -> ResolvedBinding {
         let id = self.new_value(prefix);
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind,
             operands,
@@ -9618,6 +9896,7 @@ impl<'a> BodyBuilder<'a> {
         span: SourceSpan,
         diagnostics: &mut Vec<SourceDiagnostic>,
     ) {
+        self.current_source_span = Some(span);
         let mut value = value;
         if value.ty != self.output_type {
             let output_type = self.output_type.clone();
@@ -9664,7 +9943,7 @@ impl<'a> BodyBuilder<'a> {
             })
             .unwrap_or_else(|| BodyType::Named("invalid".to_owned()));
         let id = self.new_value("proj");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::RecordProject {
                 type_identity: record_type.identity.clone(),
@@ -9916,7 +10195,7 @@ impl<'a> BodyBuilder<'a> {
             return None;
         };
         let id = self.new_value("chk");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::BoundCheck {
                 bound: bound.clone(),
@@ -10084,7 +10363,7 @@ impl<'a> BodyBuilder<'a> {
             bound: dst_bound.clone(),
         };
         let id = self.new_value("cpy");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::SequenceCopy {
                 element_type: element_type.clone(),
@@ -10134,7 +10413,7 @@ impl<'a> BodyBuilder<'a> {
         });
         let mut constant = |value: i128| {
             let id = self.new_value("c");
-            self.blocks[self.current].operations.push(BodyOperation {
+            self.push_operation(BodyOperation {
                 id: id.clone(),
                 kind: BodyOperationKind::Constant {
                     value,
@@ -10160,7 +10439,7 @@ impl<'a> BodyBuilder<'a> {
             bound: mncs_model::SequenceBound::UpTo(capacity),
         };
         let id = self.new_value("view");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::ViewConstruct {
                 source_bound: mncs_model::SequenceBound::Exact(length),
@@ -10200,7 +10479,7 @@ impl<'a> BodyBuilder<'a> {
             bound: mncs_model::SequenceBound::UpTo(new_cap),
         };
         let id = self.new_value("narrow");
-        self.blocks[self.current].operations.push(BodyOperation {
+        self.push_operation(BodyOperation {
             id: id.clone(),
             kind: BodyOperationKind::ViewNarrow {
                 source_cap,
@@ -10481,8 +10760,12 @@ enum InferredTy {
 
 /// Collect Nat/type constraints by walking declared and actual types in
 /// lockstep. Sequences recurse structurally; a direct generic position
-/// pins its parameter; everything else (nominals, views against views,
-/// mismatched shapes) constrains nothing and lets ambiguity refuse.
+/// pins its parameter; exact bounds and view capacities constrain their
+/// parameter symmetrically (`[T; N]` against `[T; 4]`, `[T; up_to N]`
+/// against `[T; up_to 4]`), including caller-parameter forwarding;
+/// everything else (nominals, exact-against-view or view-against-exact
+/// mismatches, other mismatched shapes) constrains nothing and lets
+/// ambiguity refuse.
 fn collect_inference_constraints(
     declared: &BodyType,
     actual: &BodyType,
@@ -10524,6 +10807,22 @@ fn collect_inference_constraints(
                 (
                     mncs_model::SequenceBound::Param(name),
                     mncs_model::SequenceBound::Param(caller),
+                ) => {
+                    nats.entry(name.clone())
+                        .or_default()
+                        .push(InferredNat::Forward(caller.clone()));
+                }
+                (
+                    mncs_model::SequenceBound::UpToParam(name),
+                    mncs_model::SequenceBound::UpTo(value),
+                ) => {
+                    nats.entry(name.clone())
+                        .or_default()
+                        .push(InferredNat::Value(*value));
+                }
+                (
+                    mncs_model::SequenceBound::UpToParam(name),
+                    mncs_model::SequenceBound::UpToParam(caller),
                 ) => {
                     nats.entry(name.clone())
                         .or_default()
@@ -10574,6 +10873,54 @@ fn substitute_body_type(
         }
         BodyType::Vector { element, lanes } => BodyType::Vector {
             element: Box::new(substitute_body_type(*element, type_map, value_map)),
+            lanes,
+        },
+        BodyType::Mask { lanes } => BodyType::Mask { lanes },
+        BodyType::Record { identity, name } => BodyType::Record { identity, name },
+        BodyType::Finite { identity, name } => BodyType::Finite { identity, name },
+        BodyType::Integer(i) => BodyType::Integer(i),
+        BodyType::Float(f) => BodyType::Float(f),
+        BodyType::Byte => BodyType::Byte,
+        BodyType::Bool => BodyType::Bool,
+        BodyType::Named(n) => BodyType::Named(n),
+    }
+}
+
+/// Rename generic parameters after inference-time forwarding: a callee-side
+/// `Nat`/`Type` parameter that inference solved to the caller's own
+/// parameter (`ValueParam`/generic `Type`) is spelled with the caller's
+/// name, so call-site checks compare caller-side facts. Concrete answers
+/// are handled by [`substitute_body_type`] first; this covers only the
+/// symbolic remainder.
+fn rename_forwarded_params(
+    ty: BodyType,
+    nat_forward: &BTreeMap<String, String>,
+    type_forward: &BTreeMap<String, String>,
+) -> BodyType {
+    match ty {
+        BodyType::GenericParam { name } => BodyType::GenericParam {
+            name: type_forward.get(&name).cloned().unwrap_or(name),
+        },
+        BodyType::Sequence { element, bound } => {
+            let new_element =
+                Box::new(rename_forwarded_params(*element, nat_forward, type_forward));
+            let new_bound = match bound {
+                mncs_model::SequenceBound::Exact(v) => mncs_model::SequenceBound::Exact(v),
+                mncs_model::SequenceBound::UpTo(v) => mncs_model::SequenceBound::UpTo(v),
+                mncs_model::SequenceBound::Param(n) => {
+                    mncs_model::SequenceBound::Param(nat_forward.get(&n).cloned().unwrap_or(n))
+                }
+                mncs_model::SequenceBound::UpToParam(n) => {
+                    mncs_model::SequenceBound::UpToParam(nat_forward.get(&n).cloned().unwrap_or(n))
+                }
+            };
+            BodyType::Sequence {
+                element: new_element,
+                bound: new_bound,
+            }
+        }
+        BodyType::Vector { element, lanes } => BodyType::Vector {
+            element: Box::new(rename_forwarded_params(*element, nat_forward, type_forward)),
             lanes,
         },
         BodyType::Mask { lanes } => BodyType::Mask { lanes },

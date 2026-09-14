@@ -1,6 +1,6 @@
 # Source Profile 0.13 — pressure-driven consolidation and progression
 
-Status: **implemented, experimental (current)**. Profile 0.13 is
+Status: **implemented, sealed**. Profile 0.13 is
 additive over Profiles 0.1–0.12 and is the explicit evolution home
 (RFC 0036) for every post-0.12 grammar, elaboration, semantic, and
 resource-envelope extension. Older profiles retain their historical
@@ -161,8 +161,9 @@ Evidence: `examples/source/pressure-u64-domain.mncs`,
 
 Calls to generic functions may omit `<...>` when every parameter draws
 exactly one answer from the value arguments (constraints flow through
-sequence structure and direct generic positions; caller parameters
-forward). Ambiguous calls keep `MNE220` with the culprits named
+sequence structure — exact bounds and view capacities alike — and
+direct generic positions; caller parameters forward under their own
+names). Ambiguous calls keep `MNE220` with the culprits named
 ("cannot infer T", "conflicting arguments for N"); explicit `<...>`
 always remains. Generic record *declarations* (`Box<N: Nat>`-style)
 stay unimplemented. Below 0.13, omitted arguments keep the historical

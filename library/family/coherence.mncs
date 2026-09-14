@@ -1,4 +1,4 @@
-mncs 0.6;
+mncs 0.13;
 
 // mncs.family.coherence — the MNCS-native decision core of the family
 // coherence system.
@@ -15,15 +15,25 @@ mncs 0.6;
 // this module can turn UNKNOWN into PASS or delete FAIL. Promotion in
 // particular refuses while any unresolved UNKNOWN remains.
 //
-// Bounded shape note: required-check aggregation uses a fixed twelve-slot
-// vector because the language does not yet expose sized sequences. Unused
-// slots must be padded with PASS, the neutral element of dominance; padding
+// Bounded shape note: required-check aggregation folds any status window
+// with the dominance join. The fixed twelve-slot `CheckVector` record
+// remains the compatibility entrypoint for existing claims; unused slots
+// must be padded with PASS, the neutral element of dominance, so padding
 // can never weaken a claim.
 
 module mncs.family.coherence.v01;
 
 use mncs.core.status.v1;
 use mncs.core.version.v1;
+
+// Dominance fold over any status window. PASS seeds the fold as the
+// neutral element, so padding with PASS never weakens a claim.
+fn aggregate_statuses<N: Nat>(checks: [Status; N]) -> (result: Status) {
+    iterate i over checks carrying acc: Status = Status.PASS {
+        next acc = dominate(acc, checks[i]);
+    }
+    return acc;
+}
 
 record CheckVector {
     c01: Status, c02: Status, c03: Status, c04: Status,
@@ -32,18 +42,12 @@ record CheckVector {
 }
 
 fn aggregate_checks(vector: CheckVector) -> (result: Status) {
-    let s01: Status = dominate(vector.c01, vector.c02);
-    let s02: Status = dominate(s01, vector.c03);
-    let s03: Status = dominate(s02, vector.c04);
-    let s04: Status = dominate(s03, vector.c05);
-    let s05: Status = dominate(s04, vector.c06);
-    let s06: Status = dominate(s05, vector.c07);
-    let s07: Status = dominate(s06, vector.c08);
-    let s08: Status = dominate(s07, vector.c09);
-    let s09: Status = dominate(s08, vector.c10);
-    let s10: Status = dominate(s09, vector.c11);
-    let s11: Status = dominate(s10, vector.c12);
-    return s11;
+    let checks: [Status; 12] = [
+        vector.c01, vector.c02, vector.c03, vector.c04,
+        vector.c05, vector.c06, vector.c07, vector.c08,
+        vector.c09, vector.c10, vector.c11, vector.c12,
+    ];
+    return aggregate_statuses(checks);
 }
 
 enum CoherenceVerdict { Compatible, Incompatible { reason: i32 }, Unresolved { reason: i32 } }
@@ -240,18 +244,12 @@ fn transition(state: ChangeSetState, event: ChangeSetEvent) -> (result: Transiti
     };
 }
 
-
-
 fn hold(at: ChangeSetState, reason: i32) -> (result: Transition) {
     return Transition { accepted: false, following: at, reason: reason };
 }
 
 fn accept(successor: ChangeSetState) -> (result: Transition) {
     return Transition { accepted: true, following: successor, reason: 0 };
-}
-
-fn reject(at: ChangeSetState, reason: i32) -> (result: Transition) {
-    return Transition { accepted: false, following: at, reason: reason };
 }
 
 enum DriftKind {

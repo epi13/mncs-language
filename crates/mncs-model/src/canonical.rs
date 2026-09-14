@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
 use serde_json::Value as JsonValue;
@@ -6,8 +6,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::{
-    Assumption, AssumptionConfidence, ContractClause, ContractKind, Effect, EvidenceClaim,
-    EvidenceStatus, FailureMode, Function, Program, Value,
+    function_id, Assumption, AssumptionConfidence, ContractClause, ContractKind, Effect,
+    EvidenceClaim, EvidenceStatus, FailureMode, Function, Program, SemanticBindingKind,
+    SemanticBindingTable, SemanticId, Value,
 };
 
 pub const CANONICAL_SCHEMA_VERSION: &str = "0.3";
@@ -47,6 +48,76 @@ impl Program {
 
     pub fn content_fingerprint(&self) -> Result<String, CanonicalError> {
         Ok(self.canonical_form()?.fingerprint)
+    }
+
+    /// Fingerprint of the production subject represented by this program.
+    /// Verification-only test declarations are intentionally excluded so
+    /// editing evidence does not rename the subject under test.
+    pub fn production_content_fingerprint(&self) -> Result<String, CanonicalError> {
+        let mut production = self.clone();
+        let test_functions: BTreeSet<SemanticId> = self
+            .functions
+            .iter()
+            .filter(|function| function.is_test)
+            .map(|function| function_id(function.identity_namespace(&self.module), &function.name))
+            .collect();
+        production.functions.retain(|function| !function.is_test);
+        if let Some(table) = &self.binding_table {
+            // Keep production binding evidence in the subject fingerprint,
+            // but remove the module-level test bindings and every scope,
+            // binding, and reference owned by a verification-only body.
+            // This prevents a test edit from contaminating the subject while
+            // preserving the language's production name-resolution identity.
+            let test_scopes: BTreeSet<SemanticId> = table
+                .scopes
+                .iter()
+                .filter(|scope| {
+                    scope
+                        .owner
+                        .as_ref()
+                        .is_some_and(|owner| test_functions.contains(owner))
+                })
+                .map(|scope| scope.identity.clone())
+                .collect();
+            let test_bindings: BTreeSet<SemanticId> = table
+                .bindings
+                .iter()
+                .filter(|binding| {
+                    binding.kind == SemanticBindingKind::Test
+                        || test_scopes.contains(&binding.scope)
+                        || test_functions.contains(&binding.declaration)
+                })
+                .map(|binding| binding.identity.clone())
+                .collect();
+            let filtered_scopes = table
+                .scopes
+                .iter()
+                .filter(|scope| !test_scopes.contains(&scope.identity))
+                .cloned()
+                .collect();
+            let filtered_bindings = table
+                .bindings
+                .iter()
+                .filter(|binding| !test_bindings.contains(&binding.identity))
+                .cloned()
+                .collect();
+            let filtered_references = table
+                .references
+                .iter()
+                .filter(|reference| {
+                    !test_scopes.contains(&reference.scope)
+                        && !test_bindings.contains(&reference.binding)
+                })
+                .cloned()
+                .collect();
+            production.binding_table = Some(SemanticBindingTable::new(
+                table.namespaces.clone(),
+                filtered_scopes,
+                filtered_bindings,
+                filtered_references,
+            ));
+        }
+        production.canonical_form().map(|form| form.fingerprint)
     }
 }
 
@@ -212,6 +283,14 @@ pub(crate) fn canonical_function(function: &Function) -> JsonValue {
             JsonValue::Array(function.outputs.iter().map(canonical_value).collect()),
         ),
     ]);
+    if function.is_test {
+        if let JsonValue::Object(fields) = &mut result {
+            fields.insert(
+                "declaration_kind".to_owned(),
+                JsonValue::String("test".to_owned()),
+            );
+        }
+    }
     if !function.generic_params.is_empty() {
         if let JsonValue::Object(fields) = &mut result {
             fields.insert(
@@ -483,6 +562,7 @@ mod tests {
             binding_table: None,
             functions: vec![Function {
                 home_module: None,
+                is_test: false,
                 name: "f".to_owned(),
                 generic_params: Vec::new(),
                 inputs: vec![],
@@ -556,6 +636,36 @@ mod tests {
         assert_ne!(
             changed_parameter_order.canonical_json().unwrap(),
             reversed_parameters.canonical_json().unwrap()
+        );
+    }
+
+    #[test]
+    fn production_fingerprint_excludes_verification_only_test_declarations() {
+        let mut before = program();
+        before.functions.push(Function {
+            name: "evidence".to_owned(),
+            is_test: true,
+            home_module: None,
+            generic_params: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            contracts: Vec::new(),
+            effects: Vec::new(),
+            capabilities: Vec::new(),
+            assumptions: Vec::new(),
+            evidence: Vec::new(),
+            failure: crate::FailureMode::default(),
+            body: None,
+        });
+        let mut after = before.clone();
+        after.functions[1].name = "changed_evidence".to_owned();
+        assert_eq!(
+            before.production_content_fingerprint().unwrap(),
+            after.production_content_fingerprint().unwrap()
+        );
+        assert_ne!(
+            before.content_fingerprint().unwrap(),
+            after.content_fingerprint().unwrap()
         );
     }
 

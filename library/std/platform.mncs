@@ -9,12 +9,10 @@ mncs 0.6;
 //
 // Convention note: `version_satisfies(envelope, bound, candidate)` reads
 // the bound as a lower floor — AtLeast holds when the candidate is at or
-// after the bound. This differs positionally from
-// `mncs.core.version.v1::satisfies`, whose checked-in corpus pins
-// first-arg >= second-arg; the two agree on Any/Exact and differ on the
-// directed envelopes, so call sites must not swap them blindly. Flagged
-// as language pressure for upstream clarification, not changed here: the
-// family corpus is green and its callers depend on its exact shape.
+// after the bound. This is the same reading as
+// `mncs.core.version.v1::satisfies`: the core implementation compares
+// candidate-relative-to-bound, so the two envelopes agree on every input
+// and call sites may rely on the documented floor meaning in both.
 //
 // Boundary (explicit host escape, no safe MNCS surface yet):
 // - unbounded text handling: the host classifies strings such as

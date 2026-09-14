@@ -223,7 +223,7 @@ fn geometry_alignment_and_relation_helpers_agree_per_backend() {
     run_module_corpus(
         &library("core/geometry.mncs"),
         &example("execution/library-core-geometry-extra-corpus.json"),
-        11,
+        14,
     );
 }
 

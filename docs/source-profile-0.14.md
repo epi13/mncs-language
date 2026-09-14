@@ -1,6 +1,6 @@
 # Source Profile 0.14 — buffer pipelines
 
-Status: **implemented, experimental (current)**. Profile 0.14 is
+Status: **implemented, sealed**. Profile 0.14 is
 additive over Profiles 0.1–0.13 and is the explicit evolution home
 (RFC 0036) for the buffer-pipeline tranche: bulk span copy, checked
 view narrowing, and the checked-index discharge form. Older profiles

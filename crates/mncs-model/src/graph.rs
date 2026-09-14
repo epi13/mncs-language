@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::canonical::sha256_hex;
 use crate::identity::{
     assumption_id, capability_id, contract_id, diff_identities, effect_id, evidence_id,
     function_id, program_id, IdentityKind, SemanticId,
@@ -41,6 +42,8 @@ pub enum EdgeKind {
     EstablishesFact,
     ReferencesContract,
     TransitionsTo,
+    ContainsTest,
+    ContainsTestCase,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,6 +81,50 @@ pub struct InvalidationReason {
     pub edge: EdgeKind,
 }
 
+/// A bounded compiler-owned semantic neighborhood for change impact.
+///
+/// This is intentionally smaller than a graph dump: consumers receive the
+/// changed roots, reverse dependents, and test identities reachable through
+/// affected functions. `complete` means the bounded traversal completed for
+/// the current graph; `limitations` states what this projection does not
+/// claim, such as cross-repository edges or path-sensitive causality.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SemanticImpact {
+    pub schema_version: String,
+    pub graph_identity: String,
+    pub roots: Vec<SemanticId>,
+    pub nodes: Vec<ImpactNode>,
+    pub edges: Vec<GraphEdge>,
+    pub direct_dependents: Vec<SemanticId>,
+    pub test_identities: Vec<SemanticId>,
+    pub risk_flags: Vec<ImpactRisk>,
+    pub complete: bool,
+    pub max_depth: usize,
+    pub max_nodes: usize,
+    pub limitations: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImpactNode {
+    pub identity: SemanticId,
+    pub kind: IdentityKind,
+    pub distance: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpactRisk {
+    PublicContract,
+    SharedType,
+    EffectSemantics,
+    AbiBoundary,
+    HighConnectivity,
+    UnknownRoot,
+    Truncated,
+}
+
+pub const SEMANTIC_IMPACT_SCHEMA_VERSION: &str = "mncs.semantic-impact/1";
+
 #[derive(Debug, Error)]
 pub enum GraphError {
     #[error("cannot construct a semantic graph from an invalid program")]
@@ -103,6 +150,199 @@ impl Program {
 impl SemanticGraph {
     pub fn canonical_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(self)
+    }
+
+    /// Build a bounded reverse-dependency neighborhood for the supplied
+    /// semantic roots. Reverse traversal follows graph edges from a target to
+    /// operations/functions that consume it, which is the direction needed
+    /// for verification selection. The method does not guess source paths,
+    /// test names, or cross-repository relationships.
+    pub fn impact_neighborhood(
+        &self,
+        roots: &[SemanticId],
+        max_depth: usize,
+        max_nodes: usize,
+    ) -> SemanticImpact {
+        let max_depth = max_depth.max(1);
+        let max_nodes = max_nodes.max(1);
+        let node_index: BTreeMap<SemanticId, &GraphNode> = self
+            .nodes
+            .iter()
+            .map(|node| (node.identity.clone(), node))
+            .collect();
+        let mut roots = roots.to_vec();
+        roots.sort();
+        roots.dedup();
+        let known_roots: BTreeSet<_> = roots
+            .iter()
+            .filter(|root| node_index.contains_key(*root))
+            .cloned()
+            .collect();
+        let mut distances: BTreeMap<SemanticId, usize> = BTreeMap::new();
+        let mut queue = std::collections::VecDeque::new();
+        let mut seeded_roots = BTreeSet::new();
+        let mut truncated = false;
+        for root in &known_roots {
+            if distances.len() >= max_nodes {
+                truncated = true;
+                break;
+            }
+            distances.insert(root.clone(), 0);
+            queue.push_back(root.clone());
+            seeded_roots.insert(root.clone());
+        }
+        while let Some(current) = queue.pop_front() {
+            let distance = distances[&current];
+            if distance >= max_depth {
+                continue;
+            }
+            for edge in self.edges.iter().filter(|edge| edge.to == current) {
+                if distances.contains_key(&edge.from) {
+                    continue;
+                }
+                if distances.len() >= max_nodes {
+                    truncated = true;
+                    break;
+                }
+                distances.insert(edge.from.clone(), distance + 1);
+                queue.push_back(edge.from.clone());
+            }
+            if truncated {
+                break;
+            }
+        }
+        let affected: BTreeSet<_> = distances.keys().cloned().collect();
+        let mut edges = self
+            .edges
+            .iter()
+            .filter(|edge| affected.contains(&edge.from) && affected.contains(&edge.to))
+            .cloned()
+            .collect::<Vec<_>>();
+        edges.sort_by(|left, right| {
+            left.from
+                .cmp(&right.from)
+                .then(left.to.cmp(&right.to))
+                .then(left.kind.cmp(&right.kind))
+        });
+        let nodes = distances
+            .iter()
+            .filter_map(|(identity, distance)| {
+                node_index.get(identity).map(|node| ImpactNode {
+                    identity: identity.clone(),
+                    kind: node.kind,
+                    distance: *distance,
+                })
+            })
+            .collect::<Vec<_>>();
+        let direct_dependents = self
+            .edges
+            .iter()
+            .filter(|edge| seeded_roots.contains(&edge.to) && affected.contains(&edge.from))
+            .map(|edge| edge.from.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let function_identities = nodes
+            .iter()
+            .filter(|node| node.kind == IdentityKind::Function)
+            .map(|node| node.identity.clone())
+            .chain(seeded_roots.iter().filter_map(|root| {
+                node_index
+                    .get(root)
+                    .and_then(|node| (node.kind == IdentityKind::Function).then(|| root.clone()))
+            }))
+            .collect::<BTreeSet<_>>();
+        let test_declarations = self
+            .edges
+            .iter()
+            .filter(|edge| {
+                function_identities.contains(&edge.from) && edge.kind == EdgeKind::ContainsTest
+            })
+            .map(|edge| edge.to.clone())
+            .collect::<BTreeSet<_>>();
+        let test_identities = self
+            .edges
+            .iter()
+            .filter(|edge| {
+                test_declarations.contains(&edge.from) && edge.kind == EdgeKind::ContainsTestCase
+            })
+            .map(|edge| edge.to.clone())
+            .filter(|identity| {
+                node_index
+                    .get(identity)
+                    .is_some_and(|node| node.kind == IdentityKind::TestCase)
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut risk_flags = BTreeSet::new();
+        for root in &roots {
+            match node_index.get(root).map(|node| node.kind) {
+                Some(IdentityKind::Contract) => {
+                    risk_flags.insert(ImpactRisk::PublicContract);
+                }
+                Some(
+                    IdentityKind::FiniteType | IdentityKind::RecordType | IdentityKind::RecordField,
+                ) => {
+                    risk_flags.insert(ImpactRisk::SharedType);
+                }
+                Some(IdentityKind::Effect | IdentityKind::Capability) => {
+                    risk_flags.insert(ImpactRisk::EffectSemantics);
+                }
+                Some(IdentityKind::Requirement | IdentityKind::Obligation) => {
+                    risk_flags.insert(ImpactRisk::AbiBoundary);
+                }
+                Some(_) => {}
+                None => {
+                    risk_flags.insert(ImpactRisk::UnknownRoot);
+                }
+            }
+        }
+        for root in &known_roots {
+            let degree = self.edges.iter().filter(|edge| edge.to == *root).count();
+            if degree > 8 {
+                risk_flags.insert(ImpactRisk::HighConnectivity);
+                break;
+            }
+        }
+        if truncated {
+            risk_flags.insert(ImpactRisk::Truncated);
+        }
+        if roots.iter().any(|root| !known_roots.contains(root)) {
+            risk_flags.insert(ImpactRisk::UnknownRoot);
+        }
+        let mut limitations = vec![
+            "neighborhood is compiler-exact only for the current semantic graph".to_owned(),
+            "cross-repository edges and path-sensitive control flow are not represented".to_owned(),
+        ];
+        if max_depth < 2 {
+            limitations.push("reverse traversal depth was intentionally bounded".to_owned());
+        }
+        if truncated {
+            limitations.push("node budget truncated the reverse dependency traversal".to_owned());
+        }
+        if roots.iter().any(|root| !known_roots.contains(root)) {
+            limitations.push("one or more requested roots are not current graph nodes".to_owned());
+        }
+        let graph_identity = self
+            .canonical_json()
+            .map(|json| sha256_hex(json.as_bytes()))
+            .unwrap_or_else(|_| "unavailable".to_owned());
+        let complete = !truncated && known_roots.len() == roots.len();
+        SemanticImpact {
+            schema_version: SEMANTIC_IMPACT_SCHEMA_VERSION.to_owned(),
+            graph_identity,
+            roots,
+            nodes,
+            edges,
+            direct_dependents,
+            test_identities,
+            risk_flags: risk_flags.into_iter().collect(),
+            complete,
+            max_depth,
+            max_nodes,
+            limitations,
+        }
     }
 
     pub fn invalidate(&self, changed: &[SemanticId]) -> InvalidationReport {
@@ -185,6 +425,27 @@ fn build_graph(program: &Program, identities: &SemanticIdentities) -> SemanticGr
             to: function_identity.clone(),
             kind: EdgeKind::ContainsFunction,
         });
+        if function.is_test {
+            let test_identity = crate::identity::test_declaration_id(namespace, &function.name);
+            let test_fingerprint = identities
+                .objects
+                .iter()
+                .find(|record| record.identity == test_identity)
+                .map(|record| record.fingerprint.clone())
+                .unwrap_or_default();
+            let test_case_identity =
+                crate::identity::test_case_id(namespace, &function.name, &test_fingerprint);
+            edges.push(GraphEdge {
+                from: function_identity.clone(),
+                to: test_identity.clone(),
+                kind: EdgeKind::ContainsTest,
+            });
+            edges.push(GraphEdge {
+                from: test_identity,
+                to: test_case_identity,
+                kind: EdgeKind::ContainsTestCase,
+            });
+        }
         for contract in &function.contracts {
             edges.push(GraphEdge {
                 from: function_identity.clone(),
@@ -802,6 +1063,57 @@ mod tests {
         "amount >= 0".clone_into(&mut after.functions[0].contracts[0].expression);
         let report = before.invalidation_from(&after).expect("invalidation");
         assert_eq!(report.invalidated_evidence.len(), 1);
+    }
+
+    #[test]
+    fn impact_neighborhood_is_bounded_and_exposes_test_cases() {
+        let mut program = valid_program();
+        let mut test = program.functions[0].clone();
+        test.name = "transfer_test".to_owned();
+        test.is_test = true;
+        test.contracts.clear();
+        test.effects.clear();
+        test.capabilities.clear();
+        test.assumptions.clear();
+        test.evidence.clear();
+        test.body = None;
+        program.functions.push(test);
+        let root = crate::function_id(&program.module, "transfer_test");
+        let graph = program.semantic_graph().expect("graph");
+        let impact = graph.impact_neighborhood(std::slice::from_ref(&root), 2, 8);
+        assert_eq!(impact.schema_version, super::SEMANTIC_IMPACT_SCHEMA_VERSION);
+        assert_eq!(impact.roots, vec![root]);
+        assert!(!impact.test_identities.is_empty());
+        assert!(impact.risk_flags.is_empty());
+        assert!(impact.nodes.len() <= 8);
+        assert!(impact
+            .limitations
+            .iter()
+            .any(|item| item.contains("cross-repository")));
+    }
+
+    #[test]
+    fn impact_bounds_root_seeding_and_classifies_shared_types() {
+        let mut program = valid_program();
+        let type_identity = crate::finite_type_id(&program.module, "Ledger");
+        program.finite_types.push(crate::FiniteType {
+            identity: type_identity.clone(),
+            name: "Ledger".to_owned(),
+            variants: vec![crate::FiniteVariant {
+                identity: crate::finite_variant_id(&program.module, "Ledger", "Open"),
+                name: "Open".to_owned(),
+                discriminant: 0,
+                payload: Vec::new(),
+            }],
+        });
+        let graph = program.semantic_graph().expect("graph");
+        let function_root = crate::function_id(&program.module, "transfer");
+        let type_root = type_identity;
+        let impact = graph.impact_neighborhood(&[function_root, type_root], 2, 1);
+        assert!(impact.nodes.len() <= 1);
+        assert!(!impact.complete);
+        assert!(impact.risk_flags.contains(&super::ImpactRisk::Truncated));
+        assert!(impact.risk_flags.contains(&super::ImpactRisk::SharedType));
     }
 
     #[test]
