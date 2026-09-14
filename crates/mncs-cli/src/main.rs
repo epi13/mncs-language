@@ -141,6 +141,7 @@ fn run_cli() -> ExitCode {
         "diff" => two_manifest_command(args, diff),
         "compare" => two_manifest_command(args, compare),
         "slice" => slice_command(args),
+        "impact" => impact_command(args),
         "evaluate-candidate" => evaluate_candidate_command(args),
         "verify-result" => verify_result_command(args),
         "verify-issuance" => verify_issuance_command(args),
@@ -3977,6 +3978,81 @@ fn slice_command(mut args: impl Iterator<Item = String>) -> ExitCode {
     }
 }
 
+fn impact_command(mut args: impl Iterator<Item = String>) -> ExitCode {
+    let Some(path) = args.next() else {
+        eprintln!("error: impact requires a manifest path and at least one --root identity");
+        return ExitCode::from(2);
+    };
+    let mut roots = Vec::new();
+    let mut max_depth = 4usize;
+    let mut max_nodes = 256usize;
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--root" => {
+                let Some(identity) = args.next() else {
+                    eprintln!("error: impact --root requires an identity");
+                    return ExitCode::from(2);
+                };
+                if identity.is_empty() {
+                    eprintln!("error: impact --root identity cannot be empty");
+                    return ExitCode::from(2);
+                }
+                roots.push(SemanticId(identity));
+            }
+            "--max-depth" => {
+                let Some(value) = args.next() else {
+                    eprintln!("error: impact --max-depth requires an integer");
+                    return ExitCode::from(2);
+                };
+                max_depth = match value.parse() {
+                    Ok(value) if value > 0 => value,
+                    _ => {
+                        eprintln!("error: impact --max-depth must be positive");
+                        return ExitCode::from(2);
+                    }
+                };
+            }
+            "--max-nodes" => {
+                let Some(value) = args.next() else {
+                    eprintln!("error: impact --max-nodes requires an integer");
+                    return ExitCode::from(2);
+                };
+                max_nodes = match value.parse() {
+                    Ok(value) if value > 0 => value,
+                    _ => {
+                        eprintln!("error: impact --max-nodes must be positive");
+                        return ExitCode::from(2);
+                    }
+                };
+            }
+            _ => {
+                eprintln!("error: unexpected impact argument {argument:?}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    if roots.is_empty() {
+        eprintln!("error: impact requires at least one --root identity");
+        return ExitCode::from(2);
+    }
+    let program = match read_valid_program(&path) {
+        Ok(program) => program,
+        Err(code) => return code,
+    };
+    let graph = match program.semantic_graph() {
+        Ok(graph) => graph,
+        Err(error) => {
+            eprintln!("error: unable to construct graph: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if print_json(&graph.impact_neighborhood(&roots, max_depth, max_nodes)) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(2)
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct CandidateEvaluationReport {
     candidate: mncs_model::CandidateState,
@@ -4632,6 +4708,7 @@ fn print_usage() {
     eprintln!("  mncs diff <before.json> <after.json>");
     eprintln!("  mncs compare <before.json> <after.json>");
     eprintln!("  mncs slice <manifest.json> <semantic-identity>");
+    eprintln!("  mncs impact <manifest.json> --root <semantic-identity> [--root <identity> ...] [--max-depth N] [--max-nodes N]");
     eprintln!("  mncs evaluate-candidate <baseline.json> <proposal.json>");
     eprintln!("  mncs verify-result <manifest.json> <request.json> <result.json>");
     eprintln!("  mncs verify-issuance <envelope.json> <trust-roots.json>");

@@ -65,6 +65,14 @@ Parsing and name resolution produce a graph of stable semantic entities:
 
 The graph should support canonical serialization and content-addressed identity.
 
+For development workflow consumers, `mncs impact <program> --root <identity>`
+emits `mncs.semantic-impact/1`: a bounded reverse-dependency neighborhood,
+direct dependents, affected first-class test-case identities, typed structural
+risk flags, graph digest, and explicit limitations. This is the compact impact
+interface; callers should not dump or independently reconstruct the complete
+graph. A bounded result is exact for the current graph but does not claim
+cross-repository or path-sensitive completeness.
+
 A machine-intent expression should be understandable as:
 
 ```text
@@ -259,6 +267,13 @@ promote or reject
 ```
 
 The output of one cycle can become input to a later cycle, which gives the architecture its recursive character. Every cycle must remain bounded by mutation scope, capabilities, recursion depth, resource budgets, candidate count, verifier-call limits, stopping rules, and promotion policy.
+
+Verification selection is a separate policy consumer of the impact projection:
+changed-item checks may stop locally; direct dependents and affected-subsystem
+checks expand only over compiler-reported identities; contract, effect, ABI,
+truncation, or unknown-root risks require an explicit higher boundary. The
+language reports structural facts and does not decide repository or family
+policy on behalf of Forge.
 
 Machine-intent optimization regions add target, realization, protected-property, and selection-metric
 bounds. A candidate that is faster but violates a requirement is rejected rather than reclassified

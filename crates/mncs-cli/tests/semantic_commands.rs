@@ -34,6 +34,28 @@ fn semantic_commands_emit_deterministic_machine_json() {
         .unwrap()
         .iter()
         .any(|edge| edge["kind"] == "supports_property"));
+
+    let impact = binary()
+        .args([
+            "impact",
+            &manifest,
+            "--root",
+            "mncs:0.2:function:Banking.Transfer::transfer",
+            "--max-depth",
+            "2",
+            "--max-nodes",
+            "32",
+        ])
+        .output()
+        .expect("run impact");
+    assert!(impact.status.success());
+    let impact_json: Value = serde_json::from_slice(&impact.stdout).expect("impact JSON");
+    assert_eq!(impact_json["schema_version"], "mncs.semantic-impact/1");
+    assert_eq!(
+        impact_json["roots"][0],
+        "mncs:0.2:function:Banking.Transfer::transfer"
+    );
+    assert!(impact_json["graph_identity"].as_str().unwrap().len() == 64);
 }
 
 #[test]

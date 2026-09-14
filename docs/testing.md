@@ -32,6 +32,15 @@ identities, and production-subject identity. A normal runtime manifest names
 the source/module and policy only; it does not repeat each test entry or build
 a handwritten suite.
 
+The `mncs impact` command is the bounded semantic-impact authority for the
+selective development loop. Given changed semantic roots, it emits
+`mncs.semantic-impact/1`: graph identity, exact bounded nodes/edges, direct
+dependents, compiler-owned test-case identities, typed risk flags, and explicit
+completeness/limitations. Unknown roots or truncation remain visible so Ravel
+can escalate instead of claiming a narrow proof. Ravel joins this artifact
+with `mncs test-inventory` to produce the digest-bound verification plan
+consumed by mncs-test.
+
 ## Production and verification artifacts
 
 First-class tests are verification artifacts about a subject. Normal
