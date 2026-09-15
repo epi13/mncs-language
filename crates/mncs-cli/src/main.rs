@@ -227,15 +227,11 @@ where
         Ok(source) => source,
         Err(code) => return code,
     };
-    let envelope = SourceEnvelope::new(
-        SourceArtifactKind::Program,
-        source_path.clone(),
-        SourceOrigin {
-            kind: SourceOriginKind::Path,
-            locator: Some(source_path.clone()),
-        },
-        source,
-    );
+    // The path is transport/provenance metadata in the command response.  It
+    // must not become part of the semantic inventory identity: the same
+    // repository-owned check has to remain reusable when its checkout moves
+    // to another bounded worktree or CI directory.
+    let envelope = SourceEnvelope::inline(SourceArtifactKind::Program, "test-inventory", source);
     let resolver = FileModuleResolver::with_libraries(&source_path);
     let front_end = ReferenceCompiler::default().front_end_with_resolver(envelope, &resolver);
     let valid = front_end.is_valid();
