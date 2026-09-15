@@ -519,13 +519,14 @@ where
         Ok(input) => input,
         Err(code) => return code,
     };
-    let (request, typed_arguments) = match decode_execution_request(&request_input) {
-        Ok(request) => request,
-        Err(error) => {
-            eprintln!("error: invalid execution request: {error}");
-            return ExitCode::from(2);
-        }
-    };
+    let (request, typed_arguments, expected_interface_identity) =
+        match decode_execution_request(&request_input) {
+            Ok(request) => request,
+            Err(error) => {
+                eprintln!("error: invalid execution request: {error}");
+                return ExitCode::from(2);
+            }
+        };
     // P1-013: a request naming a generic instantiation seeds its
     // compilation, so direct `execute` invokes generics with no corpus.
     let program =
@@ -533,6 +534,12 @@ where
             Ok(program) => program,
             Err(code) => return code,
         };
+    if let Err(error) =
+        verify_expected_interface_identity(&program, expected_interface_identity.as_deref())
+    {
+        eprintln!("error: typed execution request rejected: {error}");
+        return ExitCode::from(2);
+    }
     let request = match resolve_typed_request(&program, request, &typed_arguments) {
         Ok(request) => request,
         Err(error) => {
@@ -822,13 +829,14 @@ where
         Ok(input) => input,
         Err(code) => return code,
     };
-    let (request, typed_arguments) = match decode_execution_request(&request_input) {
-        Ok(request) => request,
-        Err(error) => {
-            eprintln!("error: invalid execution request: {error}");
-            return ExitCode::from(2);
-        }
-    };
+    let (request, typed_arguments, expected_interface_identity) =
+        match decode_execution_request(&request_input) {
+            Ok(request) => request,
+            Err(error) => {
+                eprintln!("error: invalid execution request: {error}");
+                return ExitCode::from(2);
+            }
+        };
     // P1-013: like `execute` above, a generic SSA target seeds its
     // own compilation from the request.
     let program =
@@ -836,6 +844,12 @@ where
             Ok(program) => program,
             Err(code) => return code,
         };
+    if let Err(error) =
+        verify_expected_interface_identity(&program, expected_interface_identity.as_deref())
+    {
+        eprintln!("error: typed execution request rejected: {error}");
+        return ExitCode::from(2);
+    }
     let request = match resolve_typed_request(&program, request, &typed_arguments) {
         Ok(request) => request,
         Err(error) => {
@@ -1029,16 +1043,6 @@ struct LanguageOwnedAbi {
     composites: BTreeMap<String, mncs_model::BackendValueContract>,
 }
 
-#[derive(Serialize)]
-struct LanguageOwnedAbiMaterial<'a> {
-    schema_version: &'static str,
-    host_abi_version: &'a str,
-    typed_call_schema_version: &'a str,
-    module: &'a str,
-    functions: &'a BTreeMap<String, mncs_codegen::LanguageOwnedFunctionAbi>,
-    composites: &'a BTreeMap<String, mncs_model::BackendValueContract>,
-}
-
 fn abi_command<I>(args: I) -> ExitCode
 where
     I: IntoIterator<Item = String>,
@@ -1095,17 +1099,7 @@ where
     let (functions, composites) = mncs_codegen::language_owned_abi_contracts(&program);
     let host_abi_version = mncs_codegen::HOST_ABI_VERSION.to_owned();
     let typed_call_schema_version = mncs_codegen::TYPED_CALL_SCHEMA_VERSION.to_owned();
-    let interface_material = LanguageOwnedAbiMaterial {
-        schema_version: "0.1",
-        host_abi_version: &host_abi_version,
-        typed_call_schema_version: &typed_call_schema_version,
-        module: &program.module,
-        functions: &functions,
-        composites: &composites,
-    };
-    let interface_identity = mncs_model::sha256_hex(
-        &serde_json::to_vec(&interface_material).expect("ABI metadata is serializable"),
-    );
+    let interface_identity = mncs_codegen::language_owned_interface_identity(&program);
     let abi = LanguageOwnedAbi {
         schema_version: "0.1".to_owned(),
         host_abi_version,
@@ -3472,13 +3466,14 @@ where
         Ok(input) => input,
         Err(code) => return code,
     };
-    let (request, typed_arguments) = match decode_execution_request(&request_input) {
-        Ok(request) => request,
-        Err(error) => {
-            eprintln!("error: invalid execution request: {error}");
-            return ExitCode::from(2);
-        }
-    };
+    let (request, typed_arguments, expected_interface_identity) =
+        match decode_execution_request(&request_input) {
+            Ok(request) => request,
+            Err(error) => {
+                eprintln!("error: invalid execution request: {error}");
+                return ExitCode::from(2);
+            }
+        };
     let request = match resolve_typed_request(&program, request, &typed_arguments) {
         Ok(request) => request,
         Err(error) => {
@@ -3486,6 +3481,12 @@ where
             return ExitCode::from(2);
         }
     };
+    if let Err(error) =
+        verify_expected_interface_identity(&program, expected_interface_identity.as_deref())
+    {
+        eprintln!("error: typed execution request rejected: {error}");
+        return ExitCode::from(2);
+    }
     let ssa = match program.lower_to_ssa() {
         Ok(ssa) => ssa,
         Err(error) => {
@@ -3846,7 +3847,7 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, ExitCode> 
 /// language-owned value contracts immediately before execution.
 fn decode_execution_request(
     input: &str,
-) -> Result<(ExecutionRequest, Vec<HostExecutionValue>), String> {
+) -> Result<(ExecutionRequest, Vec<HostExecutionValue>, Option<String>), String> {
     let mut document: serde_json::Value = serde_json::from_str(input)
         .map_err(|error| format!("execution request JSON rejected: {error}"))?;
     let object = document
@@ -3860,6 +3861,16 @@ fn decode_execution_request(
         })
         .transpose()?
         .unwrap_or_default();
+    let expected_interface_identity = object
+        .remove("expected_interface_identity")
+        .map(|value| {
+            value
+                .as_str()
+                .filter(|identity| !identity.trim().is_empty())
+                .map(str::to_owned)
+                .ok_or_else(|| "expected_interface_identity must be a non-empty string".to_owned())
+        })
+        .transpose()?;
     if !typed_arguments.is_empty()
         && object
             .get("arguments")
@@ -3873,7 +3884,23 @@ fn decode_execution_request(
     }
     let request = serde_json::from_value::<ExecutionRequest>(document)
         .map_err(|error| format!("execution request rejected: {error}"))?;
-    Ok((request, typed_arguments))
+    Ok((request, typed_arguments, expected_interface_identity))
+}
+
+fn verify_expected_interface_identity(
+    program: &Program,
+    expected: Option<&str>,
+) -> Result<(), String> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let actual = mncs_codegen::language_owned_interface_identity(program);
+    if expected != actual {
+        return Err(format!(
+            "interface_identity_mismatch: expected {expected}, loaded {actual}; regenerate the host binding"
+        ));
+    }
+    Ok(())
 }
 
 fn resolve_typed_request(

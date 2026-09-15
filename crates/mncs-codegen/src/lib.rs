@@ -53,6 +53,7 @@ pub const HOST_ABI_VERSION: &str = "1";
 /// value contracts, so changing a record field or enum variant changes the
 /// interface identity instead of silently changing positional meaning.
 pub const TYPED_CALL_SCHEMA_VERSION: &str = "mncs.typed-call/1";
+pub const LANGUAGE_OWNED_ABI_SCHEMA_VERSION: &str = "0.1";
 pub const RESEARCH_BYTECODE_BACKEND_NAME: &str = "mncs-research-bytecode";
 pub const RESEARCH_BYTECODE_BACKEND_VERSION: &str = "0.1";
 pub const RESEARCH_BYTECODE_TARGET: &str = "mncs:target:research-bytecode-0.1";
@@ -124,6 +125,36 @@ pub struct LanguageOwnedFunctionAbi {
     /// Instantiations compiled into this program, in-language and
     /// host-seeded alike.
     pub compiled_instantiations: Vec<CompiledInstantiationAbi>,
+}
+
+#[derive(Serialize)]
+struct LanguageOwnedAbiMaterial<'a> {
+    schema_version: &'static str,
+    host_abi_version: &'a str,
+    typed_call_schema_version: &'a str,
+    module: &'a str,
+    functions: &'a BTreeMap<String, LanguageOwnedFunctionAbi>,
+    composites: &'a BTreeMap<String, BackendValueContract>,
+}
+
+/// Return the identity of the language-owned callable interface for a
+/// validated program.  This is deliberately the same material emitted by
+/// `mncs abi`; every host binding and every fresh backend artifact therefore
+/// names one canonical interface rather than maintaining a second hash
+/// recipe in the host language.
+pub fn language_owned_interface_identity(program: &Program) -> String {
+    let (functions, composites) = language_owned_abi_contracts(program);
+    let material = LanguageOwnedAbiMaterial {
+        schema_version: LANGUAGE_OWNED_ABI_SCHEMA_VERSION,
+        host_abi_version: HOST_ABI_VERSION,
+        typed_call_schema_version: TYPED_CALL_SCHEMA_VERSION,
+        module: &program.module,
+        functions: &functions,
+        composites: &composites,
+    };
+    mncs_model::sha256_hex(
+        &serde_json::to_vec(&material).expect("language-owned ABI metadata is serializable"),
+    )
 }
 
 /// Return language-owned ABI contracts with qualified declaration identity.
@@ -896,6 +927,7 @@ pub fn lower_selected_ssa(
     )
     .with_function_value_contracts(function_value_contracts(program))
     .with_composite_value_contracts(crate::support::composite_value_contracts(program))
+    .with_interface_identity(crate::language_owned_interface_identity(program))
     .with_generic_entrypoints(crate::support::generic_entrypoint_records(program));
     let artifact_ref = CompilerArtifactRef::new(
         ArtifactRepresentation::BackendArtifact,
@@ -1020,6 +1052,7 @@ pub fn lower_research_bytecode(
     )
     .with_function_value_contracts(function_value_contracts(program))
     .with_composite_value_contracts(crate::support::composite_value_contracts(program))
+    .with_interface_identity(crate::language_owned_interface_identity(program))
     .with_generic_entrypoints(crate::support::generic_entrypoint_records(program));
     let artifact_ref = CompilerArtifactRef::new(
         ArtifactRepresentation::BackendArtifact,

@@ -61,3 +61,43 @@ fn interface_identity_tracks_typed_abi_evolution() {
     assert_ne!(base_identity, identity(ADDED_VARIANT));
     assert_ne!(base_identity, identity(CHANGED_RETURN));
 }
+
+#[test]
+fn stale_expected_interface_identity_is_rejected_in_band() {
+    let root = std::env::temp_dir().join(format!(
+        "mncs-typed-stale-{}-{}",
+        std::process::id(),
+        REQUEST_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&root).expect("create stale binding directory");
+    let source = root.join("interface.mncs");
+    let request = root.join("request.json");
+    std::fs::write(
+        &source,
+        "mncs 0.17;\nmodule stale.binding;\nfn choose() -> (result: i32) { return 7; }\n",
+    )
+    .expect("write stale binding source");
+    std::fs::write(
+        &request,
+        serde_json::json!({
+            "schema_version": "0.1",
+            "target": {"module": "stale.binding", "function": "choose"},
+            "expected_interface_identity": "binding-generated-for-another-interface",
+            "step_budget": 1024
+        })
+        .to_string(),
+    )
+    .expect("write stale binding request");
+    let output = binary()
+        .args([
+            "execute",
+            source.to_str().expect("source path"),
+            request.to_str().expect("request path"),
+        ])
+        .output()
+        .expect("run stale binding request");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr.contains("interface_identity_mismatch"), "{stderr}");
+    let _ = std::fs::remove_dir_all(root);
+}

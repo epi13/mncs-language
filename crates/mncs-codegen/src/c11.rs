@@ -505,6 +505,7 @@ pub fn lower_c11(
     )
     .with_function_value_contracts(function_value_contracts(program))
     .with_composite_value_contracts(crate::support::composite_value_contracts(program))
+    .with_interface_identity(crate::language_owned_interface_identity(program))
     .with_generic_entrypoints(crate::support::generic_entrypoint_records(program))
     .with_promise_decisions(scalar.promise_decisions.clone());
     let artifact_ref = artifact_ref(&artifact);

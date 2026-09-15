@@ -680,6 +680,7 @@ pub fn lower_external(
     )
     .with_function_value_contracts(support::function_value_contracts(program))
     .with_composite_value_contracts(support::composite_value_contracts(program))
+    .with_interface_identity(crate::language_owned_interface_identity(program))
     .with_generic_entrypoints(support::generic_entrypoint_records(program));
     let artifact_ref = artifact_ref(&artifact);
     let evidence = BackendEvidence::new(

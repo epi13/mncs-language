@@ -181,6 +181,7 @@ fn fs_grant_lists_granted_root_per_task() {
         mncs_embed::CallOptions {
             step_budget: 8_192,
             grants: vec![Grant::fs_root("fs_root", &dir.to_string_lossy())],
+            expected_interface_identity: None,
             type_arguments: Vec::new(),
         },
     );
@@ -319,6 +320,7 @@ fn index_shaped_workload_is_millisecond_scale() {
         CallOptions {
             step_budget: 8_192,
             grants: vec![grant],
+            expected_interface_identity: None,
             type_arguments: Vec::new(),
         },
     );

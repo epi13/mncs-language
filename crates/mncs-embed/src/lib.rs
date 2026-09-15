@@ -38,7 +38,10 @@ pub struct EmbedError {
 }
 
 impl EmbedError {
-    pub(crate) fn new(code: &str, message: impl Into<String>) -> Self {
+    /// Construct a stable host-facing error from a typed binding adapter.
+    /// Generated bindings use this for local encode/decode failures while
+    /// runtime failures continue to originate from the session itself.
+    pub fn new(code: &str, message: impl Into<String>) -> Self {
         Self {
             code: code.to_owned(),
             message: message.into(),
@@ -272,6 +275,11 @@ impl Grant {
 pub struct CallOptions {
     pub step_budget: u64,
     pub grants: Vec<Grant>,
+    /// Interface identity expected by a generated host binding.  A typed
+    /// call refuses an artifact that does not carry the same language-owned
+    /// callable interface, so stale generated code cannot reinterpret a
+    /// changed record or enum signature.
+    pub expected_interface_identity: Option<String>,
     /// Explicit generic arguments selecting a compiled specialization
     /// of a generic entrypoint (P1-013/P2-003), mirroring
     /// `ExecutionRequest.type_arguments`. Empty for concrete targets.
@@ -286,6 +294,7 @@ impl CallOptions {
         Self {
             step_budget,
             grants: Vec::new(),
+            expected_interface_identity: None,
             type_arguments: Vec::new(),
         }
     }
@@ -337,6 +346,10 @@ impl Session {
 
     pub fn backend_name(&self) -> &str {
         &self.inner.artifact().backend.name
+    }
+
+    pub fn interface_identity(&self) -> Option<&str> {
+        self.inner.artifact().interface_identity.as_deref()
     }
 
     /// Execute one named entrypoint with canonical ABI values. A
@@ -427,6 +440,22 @@ impl Session {
         args_json: &str,
         options: &CallOptions,
     ) -> Result<CallOutput, EmbedError> {
+        if let Some(expected) = options.expected_interface_identity.as_deref() {
+            let Some(actual) = self.interface_identity() else {
+                return Err(EmbedError::new(
+                    "stale_interface",
+                    "artifact has no language-owned interface identity; regenerate the artifact",
+                ));
+            };
+            if expected != actual {
+                return Err(EmbedError::new(
+                    "stale_interface",
+                    format!(
+                        "interface identity mismatch: expected {expected}, loaded {actual}; regenerate the host binding"
+                    ),
+                ));
+            }
+        }
         let values: Vec<HostExecutionValue> = serde_json::from_str(args_json).map_err(|error| {
             EmbedError::new(
                 "bad_typed_arguments",
@@ -611,6 +640,7 @@ pub unsafe extern "C" fn mncs_session_call(
     let options = CallOptions {
         step_budget,
         grants,
+        expected_interface_identity: None,
         type_arguments: Vec::new(),
     };
     match session.call_json(&module, &function, &args_text, &options) {
@@ -680,6 +710,7 @@ pub unsafe extern "C" fn mncs_session_call_batch(
             let options = CallOptions {
                 step_budget: request.step_budget,
                 grants: request.grants,
+                expected_interface_identity: None,
                 type_arguments: request.type_arguments,
             };
             session.call(&request.module, &request.function, request.args, &options)

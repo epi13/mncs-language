@@ -15,7 +15,8 @@ use crate::{CanonicalForm, HighLevelIr, ObligationRecord, SemanticId, SsaModule}
 pub const PORTABLE_WASM_MVP_TARGET: &str = "mncs:target:portable-wasm-mvp-0.1";
 pub const PORTABLE_WASM_MVP_BACKEND_NAME: &str = "mncs-portable-wasm-mvp";
 pub const PORTABLE_WASM_MVP_BACKEND_VERSION: &str = "0.1";
-pub const BACKEND_ARTIFACT_SCHEMA_VERSION: &str = "0.5";
+pub const BACKEND_ARTIFACT_SCHEMA_VERSION: &str = "0.6";
+pub const BACKEND_ARTIFACT_SCHEMA_VERSION_PRE_INTERFACE: &str = "0.5";
 /// The previous backend-artifact schema version. Artifacts carrying `"0.4"`
 /// spell contract element/field types as bare strings; they deserialize via
 /// [`AbiTypeRef`] (strings become verbatim `Named` carriers) and must pass
@@ -1434,6 +1435,12 @@ pub struct BackendArtifact {
     pub bytes_sha256: String,
     pub bytes_hex: String,
     pub exports: Vec<String>,
+    /// Identity of the language-owned callable interface used to produce
+    /// this artifact. Optional only for legacy artifacts; fresh artifacts
+    /// bind it into their identity so generated host bindings can fail
+    /// closed before resolving a stale signature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interface_identity: Option<String>,
     #[serde(default)]
     pub function_value_contracts: BTreeMap<String, BackendFunctionValueContract>,
     /// Logical composite types referenced by this artifact's signatures,
@@ -1558,6 +1565,7 @@ impl BackendArtifact {
             bytes_sha256,
             bytes_hex,
             exports,
+            interface_identity: None,
             function_value_contracts: BTreeMap::new(),
             composite_value_contracts: BTreeMap::new(),
             assumptions,
@@ -1600,7 +1608,9 @@ impl BackendArtifact {
                 contract.normalize_legacy_refs(&composites);
             }
         }
-        if self.schema_version == BACKEND_ARTIFACT_SCHEMA_VERSION_PRE_TYPED {
+        if self.schema_version == BACKEND_ARTIFACT_SCHEMA_VERSION_PRE_TYPED
+            || self.schema_version == BACKEND_ARTIFACT_SCHEMA_VERSION_PRE_INTERFACE
+        {
             self.schema_version = BACKEND_ARTIFACT_SCHEMA_VERSION.to_owned();
         }
         self.identity = identified("backend-artifact", &self.without_identity());
@@ -1611,6 +1621,15 @@ impl BackendArtifact {
         function_value_contracts: BTreeMap<String, BackendFunctionValueContract>,
     ) -> Self {
         self.function_value_contracts = function_value_contracts;
+        self.identity = identified("backend-artifact", &self.without_identity());
+        self
+    }
+
+    /// Bind this artifact to the language-owned callable interface that
+    /// produced its value contracts. The binding is part of artifact
+    /// identity and is therefore immutable after construction in practice.
+    pub fn with_interface_identity(mut self, interface_identity: impl Into<String>) -> Self {
+        self.interface_identity = Some(interface_identity.into());
         self.identity = identified("backend-artifact", &self.without_identity());
         self
     }
@@ -1689,11 +1708,47 @@ impl BackendArtifact {
             && self.target.identity_is_valid()
             && !self.artifact_kind.trim().is_empty()
             && self.bytes_sha256 == sha256_hex(&self.bytes().unwrap_or_default())
-            && self.identity == identified("backend-artifact", &self.without_identity())
+            && self.identity == self.recomputed_identity()
+    }
+
+    fn recomputed_identity(&self) -> SemanticId {
+        if self.schema_version == BACKEND_ARTIFACT_SCHEMA_VERSION_PRE_TYPED
+            || self.schema_version == BACKEND_ARTIFACT_SCHEMA_VERSION_PRE_INTERFACE
+        {
+            identified("backend-artifact", &self.legacy_without_identity())
+        } else {
+            identified("backend-artifact", &self.without_identity())
+        }
     }
 
     fn without_identity(&self) -> BackendArtifactMaterial<'_> {
         BackendArtifactMaterial {
+            schema_version: &self.schema_version,
+            backend: &self.backend,
+            input: &self.input,
+            target: &self.target,
+            artifact_kind: &self.artifact_kind,
+            format: &self.format,
+            bytes_sha256: &self.bytes_sha256,
+            bytes_hex: &self.bytes_hex,
+            exports: &self.exports,
+            interface_identity: &self.interface_identity,
+            function_value_contracts: &self.function_value_contracts,
+            composite_value_contracts: &self.composite_value_contracts,
+            assumptions: &self.assumptions,
+            obligations_generated: &self.obligations_generated,
+            proof_bindings: &self.proof_bindings,
+            execution_applicability: &self.execution_applicability,
+            evidence_dependencies: &self.evidence_dependencies,
+            promise_decisions: &self.promise_decisions,
+            generic_entrypoints: &self.generic_entrypoints,
+            unsupported: &self.unsupported,
+            status: self.status,
+        }
+    }
+
+    fn legacy_without_identity(&self) -> LegacyBackendArtifactMaterial<'_> {
+        LegacyBackendArtifactMaterial {
             schema_version: &self.schema_version,
             backend: &self.backend,
             input: &self.input,
@@ -1719,6 +1774,35 @@ impl BackendArtifact {
 
 #[derive(Serialize)]
 struct BackendArtifactMaterial<'a> {
+    schema_version: &'a str,
+    backend: &'a BackendIdentity,
+    input: &'a CompilerArtifactRef,
+    target: &'a TargetContractRef,
+    artifact_kind: &'a str,
+    format: &'a str,
+    bytes_sha256: &'a str,
+    bytes_hex: &'a str,
+    exports: &'a [String],
+    interface_identity: &'a Option<String>,
+    function_value_contracts: &'a BTreeMap<String, BackendFunctionValueContract>,
+    composite_value_contracts: &'a BTreeMap<String, BackendValueContract>,
+    assumptions: &'a [String],
+    obligations_generated: &'a [SemanticId],
+    proof_bindings: &'a [crate::ProofBindingRef],
+    execution_applicability: &'a [String],
+    evidence_dependencies: &'a [SemanticId],
+    promise_decisions: &'a [crate::BackendPromiseDecision],
+    generic_entrypoints: &'a [GenericEntrypointRecord],
+    unsupported: &'a [String],
+    status: TransformationStatus,
+}
+
+/// Identity material used by backend artifacts emitted before callable
+/// interface identities were bound into the artifact. Keeping this exact
+/// legacy path lets old frozen artifacts remain readable while typed callers
+/// still refuse them until they are regenerated with an interface binding.
+#[derive(Serialize)]
+struct LegacyBackendArtifactMaterial<'a> {
     schema_version: &'a str,
     backend: &'a BackendIdentity,
     input: &'a CompilerArtifactRef,
