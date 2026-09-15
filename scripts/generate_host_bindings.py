@@ -328,8 +328,8 @@ def python_binding(abi: dict[str, Any]) -> str:
         "        self._config = _BindingConfig(mncs, Path(source), tuple(Path(path) for path in libraries), timeout)",
         "        self.last_execution: dict[str, Any] | None = None",
         "",
-        "    def _call(self, function: str, argument: Any) -> dict[str, Any]:",
-        "        request = {'schema_version': '0.1', 'target': {'module': MODULE_IDENTITY, 'function': function},",
+        "    def _call(self, module: str, function: str, argument: Any) -> dict[str, Any]:",
+        "        request = {'schema_version': '0.1', 'target': {'module': module, 'function': function},",
         "                   'typed_arguments': [_encode(argument)], 'expected_interface_identity': INTERFACE_IDENTITY, 'step_budget': 8192}",
         "        with tempfile.TemporaryDirectory(prefix='mncs-generated-binding-') as directory:",
         "            request_path = Path(directory) / 'request.json'",
@@ -367,7 +367,7 @@ def python_binding(abi: dict[str, Any]) -> str:
         method = safe_identifier(function_name)
         out.extend([
             f"    def {method}(self, input_value: {arg_annotation}) -> {return_annotation}:",
-            f"        response = self._call({function_name!r}, input_value)",
+            f"        response = self._call({function.get('declaring_module', abi['module'])!r}, {function_name!r}, input_value)",
             f"        return _decode({return_descriptor!r}, response['returned'][0])",
             "",
         ])
@@ -388,6 +388,10 @@ def python_binding(abi: dict[str, Any]) -> str:
 
 def rust_type(contract: Any) -> str:
     descriptor = python_descriptor(contract)
+    return rust_type_descriptor(descriptor)
+
+
+def rust_type_descriptor(descriptor: str) -> str:
     if descriptor == "bool":
         return "bool"
     if descriptor == "int":
@@ -398,7 +402,8 @@ def rust_type(contract: Any) -> str:
         return safe_identifier(descriptor.split(":", 1)[1])
     if descriptor.startswith(("sequence:", "vector:")):
         parts = descriptor.split(":")
-        return f"Vec<{rust_type(parts[1])}>"
+        element = ":".join(parts[1:-1])
+        return f"Vec<{rust_type_descriptor(element)}>"
     if descriptor.startswith("mask:"):
         return "Vec<bool>"
     return "serde_json::Value"
@@ -423,16 +428,30 @@ def rust_encode_expression(descriptor: str, expression: str) -> str:
     return expression
 
 
-def rust_decode_expression(descriptor: str, expression: str) -> str:
+def rust_decode_result_expression(descriptor: str, expression: str) -> str:
     if descriptor == "bool":
-        return f"decode_bool({expression})?"
+        return f"decode_bool({expression})"
     if descriptor == "int":
-        return f"decode_i64({expression})?"
+        return f"decode_i64({expression})"
     if descriptor == "float":
-        return f"decode_f64({expression})?"
+        return f"decode_f64({expression})"
     if descriptor.startswith("finite:") or descriptor.startswith("record:"):
-        return f"{safe_identifier(descriptor.split(':', 1)[1])}::from_host_value({expression})?"
-    return expression
+        return f"{safe_identifier(descriptor.split(':', 1)[1])}::from_host_value({expression})"
+    if descriptor.startswith(("sequence:", "vector:")):
+        parts = descriptor.split(":")
+        element = ":".join(parts[1:-1])
+        item_result = rust_decode_result_expression(element, "item")
+        return (
+            f"sequence_values({expression})?.iter().map(|item| {item_result})"
+            " .collect::<Result<Vec<_>, _>>()"
+        )
+    if descriptor.startswith("mask:"):
+        return f"mask_values({expression})"
+    return f"Ok({expression})"
+
+
+def rust_decode_expression(descriptor: str, expression: str) -> str:
+    return f"{rust_decode_result_expression(descriptor, expression)}?"
 
 
 def rust_binding(abi: dict[str, Any]) -> str:
@@ -455,6 +474,7 @@ def rust_binding(abi: dict[str, Any]) -> str:
         f"pub const GENERATOR_VERSION: &str = {json.dumps(GENERATOR_VERSION)};",
         f"pub const MODULE_IDENTITY: &str = {json.dumps(abi['module'])};",
         f"pub const INTERFACE_IDENTITY: &str = {json.dumps(abi['interface_identity'])};",
+        f"pub const TYPED_CALL_SCHEMA_VERSION: &str = {json.dumps(abi.get('typed_call_schema_version', 'mncs.typed-call/1'))};",
         f"pub const BINDING_CONTENT_IDENTITY: &str = {json.dumps(binding_content_identity(abi, 'rust'))};",
         "",
         "trait HostValue { fn host_value(&self) -> Value; }",
@@ -470,6 +490,13 @@ def rust_binding(abi: dict[str, Any]) -> str:
         "}",
         "fn decode_f64(value: &Value) -> Result<f64, EmbedError> {",
         "    decode_object(value, \"float\")?.get(\"float\").and_then(Value::as_object).and_then(|v| v.get(\"value\")).and_then(Value::as_f64).ok_or_else(|| EmbedError::new(\"binding_decode\", \"typed float is malformed\"))",
+        "}",
+        "fn sequence_values(value: &Value) -> Result<&Vec<Value>, EmbedError> {",
+        "    decode_object(value, \"sequence\")?.get(\"sequence\").and_then(Value::as_object).and_then(|v| v.get(\"values\")).and_then(Value::as_array).ok_or_else(|| EmbedError::new(\"binding_decode\", \"typed sequence is malformed\"))",
+        "}",
+        "fn mask_values(value: &Value) -> Result<Vec<bool>, EmbedError> {",
+        "    let lanes = decode_object(value, \"mask\")?.get(\"mask\").and_then(Value::as_object).and_then(|v| v.get(\"lanes\")).and_then(Value::as_array).ok_or_else(|| EmbedError::new(\"binding_decode\", \"typed mask is malformed\"))?;",
+        "    lanes.iter().map(|item| item.as_bool().ok_or_else(|| EmbedError::new(\"binding_decode\", \"typed mask lane is malformed\"))).collect()",
         "}",
         "fn finite_variant(value: &Value) -> Result<&str, EmbedError> {",
         "    let finite = decode_object(value, \"finite\")?.get(\"finite\").and_then(Value::as_object).ok_or_else(|| EmbedError::new(\"binding_decode\", \"typed finite is malformed\"))?;",
@@ -531,12 +558,13 @@ def rust_binding(abi: dict[str, Any]) -> str:
     out.extend([
         "pub fn typed_call(",
         "    session: &Session,",
+        "    module: &str,",
         "    function: &str,",
         "    arguments: &str,",
         "    mut options: CallOptions,",
         ") -> Result<mncs_embed::CallOutput, EmbedError> {",
         "    options.expected_interface_identity = Some(INTERFACE_IDENTITY.to_owned());",
-        "    session.call_typed_json(MODULE_IDENTITY, function, arguments, &options)",
+        "    session.call_typed_json(module, function, arguments, &options)",
         "}",
         "",
     ])
@@ -555,15 +583,16 @@ def rust_binding(abi: dict[str, Any]) -> str:
         out.extend([
             f"pub fn {method}(session: &Session, input: {arg_type}, options: CallOptions) -> Result<{return_type}, EmbedError> {{",
             f"    let arguments = serde_json::to_string(&vec![{encoded}]).map_err(|error| EmbedError::new(\"binding_encode\", error.to_string()))?;",
-            f"    let output = typed_call(session, {json.dumps(function_name)}, &arguments, options)?;",
+            f"    let output = typed_call(session, {json.dumps(function.get('declaring_module', abi['module']))}, {json.dumps(function_name)}, &arguments, options)?;",
             "    let value = returned_value(&output)?;",
             f"    Ok({decoded})",
             "}",
             "",
         ])
     out.extend([
-        "pub const BINDING_METADATA: (&str, &str, &str) = (",
+        "pub const BINDING_METADATA: (&str, &str, &str, &str, &str) = (",
         "    GENERATOR_VERSION, MODULE_IDENTITY, INTERFACE_IDENTITY,",
+        "    TYPED_CALL_SCHEMA_VERSION, BINDING_CONTENT_IDENTITY,",
         ");",
         "",
     ])
