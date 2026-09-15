@@ -28,8 +28,8 @@ use mncs_model::{
     BackendFunctionValueContract, BackendIdentity, BackendResult, BackendValueContract,
     BodyExecutionSession, BodyType, CompilerArtifactRef, CompilerDiagnostic,
     CompilerDiagnosticKind, ExecutionCorpus, ExecutionFailure, ExecutionRequest, ExecutionResult,
-    ExecutionStatus, ExecutionTarget, ExecutionValue, HostGrant, IntegerType, Program, SemanticId,
-    SsaExecutionSession, SsaModule, StatefulCallResult, StatefulExecutionCase,
+    ExecutionStatus, ExecutionTarget, ExecutionValue, HostExecutionValue, HostGrant, IntegerType,
+    Program, SemanticId, SsaExecutionSession, SsaModule, StatefulCallResult, StatefulExecutionCase,
     StatefulExecutionCheckpoint, StatefulExecutionResult, TargetContractRef, TargetLoweringPlan,
     TransformationStatus, BACKEND_ARTIFACT_SCHEMA_VERSION, COMPILER_ARTIFACT_SCHEMA_VERSION,
     LAYERED_EXECUTION_COMPARISON_INTERPRETATION, PORTABLE_WASM_MVP_BACKEND_NAME,
@@ -48,6 +48,11 @@ pub const PORTABLE_WASM_ARTIFACT_KIND: &str = "wasm_module";
 /// `mncs abi` as `host_abi_version`) before applying that document: the
 /// contract evolves independently of any single backend's artifact format.
 pub const HOST_ABI_VERSION: &str = "1";
+/// Schema for the name-oriented host request accepted by `mncs execute` and
+/// the embedded session.  Its resolver is driven by the artifact/program
+/// value contracts, so changing a record field or enum variant changes the
+/// interface identity instead of silently changing positional meaning.
+pub const TYPED_CALL_SCHEMA_VERSION: &str = "mncs.typed-call/1";
 pub const RESEARCH_BYTECODE_BACKEND_NAME: &str = "mncs-research-bytecode";
 pub const RESEARCH_BYTECODE_BACKEND_VERSION: &str = "0.1";
 pub const RESEARCH_BYTECODE_TARGET: &str = "mncs:target:research-bytecode-0.1";
@@ -104,6 +109,8 @@ pub struct LanguageOwnedFunctionAbi {
     pub name: String,
     pub inputs: Vec<BackendValueContract>,
     pub outputs: Vec<BackendValueContract>,
+    pub input_names: Vec<String>,
+    pub output_names: Vec<String>,
     /// Generic parameters in declaration order; empty for concrete
     /// functions. A host calls a generic entry by spelling one
     /// `type_arguments` element per parameter (`{"kind": "nat",
@@ -206,6 +213,8 @@ pub fn language_owned_abi_contracts(
             name: function.name.clone(),
             inputs: contract.inputs.clone(),
             outputs: contract.outputs.clone(),
+            input_names: contract.input_names.clone(),
+            output_names: contract.output_names.clone(),
             requires_type_arguments: !function.generic_params.is_empty(),
             generic_params: function.generic_params.clone(),
             compiled_instantiations,
@@ -221,6 +230,62 @@ pub fn language_owned_abi_contracts(
     }
 
     (functions, composites)
+}
+
+/// Resolve name-oriented host values against a function contract.  This is
+/// the general typed invocation membrane used by both the CLI and embedded
+/// hosts; callers never need to construct integer widths, nominal identities,
+/// or enum discriminants themselves.
+pub fn resolve_typed_arguments(
+    contract: &BackendFunctionValueContract,
+    composites: &BTreeMap<String, BackendValueContract>,
+    values: &[HostExecutionValue],
+) -> Result<Vec<ExecutionValue>, String> {
+    support::resolve_host_arguments(contract, composites, values)
+}
+
+/// Resolve a typed call against a verified artifact, including generic entry
+/// resolution.  The artifact's own metadata is the sole authority for the
+/// callable signature.
+pub fn resolve_typed_arguments_for_artifact(
+    artifact: &BackendArtifact,
+    module: &str,
+    function: &str,
+    type_arguments: &[mncs_model::ExecutionTypeArgument],
+    values: &[HostExecutionValue],
+) -> Result<Vec<ExecutionValue>, String> {
+    let (entry_module, entry_function) =
+        support::resolve_request_entry(artifact, module, function, type_arguments)?;
+    let Some(contract) = support::entry_value_contract(
+        &artifact.function_value_contracts,
+        &entry_module,
+        &entry_function,
+    ) else {
+        return Err(format!(
+            "typed host call target {entry_module}::{entry_function} has no language-owned value contract"
+        ));
+    };
+    resolve_typed_arguments(contract, &artifact.composite_value_contracts, values)
+}
+
+/// Resolve a typed call against a validated source program.  This path is
+/// used by the reference `mncs execute` command before the program executor
+/// runs, while frozen-artifact callers use
+/// [`resolve_typed_arguments_for_artifact`].
+pub fn resolve_typed_arguments_for_program(
+    program: &Program,
+    module: &str,
+    function: &str,
+    values: &[HostExecutionValue],
+) -> Result<Vec<ExecutionValue>, String> {
+    let contracts = support::function_value_contracts(program);
+    let composites = support::composite_value_contracts(program);
+    let Some(contract) = support::entry_value_contract(&contracts, module, function) else {
+        return Err(format!(
+            "typed host call target {module}::{function} has no language-owned value contract"
+        ));
+    };
+    resolve_typed_arguments(contract, &composites, values)
 }
 
 fn trace_timing(stage: &str, started: Instant) {

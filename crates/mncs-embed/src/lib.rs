@@ -22,8 +22,8 @@ use std::collections::BTreeSet;
 use mncs_codegen::OwnedExecutionSession;
 use mncs_model::{
     BackendArtifact, EffectExecutionPolicy, ExecutionPolicy, ExecutionRequest, ExecutionStatus,
-    ExecutionTarget, ExecutionTypeArgument, ExecutionValue, HostGenericSeedRequest, HostGrant,
-    EXECUTION_REQUEST_SCHEMA_VERSION, HOST_GRANT_MAX_BYTES,
+    ExecutionTarget, ExecutionTypeArgument, ExecutionValue, HostExecutionValue,
+    HostGenericSeedRequest, HostGrant, EXECUTION_REQUEST_SCHEMA_VERSION, HOST_GRANT_MAX_BYTES,
 };
 use serde::{Deserialize, Serialize};
 
@@ -413,6 +413,34 @@ impl Session {
         let arguments: Vec<ExecutionValue> = serde_json::from_str(args_json).map_err(|error| {
             EmbedError::new("bad_arguments", format!("argument JSON rejected: {error}"))
         })?;
+        Ok(self.call(module, function, arguments, options))
+    }
+
+    /// JSON convenience for the name-oriented typed host boundary.  The
+    /// values are resolved against the verified artifact's callable metadata;
+    /// callers provide record/enum names and logical scalar values, never
+    /// positional integer encodings or nominal identities.
+    pub fn call_typed_json(
+        &self,
+        module: &str,
+        function: &str,
+        args_json: &str,
+        options: &CallOptions,
+    ) -> Result<CallOutput, EmbedError> {
+        let values: Vec<HostExecutionValue> = serde_json::from_str(args_json).map_err(|error| {
+            EmbedError::new(
+                "bad_typed_arguments",
+                format!("typed argument JSON rejected: {error}"),
+            )
+        })?;
+        let arguments = mncs_codegen::resolve_typed_arguments_for_artifact(
+            self.inner.artifact(),
+            module,
+            function,
+            &options.type_arguments,
+            &values,
+        )
+        .map_err(|error| EmbedError::new("bad_typed_arguments", error))?;
         Ok(self.call(module, function, arguments, options))
     }
 }

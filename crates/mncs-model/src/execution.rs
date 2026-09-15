@@ -519,6 +519,51 @@ pub enum ExecutionValue {
     },
 }
 
+/// A host-facing, name-oriented value request.  This is deliberately a
+/// request representation rather than a second semantic value model: the
+/// language-owned ABI contract resolves it into [`ExecutionValue`] before an
+/// executor sees it.  Scalars inherit their exact integer/float type from
+/// the expected contract, while nominal aggregates name their type and
+/// fields explicitly.  No positional encoding or host-side enum
+/// discriminant is part of this wire form.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostExecutionValue {
+    Integer {
+        value: i128,
+    },
+    Float {
+        value: f64,
+    },
+    Boolean {
+        value: bool,
+    },
+    Byte {
+        value: i128,
+    },
+    Finite {
+        #[serde(rename = "type")]
+        type_name: String,
+        variant: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        payload: BTreeMap<String, HostExecutionValue>,
+    },
+    Record {
+        #[serde(rename = "type")]
+        type_name: String,
+        fields: BTreeMap<String, HostExecutionValue>,
+    },
+    Sequence {
+        values: Vec<HostExecutionValue>,
+    },
+    Vector {
+        values: Vec<HostExecutionValue>,
+    },
+    Mask {
+        lanes: Vec<bool>,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectExecutionPolicy {

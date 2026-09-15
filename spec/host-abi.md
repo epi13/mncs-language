@@ -33,6 +33,30 @@ Version history:
   before applying this document; a higher version means this text no
   longer describes the artifact.
 
+## 1.1 Typed host invocation
+
+The reference executor and embedded session accept a name-oriented request
+through the `mncs.typed-call/1` envelope. The request keeps the ordinary
+`ExecutionRequest` fields and replaces its non-empty `arguments` array with
+`typed_arguments`. `typed_arguments` is an array of host values:
+
+```json
+[{"record":{"type":"SelectionInput","fields":{
+  "enabled":{"boolean":{"value":true}},
+  "mode":{"finite":{"type":"Mode","variant":"fast"}},
+  "count":{"integer":{"value":7}}
+}}}]
+```
+
+The callable's `mncs abi` report is the authority for arity, scalar widths,
+nominal identities, field sets, enum variants, and canonical field order.
+Hosts MUST NOT supply numeric enum discriminants or infer positional meaning.
+The runtime resolves the request to the canonical execution-value form before
+callee code runs; a mismatch is `invalid_request`. `typed_call_schema_version`
+and `interface_identity` in the ABI report identify this boundary. A binding
+MUST reject a changed interface identity until it is regenerated or explicitly
+validated against the new report.
+
 ## 2. Scalar transfer
 
 | MNCS type | WASM parameter/result | Notes |

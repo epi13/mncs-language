@@ -27,20 +27,48 @@ fn run(args: [i64; 12]) -> Value {
     ));
     std::fs::create_dir_all(&root).expect("create request directory");
     let request = root.join("request.json");
-    let arguments = args
-        .into_iter()
-        .map(|value| json!({"integer": {"value": value, "type": {"bits": 32, "signed": true}}}))
-        .collect::<Vec<_>>();
+    let change_class = [
+        "implementation",
+        "public_contract",
+        "shared_type",
+        "parser_semantics",
+        "serialization_format",
+        "effect_semantics",
+        "abi_boundary",
+        "canonical_fixture",
+        "language_profile",
+        "cross_repository_contract",
+    ][usize::try_from(args[4]).expect("change class code")];
+    let boolean = |value: i64| json!({"boolean": {"value": value == 1}});
+    let arguments = vec![json!({
+        "record": {
+            "type": "SelectionInput",
+            "fields": {
+                "cross_repository": boolean(args[0]),
+                "impact_complete": boolean(args[1]),
+                "unknown_root": boolean(args[2]),
+                "truncated": boolean(args[3]),
+                "change_class": {"finite": {"type": "ChangeClass", "variant": change_class}},
+                "high_connectivity": boolean(args[5]),
+                "shared_type": boolean(args[6]),
+                "effect_semantics": boolean(args[7]),
+                "abi_boundary": boolean(args[8]),
+                "public_contract": boolean(args[9]),
+                "direct_dependents": boolean(args[10]),
+                "selected_tests": {"integer": {"value": args[11]}},
+            }
+        }
+    })];
     std::fs::write(
         &request,
         serde_json::to_vec(&json!({
             "schema_version": "0.1",
             "target": {
                 "module": "mncs.family.verification_plan.v1",
-                "function": "select_codes"
+                "function": "choose"
             },
-            "arguments": arguments,
-        "step_budget": 4096
+            "typed_arguments": arguments,
+            "step_budget": 4096
         }))
         .expect("encode request"),
     )
@@ -53,7 +81,8 @@ fn run(args: [i64; 12]) -> Value {
         .expect("execute native policy");
     assert!(
         output.status.success(),
-        "policy execution failed: {}",
+        "policy execution failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
     serde_json::from_slice(&output.stdout).expect("policy JSON")
