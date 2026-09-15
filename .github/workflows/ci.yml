@@ -26,6 +26,10 @@ jobs:
           components: rustfmt, clippy
       - name: Format
         run: cargo fmt --all -- --check
+      - name: Validate generated family provider metadata
+        run: |
+          python3 scripts/generate_family_provider_metadata.py --check
+          PYTHONPATH=scripts python3 scripts/test_family_provider_metadata.py
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
