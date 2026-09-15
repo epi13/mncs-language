@@ -122,7 +122,7 @@ pub use execution::{
     ExecutionProperty, ExecutionRequest, ExecutionResult, ExecutionStatus, ExecutionSubject,
     ExecutionTarget, ExecutionTraceEntry, ExecutionTypeArgument, ExecutionValue,
     ExecutionValueCapture, ExpectedEffectObservation, GenericEntryFailure, GenericEntryTarget,
-    HostGenericSeedRequest, HostGrant, HostSeedError, ObservationCapturePolicy,
+    HostExecutionValue, HostGenericSeedRequest, HostGrant, HostSeedError, ObservationCapturePolicy,
     ObservationCompletenessStatus, ObservedExecutionResult, StatefulArgument, StatefulCallResult,
     StatefulExecutionCase, StatefulExecutionCheckpoint, StatefulExecutionComparison,
     StatefulExecutionMismatch, StatefulExecutionResult, StatefulExecutionStep,

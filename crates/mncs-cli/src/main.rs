@@ -26,7 +26,7 @@ use mncs_model::{
     DeterministicVerifier, DiagnosticCategory, DiagnosticObligation, EvidenceFreshness,
     EvidenceManifest, EvidenceState, ExecutionComparison, ExecutionCorpus,
     ExecutionObservationPolicy, ExecutionProperty, ExecutionRequest, ExecutionStatus,
-    ExecutionValue, FunctionBody, HostGrant, LanguageExperimentCaseObservation,
+    ExecutionValue, FunctionBody, HostExecutionValue, HostGrant, LanguageExperimentCaseObservation,
     LanguageExperimentComparison, LanguageExperimentDefinition,
     LanguageExperimentPropertyObservation, LanguageExperimentResult,
     LanguageExperimentStatefulCaseObservation, LoweringExecutionComparison,
@@ -519,7 +519,7 @@ where
         Ok(input) => input,
         Err(code) => return code,
     };
-    let request: ExecutionRequest = match serde_json::from_str(&request_input) {
+    let (request, typed_arguments) = match decode_execution_request(&request_input) {
         Ok(request) => request,
         Err(error) => {
             eprintln!("error: invalid execution request: {error}");
@@ -533,6 +533,13 @@ where
             Ok(program) => program,
             Err(code) => return code,
         };
+    let request = match resolve_typed_request(&program, request, &typed_arguments) {
+        Ok(request) => request,
+        Err(error) => {
+            eprintln!("error: typed execution request rejected: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let result = execute_with_policy(&program, &request);
     let status = result.status;
     if !print_json(&result) {
@@ -815,7 +822,7 @@ where
         Ok(input) => input,
         Err(code) => return code,
     };
-    let request: ExecutionRequest = match serde_json::from_str(&request_input) {
+    let (request, typed_arguments) = match decode_execution_request(&request_input) {
         Ok(request) => request,
         Err(error) => {
             eprintln!("error: invalid execution request: {error}");
@@ -829,6 +836,13 @@ where
             Ok(program) => program,
             Err(code) => return code,
         };
+    let request = match resolve_typed_request(&program, request, &typed_arguments) {
+        Ok(request) => request,
+        Err(error) => {
+            eprintln!("error: typed execution request rejected: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let result = execute_ssa(&program, &request);
     let status = result.status;
     if !print_json(&result) {
@@ -1006,11 +1020,23 @@ where
 struct LanguageOwnedAbi {
     schema_version: String,
     host_abi_version: String,
+    typed_call_schema_version: String,
+    interface_identity: String,
     source_artifact_identity: String,
     module: String,
     semantic_fingerprint: Option<String>,
     functions: BTreeMap<String, mncs_codegen::LanguageOwnedFunctionAbi>,
     composites: BTreeMap<String, mncs_model::BackendValueContract>,
+}
+
+#[derive(Serialize)]
+struct LanguageOwnedAbiMaterial<'a> {
+    schema_version: &'static str,
+    host_abi_version: &'a str,
+    typed_call_schema_version: &'a str,
+    module: &'a str,
+    functions: &'a BTreeMap<String, mncs_codegen::LanguageOwnedFunctionAbi>,
+    composites: &'a BTreeMap<String, mncs_model::BackendValueContract>,
 }
 
 fn abi_command<I>(args: I) -> ExitCode
@@ -1067,9 +1093,24 @@ where
         return ExitCode::FAILURE;
     }
     let (functions, composites) = mncs_codegen::language_owned_abi_contracts(&program);
+    let host_abi_version = mncs_codegen::HOST_ABI_VERSION.to_owned();
+    let typed_call_schema_version = mncs_codegen::TYPED_CALL_SCHEMA_VERSION.to_owned();
+    let interface_material = LanguageOwnedAbiMaterial {
+        schema_version: "0.1",
+        host_abi_version: &host_abi_version,
+        typed_call_schema_version: &typed_call_schema_version,
+        module: &program.module,
+        functions: &functions,
+        composites: &composites,
+    };
+    let interface_identity = mncs_model::sha256_hex(
+        &serde_json::to_vec(&interface_material).expect("ABI metadata is serializable"),
+    );
     let abi = LanguageOwnedAbi {
         schema_version: "0.1".to_owned(),
-        host_abi_version: mncs_codegen::HOST_ABI_VERSION.to_owned(),
+        host_abi_version,
+        typed_call_schema_version,
+        interface_identity,
         source_artifact_identity: envelope.identity,
         module: program.module.clone(),
         semantic_fingerprint: program.content_fingerprint().ok(),
@@ -3427,9 +3468,23 @@ where
         Ok(program) => program,
         Err(code) => return code,
     };
-    let request = match read_json::<ExecutionRequest>(&request_path) {
-        Ok(request) => request,
+    let request_input = match read_source(&request_path) {
+        Ok(input) => input,
         Err(code) => return code,
+    };
+    let (request, typed_arguments) = match decode_execution_request(&request_input) {
+        Ok(request) => request,
+        Err(error) => {
+            eprintln!("error: invalid execution request: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let request = match resolve_typed_request(&program, request, &typed_arguments) {
+        Ok(request) => request,
+        Err(error) => {
+            eprintln!("error: typed execution request rejected: {error}");
+            return ExitCode::from(2);
+        }
     };
     let ssa = match program.lower_to_ssa() {
         Ok(ssa) => ssa,
@@ -3783,6 +3838,59 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, ExitCode> 
         eprintln!("error: {error}");
         ExitCode::from(2)
     })
+}
+
+/// Decode the execution wire document while keeping the typed host request
+/// separate from the canonical `ExecutionRequest`.  The latter remains the
+/// executor's stable internal form; the former is resolved by the
+/// language-owned value contracts immediately before execution.
+fn decode_execution_request(
+    input: &str,
+) -> Result<(ExecutionRequest, Vec<HostExecutionValue>), String> {
+    let mut document: serde_json::Value = serde_json::from_str(input)
+        .map_err(|error| format!("execution request JSON rejected: {error}"))?;
+    let object = document
+        .as_object_mut()
+        .ok_or_else(|| "execution request must be a JSON object".to_owned())?;
+    let typed_arguments = object
+        .remove("typed_arguments")
+        .map(|value| {
+            serde_json::from_value::<Vec<HostExecutionValue>>(value)
+                .map_err(|error| format!("typed_arguments rejected: {error}"))
+        })
+        .transpose()?
+        .unwrap_or_default();
+    if !typed_arguments.is_empty()
+        && object
+            .get("arguments")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|arguments| !arguments.is_empty())
+    {
+        return Err("arguments and typed_arguments are mutually exclusive".to_owned());
+    }
+    if !object.contains_key("arguments") {
+        object.insert("arguments".to_owned(), serde_json::Value::Array(Vec::new()));
+    }
+    let request = serde_json::from_value::<ExecutionRequest>(document)
+        .map_err(|error| format!("execution request rejected: {error}"))?;
+    Ok((request, typed_arguments))
+}
+
+fn resolve_typed_request(
+    program: &Program,
+    mut request: ExecutionRequest,
+    typed_arguments: &[HostExecutionValue],
+) -> Result<ExecutionRequest, String> {
+    if typed_arguments.is_empty() {
+        return Ok(request);
+    }
+    request.arguments = mncs_codegen::resolve_typed_arguments_for_program(
+        program,
+        &request.target.module,
+        &request.target.function,
+        typed_arguments,
+    )?;
+    Ok(request)
 }
 
 fn write_pretty_json(path: PathBuf, value: &impl Serialize) -> Result<(), std::io::Error> {

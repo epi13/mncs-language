@@ -9,6 +9,7 @@ use std::time::Instant;
 use mncs_embed::{Artifact, CallOptions, Session};
 
 const SOURCE: &str = "mncs 0.6;\nmodule probe.embed;\nfn decide(x: i64) -> (result: i64) {\n    if x >= 100 {\n        return 1;\n    }\n    if x >= 10 {\n        return 2;\n    }\n    return 3;\n}\n";
+const TYPED_SOURCE: &str = "mncs 0.17;\nmodule probe.typed;\nenum Mode { fast, safe }\nrecord SelectionInput { enabled: bool, mode: Mode, count: i32 }\nfn choose(input: SelectionInput) -> (result: i32) {\n    return input.count;\n}\n";
 
 fn i64_arg(value: i64) -> String {
     format!(
@@ -52,6 +53,24 @@ fn repeated_calls_agree_and_carry_digest() {
         };
         assert_eq!(value, expected as i128, "input {input}");
     }
+}
+
+/// The embedded host can name a record and enum variant while scalar widths,
+/// nominal identities, and field order come from the verified artifact.
+#[test]
+fn named_typed_call_resolves_against_artifact_metadata() {
+    let artifact = Artifact::from_source(TYPED_SOURCE, "mncs-research-bytecode")
+        .expect("compile typed probe artifact");
+    let session = Session::open(artifact).expect("open typed session");
+    let args = r#"[{"record":{"type":"SelectionInput","fields":{"count":{"integer":{"value":37}},"enabled":{"boolean":{"value":true}},"mode":{"finite":{"type":"Mode","variant":"fast"}}}}}]"#;
+    let output = session
+        .call_typed_json("probe.typed", "choose", args, &CallOptions::budgeted(8_192))
+        .expect("typed call");
+    assert_eq!(output.status, "returned");
+    assert!(matches!(
+        output.returned.as_slice(),
+        [mncs_model::ExecutionValue::Integer { value: 37, ty }] if ty.bits == 32 && ty.signed
+    ));
 }
 
 /// A tampered artifact (one payload hex digit flipped) is refused at

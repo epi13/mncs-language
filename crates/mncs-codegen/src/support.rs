@@ -2,13 +2,14 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Write;
+use std::sync::Arc;
 
 use mncs_model::{
     AbiTypeRef, ArtifactRepresentation, BackendArtifact, BackendFunctionValueContract,
     BackendIdentity, BackendResult, BackendValueContract, BodyType, CompilerArtifactRef,
     CompilerDiagnostic, CompilerDiagnosticKind, ExecutionFailure, ExecutionRequest,
-    ExecutionStatus, ExecutionValue, IntegerType, Program, SequenceBound, SsaModule,
-    TransformationStatus, TypeSyntax, BACKEND_ARTIFACT_SCHEMA_VERSION,
+    ExecutionStatus, ExecutionValue, HostExecutionValue, IntegerType, Program, SequenceBound,
+    SsaModule, TransformationStatus, TypeSyntax, BACKEND_ARTIFACT_SCHEMA_VERSION,
 };
 use sha2::{Digest, Sha256};
 
@@ -459,6 +460,16 @@ pub(crate) fn function_value_contracts(
                 .outputs
                 .iter()
                 .map(|value| value_contract_for(program, &value.value_type))
+                .collect(),
+            input_names: function
+                .inputs
+                .iter()
+                .map(|value| value.name.clone())
+                .collect(),
+            output_names: function
+                .outputs
+                .iter()
+                .map(|value| value.name.clone())
                 .collect(),
         };
 
@@ -999,6 +1010,427 @@ fn check_scalar_value(
             declared.semantic_name(),
             value_shape(value)
         ))
+    }
+}
+
+/// Resolve the name-oriented host call representation against one
+/// language-owned value contract.  This is the only host-to-canonical value
+/// adapter: callers provide names and logical scalar values, while the
+/// contract supplies nominal identities, enum discriminants, scalar widths,
+/// and canonical field order.
+pub(crate) fn resolve_host_arguments(
+    contract: &BackendFunctionValueContract,
+    composites: &BTreeMap<String, BackendValueContract>,
+    values: &[HostExecutionValue],
+) -> Result<Vec<ExecutionValue>, String> {
+    if contract.inputs.len() != values.len() {
+        return Err(format!(
+            "typed host call argument count mismatch: expected {} argument(s), received {}",
+            contract.inputs.len(),
+            values.len()
+        ));
+    }
+    contract
+        .inputs
+        .iter()
+        .zip(values)
+        .enumerate()
+        .map(|(index, (contract, value))| {
+            let resolved =
+                resolve_host_value(contract, value, composites, &format!("argument {index}"))?;
+            check_contract_value(
+                contract,
+                &resolved,
+                composites,
+                &format!("argument {index}"),
+            )?;
+            Ok(resolved)
+        })
+        .collect()
+}
+
+fn resolve_host_value(
+    contract: &BackendValueContract,
+    value: &HostExecutionValue,
+    composites: &BTreeMap<String, BackendValueContract>,
+    path: &str,
+) -> Result<ExecutionValue, String> {
+    match contract {
+        BackendValueContract::Scalar { semantic_type } => {
+            resolve_host_declared_type(semantic_type.get(), value, composites, path)
+        }
+        BackendValueContract::Finite {
+            type_identity,
+            name,
+            variants,
+            variant_names,
+            payloads,
+        } => {
+            let HostExecutionValue::Finite {
+                type_name,
+                variant,
+                payload,
+            } = value
+            else {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: expected finite {name}, received a different host value"
+                ));
+            };
+            if type_name != &type_identity.0 && (name.is_empty() || type_name != name) {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: finite type {type_name:?} does not name expected {name:?} ({type_identity})"
+                ));
+            }
+            let Some((discriminant, variant_identity)) =
+                variants.iter().find_map(|(discriminant, identity)| {
+                    if variant_names.get(discriminant) == Some(variant) || identity.0 == *variant {
+                        Some((*discriminant, identity.clone()))
+                    } else {
+                        None
+                    }
+                })
+            else {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: unknown variant {variant:?} for finite {name:?}"
+                ));
+            };
+            let declared = payloads
+                .get(&discriminant)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            if payload.len() != declared.len()
+                || declared
+                    .iter()
+                    .any(|(field, _)| !payload.contains_key(field))
+            {
+                let expected = declared
+                    .iter()
+                    .map(|(field, _)| field.as_str())
+                    .collect::<Vec<_>>();
+                let received = payload.keys().map(String::as_str).collect::<Vec<_>>();
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: finite payload fields differ: expected [{}], received [{}]",
+                    expected.join(", "),
+                    received.join(", ")
+                ));
+            }
+            let mut fields = Vec::with_capacity(declared.len());
+            for (field, declared_type) in declared {
+                let host = payload
+                    .get(field)
+                    .expect("payload length and field membership checked");
+                fields.push((
+                    field.clone(),
+                    resolve_host_declared_type(
+                        declared_type.get(),
+                        host,
+                        composites,
+                        &format!("{path}.{field}"),
+                    )?,
+                ));
+            }
+            Ok(ExecutionValue::Finite {
+                type_identity: type_identity.clone(),
+                variant_identity,
+                discriminant,
+                payload: Arc::new(fields),
+            })
+        }
+        BackendValueContract::Record {
+            type_identity,
+            name,
+            fields,
+        } => {
+            let HostExecutionValue::Record {
+                type_name,
+                fields: values,
+            } = value
+            else {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: expected record {name}, received a different host value"
+                ));
+            };
+            if type_name != &type_identity.0 && (name.is_empty() || type_name != name) {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: record type {type_name:?} does not name expected {name:?} ({type_identity})"
+                ));
+            }
+            if values.len() != fields.len()
+                || fields.iter().any(|(field, _)| !values.contains_key(field))
+            {
+                let expected = fields
+                    .iter()
+                    .map(|(field, _)| field.as_str())
+                    .collect::<Vec<_>>();
+                let received = values.keys().map(String::as_str).collect::<Vec<_>>();
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: record fields differ: expected [{}], received [{}]",
+                    expected.join(", "),
+                    received.join(", ")
+                ));
+            }
+            let mut resolved = Vec::with_capacity(fields.len());
+            for (field, declared_type) in fields {
+                let host = values
+                    .get(field)
+                    .expect("record length and field membership checked");
+                resolved.push((
+                    field.clone(),
+                    resolve_host_declared_type(
+                        declared_type.get(),
+                        host,
+                        composites,
+                        &format!("{path}.{field}"),
+                    )?,
+                ));
+            }
+            Ok(ExecutionValue::Record {
+                type_identity: type_identity.clone(),
+                name: name.clone(),
+                fields: Arc::new(resolved),
+            })
+        }
+        BackendValueContract::Sequence {
+            element, length, ..
+        } => {
+            let HostExecutionValue::Sequence { values } = value else {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: expected exact sequence, received a different host value"
+                ));
+            };
+            if values.len() != *length as usize {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: sequence length mismatch: expected {length}, received {}",
+                    values.len()
+                ));
+            }
+            let values = values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    resolve_host_declared_type(
+                        element.get(),
+                        value,
+                        composites,
+                        &format!("{path}[{index}]"),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(ExecutionValue::Sequence {
+                values: Arc::new(values),
+            })
+        }
+        BackendValueContract::View {
+            element, capacity, ..
+        } => {
+            let HostExecutionValue::Sequence { values } = value else {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: expected bounded sequence, received a different host value"
+                ));
+            };
+            if values.len() > *capacity as usize {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: sequence exceeds capacity {capacity}, received {}",
+                    values.len()
+                ));
+            }
+            let values = values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    resolve_host_declared_type(
+                        element.get(),
+                        value,
+                        composites,
+                        &format!("{path}[{index}]"),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(ExecutionValue::Sequence {
+                values: Arc::new(values),
+            })
+        }
+        BackendValueContract::Vector { element, lanes, .. } => {
+            let HostExecutionValue::Vector { values } = value else {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: expected vector, received a different host value"
+                ));
+            };
+            if values.len() != *lanes as usize {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: vector lane mismatch: expected {lanes}, received {}",
+                    values.len()
+                ));
+            }
+            let values = values
+                .iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    resolve_host_declared_type(
+                        element.get(),
+                        value,
+                        composites,
+                        &format!("{path}[{index}]"),
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(ExecutionValue::Vector {
+                values: Arc::new(values),
+            })
+        }
+        BackendValueContract::Mask { lanes, .. } => {
+            let HostExecutionValue::Mask { lanes: values } = value else {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: expected mask, received a different host value"
+                ));
+            };
+            if values.len() != *lanes as usize {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: mask lane mismatch: expected {lanes}, received {}",
+                    values.len()
+                ));
+            }
+            Ok(ExecutionValue::Mask {
+                lanes: Arc::new(values.clone()),
+            })
+        }
+    }
+}
+
+fn resolve_host_declared_type(
+    declared: &BodyType,
+    value: &HostExecutionValue,
+    composites: &BTreeMap<String, BackendValueContract>,
+    path: &str,
+) -> Result<ExecutionValue, String> {
+    match declared {
+        BodyType::Finite { identity, .. } | BodyType::Record { identity, .. } => {
+            let Some(contract) = BackendValueContract::find_nominal_contract(composites, identity)
+            else {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: nominal type {identity} has no ABI contract"
+                ));
+            };
+            return resolve_host_value(contract, value, composites, path);
+        }
+        BodyType::Named(spelling) => {
+            match BackendValueContract::resolve_nominal_spelling(spelling, composites) {
+                mncs_model::NominalResolution::Resolved(resolved) => {
+                    return resolve_host_declared_type(&resolved, value, composites, path);
+                }
+                mncs_model::NominalResolution::Ambiguous => {
+                    return Err(format!(
+                        "MNCS_TYPED_VALUE {path}: ambiguous nominal type spelling {spelling:?}"
+                    ));
+                }
+                mncs_model::NominalResolution::Unknown => {
+                    let parsed = BodyType::from_semantic_name(spelling);
+                    if parsed != *declared {
+                        return resolve_host_declared_type(&parsed, value, composites, path);
+                    }
+                }
+            }
+        }
+        BodyType::Sequence {
+            element,
+            bound: SequenceBound::Exact(length),
+        } => {
+            return resolve_host_value(
+                &BackendValueContract::Sequence {
+                    semantic_type: declared.semantic_name(),
+                    element: AbiTypeRef((**element).clone()),
+                    length: *length,
+                },
+                value,
+                composites,
+                path,
+            );
+        }
+        BodyType::Sequence {
+            element,
+            bound: SequenceBound::UpTo(capacity),
+        } => {
+            return resolve_host_value(
+                &BackendValueContract::View {
+                    semantic_type: declared.semantic_name(),
+                    element: AbiTypeRef((**element).clone()),
+                    capacity: *capacity,
+                },
+                value,
+                composites,
+                path,
+            );
+        }
+        BodyType::Vector { element, lanes } => {
+            return resolve_host_value(
+                &BackendValueContract::Vector {
+                    semantic_type: declared.semantic_name(),
+                    element: AbiTypeRef((**element).clone()),
+                    lanes: *lanes,
+                },
+                value,
+                composites,
+                path,
+            );
+        }
+        BodyType::Mask { lanes } => {
+            return resolve_host_value(
+                &BackendValueContract::Mask {
+                    semantic_type: declared.semantic_name(),
+                    lanes: *lanes,
+                },
+                value,
+                composites,
+                path,
+            );
+        }
+        _ => {}
+    }
+    match (declared, value) {
+        (BodyType::Bool, HostExecutionValue::Boolean { value }) => {
+            Ok(ExecutionValue::Boolean { value: *value })
+        }
+        (BodyType::Named(spelling), HostExecutionValue::Boolean { value })
+            if spelling == "bool" =>
+        {
+            Ok(ExecutionValue::Boolean { value: *value })
+        }
+        (BodyType::Integer(ty), HostExecutionValue::Integer { value }) => {
+            if !integer_fits(*value, *ty) {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: integer {value} does not fit {}{}",
+                    if ty.signed { "i" } else { "u" },
+                    ty.bits
+                ));
+            }
+            Ok(ExecutionValue::Integer {
+                value: *value,
+                ty: *ty,
+            })
+        }
+        (BodyType::Float(ty), HostExecutionValue::Float { value }) => {
+            if !ty.is_supported() || !value.is_finite() {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: host float must be finite binary64"
+                ));
+            }
+            Ok(ExecutionValue::Float {
+                bits: value.to_bits(),
+                ty: *ty,
+            })
+        }
+        (BodyType::Byte, HostExecutionValue::Byte { value }) => {
+            if !(0..=255).contains(value) {
+                return Err(format!(
+                    "MNCS_TYPED_VALUE {path}: byte value {value} is outside 0..=255"
+                ));
+            }
+            Ok(ExecutionValue::Byte { value: *value })
+        }
+        _ => Err(format!(
+            "MNCS_TYPED_VALUE {path}: host value shape does not match {}",
+            declared.semantic_name()
+        )),
     }
 }
 

@@ -1032,6 +1032,14 @@ impl BackendEvidence {
 pub struct BackendFunctionValueContract {
     pub inputs: Vec<BackendValueContract>,
     pub outputs: Vec<BackendValueContract>,
+    /// Parameter names are part of the host-call description.  They are
+    /// additive so artifacts emitted before named calls remain readable, but
+    /// newly generated bindings can present a semantic signature instead of
+    /// asking a host to infer positions from a scalar ABI.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_names: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub output_names: Vec<String>,
 }
 
 /// A semantic type reference carried by ABI value contracts. Serializes
@@ -2679,6 +2687,8 @@ mod tests {
                     capacity: 8,
                 }],
                 outputs: vec![],
+                input_names: vec![],
+                output_names: vec![],
             },
         );
         artifact.identity = identified("backend-artifact", &artifact.without_identity());

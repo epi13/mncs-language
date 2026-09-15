@@ -31,18 +31,31 @@ enum EscalationReason {
     direct_dependents_affected,
 }
 
+enum ChangeClass {
+    implementation,
+    public_contract,
+    shared_type,
+    parser_semantics,
+    serialization_format,
+    effect_semantics,
+    abi_boundary,
+    canonical_fixture,
+    language_profile,
+    cross_repository_contract,
+}
+
 record SelectionInput {
-    cross_repository: i32,
-    impact_complete: i32,
-    unknown_root: i32,
-    truncated: i32,
-    change_class: i32,
-    high_connectivity: i32,
-    shared_type: i32,
-    effect_semantics: i32,
-    abi_boundary: i32,
-    public_contract: i32,
-    direct_dependents: i32,
+    cross_repository: bool,
+    impact_complete: bool,
+    unknown_root: bool,
+    truncated: bool,
+    change_class: ChangeClass,
+    high_connectivity: bool,
+    shared_type: bool,
+    effect_semantics: bool,
+    abi_boundary: bool,
+    public_contract: bool,
+    direct_dependents: bool,
     selected_tests: i32,
 }
 
@@ -52,106 +65,114 @@ record SelectionDecision {
     sufficient_local: bool,
 }
 
-fn change_reason(change_class: i32) -> (result: i32) {
-    if change_class == 1 { return 16; }
-    if change_class == 2 { return 32; }
-    if change_class == 3 { return 64; }
-    if change_class == 4 { return 128; }
-    if change_class == 5 { return 256; }
-    if change_class == 6 { return 512; }
-    if change_class == 7 { return 1024; }
-    if change_class == 8 { return 2048; }
-    if change_class == 9 { return 1; }
-    return 0;
+fn change_reason(change_class: ChangeClass) -> (result: i32) {
+    return match change_class {
+        implementation => 0,
+        public_contract => 16,
+        shared_type => 32,
+        parser_semantics => 64,
+        serialization_format => 128,
+        effect_semantics => 256,
+        abi_boundary => 512,
+        canonical_fixture => 1024,
+        language_profile => 2048,
+        cross_repository_contract => 1,
+    };
 }
 
-fn broad_reasons(input: SelectionInput) -> (result: i32) {
-    return flag(input.impact_complete, 0, 2)
-        + flag(input.unknown_root, 1, 4)
-        + flag(input.truncated, 1, 8)
-        + change_reason(input.change_class);
+fn broad_reasons(input: SelectionInput, class_reason: i32) -> (result: i32) {
+    return flag_not(input.impact_complete, 2)
+        + flag(input.unknown_root, 4)
+        + flag(input.truncated, 8)
+        + class_reason;
 }
 
 fn risk_reasons(input: SelectionInput) -> (result: i32) {
-    return flag(input.high_connectivity, 1, 4096)
-        + flag(input.shared_type, 1, 32)
-        + flag(input.effect_semantics, 1, 256)
-        + flag(input.abi_boundary, 1, 512)
-        + flag(input.public_contract, 1, 16);
+    return flag(input.high_connectivity, 4096)
+        + flag(input.shared_type, 32)
+        + flag(input.effect_semantics, 256)
+        + flag(input.abi_boundary, 512)
+        + flag(input.public_contract, 16);
 }
 
-fn flag(value: i32, expected: i32, code: i32) -> (result: i32) {
-    if value == expected { return code; }
+fn flag(value: bool, code: i32) -> (result: i32) {
+    if value { return code; }
     return 0;
 }
 
-fn level_for(input: SelectionInput) -> (result: VerificationLevel) {
-    if input.cross_repository == 1 { return VerificationLevel.family; }
-    if input.change_class == 9 { return VerificationLevel.family; }
-    if broad_reasons(input) > 0 { return VerificationLevel.repository_canonical; }
-    if input.public_contract == 1 { return VerificationLevel.repository_canonical; }
+fn flag_not(value: bool, code: i32) -> (result: i32) {
+    if !value { return code; }
+    return 0;
+}
+
+fn level_for(input: SelectionInput, class_reason: i32) -> (result: VerificationLevel) {
+    if input.cross_repository { return VerificationLevel.family; }
+    if class_reason == 1 { return VerificationLevel.family; }
+    if broad_reasons(input, class_reason) > 0 { return VerificationLevel.repository_canonical; }
+    if input.public_contract { return VerificationLevel.repository_canonical; }
     if risk_reasons(input) > 0 { return VerificationLevel.affected_subsystem; }
-    if input.direct_dependents == 1 { return VerificationLevel.direct_dependents; }
+    if input.direct_dependents { return VerificationLevel.direct_dependents; }
     return VerificationLevel.changed_item;
 }
 
-fn reason_for_slot(input: SelectionInput, slot: i32) -> (result: EscalationReason) {
-    if slot == 0 && (input.cross_repository == 1 || input.change_class == 9) {
+fn reason_for_slot(input: SelectionInput, class_reason: i32, slot: i32) -> (result: EscalationReason) {
+    if slot == 0 && (input.cross_repository || class_reason == 1) {
         return EscalationReason.cross_repository_contract_changed;
     }
-    if slot == 1 && input.impact_complete == 0 { return EscalationReason.impact_evidence_truncated; }
-    if slot == 2 && input.unknown_root == 1 { return EscalationReason.unknown_changed_identity; }
-    if slot == 3 && input.truncated == 1 { return EscalationReason.impact_evidence_truncated; }
-    if slot == 4 && (input.public_contract == 1 || input.change_class == 1) {
+    if slot == 1 && !input.impact_complete { return EscalationReason.impact_evidence_truncated; }
+    if slot == 2 && input.unknown_root { return EscalationReason.unknown_changed_identity; }
+    if slot == 3 && input.truncated { return EscalationReason.impact_evidence_truncated; }
+    if slot == 4 && (input.public_contract || class_reason == 16) {
         return EscalationReason.public_contract_changed;
     }
-    if slot == 5 && (input.shared_type == 1 || input.change_class == 2) {
+    if slot == 5 && (input.shared_type || class_reason == 32) {
         return EscalationReason.shared_type_changed;
     }
-    if slot == 6 && input.change_class == 3 { return EscalationReason.parser_semantics_changed; }
-    if slot == 7 && input.change_class == 4 { return EscalationReason.serialization_format_changed; }
-    if slot == 8 && (input.effect_semantics == 1 || input.change_class == 5) {
+    if slot == 6 && class_reason == 64 { return EscalationReason.parser_semantics_changed; }
+    if slot == 7 && class_reason == 128 { return EscalationReason.serialization_format_changed; }
+    if slot == 8 && (input.effect_semantics || class_reason == 256) {
         return EscalationReason.effect_semantics_changed;
     }
-    if slot == 9 && (input.abi_boundary == 1 || input.change_class == 6) {
+    if slot == 9 && (input.abi_boundary || class_reason == 512) {
         return EscalationReason.abi_boundary_changed;
     }
-    if slot == 10 && input.change_class == 7 { return EscalationReason.canonical_fixture_changed; }
-    if slot == 11 && input.change_class == 8 { return EscalationReason.language_profile_changed; }
-    if slot == 12 && input.high_connectivity == 1 {
+    if slot == 10 && class_reason == 1024 { return EscalationReason.canonical_fixture_changed; }
+    if slot == 11 && class_reason == 2048 { return EscalationReason.language_profile_changed; }
+    if slot == 12 && input.high_connectivity {
         return EscalationReason.high_connectivity_definition_changed;
     }
-    if slot == 13 && input.direct_dependents == 1 { return EscalationReason.direct_dependents_affected; }
+    if slot == 13 && input.direct_dependents { return EscalationReason.direct_dependents_affected; }
     return EscalationReason.none;
 }
 
-fn reasons_for(input: SelectionInput) -> (result: [EscalationReason; 16]) {
+fn reasons_for(input: SelectionInput, class_reason: i32) -> (result: [EscalationReason; 16]) {
     return [
-        reason_for_slot(input, 0),
-        reason_for_slot(input, 1),
-        reason_for_slot(input, 2),
-        reason_for_slot(input, 3),
-        reason_for_slot(input, 4),
-        reason_for_slot(input, 5),
-        reason_for_slot(input, 6),
-        reason_for_slot(input, 7),
-        reason_for_slot(input, 8),
-        reason_for_slot(input, 9),
-        reason_for_slot(input, 10),
-        reason_for_slot(input, 11),
-        reason_for_slot(input, 12),
-        reason_for_slot(input, 13),
+        reason_for_slot(input, class_reason, 0),
+        reason_for_slot(input, class_reason, 1),
+        reason_for_slot(input, class_reason, 2),
+        reason_for_slot(input, class_reason, 3),
+        reason_for_slot(input, class_reason, 4),
+        reason_for_slot(input, class_reason, 5),
+        reason_for_slot(input, class_reason, 6),
+        reason_for_slot(input, class_reason, 7),
+        reason_for_slot(input, class_reason, 8),
+        reason_for_slot(input, class_reason, 9),
+        reason_for_slot(input, class_reason, 10),
+        reason_for_slot(input, class_reason, 11),
+        reason_for_slot(input, class_reason, 12),
+        reason_for_slot(input, class_reason, 13),
         EscalationReason.none,
         EscalationReason.none,
     ];
 }
 
 fn choose(input: SelectionInput) -> (result: SelectionDecision) {
-    let level: VerificationLevel = level_for(input);
+    let class_reason: i32 = change_reason(input.change_class);
+    let level: VerificationLevel = level_for(input, class_reason);
     if input.selected_tests > 0 {
-        return make_decision(level, input, locally_sufficient(level));
+        return make_decision(level, input, class_reason, locally_sufficient(level));
     }
-    return make_decision(level, input, false);
+    return make_decision(level, input, class_reason, false);
 }
 
 fn locally_sufficient(level: VerificationLevel) -> (result: bool) {
@@ -164,6 +185,8 @@ fn locally_sufficient(level: VerificationLevel) -> (result: bool) {
     };
 }
 
+// Deprecated compatibility entrypoint. New hosts must call `choose` with a
+// typed SelectionInput through the language-owned host binding.
 fn select_codes(
     cross_repository: i32,
     impact_complete: i32,
@@ -179,25 +202,38 @@ fn select_codes(
     selected_tests: i32,
 ) -> (result: SelectionDecision) {
     return choose(SelectionInput {
-        cross_repository: cross_repository,
-        impact_complete: impact_complete,
-        unknown_root: unknown_root,
-        truncated: truncated,
-        change_class: change_class,
-        high_connectivity: high_connectivity,
-        shared_type: shared_type,
-        effect_semantics: effect_semantics,
-        abi_boundary: abi_boundary,
-        public_contract: public_contract,
-        direct_dependents: direct_dependents,
+        cross_repository: cross_repository == 1,
+        impact_complete: impact_complete == 1,
+        unknown_root: unknown_root == 1,
+        truncated: truncated == 1,
+        change_class: change_class_from_code(change_class),
+        high_connectivity: high_connectivity == 1,
+        shared_type: shared_type == 1,
+        effect_semantics: effect_semantics == 1,
+        abi_boundary: abi_boundary == 1,
+        public_contract: public_contract == 1,
+        direct_dependents: direct_dependents == 1,
         selected_tests: selected_tests,
     });
 }
 
-fn make_decision(level: VerificationLevel, input: SelectionInput, sufficient: bool) -> (result: SelectionDecision) {
+fn change_class_from_code(code: i32) -> (result: ChangeClass) {
+    if code == 1 { return ChangeClass.public_contract; }
+    if code == 2 { return ChangeClass.shared_type; }
+    if code == 3 { return ChangeClass.parser_semantics; }
+    if code == 4 { return ChangeClass.serialization_format; }
+    if code == 5 { return ChangeClass.effect_semantics; }
+    if code == 6 { return ChangeClass.abi_boundary; }
+    if code == 7 { return ChangeClass.canonical_fixture; }
+    if code == 8 { return ChangeClass.language_profile; }
+    if code == 9 { return ChangeClass.cross_repository_contract; }
+    return ChangeClass.implementation;
+}
+
+fn make_decision(level: VerificationLevel, input: SelectionInput, class_reason: i32, sufficient: bool) -> (result: SelectionDecision) {
     return SelectionDecision {
         level: level,
-        reasons: reasons_for(input),
+        reasons: reasons_for(input, class_reason),
         sufficient_local: sufficient,
     };
 }

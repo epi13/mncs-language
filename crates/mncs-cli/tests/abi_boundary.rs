@@ -377,6 +377,10 @@ fn abi_report_carries_the_host_abi_version() {
         .unwrap_or_else(|error| panic!("ABI JSON ({stderr}): {error}"));
     assert_eq!(output.status.code(), Some(0), "{stderr}: {abi:#}");
     assert_eq!(abi["host_abi_version"], "1");
+    assert_eq!(abi["typed_call_schema_version"], "mncs.typed-call/1");
+    assert!(abi["interface_identity"]
+        .as_str()
+        .is_some_and(|value| value.len() == 64));
     assert_eq!(
         abi["functions"]["tail2"]["outputs"][0]["view"]["capacity"],
         8
