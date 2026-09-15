@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 
-GENERATOR_VERSION = "mncs-host-bindings/0.1"
+GENERATOR_VERSION = "mncs-host-bindings/0.2"
 
 
 def binding_content_identity(abi: dict[str, Any], language: str) -> str:
@@ -62,6 +62,25 @@ def safe_identifier(value: str) -> str:
     return value
 
 
+def input_identifiers(function: dict[str, Any], count: int) -> list[str]:
+    """Return stable, collision-free host names for callable inputs."""
+
+    names = function.get("input_names", [])
+    used: set[str] = set()
+    result: list[str] = []
+    for index in range(count):
+        submitted = names[index] if isinstance(names, list) and index < len(names) else ""
+        base = safe_identifier(str(submitted)) if submitted else f"input_{index + 1}"
+        candidate = base
+        suffix = 2
+        while candidate in used:
+            candidate = f"{base}_{suffix}"
+            suffix += 1
+        used.add(candidate)
+        result.append(candidate)
+    return result
+
+
 def unique_composites(abi: dict[str, Any]) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
     for key, contract in abi["composites"].items():
@@ -83,7 +102,7 @@ def unique_composites(abi: dict[str, Any]) -> dict[str, dict[str, Any]]:
 def shape(contract: Any) -> dict[str, Any]:
     if not isinstance(contract, dict):
         return {}
-    for kind in ("finite", "record", "sequence", "vector", "mask", "scalar"):
+    for kind in ("finite", "record", "view", "sequence", "vector", "mask", "scalar"):
         if kind in contract and isinstance(contract[kind], dict):
             return {kind: contract[kind]}
     return contract
@@ -108,6 +127,8 @@ def python_descriptor(contract: Any) -> str:
     if isinstance(contract, str):
         if contract == "bool":
             return "bool"
+        if contract == "byte":
+            return "byte"
         if contract.startswith(("i", "u")) and contract[1:].isdigit():
             return "int"
         if contract.startswith("f") and contract[1:].isdigit():
@@ -128,6 +149,11 @@ def python_descriptor(contract: Any) -> str:
         return f"finite:{value['finite'].get('name', '')}"
     if "record" in value:
         return f"record:{value['record'].get('name', '')}"
+    if "view" in value:
+        view = value["view"]
+        element = view.get("element")
+        capacity = view.get("capacity")
+        return f"view:{python_descriptor(element)}:{capacity if capacity is not None else ''}"
     if "sequence" in value:
         sequence = value["sequence"]
         element = sequence.get("element")
@@ -156,6 +182,8 @@ def rust_descriptor(contract: Any) -> str:
     if isinstance(contract, str):
         if contract == "bool":
             return "bool"
+        if contract == "byte":
+            return "byte"
         if contract.startswith("u") and contract[1:].isdigit():
             return "uint"
         if contract.startswith("i") and contract[1:].isdigit():
@@ -178,6 +206,11 @@ def rust_descriptor(contract: Any) -> str:
         return f"finite:{value['finite'].get('name', '')}"
     if "record" in value:
         return f"record:{value['record'].get('name', '')}"
+    if "view" in value:
+        view = value["view"]
+        element = view.get("element")
+        capacity = view.get("capacity")
+        return f"view:{rust_descriptor(element)}:{capacity if capacity is not None else ''}"
     if "sequence" in value:
         sequence = value["sequence"]
         element = sequence.get("element")
@@ -209,7 +242,10 @@ def python_annotation(descriptor: str) -> str:
         return "float"
     if descriptor.startswith("finite:") or descriptor.startswith("record:"):
         return safe_identifier(descriptor.split(":", 1)[1])
-    if descriptor.startswith(("sequence:", "vector:")):
+    if descriptor.startswith(("view:", "sequence:", "vector:")):
+        parts = descriptor.split(":")
+        if ":".join(parts[1:-1]) == "byte":
+            return "bytes"
         return "tuple[Any, ...]"
     if descriptor.startswith("mask:"):
         return "tuple[bool, ...]"
@@ -283,6 +319,8 @@ def python_binding(abi: dict[str, Any]) -> str:
         "        return {'integer': {'value': value}}",
         "    if isinstance(value, float):",
         "        return {'float': {'value': value}}",
+        "    if isinstance(value, (bytes, bytearray)):",
+        "        return {'sequence': {'values': [{'byte': {'value': item}} for item in value]}}",
         "    if isinstance(value, (tuple, list)):",
         "        return {'sequence': {'values': [_encode(item) for item in value]}}",
         "    return value",
@@ -301,14 +339,15 @@ def python_binding(abi: dict[str, Any]) -> str:
         "        if cls is None:",
         "            raise BindingError(f'generated record type is missing: {descriptor}')",
         "        return cls.from_host_value(value)",
-        "    if descriptor.startswith('sequence:') or descriptor.startswith('vector:'):",
+        "    if descriptor.startswith('view:') or descriptor.startswith('sequence:') or descriptor.startswith('vector:'):",
         "        sequence = value.get('sequence') if isinstance(value, dict) else None",
         "        values = sequence.get('values') if isinstance(sequence, dict) else None",
         "        if not isinstance(values, list):",
         "            raise BindingError('returned value is not a typed sequence')",
         "        parts = descriptor.split(':')",
         "        element_descriptor = ':'.join(parts[1:-1])",
-        "        return tuple(_decode(element_descriptor, item) for item in values)",
+        "        decoded = tuple(_decode(element_descriptor, item) for item in values)",
+        "        return bytes(decoded) if element_descriptor == 'byte' else decoded",
         "    if descriptor == 'bool':",
         "        boolean = value.get('boolean') if isinstance(value, dict) else None",
         "        return boolean.get('value') if isinstance(boolean, dict) else value",
@@ -378,9 +417,9 @@ def python_binding(abi: dict[str, Any]) -> str:
         "        self._config = _BindingConfig(mncs, Path(source), tuple(Path(path) for path in libraries), timeout)",
         "        self.last_execution: dict[str, Any] | None = None",
         "",
-        "    def _call(self, module: str, function: str, argument: Any) -> dict[str, Any]:",
+        "    def _call(self, module: str, function: str, *arguments: Any) -> dict[str, Any]:",
         "        request = {'schema_version': '0.1', 'target': {'module': module, 'function': function},",
-        "                   'typed_arguments': [_encode(argument)], 'expected_interface_identity': INTERFACE_IDENTITY, 'step_budget': 8192}",
+        "                   'typed_arguments': [_encode(argument) for argument in arguments], 'expected_interface_identity': INTERFACE_IDENTITY, 'step_budget': 8192}",
         "        with tempfile.TemporaryDirectory(prefix='mncs-generated-binding-') as directory:",
         "            request_path = Path(directory) / 'request.json'",
         "            request_path.write_text(json.dumps(request, separators=(',', ':')), encoding='utf-8')",
@@ -408,16 +447,35 @@ def python_binding(abi: dict[str, Any]) -> str:
         inputs = function.get("inputs", [])
         input_names = function.get("input_names", [])
         output_types = function.get("outputs", [])
-        if len(inputs) != 1 or len(output_types) != 1:
+        if len(output_types) != 1:
             continue
-        arg_descriptor = python_descriptor(inputs[0])
         return_descriptor = python_descriptor(output_types[0])
-        arg_annotation = python_annotation(arg_descriptor)
         return_annotation = python_annotation(return_descriptor)
         method = safe_identifier(function_name)
+        if len(inputs) == 1:
+            arg_descriptor = python_descriptor(inputs[0])
+            arg_annotation = python_annotation(arg_descriptor)
+            out.extend([
+                f"    def {method}(self, input_value: {arg_annotation}) -> {return_annotation}:",
+                f"        response = self._call({function.get('declaring_module', abi['module'])!r}, {function_name!r}, input_value)",
+                f"        return _decode({return_descriptor!r}, response['returned'][0])",
+                "",
+            ])
+            continue
+        names = input_identifiers(function, len(inputs))
+        parameters = ", ".join(
+            f"{name}: {python_annotation(python_descriptor(contract))}"
+            for name, contract in zip(names, inputs)
+        )
+        arguments = ", ".join(names)
+        signature = f"self, {parameters}" if parameters else "self"
+        call = (
+            f"        response = self._call({function.get('declaring_module', abi['module'])!r}, "
+            f"{function_name!r}{', ' + arguments if arguments else ''})"
+        )
         out.extend([
-            f"    def {method}(self, input_value: {arg_annotation}) -> {return_annotation}:",
-            f"        response = self._call({function.get('declaring_module', abi['module'])!r}, {function_name!r}, input_value)",
+            f"    def {method}({signature}) -> {return_annotation}:",
+            call,
             f"        return _decode({return_descriptor!r}, response['returned'][0])",
             "",
         ])
@@ -454,7 +512,7 @@ def rust_type_descriptor(descriptor: str) -> str:
         return "f64"
     if descriptor.startswith("finite:") or descriptor.startswith("record:"):
         return safe_identifier(descriptor.split(":", 1)[1])
-    if descriptor.startswith(("sequence:", "vector:")):
+    if descriptor.startswith(("view:", "sequence:", "vector:")):
         parts = descriptor.split(":")
         element = ":".join(parts[1:-1])
         return f"Vec<{rust_type_descriptor(element)}>"
@@ -476,7 +534,7 @@ def rust_encode_expression(descriptor: str, expression: str) -> str:
         return f"json!({{\"float\": {{\"value\": {expression}}}}})"
     if descriptor.startswith(("finite:", "record:")):
         return f"{expression}.host_value()"
-    if descriptor.startswith(("sequence:", "vector:")):
+    if descriptor.startswith(("view:", "sequence:", "vector:")):
         parts = descriptor.split(":")
         element = ":".join(parts[1:-1])
         item = rust_encode_expression(element, "item")
@@ -499,7 +557,7 @@ def rust_decode_result_expression(descriptor: str, expression: str) -> str:
         return f"decode_f64({expression})"
     if descriptor.startswith("finite:") or descriptor.startswith("record:"):
         return f"{safe_identifier(descriptor.split(':', 1)[1])}::from_host_value({expression})"
-    if descriptor.startswith(("sequence:", "vector:")):
+    if descriptor.startswith(("view:", "sequence:", "vector:")):
         parts = descriptor.split(":")
         element = ":".join(parts[1:-1])
         item_result = rust_decode_result_expression(element, "item")
@@ -643,17 +701,37 @@ def rust_binding(abi: dict[str, Any]) -> str:
     for function_name, function in sorted(functions.items()):
         inputs = function.get("inputs", [])
         outputs = function.get("outputs", [])
-        if len(inputs) != 1 or len(outputs) != 1:
+        if len(outputs) != 1:
             continue
-        arg_descriptor = rust_descriptor(inputs[0])
         return_descriptor = rust_descriptor(outputs[0])
-        method = safe_identifier(function_name)
-        arg_type = rust_type(inputs[0])
         return_type = rust_type(outputs[0])
-        encoded = rust_encode_expression(arg_descriptor, "input")
         decoded = rust_decode_expression(return_descriptor, "&value")
+        method = safe_identifier(function_name)
+        if len(inputs) == 1:
+            arg_descriptor = rust_descriptor(inputs[0])
+            arg_type = rust_type(inputs[0])
+            encoded = rust_encode_expression(arg_descriptor, "input")
+            out.extend([
+                f"pub fn {method}(session: &Session, input: {arg_type}, options: CallOptions) -> Result<{return_type}, EmbedError> {{",
+                f"    let arguments = serde_json::to_string(&vec![{encoded}]).map_err(|error| EmbedError::new(\"binding_encode\", error.to_string()))?;",
+                f"    let output = typed_call(session, {json.dumps(function.get('declaring_module', abi['module']))}, {json.dumps(function_name)}, &arguments, options)?;",
+                "    let value = returned_value(&output)?;",
+                f"    Ok({decoded})",
+                "}",
+                "",
+            ])
+            continue
+        names = input_identifiers(function, len(inputs))
+        parameters = ", ".join(
+            f"{name}: {rust_type(contract)}" for name, contract in zip(names, inputs)
+        )
+        signature = f"session: &Session{', ' + parameters if parameters else ''}, options: CallOptions"
+        encoded = ", ".join(
+            rust_encode_expression(rust_descriptor(contract), name)
+            for name, contract in zip(names, inputs)
+        )
         out.extend([
-            f"pub fn {method}(session: &Session, input: {arg_type}, options: CallOptions) -> Result<{return_type}, EmbedError> {{",
+            f"pub fn {method}({signature}) -> Result<{return_type}, EmbedError> {{",
             f"    let arguments = serde_json::to_string(&vec![{encoded}]).map_err(|error| EmbedError::new(\"binding_encode\", error.to_string()))?;",
             f"    let output = typed_call(session, {json.dumps(function.get('declaring_module', abi['module']))}, {json.dumps(function_name)}, &arguments, options)?;",
             "    let value = returned_value(&output)?;",
