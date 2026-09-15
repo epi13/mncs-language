@@ -730,9 +730,10 @@ def rust_binding(abi: dict[str, Any]) -> str:
             rust_encode_expression(rust_descriptor(contract), name)
             for name, contract in zip(names, inputs)
         )
+        argument_values = f"vec![{encoded}]" if encoded else "Vec::<Value>::new()"
         out.extend([
             f"pub fn {method}({signature}) -> Result<{return_type}, EmbedError> {{",
-            f"    let arguments = serde_json::to_string(&vec![{encoded}]).map_err(|error| EmbedError::new(\"binding_encode\", error.to_string()))?;",
+            f"    let arguments = serde_json::to_string(&{argument_values}).map_err(|error| EmbedError::new(\"binding_encode\", error.to_string()))?;",
             f"    let output = typed_call(session, {json.dumps(function.get('declaring_module', abi['module']))}, {json.dumps(function_name)}, &arguments, options)?;",
             "    let value = returned_value(&output)?;",
             f"    Ok({decoded})",
