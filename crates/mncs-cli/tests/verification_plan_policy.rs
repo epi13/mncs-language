@@ -40,7 +40,7 @@ fn run(args: [i64; 12]) -> Value {
                 "function": "select_codes"
             },
             "arguments": arguments,
-            "step_budget": 512
+        "step_budget": 4096
         }))
         .expect("encode request"),
     )
@@ -65,30 +65,67 @@ fn field<'a>(value: &'a Value, name: &str) -> &'a Value {
         .expect("returned record fields")
         .iter()
         .find(|pair| pair[0] == name)
-        .map(|pair| &pair[1]["integer"]["value"])
+        .map(|pair| &pair[1])
         .expect("policy field")
+}
+
+fn finite_variant(value: &Value, field_name: &str) -> String {
+    field(value, field_name)["finite"]["variant_identity"]
+        .as_str()
+        .expect("finite variant identity")
+        .rsplit("::")
+        .next()
+        .expect("finite variant name")
+        .to_owned()
+}
+
+fn reasons(value: &Value) -> Vec<String> {
+    field(value, "reasons")["sequence"]["values"]
+        .as_array()
+        .expect("reasons sequence")
+        .iter()
+        .map(|reason| {
+            reason["finite"]["variant_identity"]
+                .as_str()
+                .expect("reason variant identity")
+                .rsplit("::")
+                .next()
+                .expect("reason variant name")
+                .to_owned()
+        })
+        .filter(|reason| reason != "none")
+        .collect()
+}
+
+fn sufficient(value: &Value) -> bool {
+    field(value, "sufficient_local")["boolean"]["value"]
+        .as_bool()
+        .expect("sufficiency")
 }
 
 #[test]
 fn native_policy_keeps_direct_dependents_narrow() {
     let result = run([0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1]);
     assert_eq!(result["status"], "returned");
-    assert_eq!(field(&result, "level_code"), 1);
-    assert_eq!(field(&result, "reason_mask"), 8192);
+    assert_eq!(finite_variant(&result, "level"), "direct_dependents");
+    assert_eq!(reasons(&result), vec!["direct_dependents_affected"]);
+    assert!(sufficient(&result));
 }
 
 #[test]
 fn native_policy_promotes_public_contracts_to_repository_proof() {
     let result = run([0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1]);
     assert_eq!(result["status"], "returned");
-    assert_eq!(field(&result, "level_code"), 3);
-    assert_eq!(field(&result, "reason_mask"), 16);
+    assert_eq!(finite_variant(&result, "level"), "repository_canonical");
+    assert_eq!(reasons(&result), vec!["public_contract_changed"]);
+    assert!(!sufficient(&result));
 }
 
 #[test]
 fn native_policy_routes_cross_repository_changes_to_family() {
     let result = run([0, 1, 0, 0, 9, 0, 0, 0, 0, 0, 0, 1]);
     assert_eq!(result["status"], "returned");
-    assert_eq!(field(&result, "level_code"), 4);
-    assert_eq!(field(&result, "reason_mask"), 1);
+    assert_eq!(finite_variant(&result, "level"), "family");
+    assert_eq!(reasons(&result), vec!["cross_repository_contract_changed"]);
+    assert!(!sufficient(&result));
 }

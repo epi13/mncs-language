@@ -1,9 +1,35 @@
 mncs 0.17;
 
-// Native bounded verification-selection policy.  JSON, filesystem, and
-// subprocess work remain Ravel transport; this module owns the level and
-// reason-mask decision used by the normal Ravel entrypoint.
+// Native bounded verification-selection policy. JSON, filesystem, and
+// subprocess work remain Ravel transport; this module owns the level,
+// typed escalation reasons, and local sufficiency decision used by the
+// normal Ravel entrypoint.
 module mncs.family.verification_plan.v1;
+
+enum VerificationLevel {
+    changed_item,
+    direct_dependents,
+    affected_subsystem,
+    repository_canonical,
+    family,
+}
+
+enum EscalationReason {
+    none,
+    cross_repository_contract_changed,
+    impact_evidence_truncated,
+    unknown_changed_identity,
+    public_contract_changed,
+    shared_type_changed,
+    parser_semantics_changed,
+    serialization_format_changed,
+    effect_semantics_changed,
+    abi_boundary_changed,
+    canonical_fixture_changed,
+    language_profile_changed,
+    high_connectivity_definition_changed,
+    direct_dependents_affected,
+}
 
 record SelectionInput {
     cross_repository: i32,
@@ -21,9 +47,9 @@ record SelectionInput {
 }
 
 record SelectionDecision {
-    level_code: i32,
-    reason_mask: i32,
-    sufficient_local: i32,
+    level: VerificationLevel,
+    reasons: [EscalationReason; 16],
+    sufficient_local: bool,
 }
 
 fn change_reason(change_class: i32) -> (result: i32) {
@@ -59,34 +85,83 @@ fn flag(value: i32, expected: i32, code: i32) -> (result: i32) {
     return 0;
 }
 
-fn level_for(input: SelectionInput) -> (result: i32) {
-    if input.cross_repository == 1 { return 4; }
-    if input.change_class == 9 { return 4; }
-    if broad_reasons(input) > 0 { return 3; }
-    if input.public_contract == 1 { return 3; }
-    if risk_reasons(input) > 0 { return 2; }
-    if input.direct_dependents == 1 { return 1; }
-    return 0;
+fn level_for(input: SelectionInput) -> (result: VerificationLevel) {
+    if input.cross_repository == 1 { return VerificationLevel.family; }
+    if input.change_class == 9 { return VerificationLevel.family; }
+    if broad_reasons(input) > 0 { return VerificationLevel.repository_canonical; }
+    if input.public_contract == 1 { return VerificationLevel.repository_canonical; }
+    if risk_reasons(input) > 0 { return VerificationLevel.affected_subsystem; }
+    if input.direct_dependents == 1 { return VerificationLevel.direct_dependents; }
+    return VerificationLevel.changed_item;
 }
 
-fn reason_for(input: SelectionInput) -> (result: i32) {
-    if input.cross_repository == 1 { return 1; }
-    if input.change_class == 9 { return 1; }
-    if broad_reasons(input) > 0 { return broad_reasons(input); }
-    if input.public_contract == 1 { return 16; }
-    if risk_reasons(input) > 0 { return risk_reasons(input); }
-    if input.direct_dependents == 1 { return 8192; }
-    return 0;
+fn reason_for_slot(input: SelectionInput, slot: i32) -> (result: EscalationReason) {
+    if slot == 0 && (input.cross_repository == 1 || input.change_class == 9) {
+        return EscalationReason.cross_repository_contract_changed;
+    }
+    if slot == 1 && input.impact_complete == 0 { return EscalationReason.impact_evidence_truncated; }
+    if slot == 2 && input.unknown_root == 1 { return EscalationReason.unknown_changed_identity; }
+    if slot == 3 && input.truncated == 1 { return EscalationReason.impact_evidence_truncated; }
+    if slot == 4 && (input.public_contract == 1 || input.change_class == 1) {
+        return EscalationReason.public_contract_changed;
+    }
+    if slot == 5 && (input.shared_type == 1 || input.change_class == 2) {
+        return EscalationReason.shared_type_changed;
+    }
+    if slot == 6 && input.change_class == 3 { return EscalationReason.parser_semantics_changed; }
+    if slot == 7 && input.change_class == 4 { return EscalationReason.serialization_format_changed; }
+    if slot == 8 && (input.effect_semantics == 1 || input.change_class == 5) {
+        return EscalationReason.effect_semantics_changed;
+    }
+    if slot == 9 && (input.abi_boundary == 1 || input.change_class == 6) {
+        return EscalationReason.abi_boundary_changed;
+    }
+    if slot == 10 && input.change_class == 7 { return EscalationReason.canonical_fixture_changed; }
+    if slot == 11 && input.change_class == 8 { return EscalationReason.language_profile_changed; }
+    if slot == 12 && input.high_connectivity == 1 {
+        return EscalationReason.high_connectivity_definition_changed;
+    }
+    if slot == 13 && input.direct_dependents == 1 { return EscalationReason.direct_dependents_affected; }
+    return EscalationReason.none;
+}
+
+fn reasons_for(input: SelectionInput) -> (result: [EscalationReason; 16]) {
+    return [
+        reason_for_slot(input, 0),
+        reason_for_slot(input, 1),
+        reason_for_slot(input, 2),
+        reason_for_slot(input, 3),
+        reason_for_slot(input, 4),
+        reason_for_slot(input, 5),
+        reason_for_slot(input, 6),
+        reason_for_slot(input, 7),
+        reason_for_slot(input, 8),
+        reason_for_slot(input, 9),
+        reason_for_slot(input, 10),
+        reason_for_slot(input, 11),
+        reason_for_slot(input, 12),
+        reason_for_slot(input, 13),
+        EscalationReason.none,
+        EscalationReason.none,
+    ];
 }
 
 fn choose(input: SelectionInput) -> (result: SelectionDecision) {
-    let level: i32 = level_for(input);
+    let level: VerificationLevel = level_for(input);
     if input.selected_tests > 0 {
-        if level == 3 { return make_decision(level, reason_for(input), 0); }
-        if level == 4 { return make_decision(level, reason_for(input), 0); }
-        return make_decision(level, reason_for(input), 1);
+        return make_decision(level, input, locally_sufficient(level));
     }
-    return make_decision(level, reason_for(input), 0);
+    return make_decision(level, input, false);
+}
+
+fn locally_sufficient(level: VerificationLevel) -> (result: bool) {
+    return match level {
+        changed_item => true,
+        direct_dependents => true,
+        affected_subsystem => true,
+        repository_canonical => false,
+        family => false,
+    };
 }
 
 fn select_codes(
@@ -119,10 +194,10 @@ fn select_codes(
     });
 }
 
-fn make_decision(level: i32, reasons: i32, sufficient: i32) -> (result: SelectionDecision) {
+fn make_decision(level: VerificationLevel, input: SelectionInput, sufficient: bool) -> (result: SelectionDecision) {
     return SelectionDecision {
-        level_code: level,
-        reason_mask: reasons,
+        level: level,
+        reasons: reasons_for(input),
         sufficient_local: sufficient,
     };
 }
