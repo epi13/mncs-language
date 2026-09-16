@@ -1047,17 +1047,31 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
             continue;
         };
         let native_result = native_test_value(native_value);
-        let verdict = native_result
+        let projection_output = session.call(
+            "mncs.test.assertions.v1",
+            "project_test",
+            vec![native_value.clone()],
+            &call_options,
+        );
+        let projection_value = returned_value(&projection_output).cloned();
+        if projection_value.is_none() {
+            transport_failure = Some(format!(
+                "native test projection rejected {} (status {})",
+                test.test_case_identity.0, projection_output.status
+            ));
+        }
+        let projection = projection_value
+            .as_ref()
+            .map(native_test_projection)
+            .unwrap_or(serde_json::Value::Null);
+        let verdict = projection
             .get("verdict")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("UNKNOWN");
-        let status = match verdict {
-            "PASS" => "passed",
-            "FAIL" => "failed",
-            "SKIP" => "skipped",
-            "UNSUPPORTED" => "unsupported",
-            _ => "infrastructure_failure",
-        };
+        let status = projection
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("infrastructure_failure");
         let observed = session.call(
             "mncs.test.suite.v1",
             "observe",
@@ -1091,11 +1105,29 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
             },
             "source_span": test.source_span,
             "native_result": native_result,
+            "projection": projection,
             "execution": output
         }));
     }
     let suite_summary = native_suite_value(&suite_value);
-    let suite_verdict = suite_summary
+    let suite_projection_output = session.call(
+        "mncs.test.suite.v1",
+        "project",
+        vec![suite_value.clone()],
+        &call_options,
+    );
+    let suite_projection_value = returned_value(&suite_projection_output).cloned();
+    if suite_projection_value.is_none() {
+        transport_failure = Some(format!(
+            "native suite projection rejected (status {})",
+            suite_projection_output.status
+        ));
+    }
+    let suite_projection = suite_projection_value
+        .as_ref()
+        .map(native_suite_projection)
+        .unwrap_or(serde_json::Value::Null);
+    let suite_verdict = suite_projection
         .get("verdict")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("UNKNOWN");
@@ -1104,11 +1136,13 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
     } else {
         suite_verdict
     };
-    let classification = match verdict {
-        "PASS" => "passed",
-        "FAIL" => "test_failure",
-        "UNKNOWN" => "unsupported",
-        _ => "test_failure",
+    let classification = if transport_failure.is_some() {
+        "infrastructure_failure"
+    } else {
+        suite_projection
+            .get("classification")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unsupported")
     };
     let selection_level = if requested_test_identities.is_empty() && options.filters.is_empty() {
         "repository_canonical"
@@ -1171,7 +1205,10 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
             "host_subprocesses": 0,
             "batch_size": selected.len(),
             "native_batch_calls": 1,
-            "native_session_calls": 1 + selected.len() + selected.len(),
+            // empty + per-test semantic projection + per-test suite fold +
+            // final suite projection; the batch execution is counted
+            // separately as native_batch_calls.
+            "native_session_calls": 2 + selected.len() * 3,
             "step_budget": options.step_budget,
             "runner_version": env!("CARGO_PKG_VERSION"),
             "run_identity": run_identity,
@@ -1245,6 +1282,49 @@ fn finite_variant_label(value: &ExecutionValue) -> Option<String> {
             .map(ToOwned::to_owned),
         _ => None,
     }
+}
+
+fn finite_field_label(value: &ExecutionValue, name: &str) -> Option<String> {
+    record_field(value, name).and_then(finite_variant_label)
+}
+
+/// Project native semantic decisions for the external compatibility document.
+/// The decisions themselves come from mncs.test.assertions.v1; this helper only
+/// spells bounded finite values at the JSON boundary.
+fn native_test_projection(value: &ExecutionValue) -> serde_json::Value {
+    let lower = |name: &str, fallback: &str| {
+        finite_field_label(value, name)
+            .map(|label| label.to_ascii_lowercase())
+            .unwrap_or_else(|| fallback.to_owned())
+    };
+    let verdict = finite_field_label(value, "verdict")
+        .map(|label| label.to_ascii_uppercase())
+        .unwrap_or_else(|| "UNKNOWN".to_owned());
+    serde_json::json!({
+        "status": lower("status", "infrastructure_failure"),
+        "classification": lower("classification", "infrastructure_failure"),
+        "verdict": verdict,
+        "failure_kind": lower("failure_kind", "infrastructure_failure")
+    })
+}
+
+/// Project the native suite decision without reconstructing its meaning from
+/// counters in the host.  Counter values remain an external representation of
+/// the SuiteSummary record; the verdict/classification are native projections.
+fn native_suite_projection(value: &ExecutionValue) -> serde_json::Value {
+    let lower = |name: &str, fallback: &str| {
+        finite_field_label(value, name)
+            .map(|label| label.to_ascii_lowercase())
+            .unwrap_or_else(|| fallback.to_owned())
+    };
+    let verdict = finite_field_label(value, "verdict")
+        .map(|label| label.to_ascii_uppercase())
+        .unwrap_or_else(|| "UNKNOWN".to_owned());
+    serde_json::json!({
+        "status": lower("status", "unsupported"),
+        "classification": lower("classification", "unsupported"),
+        "verdict": verdict
+    })
 }
 
 fn native_test_value(value: &ExecutionValue) -> serde_json::Value {
