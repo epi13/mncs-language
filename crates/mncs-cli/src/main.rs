@@ -20,6 +20,8 @@ use mncs_compiler::{
     ModuleResolutionOutcome, ModuleResolver, ReferenceCompiler, SourceFrontEndResult,
 };
 use mncs_embed::{
+    process::{run_bounded, ProcessRequest, MAX_CAPTURE_BYTES, MAX_DEADLINE_MS},
+    structured::StructuredDocument,
     Artifact as EmbedArtifact, BatchCall as EmbedBatchCall, CallOptions as EmbedCallOptions,
     Session as EmbedSession,
 };
@@ -104,6 +106,8 @@ fn run_cli() -> ExitCode {
         }
         "test-inventory" => test_inventory_command(args),
         "test" => test_command(args),
+        "call" | "run-app" => call_command(args),
+        "process" => process_command(args),
         "canonicalize" => one_manifest_command(args, canonicalize),
         "identity" => one_manifest_command(args, identity),
         "graph" => one_manifest_command(args, graph),
@@ -269,12 +273,407 @@ struct NativeTestOptions {
     libraries: Vec<PathBuf>,
     filters: Vec<String>,
     test_identities: Vec<String>,
+    verification_plan: Option<PathBuf>,
     step_budget: u64,
     format: String,
     result_path: Option<PathBuf>,
     check_result_path: Option<PathBuf>,
     artifacts_path: Option<PathBuf>,
     allow_unsupported: bool,
+}
+
+/// Generic typed MNCS application invocation.  The CLI owns only source
+/// admission, artifact execution, and the external typed-JSON boundary; the
+/// called module owns application semantics.
+#[derive(Debug, Default)]
+struct NativeCallOptions {
+    source_path: Option<String>,
+    libraries: Vec<PathBuf>,
+    module: Option<String>,
+    function: Option<String>,
+    arguments: Option<String>,
+    step_budget: u64,
+    result_path: Option<PathBuf>,
+    expected_interface_identity: Option<String>,
+}
+
+fn call_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut options = NativeCallOptions {
+        step_budget: 200_000,
+        ..NativeCallOptions::default()
+    };
+    let mut args = args.into_iter();
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--source" => options.source_path = args.next(),
+            "--library" => match args.next() {
+                Some(value) if !value.is_empty() => options.libraries.push(PathBuf::from(value)),
+                _ => return native_call_usage("--library requires a path"),
+            },
+            "--module" => options.module = args.next(),
+            "--function" => options.function = args.next(),
+            "--args" => match args.next() {
+                Some(path) => match read_source(&path) {
+                    Ok(value) => options.arguments = Some(value),
+                    Err(code) => return code,
+                },
+                None => return native_call_usage("--args requires a JSON file"),
+            },
+            "--args-json" => options.arguments = args.next(),
+            "--step-budget" => match args.next().and_then(|value| value.parse::<u64>().ok()) {
+                Some(value) if value > 0 => options.step_budget = value,
+                _ => return native_call_usage("--step-budget requires a positive integer"),
+            },
+            "--result" => options.result_path = args.next().map(PathBuf::from),
+            "--interface-identity" => options.expected_interface_identity = args.next(),
+            value if value.starts_with('-') => {
+                return native_call_usage(&format!("unknown option {value:?}"))
+            }
+            value => {
+                if options.source_path.replace(value.to_owned()).is_some() {
+                    return native_call_usage("source path was supplied more than once");
+                }
+            }
+        }
+    }
+    let Some(source_path) = options.source_path.clone() else {
+        return native_call_usage("a source path is required");
+    };
+    let Some(module) = options.module.clone() else {
+        return native_call_usage("--module is required");
+    };
+    let Some(function) = options.function.clone() else {
+        return native_call_usage("--function is required");
+    };
+    let Some(arguments) = options.arguments.clone() else {
+        return native_call_usage("--args or --args-json is required");
+    };
+    run_native_call(&source_path, &module, &function, &arguments, &options)
+}
+
+fn native_call_usage(message: &str) -> ExitCode {
+    eprintln!("error: {message}");
+    eprintln!(
+        "usage: mncs call SOURCE --module MODULE --function FUNCTION --args FILE [--library ROOT ...] [--step-budget N] [--result FILE] [--interface-identity ID]"
+    );
+    ExitCode::from(2)
+}
+
+fn run_native_call(
+    source_path: &str,
+    module: &str,
+    function: &str,
+    arguments: &str,
+    options: &NativeCallOptions,
+) -> ExitCode {
+    let document = match StructuredDocument::from_bytes(arguments.as_bytes()) {
+        Ok(document) => document,
+        Err(error) => {
+            eprintln!("error: typed argument document rejected: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if !document.value().is_array() {
+        eprintln!("error: typed argument document must be a JSON array");
+        return ExitCode::from(2);
+    }
+    let source = match read_source(source_path) {
+        Ok(source) => source,
+        Err(code) => return code,
+    };
+    let envelope = SourceEnvelope::inline(SourceArtifactKind::Program, "native-call", source);
+    let resolver = FileModuleResolver::with_explicit_libraries(source_path, &options.libraries);
+    let compiler = ReferenceCompiler::default();
+    let front_end = compiler.front_end_with_resolver(envelope, &resolver);
+    if !front_end.is_valid() {
+        let report = serde_json::json!({
+            "schema_version": "mncs.application-call/1",
+            "status": "compile_failed",
+            "module": module,
+            "function": function,
+            "diagnostics": front_end.diagnostics
+        });
+        return finish_native_call_output(&report, options, ExitCode::from(4));
+    }
+    let Some(program) = front_end.program else {
+        eprintln!("error: compiler admitted no executable program");
+        return ExitCode::from(4);
+    };
+    let emit = [
+        ArtifactRepresentation::Semantic,
+        ArtifactRepresentation::Hir,
+        ArtifactRepresentation::Ssa,
+        ArtifactRepresentation::TargetLoweringPlan,
+        ArtifactRepresentation::BackendArtifact,
+    ]
+    .into_iter()
+    .collect();
+    let request = match compiler.request_for_program_with_backend(
+        &program,
+        emit,
+        mncs_codegen::RESEARCH_BYTECODE_BACKEND_NAME,
+    ) {
+        Ok(request) => request,
+        Err(diagnostic) => {
+            let report = serde_json::json!({
+                "schema_version": "mncs.application-call/1",
+                "status": "compile_failed",
+                "module": module,
+                "function": function,
+                "diagnostics": format!("{diagnostic:?}")
+            });
+            return finish_native_call_output(&report, options, ExitCode::from(4));
+        }
+    };
+    let compilation = compiler.compile(request, &program);
+    let Some(backend) = compilation.emissions.backend else {
+        let report = serde_json::json!({
+            "schema_version": "mncs.application-call/1",
+            "status": "compile_failed",
+            "module": module,
+            "function": function,
+            "diagnostics": compilation.diagnostics
+        });
+        return finish_native_call_output(&report, options, ExitCode::from(4));
+    };
+    let backend_bytes = match serde_json::to_vec(&backend) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!("error: native application artifact serialization failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let artifact = match EmbedArtifact::from_json(&backend_bytes) {
+        Ok(artifact) => artifact,
+        Err(error) => {
+            eprintln!("error: native application artifact failed identity admission: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let session = match EmbedSession::open(artifact) {
+        Ok(session) => session,
+        Err(error) => {
+            eprintln!("error: native application session refused the artifact: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let mut call_options = EmbedCallOptions::budgeted(options.step_budget);
+    call_options.expected_interface_identity = options.expected_interface_identity.clone();
+    let output = match session.call_typed_json(
+        module,
+        function,
+        std::str::from_utf8(document.canonical_bytes()).unwrap_or(arguments),
+        &call_options,
+    ) {
+        Ok(output) => output,
+        Err(error) => {
+            let report = serde_json::json!({
+                "schema_version": "mncs.application-call/1",
+                "status": "invalid_request",
+                "module": module,
+                "function": function,
+                "error": error.to_string(),
+                "artifact_identity": session.artifact_identity(),
+                "artifact_sha256": session.digest(),
+                "backend": session.backend_name()
+            });
+            return finish_native_call_output(&report, options, ExitCode::from(2));
+        }
+    };
+    let report = serde_json::json!({
+        "schema_version": "mncs.application-call/1",
+        "status": output.status,
+        "module": module,
+        "function": function,
+        "call": output,
+        "canonical_arguments_sha256": mncs_model::sha256_hex(document.canonical_bytes())
+    });
+    let exit = match report["status"].as_str() {
+        Some("returned") => ExitCode::SUCCESS,
+        Some("runtime_failure") | Some("budget_exhausted") => ExitCode::FAILURE,
+        _ => ExitCode::from(3),
+    };
+    finish_native_call_output(&report, options, exit)
+}
+
+fn finish_native_call_output(
+    report: &serde_json::Value,
+    options: &NativeCallOptions,
+    exit: ExitCode,
+) -> ExitCode {
+    let bytes = serde_json::to_vec_pretty(report).unwrap_or_else(|_| b"{}".to_vec());
+    if let Some(path) = &options.result_path {
+        if let Err(error) = write_native_test_file(path, &bytes) {
+            eprintln!("error: unable to write native application result {path:?}: {error}");
+            return ExitCode::from(3);
+        }
+    }
+    println!("{}", String::from_utf8_lossy(&bytes));
+    exit
+}
+
+/// Generic bounded explicit-argv process capability.  This command exposes
+/// the runtime effect to external adapters without adding application policy
+/// to the compiler bootstrap.  It never evaluates a shell string.
+fn process_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut program: Option<String> = None;
+    let mut argv = Vec::new();
+    let mut current_dir = None;
+    let mut environment = BTreeMap::new();
+    let mut stdin = Vec::new();
+    let mut stdout_limit = MAX_CAPTURE_BYTES;
+    let mut stderr_limit = MAX_CAPTURE_BYTES;
+    let mut deadline_ms = 60_000u64;
+    let mut result_path: Option<PathBuf> = None;
+    let mut arguments = args.into_iter();
+    while let Some(argument) = arguments.next() {
+        let mut next_value = |label: &str| -> Result<String, ExitCode> {
+            arguments.next().ok_or_else(|| {
+                eprintln!("error: {label} requires a value");
+                ExitCode::from(2)
+            })
+        };
+        match argument.as_str() {
+            "--program" => match next_value("--program") {
+                Ok(value) => program = Some(value),
+                Err(code) => return code,
+            },
+            "--arg" => match next_value("--arg") {
+                Ok(value) => argv.push(value),
+                Err(code) => return code,
+            },
+            "--cwd" => match next_value("--cwd") {
+                Ok(value) => current_dir = Some(PathBuf::from(value)),
+                Err(code) => return code,
+            },
+            "--env" => match next_value("--env") {
+                Ok(value) => match value.split_once('=') {
+                    Some((key, value)) if !key.is_empty() && !key.contains('=') => {
+                        environment.insert(key.to_owned(), value.to_owned());
+                    }
+                    _ => {
+                        eprintln!("error: --env requires KEY=VALUE");
+                        return ExitCode::from(2);
+                    }
+                },
+                Err(code) => return code,
+            },
+            "--stdin" => match next_value("--stdin") {
+                Ok(path) => match fs::read(&path) {
+                    Ok(bytes) => stdin = bytes,
+                    Err(error) => {
+                        eprintln!("error: unable to read stdin file {path:?}: {error}");
+                        return ExitCode::from(2);
+                    }
+                },
+                Err(code) => return code,
+            },
+            "--stdout-limit" => match next_value("--stdout-limit")
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
+            {
+                Some(value) => stdout_limit = value,
+                None => return process_usage("--stdout-limit requires an integer"),
+            },
+            "--stderr-limit" => match next_value("--stderr-limit")
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
+            {
+                Some(value) => stderr_limit = value,
+                None => return process_usage("--stderr-limit requires an integer"),
+            },
+            "--deadline-ms" => match next_value("--deadline-ms")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+            {
+                Some(value) if value > 0 && value <= MAX_DEADLINE_MS => deadline_ms = value,
+                _ => return process_usage("--deadline-ms exceeds the bounded process limit"),
+            },
+            "--result" => match next_value("--result") {
+                Ok(value) => result_path = Some(PathBuf::from(value)),
+                Err(code) => return code,
+            },
+            value if value.starts_with('-') => {
+                return process_usage(&format!("unknown option {value:?}"))
+            }
+            value => {
+                if program.replace(value.to_owned()).is_some() {
+                    return process_usage("program was supplied more than once");
+                }
+            }
+        }
+    }
+    let Some(program) = program else {
+        return process_usage("a program is required");
+    };
+    let request = ProcessRequest {
+        program,
+        argv,
+        current_dir,
+        environment,
+        stdin,
+        stdout_limit,
+        stderr_limit,
+        deadline_ms,
+    };
+    let result = match run_bounded(&request) {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("error: bounded process request failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let timed_out = result.timed_out;
+    let exit_code = result.status.code;
+    let success = result.status.success;
+    let stdout = result.stdout;
+    let stderr = result.stderr;
+    let report = serde_json::json!({
+        "schema_version": "mncs.process-result/1",
+        "status": if timed_out { "timed_out" } else { "completed" },
+        "program": request.program,
+        "argv": request.argv,
+        "exit_code": exit_code,
+        "success": success,
+        "timed_out": timed_out,
+        "stdout": String::from_utf8(stdout.clone()).ok(),
+        "stderr": String::from_utf8(stderr.clone()).ok(),
+        "stdout_bytes": stdout,
+        "stderr_bytes": stderr,
+        "stdout_truncated": result.stdout_truncated,
+        "stderr_truncated": result.stderr_truncated,
+        "duration_ms": result.duration_ms
+    });
+    let bytes = serde_json::to_vec_pretty(&report).unwrap_or_else(|_| b"{}".to_vec());
+    if let Some(path) = result_path {
+        if let Err(error) = write_native_test_file(&path, &bytes) {
+            eprintln!("error: unable to write process result {path:?}: {error}");
+            return ExitCode::from(3);
+        }
+    }
+    println!("{}", String::from_utf8_lossy(&bytes));
+    if timed_out {
+        ExitCode::from(124)
+    } else {
+        exit_code
+            .map(|code| code.clamp(0, 255) as u8)
+            .map(ExitCode::from)
+            .unwrap_or_else(|| ExitCode::from(1))
+    }
+}
+
+fn process_usage(message: &str) -> ExitCode {
+    eprintln!("error: {message}");
+    eprintln!(
+        "usage: mncs process PROGRAM [--arg ARG ...] [--cwd DIR] [--env KEY=VALUE ...] [--stdin FILE] [--stdout-limit N] [--stderr-limit N] [--deadline-ms N] [--result FILE]"
+    );
+    ExitCode::from(2)
 }
 
 fn test_command<I>(args: I) -> ExitCode
@@ -307,6 +706,10 @@ where
                 Some(value) if !value.is_empty() => options.test_identities.push(value),
                 Some(_) => return native_test_usage("--test-identity requires a value"),
                 None => return native_test_usage("--test-identity requires a value"),
+            },
+            "--verification-plan" => match args.next() {
+                Some(value) => options.verification_plan = Some(PathBuf::from(value)),
+                None => return native_test_usage("--verification-plan requires a JSON path"),
             },
             "--step-budget" => match args.next().and_then(|value| value.parse::<u64>().ok()) {
                 Some(value) if value > 0 => options.step_budget = value,
@@ -362,12 +765,85 @@ where
 fn native_test_usage(message: &str) -> ExitCode {
     eprintln!("error: {message}");
     eprintln!(
-        "usage: mncs test SOURCE [--library ROOT ...] [--filter SELECTOR ...] [--test-identity ID ...] [--step-budget N] [--result FILE] [--check-result FILE] [--artifacts DIR] [--format json|text]"
+        "usage: mncs test SOURCE [--library ROOT ...] [--filter SELECTOR ...] [--test-identity ID ... | --verification-plan FILE] [--step-budget N] [--result FILE] [--check-result FILE] [--artifacts DIR] [--format json|text]"
     );
     ExitCode::from(2)
 }
 
+/// Validate the bounded external projection of a Commons-owned verification
+/// plan.  Commons remains the semantic authority for plan construction; the
+/// native runner only admits the exact identity list and joins it to its own
+/// compiler inventory.  This keeps shell tools from projecting plan meaning.
+fn load_verification_plan(
+    options: &NativeTestOptions,
+) -> Result<(Vec<String>, Option<serde_json::Value>), String> {
+    if options.verification_plan.is_none() {
+        return Ok((options.test_identities.clone(), None));
+    }
+    if !options.test_identities.is_empty() || !options.filters.is_empty() {
+        return Err(
+            "--verification-plan cannot be combined with --test-identity or --filter".to_owned(),
+        );
+    }
+    let path = options.verification_plan.as_ref().expect("checked above");
+    let bytes = fs::read(path).map_err(|error| format!("unable to read {path:?}: {error}"))?;
+    let document = StructuredDocument::from_bytes(&bytes)
+        .map_err(|error| format!("structured document rejected: {error}"))?;
+    let object = document
+        .value()
+        .as_object()
+        .ok_or_else(|| "verification plan must be a JSON object".to_owned())?;
+    if object
+        .get("schema_version")
+        .and_then(serde_json::Value::as_str)
+        != Some("mncs.verification-plan/1")
+    {
+        return Err("verification plan schema_version is not mncs.verification-plan/1".to_owned());
+    }
+    let selection = object
+        .get("selection")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| "verification plan has no selection object".to_owned())?;
+    let identities = selection
+        .get("selected_test_identities")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "verification plan has no selected_test_identities array".to_owned())?;
+    if identities.is_empty() {
+        return Err("verification plan contains no exact selected test identities".to_owned());
+    }
+    let mut selected = Vec::with_capacity(identities.len());
+    for identity in identities {
+        let Some(identity) = identity.as_str().filter(|value| !value.is_empty()) else {
+            return Err(
+                "verification plan contains a non-string or empty test identity".to_owned(),
+            );
+        };
+        if selected.iter().any(|known| known == identity) {
+            return Err(format!(
+                "verification plan repeats test identity {identity:?}"
+            ));
+        }
+        selected.push(identity.to_owned());
+    }
+    selected.sort();
+    Ok((
+        selected,
+        Some(serde_json::json!({
+            "plan_id": object.get("plan_id").and_then(serde_json::Value::as_str),
+            "sha256": mncs_model::sha256_hex(document.canonical_bytes()),
+            "selected_test_count": identities.len()
+        })),
+    ))
+}
+
 fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode {
+    let (requested_test_identities, verification_plan) = match load_verification_plan(options) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("error: verification plan rejected: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let source = match read_source(source_path) {
         Ok(source) => source,
         Err(code) => return code,
@@ -409,8 +885,7 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
         .iter()
         .map(|test| test.test_case_identity.0.clone())
         .collect();
-    if let Some(unknown) = options
-        .test_identities
+    if let Some(unknown) = requested_test_identities
         .iter()
         .find(|identity| !available_ids.contains(*identity))
     {
@@ -431,9 +906,8 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
         .tests
         .iter()
         .filter(|test| {
-            let exact = options.test_identities.is_empty()
-                || options
-                    .test_identities
+            let exact = requested_test_identities.is_empty()
+                || requested_test_identities
                     .iter()
                     .any(|identity| identity == &test.test_case_identity.0);
             let fragments = options.filters.is_empty()
@@ -459,7 +933,7 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
                 "selected_test_count": 0,
                 "available_test_count": inventory.tests.len(),
                 "filters": options.filters,
-                "exact": options.test_identities
+                "exact": requested_test_identities
             },
             "execution": {"mode": "native-toolchain-embed", "host_subprocesses": 0, "fallback": false}
         });
@@ -636,7 +1110,7 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
         "UNKNOWN" => "unsupported",
         _ => "test_failure",
     };
-    let selection_level = if options.test_identities.is_empty() && options.filters.is_empty() {
+    let selection_level = if requested_test_identities.is_empty() && options.filters.is_empty() {
         "repository_canonical"
     } else {
         "changed_item"
@@ -688,7 +1162,7 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
             "available_test_count": inventory.tests.len(),
             "selected_test_identities": selected_test_identities,
             "filters": options.filters,
-            "exact": options.test_identities
+            "exact": requested_test_identities
         },
         "execution": {
             "mode": "native-toolchain-embed",
@@ -718,6 +1192,9 @@ fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode 
     if let Some(message) = transport_failure {
         result["failure"] =
             serde_json::json!({"class": "infrastructure_failure", "message": message});
+    }
+    if let Some(plan) = verification_plan {
+        result["selection"]["verification_plan"] = plan;
     }
     let exit = match verdict {
         "PASS" => ExitCode::SUCCESS,
@@ -754,10 +1231,26 @@ fn execution_integer(value: &ExecutionValue) -> Option<i128> {
     }
 }
 
+/// Name-oriented projection for finite values at the external compatibility
+/// boundary.  Application policy lives in the MNCS finite type; the host must
+/// not decode its discriminant as a second semantic authority.
+fn finite_variant_label(value: &ExecutionValue) -> Option<String> {
+    match value {
+        ExecutionValue::Finite {
+            variant_identity, ..
+        } => variant_identity
+            .0
+            .rsplit("::")
+            .next()
+            .map(ToOwned::to_owned),
+        _ => None,
+    }
+}
+
 fn native_test_value(value: &ExecutionValue) -> serde_json::Value {
     let verdict_code = record_field(value, "verdict_code")
         .and_then(execution_integer)
-        .unwrap_or(3);
+        .unwrap_or_default();
     let failure_code = record_field(value, "failure_code")
         .and_then(execution_integer)
         .unwrap_or(0);
@@ -766,25 +1259,13 @@ fn native_test_value(value: &ExecutionValue) -> serde_json::Value {
             ExecutionValue::Finite { discriminant, .. } => Some(i128::from(*discriminant)),
             _ => None,
         })
-        .unwrap_or(7);
-    let verdict = match verdict_code {
-        0 => "PASS",
-        1 => "FAIL",
-        2 => "SKIP",
-        3 => "UNSUPPORTED",
-        _ => "UNKNOWN",
-    };
-    let failure_kind = match failure_kind_code {
-        0 => "none",
-        1 => "assertion",
-        2 => "setup",
-        3 => "compile",
-        4 => "runtime",
-        5 => "timeout",
-        6 => "unsupported",
-        7 => "infrastructure",
-        _ => "unknown",
-    };
+        .unwrap_or_default();
+    let verdict = finite_variant_label(record_field(value, "verdict").unwrap_or(value))
+        .unwrap_or_else(|| "UNKNOWN".to_owned())
+        .to_ascii_uppercase();
+    let failure_kind = finite_variant_label(record_field(value, "failure_kind").unwrap_or(value))
+        .unwrap_or_else(|| "unknown".to_owned())
+        .to_ascii_lowercase();
     let integer = |name: &str| {
         record_field(value, name)
             .and_then(execution_integer)
@@ -809,12 +1290,9 @@ fn native_suite_value(value: &ExecutionValue) -> serde_json::Value {
     let verdict_code = record_field(value, "verdict_code")
         .and_then(execution_integer)
         .unwrap_or(3);
-    let verdict = match verdict_code {
-        0 => "PASS",
-        1 => "FAIL",
-        3 => "UNKNOWN",
-        _ => "UNKNOWN",
-    };
+    let verdict = finite_variant_label(record_field(value, "verdict").unwrap_or(value))
+        .unwrap_or_else(|| "UNKNOWN".to_owned())
+        .to_ascii_uppercase();
     let integer = |name: &str| {
         record_field(value, name)
             .and_then(execution_integer)
@@ -5486,7 +5964,10 @@ fn print_usage() {
     eprintln!("Usage:");
     eprintln!("  mncs validate <manifest.json>");
     eprintln!("  mncs test-inventory <program.mncs>");
-    eprintln!("  mncs test <program.mncs> [--library ROOT ...] [--filter SELECTOR ...] [--test-identity ID ...] [--step-budget N] [--result FILE] [--check-result FILE] [--artifacts DIR] [--format json|text]");
+    eprintln!("  mncs test <program.mncs> [--library ROOT ...] [--filter SELECTOR ...] [--test-identity ID ... | --verification-plan FILE] [--step-budget N] [--result FILE] [--check-result FILE] [--artifacts DIR] [--format json|text]");
+    eprintln!("  mncs call <program.mncs> --module MODULE --function FUNCTION --args FILE [--library ROOT ...] [--step-budget N] [--result FILE]");
+    eprintln!("  mncs run-app <program.mncs> --module MODULE --function FUNCTION --args FILE  (alias for call)");
+    eprintln!("  mncs process PROGRAM [--arg ARG ...] [--cwd DIR] [--env KEY=VALUE ...] [--stdin FILE] [--stdout-limit N] [--stderr-limit N] [--deadline-ms N] [--result FILE]");
     eprintln!("  mncs canonicalize <manifest.json>");
     eprintln!("  mncs identity <manifest.json>");
     eprintln!("  mncs graph <manifest.json>");

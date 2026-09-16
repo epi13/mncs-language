@@ -29,6 +29,8 @@ use serde::{Deserialize, Serialize};
 
 pub mod scope;
 pub use scope::{ScopeRun, ScopedOutput, TaskScope, WorkItem};
+pub mod process;
+pub mod structured;
 
 /// Machine-readable embed failure. `code` is stable for host matching.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
