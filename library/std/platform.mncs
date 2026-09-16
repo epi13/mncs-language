@@ -14,12 +14,15 @@ mncs 0.6;
 // candidate-relative-to-bound, so the two envelopes agree on every input
 // and call sites may rely on the documented floor meaning in both.
 //
-// Boundary (explicit host escape, no safe MNCS surface yet):
+// Boundary (runtime capability boundary, not a permanent host-language
+// application boundary):
 // - unbounded text handling: the host classifies strings such as
 //   "x86_64" or "glibc 2.43" into these enums before calling in. MNCS
 //   never observes the raw strings, so a new platform string can never
 //   silently reinterpret an existing arm;
-// - process execution, filesystem discovery, and hashing stay host-side;
+// - process execution, filesystem discovery, and hashing are currently
+//   realized by the Rust runtime/toolchain, but their application policy
+//   belongs in reusable MNCS effects as those surfaces are promoted;
 // - ROCm/Metal requirement selection is future work: workers report the
 //   accelerator they have, but requirement selection today covers CUDA,
 //   eBPF, WASM, and PTX only. A workload needing ROCm/Metal selection

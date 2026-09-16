@@ -130,7 +130,7 @@ The proposed contract is implemented experimentally by:
 - `reference_compiler_architecture()` in `mncs-compiler`;
 - `mncs compiler-architecture` in `mncs-cli`;
 - the strengthened `CompilationStudyResult` contract and pass observations; and
-- Forge-side observation projection and comparison in `mncs-forge-mcp`.
+- Forge-side observation projection and comparison in `mncs-forge`.
 
 Tests require all logical stages to appear exactly once in canonical order, preserve planned gaps, validate content identity, retain unresolved obligations, expose pass executions, localize the earliest observed IR difference, and refuse observation laundering.
 

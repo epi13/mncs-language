@@ -300,6 +300,33 @@ impl CallOptions {
     }
 }
 
+/// One typed invocation in a retained-session batch.  The Rust API keeps
+/// values typed; the JSON/C ABI batch below is only the external
+/// interoperability projection of the same operation.
+#[derive(Debug, Clone)]
+pub struct BatchCall {
+    pub module: String,
+    pub function: String,
+    pub arguments: Vec<ExecutionValue>,
+    pub options: CallOptions,
+}
+
+impl BatchCall {
+    pub fn new(
+        module: impl Into<String>,
+        function: impl Into<String>,
+        arguments: Vec<ExecutionValue>,
+        options: CallOptions,
+    ) -> Self {
+        Self {
+            module: module.into(),
+            function: function.into(),
+            arguments,
+            options,
+        }
+    }
+}
+
 /// Structured per-call result. `artifact_identity`/`artifact_sha256`
 /// identify the exact bytes executed on this call.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -412,6 +439,25 @@ impl Session {
             backend: self.backend_name().to_owned(),
             reused_session: self.reused(),
         }
+    }
+
+    /// Execute typed calls in order while retaining one verified session.
+    /// Each output is independent and preserves its own status, effects, and
+    /// artifact identity.  This is the reusable in-process capability used
+    /// by native tooling; callers do not need a subprocess or JSON roundtrip
+    /// to compose several MNCS calls.
+    pub fn call_batch(&self, calls: &[BatchCall]) -> Vec<CallOutput> {
+        calls
+            .iter()
+            .map(|call| {
+                self.call(
+                    &call.module,
+                    &call.function,
+                    call.arguments.clone(),
+                    &call.options,
+                )
+            })
+            .collect()
     }
 
     /// JSON convenience: `args_json` is a JSON array of canonical

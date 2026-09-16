@@ -6,7 +6,7 @@
 use std::ffi::{CStr, CString};
 use std::time::Instant;
 
-use mncs_embed::{Artifact, CallOptions, Session};
+use mncs_embed::{Artifact, BatchCall, CallOptions, Session};
 
 const SOURCE: &str = "mncs 0.6;\nmodule probe.embed;\nfn decide(x: i64) -> (result: i64) {\n    if x >= 100 {\n        return 1;\n    }\n    if x >= 10 {\n        return 2;\n    }\n    return 3;\n}\n";
 const TYPED_SOURCE: &str = "mncs 0.17;\nmodule probe.typed;\nenum Mode { fast, safe }\nrecord SelectionInput { enabled: bool, mode: Mode, count: i32 }\nfn choose(input: SelectionInput) -> (result: i32) {\n    return input.count;\n}\n";
@@ -53,6 +53,36 @@ fn repeated_calls_agree_and_carry_digest() {
         };
         assert_eq!(value, expected as i128, "input {input}");
     }
+}
+
+/// Typed Rust consumers can batch calls through the same retained session;
+/// this is the reusable runtime capability consumed by the native `mncs test`
+/// entrypoint rather than a test-specific transport trick.
+#[test]
+fn typed_batch_calls_share_one_retained_session() {
+    let (session, digest) = open_session();
+    let options = CallOptions::budgeted(8_192);
+    let calls = [
+        BatchCall::new(
+            "probe.embed",
+            "decide",
+            serde_json::from_str(&i64_arg(150)).expect("first args"),
+            options.clone(),
+        ),
+        BatchCall::new(
+            "probe.embed",
+            "decide",
+            serde_json::from_str(&i64_arg(5)).expect("second args"),
+            options,
+        ),
+    ];
+    let outputs = session.call_batch(&calls);
+    assert_eq!(outputs.len(), 2);
+    assert!(outputs.iter().all(|output| output.status == "returned"));
+    assert!(outputs.iter().all(|output| output.reused_session));
+    assert!(outputs
+        .iter()
+        .all(|output| output.artifact_sha256 == digest));
 }
 
 /// The embedded host can name a record and enum variant while scalar widths,

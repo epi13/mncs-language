@@ -19,6 +19,10 @@ use mncs_compiler::{
     native_node_profile, reference_compiler_architecture, ModuleResolution,
     ModuleResolutionOutcome, ModuleResolver, ReferenceCompiler, SourceFrontEndResult,
 };
+use mncs_embed::{
+    Artifact as EmbedArtifact, BatchCall as EmbedBatchCall, CallOptions as EmbedCallOptions,
+    Session as EmbedSession,
+};
 use mncs_model::{
     compare_body_and_ssa, compare_execution, execute_observed, execute_ssa, execute_with_policy,
     ArtifactRepresentation, CandidateEvaluation, CausalSlice, ComparisonStatus, CompilationResult,
@@ -99,6 +103,7 @@ fn run_cli() -> ExitCode {
             validate(&path)
         }
         "test-inventory" => test_inventory_command(args),
+        "test" => test_command(args),
         "canonicalize" => one_manifest_command(args, canonicalize),
         "identity" => one_manifest_command(args, identity),
         "graph" => one_manifest_command(args, graph),
@@ -249,6 +254,667 @@ where
     } else {
         ExitCode::FAILURE
     }
+}
+
+/// Options for the compiler-owned native test entrypoint.
+///
+/// This command is intentionally part of the MNCS toolchain rather than a
+/// second application runner.  The toolchain owns source loading, compiler
+/// admission, and the platform-facing result projection; test meaning stays
+/// in the imported `mncs.test.*` modules and is executed through one retained
+/// `mncs-embed` session.  There is no subprocess fallback here.
+#[derive(Debug, Default)]
+struct NativeTestOptions {
+    source_path: Option<String>,
+    libraries: Vec<PathBuf>,
+    filters: Vec<String>,
+    test_identities: Vec<String>,
+    step_budget: u64,
+    format: String,
+    result_path: Option<PathBuf>,
+    check_result_path: Option<PathBuf>,
+    artifacts_path: Option<PathBuf>,
+    allow_unsupported: bool,
+}
+
+fn test_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut options = NativeTestOptions {
+        step_budget: 200_000,
+        format: "json".to_owned(),
+        ..NativeTestOptions::default()
+    };
+    let mut args = args.into_iter();
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--source" => match args.next() {
+                Some(value) => options.source_path = Some(value),
+                None => return native_test_usage("--source requires a path"),
+            },
+            "--library" => match args.next() {
+                Some(value) if !value.is_empty() => options.libraries.push(PathBuf::from(value)),
+                Some(_) => return native_test_usage("--library requires a non-empty path"),
+                None => return native_test_usage("--library requires a path"),
+            },
+            "--filter" => match args.next() {
+                Some(value) if !value.is_empty() => options.filters.push(value),
+                Some(_) => return native_test_usage("--filter requires a non-empty selector"),
+                None => return native_test_usage("--filter requires a selector"),
+            },
+            "--test-identity" => match args.next() {
+                Some(value) if !value.is_empty() => options.test_identities.push(value),
+                Some(_) => return native_test_usage("--test-identity requires a value"),
+                None => return native_test_usage("--test-identity requires a value"),
+            },
+            "--step-budget" => match args.next().and_then(|value| value.parse::<u64>().ok()) {
+                Some(value) if value > 0 => options.step_budget = value,
+                _ => return native_test_usage("--step-budget requires a positive integer"),
+            },
+            "--format" => match args.next().as_deref() {
+                Some("json") => options.format = "json".to_owned(),
+                Some("text") => options.format = "text".to_owned(),
+                _ => return native_test_usage("--format must be json or text"),
+            },
+            "--result" => match args.next() {
+                Some(value) => options.result_path = Some(PathBuf::from(value)),
+                None => return native_test_usage("--result requires a path"),
+            },
+            "--check-result" => match args.next() {
+                Some(value) => options.check_result_path = Some(PathBuf::from(value)),
+                None => return native_test_usage("--check-result requires a path"),
+            },
+            "--artifacts" => match args.next() {
+                Some(value) => options.artifacts_path = Some(PathBuf::from(value)),
+                None => return native_test_usage("--artifacts requires a directory"),
+            },
+            "--allow-unsupported" => options.allow_unsupported = true,
+            "--timeout-seconds" => {
+                eprintln!(
+                    "error: the native entrypoint has no wall-clock fallback; use --step-budget"
+                );
+                return ExitCode::from(2);
+            }
+            value if value == "--manifest" => {
+                eprintln!(
+                    "error: native `mncs test` consumes a source directly; TOML manifests belong to the compatibility adapter"
+                );
+                return ExitCode::from(2);
+            }
+            value if value.starts_with('-') => {
+                return native_test_usage(&format!("unknown option {value:?}"))
+            }
+            value => {
+                if options.source_path.replace(value.to_owned()).is_some() {
+                    return native_test_usage("source path was supplied more than once");
+                }
+            }
+        }
+    }
+
+    let Some(source_path) = options.source_path.clone() else {
+        return native_test_usage("a source path is required");
+    };
+    run_native_tests(&source_path, &options)
+}
+
+fn native_test_usage(message: &str) -> ExitCode {
+    eprintln!("error: {message}");
+    eprintln!(
+        "usage: mncs test SOURCE [--library ROOT ...] [--filter SELECTOR ...] [--test-identity ID ...] [--step-budget N] [--result FILE] [--check-result FILE] [--artifacts DIR] [--format json|text]"
+    );
+    ExitCode::from(2)
+}
+
+fn run_native_tests(source_path: &str, options: &NativeTestOptions) -> ExitCode {
+    let source = match read_source(source_path) {
+        Ok(source) => source,
+        Err(code) => return code,
+    };
+    // The filesystem path is transport/provenance metadata.  Keep it out of
+    // the semantic source envelope so inventory identity stays stable when a
+    // repository moves between worktrees or CI directories.
+    let envelope = SourceEnvelope::inline(SourceArtifactKind::Program, "native-test", source);
+    let resolver = FileModuleResolver::with_explicit_libraries(source_path, &options.libraries);
+    let compiler = ReferenceCompiler::default();
+    let front_end = compiler.front_end_with_resolver(envelope, &resolver);
+    if !front_end.is_valid() {
+        let diagnostics = serde_json::to_value(&front_end.diagnostics).unwrap_or_else(|_| {
+            serde_json::json!([{"code": "MNCS_NATIVE_FRONTEND", "message": "front end diagnostics could not be serialized"}])
+        });
+        let result = serde_json::json!({
+            "schema_version": "mncs.test-result/1",
+            "verdict": "UNKNOWN",
+            "classification": "compile_failure",
+            "failure_class": "compile",
+            "failure": {"message": "native test source did not pass compiler admission", "diagnostics": diagnostics},
+            "tests": [],
+            "selection": {"level": "invalid_invocation", "selected_test_count": 0, "available_test_count": 0},
+            "execution": {"mode": "native-toolchain-embed", "host_subprocesses": 0, "fallback": false}
+        });
+        return finish_native_test_output(&result, options, ExitCode::from(4));
+    }
+    let Some(program) = front_end.program.clone() else {
+        eprintln!("error: compiler admitted no executable program");
+        return ExitCode::from(4);
+    };
+    let Some(inventory) = front_end.test_inventory.clone() else {
+        eprintln!("error: compiler emitted no test inventory for the source");
+        return ExitCode::from(4);
+    };
+
+    let available_ids: BTreeSet<String> = inventory
+        .tests
+        .iter()
+        .map(|test| test.test_case_identity.0.clone())
+        .collect();
+    if let Some(unknown) = options
+        .test_identities
+        .iter()
+        .find(|identity| !available_ids.contains(*identity))
+    {
+        let result = serde_json::json!({
+            "schema_version": "mncs.test-result/1",
+            "verdict": "UNKNOWN",
+            "classification": "invalid_invocation",
+            "failure_class": "selection",
+            "failure": {"message": "requested test identity is absent from the compiler inventory", "test_identity": unknown},
+            "tests": [],
+            "selection": {"level": "invalid_invocation", "selected_test_count": 0, "available_test_count": inventory.tests.len()},
+            "execution": {"mode": "native-toolchain-embed", "host_subprocesses": 0, "fallback": false}
+        });
+        return finish_native_test_output(&result, options, ExitCode::from(2));
+    }
+
+    let selected: Vec<&mncs_compiler::TestInventoryEntry> = inventory
+        .tests
+        .iter()
+        .filter(|test| {
+            let exact = options.test_identities.is_empty()
+                || options
+                    .test_identities
+                    .iter()
+                    .any(|identity| identity == &test.test_case_identity.0);
+            let fragments = options.filters.is_empty()
+                || options.filters.iter().any(|filter| {
+                    test.name.contains(filter)
+                        || test.qualified_name.contains(filter)
+                        || test.test_case_identity.0.contains(filter)
+                });
+            exact && fragments
+        })
+        .collect();
+
+    if selected.is_empty() {
+        let result = serde_json::json!({
+            "schema_version": "mncs.test-result/1",
+            "verdict": "UNKNOWN",
+            "classification": "invalid_invocation",
+            "failure_class": "selection",
+            "failure": {"message": "selection matched no compiler-inventoried tests"},
+            "tests": [],
+            "selection": {
+                "level": "invalid_invocation",
+                "selected_test_count": 0,
+                "available_test_count": inventory.tests.len(),
+                "filters": options.filters,
+                "exact": options.test_identities
+            },
+            "execution": {"mode": "native-toolchain-embed", "host_subprocesses": 0, "fallback": false}
+        });
+        return finish_native_test_output(&result, options, ExitCode::from(2));
+    }
+
+    let emit = [
+        ArtifactRepresentation::Semantic,
+        ArtifactRepresentation::Hir,
+        ArtifactRepresentation::Ssa,
+        ArtifactRepresentation::TargetLoweringPlan,
+        ArtifactRepresentation::BackendArtifact,
+    ]
+    .into_iter()
+    .collect();
+    let request = match compiler.request_for_program_with_backend(
+        &program,
+        emit,
+        mncs_codegen::RESEARCH_BYTECODE_BACKEND_NAME,
+    ) {
+        Ok(request) => request,
+        Err(diagnostic) => {
+            let result = serde_json::json!({
+                "schema_version": "mncs.test-result/1",
+                "verdict": "UNKNOWN",
+                "classification": "compile_failure",
+                "failure_class": "backend",
+                "failure": {"message": format!("native test backend request was refused: {diagnostic:?}")},
+                "tests": [],
+                "selection": {"level": "invalid_invocation", "selected_test_count": 0, "available_test_count": inventory.tests.len()},
+                "execution": {"mode": "native-toolchain-embed", "host_subprocesses": 0, "fallback": false}
+            });
+            return finish_native_test_output(&result, options, ExitCode::from(4));
+        }
+    };
+    let compilation = compiler.compile(request, &program);
+    if compilation.status == CompilationStatus::Failed {
+        let result = serde_json::json!({
+            "schema_version": "mncs.test-result/1",
+            "verdict": "UNKNOWN",
+            "classification": "compile_failure",
+            "failure_class": "compile",
+            "failure": {"message": "native test program failed compiler admission", "diagnostics": compilation.diagnostics},
+            "tests": [],
+            "selection": {"level": "invalid_invocation", "selected_test_count": 0, "available_test_count": inventory.tests.len()},
+            "execution": {"mode": "native-toolchain-embed", "host_subprocesses": 0, "fallback": false}
+        });
+        return finish_native_test_output(&result, options, ExitCode::from(4));
+    }
+    let Some(backend) = compilation.emissions.backend else {
+        eprintln!("error: native test compilation emitted no executable backend artifact");
+        return ExitCode::from(4);
+    };
+    let backend_bytes = match serde_json::to_vec(&backend) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!("error: native test backend serialization failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let artifact = match EmbedArtifact::from_json(&backend_bytes) {
+        Ok(artifact) => artifact,
+        Err(error) => {
+            eprintln!("error: native test backend artifact failed identity admission: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let session = match EmbedSession::open(artifact) {
+        Ok(session) => session,
+        Err(error) => {
+            eprintln!("error: native test session refused the admitted artifact: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let call_options = EmbedCallOptions::budgeted(options.step_budget);
+    let empty = session.call("mncs.test.suite.v1", "empty", Vec::new(), &call_options);
+    let mut suite_value = match returned_value(&empty) {
+        Some(value) => value.clone(),
+        None => {
+            eprintln!("error: native suite initializer did not return SuiteSummary: {empty:?}");
+            return ExitCode::from(3);
+        }
+    };
+    let batch_calls: Vec<EmbedBatchCall> = selected
+        .iter()
+        .map(|test| {
+            EmbedBatchCall::new(
+                test.module.clone(),
+                test.name.clone(),
+                Vec::new(),
+                call_options.clone(),
+            )
+        })
+        .collect();
+    let batch_outputs = session.call_batch(&batch_calls);
+    let mut test_reports = Vec::with_capacity(selected.len());
+    let mut transport_failure = None;
+    for (test, output) in selected.iter().zip(batch_outputs) {
+        let Some(native_value) = returned_value(&output) else {
+            transport_failure = Some(format!(
+                "native test {} did not return a TestResult (status {})",
+                test.test_case_identity.0, output.status
+            ));
+            test_reports.push(serde_json::json!({
+                "id": test.test_case_identity.0,
+                "entry": test.name,
+                "verdict": "UNKNOWN",
+                "status": "infrastructure_failure",
+                "execution": output
+            }));
+            continue;
+        };
+        let native_result = native_test_value(native_value);
+        let verdict = native_result
+            .get("verdict")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("UNKNOWN");
+        let status = match verdict {
+            "PASS" => "passed",
+            "FAIL" => "failed",
+            "SKIP" => "skipped",
+            "UNSUPPORTED" => "unsupported",
+            _ => "infrastructure_failure",
+        };
+        let observed = session.call(
+            "mncs.test.suite.v1",
+            "observe",
+            vec![suite_value.clone(), native_value.clone()],
+            &call_options,
+        );
+        if let Some(value) = returned_value(&observed) {
+            suite_value = value.clone();
+        } else {
+            transport_failure = Some(format!(
+                "native suite aggregation rejected {} (status {})",
+                test.test_case_identity.0, observed.status
+            ));
+        }
+        test_reports.push(serde_json::json!({
+            "id": test.test_case_identity.0,
+            "entry": test.name,
+            "kind": "unit",
+            "verdict": verdict,
+            "status": status,
+            "semantic": {
+                "declaration_identity": test.declaration_identity,
+                "test_case_identity": test.test_case_identity,
+                "function_identity": test.function_identity,
+                "module": test.module,
+                "qualified_name": test.qualified_name,
+                "profile": test.profile,
+                "semantic_fingerprint": test.semantic_fingerprint,
+                "subject_identity": test.subject_identity,
+                "subject_fingerprint": test.subject_fingerprint
+            },
+            "source_span": test.source_span,
+            "native_result": native_result,
+            "execution": output
+        }));
+    }
+    let suite_summary = native_suite_value(&suite_value);
+    let suite_verdict = suite_summary
+        .get("verdict")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("UNKNOWN");
+    let verdict = if transport_failure.is_some() {
+        "UNKNOWN"
+    } else {
+        suite_verdict
+    };
+    let classification = match verdict {
+        "PASS" => "passed",
+        "FAIL" => "test_failure",
+        "UNKNOWN" => "unsupported",
+        _ => "test_failure",
+    };
+    let selection_level = if options.test_identities.is_empty() && options.filters.is_empty() {
+        "repository_canonical"
+    } else {
+        "changed_item"
+    };
+    let selected_test_identities: Vec<String> = selected
+        .iter()
+        .map(|test| test.test_case_identity.0.clone())
+        .collect();
+    // Inventory identity is a compiler-owned semantic projection, not a
+    // digest of transport metadata such as the source path or envelope
+    // label.  Keep the projection identical to the compatibility adapter:
+    // subject identity, subject fingerprint, and the ordered compiler test
+    // case identities are sufficient to bind exact selection.
+    let inventory_identity_material = (
+        inventory.subject_identity.0.as_str(),
+        inventory.subject_fingerprint.as_str(),
+        inventory
+            .tests
+            .iter()
+            .map(|test| test.test_case_identity.0.as_str())
+            .collect::<Vec<_>>(),
+    );
+    let inventory_identity = mncs_model::sha256_hex(
+        &serde_json::to_vec(&inventory_identity_material).unwrap_or_default(),
+    );
+    let run_identity = mncs_model::sha256_hex(
+        &serde_json::to_vec(&(source_path, &inventory_identity, &selected_test_identities))
+            .unwrap_or_default(),
+    );
+    let mut result = serde_json::json!({
+        "schema_version": "mncs.test-result/1",
+        "verdict": verdict,
+        "classification": classification,
+        "failure_class": if transport_failure.is_some() { "infrastructure" } else { "none" },
+        "tests": test_reports,
+        "summary": {
+            "authority": "native_suite",
+            "verdict": verdict,
+            "total": suite_summary.get("total").cloned().unwrap_or(serde_json::Value::from(0)),
+            "passed": suite_summary.get("passed").cloned().unwrap_or(serde_json::Value::from(0)),
+            "failed": suite_summary.get("failed").cloned().unwrap_or(serde_json::Value::from(0)),
+            "skipped": suite_summary.get("skipped").cloned().unwrap_or(serde_json::Value::from(0)),
+            "unsupported": suite_summary.get("unsupported").cloned().unwrap_or(serde_json::Value::from(0))
+        },
+        "native_suite_summary": suite_summary,
+        "selection": {
+            "level": selection_level,
+            "selected_test_count": selected.len(),
+            "available_test_count": inventory.tests.len(),
+            "selected_test_identities": selected_test_identities,
+            "filters": options.filters,
+            "exact": options.test_identities
+        },
+        "execution": {
+            "mode": "native-toolchain-embed",
+            "canonical_path": true,
+            "fallback": false,
+            "host_subprocesses": 0,
+            "batch_size": selected.len(),
+            "native_batch_calls": 1,
+            "native_session_calls": 1 + selected.len() + selected.len(),
+            "step_budget": options.step_budget,
+            "runner_version": env!("CARGO_PKG_VERSION"),
+            "run_identity": run_identity,
+            "test_case_identities": selected_test_identities,
+            "inventory_identity": inventory_identity,
+            "artifact_identity": session.artifact_identity(),
+            "artifact_sha256": session.digest(),
+            "backend": session.backend_name(),
+            "reused_session": session.reused(),
+            "compiler_owned_inventory": true
+        },
+        "provenance": {
+            "runner": {"name": "mncs.test.runner.v1", "language": "mncs", "host": "mncs-toolchain"},
+            "source": source_path,
+            "inventory_identity": inventory_identity
+        }
+    });
+    if let Some(message) = transport_failure {
+        result["failure"] =
+            serde_json::json!({"class": "infrastructure_failure", "message": message});
+    }
+    let exit = match verdict {
+        "PASS" => ExitCode::SUCCESS,
+        "FAIL" => ExitCode::from(1),
+        "UNKNOWN" if options.allow_unsupported => ExitCode::SUCCESS,
+        "UNKNOWN" => ExitCode::from(6),
+        _ => ExitCode::from(3),
+    };
+    finish_native_test_output(&result, options, exit)
+}
+
+fn returned_value(output: &mncs_embed::CallOutput) -> Option<&ExecutionValue> {
+    if output.status == "returned" && output.returned.len() == 1 {
+        output.returned.first()
+    } else {
+        None
+    }
+}
+
+fn record_field<'a>(value: &'a ExecutionValue, name: &str) -> Option<&'a ExecutionValue> {
+    match value {
+        ExecutionValue::Record { fields, .. } => fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value),
+        _ => None,
+    }
+}
+
+fn execution_integer(value: &ExecutionValue) -> Option<i128> {
+    match value {
+        ExecutionValue::Integer { value, .. } => Some(*value),
+        _ => None,
+    }
+}
+
+fn native_test_value(value: &ExecutionValue) -> serde_json::Value {
+    let verdict_code = record_field(value, "verdict_code")
+        .and_then(execution_integer)
+        .unwrap_or(3);
+    let failure_code = record_field(value, "failure_code")
+        .and_then(execution_integer)
+        .unwrap_or(0);
+    let failure_kind_code = record_field(value, "failure_kind")
+        .and_then(|value| match value {
+            ExecutionValue::Finite { discriminant, .. } => Some(i128::from(*discriminant)),
+            _ => None,
+        })
+        .unwrap_or(7);
+    let verdict = match verdict_code {
+        0 => "PASS",
+        1 => "FAIL",
+        2 => "SKIP",
+        3 => "UNSUPPORTED",
+        _ => "UNKNOWN",
+    };
+    let failure_kind = match failure_kind_code {
+        0 => "none",
+        1 => "assertion",
+        2 => "setup",
+        3 => "compile",
+        4 => "runtime",
+        5 => "timeout",
+        6 => "unsupported",
+        7 => "infrastructure",
+        _ => "unknown",
+    };
+    let integer = |name: &str| {
+        record_field(value, name)
+            .and_then(execution_integer)
+            .map(|number| serde_json::Value::from(number as i64))
+            .unwrap_or(serde_json::Value::Null)
+    };
+    serde_json::json!({
+        "verdict": verdict,
+        "verdict_code": verdict_code,
+        "failure_kind": failure_kind,
+        "failure_kind_code": failure_kind_code,
+        "failure_code": failure_code,
+        "assertions": integer("assertions"),
+        "failures": integer("failures"),
+        "expected": integer("expected"),
+        "actual": integer("actual"),
+        "assertion_code": integer("assertion_code")
+    })
+}
+
+fn native_suite_value(value: &ExecutionValue) -> serde_json::Value {
+    let verdict_code = record_field(value, "verdict_code")
+        .and_then(execution_integer)
+        .unwrap_or(3);
+    let verdict = match verdict_code {
+        0 => "PASS",
+        1 => "FAIL",
+        3 => "UNKNOWN",
+        _ => "UNKNOWN",
+    };
+    let integer = |name: &str| {
+        record_field(value, name)
+            .and_then(execution_integer)
+            .map(|number| serde_json::Value::from(number as u64))
+            .unwrap_or(serde_json::Value::from(0u64))
+    };
+    serde_json::json!({
+        "verdict": verdict,
+        "verdict_code": verdict_code,
+        "total": integer("total"),
+        "passed": integer("passed"),
+        "failed": integer("failed"),
+        "skipped": integer("skipped"),
+        "unsupported": integer("unsupported"),
+        "assertion_failures": integer("assertion_failures"),
+        "setup_failures": integer("setup_failures"),
+        "compile_failures": integer("compile_failures"),
+        "runtime_failures": integer("runtime_failures"),
+        "timeout_failures": integer("timeout_failures"),
+        "infrastructure_failures": integer("infrastructure_failures"),
+        "assertion_count": integer("assertion_count"),
+        "failure_count": integer("failure_count")
+    })
+}
+
+fn finish_native_test_output(
+    result: &serde_json::Value,
+    options: &NativeTestOptions,
+    exit: ExitCode,
+) -> ExitCode {
+    let bytes = serde_json::to_vec_pretty(result).unwrap_or_else(|_| b"{}".to_vec());
+    if let Some(path) = &options.result_path {
+        if let Err(error) = write_native_test_file(path, &bytes) {
+            eprintln!("error: unable to write native test result {path:?}: {error}");
+            return ExitCode::from(3);
+        }
+    }
+    let digest = mncs_model::sha256_hex(&bytes);
+    let verdict = result
+        .get("verdict")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("UNKNOWN");
+    let check = serde_json::json!({
+        "schema_version": "mncs.check-result/1",
+        "id": "mncs-test",
+        "provider": "mncs-test",
+        "verdict": verdict,
+        "scope": "mncs-test",
+        "claim": "selected compiler-inventoried MNCS tests were executed through the native suite",
+        "summary": format!("native mncs-test {verdict} for compiler-inventoried selection"),
+        "contract_revision": "mncs.test-result/1",
+        "producer_revision": "mncs-test-native-runner-v1",
+        "digest": digest,
+        "result_ref": {
+            "schema_version": "mncs.test-result/1",
+            "sha256": digest,
+            "path": options.result_path.as_ref().map(|path| path.to_string_lossy().to_string())
+        },
+        "references": [{
+            "kind": "mncs-test-result",
+            "producer": "mncs-test",
+            "contract_revision": "mncs.test-result/1",
+            "authority": "mncs.test.suite.v1",
+            "authority_status": verdict,
+            "digest": digest
+        }],
+        "selection": result.get("selection").cloned().unwrap_or(serde_json::Value::Null),
+        "execution": result.get("execution").cloned().unwrap_or(serde_json::Value::Null)
+    });
+    if let Some(path) = &options.check_result_path {
+        match serde_json::to_vec_pretty(&check) {
+            Ok(bytes) => {
+                if let Err(error) = write_native_test_file(path, &bytes) {
+                    eprintln!("error: unable to write native test check result {path:?}: {error}");
+                    return ExitCode::from(3);
+                }
+            }
+            Err(error) => {
+                eprintln!("error: unable to serialize native test check result: {error}");
+                return ExitCode::from(3);
+            }
+        }
+    }
+    if let Some(directory) = &options.artifacts_path {
+        if let Err(error) = fs::create_dir_all(directory)
+            .and_then(|_| fs::write(directory.join("native-test-result.json"), &bytes))
+        {
+            eprintln!("error: unable to write native test artifact {directory:?}: {error}");
+            return ExitCode::from(3);
+        }
+    }
+    if options.format == "text" {
+        println!("native mncs-test: {verdict}");
+        if let Some(selection) = result.get("selection") {
+            println!("selection: {selection}");
+        }
+    } else {
+        println!("{}", String::from_utf8_lossy(&bytes));
+    }
+    exit
 }
 
 fn one_manifest_command<I>(args: I, command: fn(&str) -> ExitCode) -> ExitCode
@@ -4620,6 +5286,20 @@ impl FileModuleResolver {
         resolver.bundle = bundle_from_env();
         resolver
     }
+
+    /// Source-local resolution plus explicitly supplied library roots.  The
+    /// native test entrypoint uses this form so its dependency surface is
+    /// visible in the invocation rather than hidden in a process environment.
+    fn with_explicit_libraries(source_path: &str, libraries: &[PathBuf]) -> Self {
+        let mut resolver = Self::for_source(source_path);
+        resolver.libraries = if libraries.is_empty() {
+            library_roots()
+        } else {
+            libraries.to_vec()
+        };
+        resolver.bundle = bundle_from_env();
+        resolver
+    }
 }
 
 /// Directories that may satisfy `use` targets beyond the importing file's own
@@ -4777,6 +5457,16 @@ fn read_source(path: &str) -> Result<String, ExitCode> {
     })
 }
 
+fn write_native_test_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, bytes)
+}
+
 fn print_json<T: Serialize>(value: &T) -> bool {
     match serde_json::to_string_pretty(value) {
         Ok(json) => {
@@ -4796,6 +5486,7 @@ fn print_usage() {
     eprintln!("Usage:");
     eprintln!("  mncs validate <manifest.json>");
     eprintln!("  mncs test-inventory <program.mncs>");
+    eprintln!("  mncs test <program.mncs> [--library ROOT ...] [--filter SELECTOR ...] [--test-identity ID ...] [--step-budget N] [--result FILE] [--check-result FILE] [--artifacts DIR] [--format json|text]");
     eprintln!("  mncs canonicalize <manifest.json>");
     eprintln!("  mncs identity <manifest.json>");
     eprintln!("  mncs graph <manifest.json>");

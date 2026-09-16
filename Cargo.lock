@@ -464,6 +464,7 @@ dependencies = [
  "mncs-codegen",
  "mncs-compiler",
  "mncs-conformance",
+ "mncs-embed",
  "mncs-model",
  "mncs-syntax",
  "mncs-translation-check",
