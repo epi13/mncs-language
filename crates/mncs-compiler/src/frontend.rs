@@ -3598,6 +3598,8 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
             calls_in_expr(element, calls);
         }
         AstExpr::Sha256Digest { view, .. } => calls_in_expr(view, calls),
+        AstExpr::StructuredDigest { value, .. } => calls_in_expr(value, calls),
+        AstExpr::ProcessRun { request, .. } => calls_in_expr(request, calls),
         AstExpr::HostWrite { view, .. } => calls_in_expr(view, calls),
         AstExpr::FloatIntrinsic { argument, .. } => calls_in_expr(argument, calls),
         AstExpr::Ed25519Verify {
@@ -6262,6 +6264,118 @@ impl<'a> BodyBuilder<'a> {
         Some(ResolvedBinding::plain(id, result_ty))
     }
 
+    /// Elaborate `structured_digest(value)` (Profile 0.16). This is the
+    /// generic identity boundary for typed MNCS records: the executor
+    /// canonicalizes the logical value it has already received, rather than
+    /// exposing a JSON parser or an application-specific digest operation.
+    fn elaborate_structured_digest(
+        &mut self,
+        value: &AstExpr,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let result_ty = BodyType::Sequence {
+            element: Box::new(BodyType::Byte),
+            bound: mncs_model::SequenceBound::UpTo(64),
+        };
+        if expected.is_some_and(|expected| expected != &result_ty) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE280",
+                format!(
+                    "structured_digest produces {} which does not satisfy the required type",
+                    result_ty.semantic_name()
+                ),
+                span,
+            ));
+            return None;
+        }
+        let capability =
+            self.check_host_authority("structured_digest", "MNE281", "MNE282", span, diagnostics)?;
+        let operand = self.elaborate_expr(value, None, env, diagnostics)?;
+        let id = self.new_value("structured_digest");
+        self.push_operation(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability,
+                operation: "structured_digest".to_owned(),
+            },
+            operands: vec![operand.id],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
+    /// Elaborate the reusable explicit-argv `process_run(request)` effect.
+    /// The request/result records are nominal application inputs at source,
+    /// while the runtime validates their field contract and performs only
+    /// the generic bounded OS mechanism. Keeping the result nominal prevents
+    /// a process effect from becoming an untyped byte channel.
+    fn elaborate_process_run(
+        &mut self,
+        request: &AstExpr,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let Some(result_ty) = expected.cloned() else {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE283",
+                "process_run requires an expected nominal process-result record type",
+                span,
+            ));
+            return None;
+        };
+        if !matches!(result_ty, BodyType::Record { .. }) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE283",
+                "process_run result must be a nominal process-result record type",
+                span,
+            ));
+            return None;
+        }
+        let capability =
+            self.check_host_authority("process_run", "MNE284", "MNE285", span, diagnostics)?;
+        let request_binding = self.elaborate_expr(request, None, env, diagnostics)?;
+        if !matches!(request_binding.ty, BodyType::Record { .. }) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE286",
+                "process_run requires a nominal process-request record argument",
+                request.span(),
+            ));
+            return None;
+        }
+        let id = self.new_value("process_run");
+        self.push_operation(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability,
+                operation: "process_run".to_owned(),
+            },
+            operands: vec![request_binding.id],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
     /// Elaborate the `host_write(view)` intrinsic (P-006 storage slice).
     /// Bounded append-only storage through the host-capability boundary:
     /// the executor appends exactly the view's runtime bytes (at most 64
@@ -8490,6 +8604,12 @@ impl<'a> BodyBuilder<'a> {
             AstExpr::Sha256Digest { view, span } => {
                 self.elaborate_sha256_digest(view, *span, expected, env, diagnostics)
             }
+            AstExpr::StructuredDigest { value, span } => {
+                self.elaborate_structured_digest(value, *span, expected, env, diagnostics)
+            }
+            AstExpr::ProcessRun { request, span } => {
+                self.elaborate_process_run(request, *span, expected, env, diagnostics)
+            }
             AstExpr::HostWrite { view, span } => {
                 self.elaborate_host_write(view, *span, expected, env, diagnostics)
             }
@@ -8522,23 +8642,65 @@ impl<'a> BodyBuilder<'a> {
             AstExpr::SequenceLiteral { elements, span } => {
                 let BodyType::Sequence {
                     element: element_type,
-                    bound: mncs_model::SequenceBound::Exact(length),
+                    bound,
                 } = expected
                     .cloned()
                     .unwrap_or(BodyType::Named("invalid".to_owned()))
                 else {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE183",
-                        "sequence literals require an exact bounded-sequence expected type",
+                        "sequence literals require an exact or bounded-view sequence expected type",
                         *span,
                     ));
                     return None;
+                };
+                let length = match bound {
+                    mncs_model::SequenceBound::Exact(length)
+                        if elements.len() == length as usize =>
+                    {
+                        length
+                    }
+                    mncs_model::SequenceBound::UpTo(capacity)
+                        if elements.len() <= capacity as usize =>
+                    {
+                        elements.len() as u32
+                    }
+                    mncs_model::SequenceBound::Exact(length) => {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE184",
+                            format!(
+                                "sequence literal supplies {} elements but the declared exact length is {length}",
+                                elements.len()
+                            ),
+                            *span,
+                        ));
+                        return None;
+                    }
+                    mncs_model::SequenceBound::UpTo(capacity) => {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE184",
+                            format!(
+                                "sequence literal supplies {} elements beyond the bounded-view capacity {capacity}",
+                                elements.len()
+                            ),
+                            *span,
+                        ));
+                        return None;
+                    }
+                    _ => {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE183",
+                            "sequence literals require a concrete exact or up_to sequence bound",
+                            *span,
+                        ));
+                        return None;
+                    }
                 };
                 if elements.len() != length as usize {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE184",
                         format!(
-                            "sequence literal supplies {0} elements but the declared exact length is {length}",
+                            "sequence literal supplies {} elements but its constructed length is {length}",
                             elements.len()
                         ),
                         *span,
@@ -8619,14 +8781,14 @@ impl<'a> BodyBuilder<'a> {
                 )?;
                 let BodyType::Sequence {
                     element: element_type,
-                    bound: mncs_model::SequenceBound::Exact(length),
+                    bound,
                 } = expected
                     .cloned()
                     .unwrap_or(BodyType::Named("invalid".to_owned()))
                 else {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE183",
-                        "sequence literals require an exact bounded-sequence expected type",
+                        "sequence literals require an exact or bounded-view sequence expected type",
                         *span,
                     ));
                     return None;
@@ -8637,11 +8799,43 @@ impl<'a> BodyBuilder<'a> {
                 // `[value; N]`). Length agreement with the expected exact
                 // bound is checked statically; the declared bound itself
                 // already passed the sequence-length ceiling.
+                let length = match bound {
+                    mncs_model::SequenceBound::Exact(length) if parsed == length => length,
+                    mncs_model::SequenceBound::UpTo(capacity) if parsed <= capacity => parsed,
+                    mncs_model::SequenceBound::Exact(length) => {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE184",
+                            format!(
+                                "repeat count {parsed} does not match the declared exact length {length}"
+                            ),
+                            *span,
+                        ));
+                        return None;
+                    }
+                    mncs_model::SequenceBound::UpTo(capacity) => {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE184",
+                            format!(
+                                "repeat count {parsed} exceeds the bounded-view capacity {capacity}"
+                            ),
+                            *span,
+                        ));
+                        return None;
+                    }
+                    _ => {
+                        diagnostics.push(elaboration_diagnostic(
+                            "MNE183",
+                            "sequence repeat requires a concrete exact or up_to sequence bound",
+                            *span,
+                        ));
+                        return None;
+                    }
+                };
                 if parsed != length {
                     diagnostics.push(elaboration_diagnostic(
                         "MNE184",
                         format!(
-                            "repeat count {parsed} does not match the declared exact length {length}"
+                            "repeat count {parsed} does not match the constructed length {length}"
                         ),
                         *span,
                     ));

@@ -49,7 +49,8 @@ class HostBindingGenerationTests(unittest.TestCase):
     def test_python_binding_supports_byte_views_and_multi_argument_callable(self) -> None:
         rendered = python_binding(ABI)
         self.assertIn("def feed(self, bytes: bytes, state: tuple[Any, ...])", rendered)
-        self.assertIn("'typed_arguments': [_encode(argument) for argument in arguments]", rendered)
+        self.assertIn("typed_arguments = [_encode(argument) for argument in arguments]", rendered)
+        self.assertIn("'call', str(self._config.source)", rendered)
         self.assertIn("return bytes(decoded) if element_descriptor == 'byte' else decoded", rendered)
 
 

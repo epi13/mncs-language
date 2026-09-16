@@ -2574,7 +2574,154 @@ fn execute_instruction(
                     }
                 }
             }
-            if operation == "clock_read" {
+            if operation == "process_run" {
+                if observing {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        instruction_identity(instruction),
+                        "process_run requires the explicit realize policy; record-only validation never spawns a process",
+                    );
+                    return true;
+                }
+                let Some(request_value) = instruction
+                    .inputs
+                    .first()
+                    .and_then(|input| values.get(input))
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "process_run requires one typed process request",
+                    );
+                    return true;
+                };
+                let process_request =
+                    match crate::execution::process_request_from_value(request_value) {
+                        Ok(request) => request,
+                        Err(reason) => {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                instruction_identity(instruction),
+                                reason,
+                            );
+                            return true;
+                        }
+                    };
+                if !grant.locator.is_empty() && grant.locator != process_request.program {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "process capability grant does not authorize the requested executable",
+                    );
+                    return true;
+                }
+                let process_result = match crate::process::run_bounded(&process_request) {
+                    Ok(process_result) => process_result,
+                    Err(crate::process::ProcessError::Invalid(reason))
+                    | Err(crate::process::ProcessError::Limit(reason)) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                    Err(error) => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            instruction_identity(instruction),
+                            error.to_string(),
+                        );
+                        return true;
+                    }
+                };
+                let Some(output) = instruction.outputs.first() else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "process_run has no result binding",
+                    );
+                    return true;
+                };
+                let returned = match crate::execution::process_result_value(
+                    program,
+                    &output.ty,
+                    &process_result,
+                ) {
+                    Ok(returned) => returned,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                };
+                let program_name = process_request.program.clone();
+                values.insert(output.identity.clone(), returned);
+                result.effects.push(ExecutionEffectEvent {
+                    operation: instruction_identity(instruction).unwrap_or_else(|| {
+                        crate::identity::SemanticId(format!("host-call:{capability}"))
+                    }),
+                    kind: "process_run".to_owned(),
+                    target: program_name,
+                    capability: capability.clone(),
+                    provenance: Some(format!(
+                        "process:exit={:?}:stdout_sha256:{}:stderr_sha256:{}",
+                        process_result.status.code,
+                        crate::canonical::sha256_hex(&process_result.stdout),
+                        crate::canonical::sha256_hex(&process_result.stderr)
+                    )),
+                });
+            } else if operation == "structured_digest" {
+                let Some(operand) = instruction
+                    .inputs
+                    .first()
+                    .and_then(|input| values.get(input))
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "structured_digest requires one typed value operand",
+                    );
+                    return true;
+                };
+                let digest = match crate::execution::structured_digest_value(operand) {
+                    Ok(digest) => digest,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                };
+                if let Some(output) = instruction.outputs.first() {
+                    values.insert(
+                        output.identity.clone(),
+                        ExecutionValue::Sequence {
+                            values: digest
+                                .iter()
+                                .map(|byte| ExecutionValue::Byte {
+                                    value: i128::from(*byte),
+                                })
+                                .collect::<Vec<_>>()
+                                .into(),
+                        },
+                    );
+                }
+                result.effects.push(ExecutionEffectEvent {
+                    operation: instruction_identity(instruction).unwrap_or_else(|| {
+                        crate::identity::SemanticId(format!("host-call:{capability}"))
+                    }),
+                    kind: "structured_digest".to_owned(),
+                    target: "canonical-value".to_owned(),
+                    capability: capability.clone(),
+                    provenance: Some(format!("sha256:{}", crate::canonical::sha256_hex(&digest))),
+                });
+            } else if operation == "clock_read" {
                 let Some(millis) = crate::execution::host_epoch_millis() else {
                     result.fail(
                         ExecutionStatus::InvalidRequest,

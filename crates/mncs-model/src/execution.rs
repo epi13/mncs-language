@@ -17,7 +17,7 @@ use crate::identity::{function_id, parameter_id, value_id, SemanticId};
 use crate::{
     ArithmeticIntent, BodyBlock, BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator,
     BodyType, BoundsEvidence, FloatType, Function, FunctionBody, IntegerType, Program,
-    SequenceBound,
+    SequenceBound, MAX_SEQUENCE_BOUND,
 };
 
 /// Recover the `f64` of a float boundary value.
@@ -655,6 +655,7 @@ pub fn host_operation_mutates(operation_id: &str) -> bool {
     matches!(
         operation_id,
         "blob_append"
+            | "process_run"
             | "fs_create_file"
             | "fs_write_bytes_at"
             | "fs_append_bytes_at"
@@ -663,6 +664,305 @@ pub fn host_operation_mutates(operation_id: &str) -> bool {
             | "fs_rename_at"
             | "fs_sync_at"
     )
+}
+
+const STRUCTURED_DIGEST_MAX_BYTES: usize = 64 * 1024;
+
+/// Canonical identity for one already-typed logical value. This is a generic
+/// runtime primitive: record field names, nominal identities, sequence order,
+/// and scalar tags are serialized from the language value model itself.
+pub(crate) fn structured_digest_value(value: &ExecutionValue) -> Result<[u8; 32], String> {
+    let canonical = canonical_json_value(value)
+        .map_err(|error| format!("structured value cannot be canonicalized: {error}"))?;
+    if canonical.len() > STRUCTURED_DIGEST_MAX_BYTES {
+        return Err(format!(
+            "structured value exceeds the {}-byte digest bound",
+            STRUCTURED_DIGEST_MAX_BYTES
+        ));
+    }
+    Ok(Sha256::digest(canonical.as_bytes()).into())
+}
+
+fn record_field<'a>(value: &'a ExecutionValue, name: &str) -> Option<&'a ExecutionValue> {
+    let ExecutionValue::Record { fields, .. } = value else {
+        return None;
+    };
+    fields
+        .iter()
+        .find(|(field, _)| field == name)
+        .map(|(_, value)| value)
+}
+
+fn process_bytes(value: &ExecutionValue, field: &str) -> Result<Vec<u8>, String> {
+    let ExecutionValue::Sequence { values } = value else {
+        return Err(format!(
+            "process request field {field:?} must be a bounded byte view"
+        ));
+    };
+    if values.len() > MAX_SEQUENCE_BOUND as usize {
+        return Err(format!(
+            "process request field {field:?} exceeds the {}-byte source bound",
+            MAX_SEQUENCE_BOUND
+        ));
+    }
+    values
+        .iter()
+        .map(|element| match element {
+            ExecutionValue::Byte { value } => u8::try_from(*value)
+                .map_err(|_| format!("process request field {field:?} contains a non-byte value")),
+            _ => Err(format!(
+                "process request field {field:?} contains a non-byte value"
+            )),
+        })
+        .collect()
+}
+
+fn process_text(value: &ExecutionValue, field: &str) -> Result<String, String> {
+    let bytes = process_bytes(value, field)?;
+    if bytes.contains(&0) {
+        return Err(format!("process request field {field:?} contains NUL"));
+    }
+    String::from_utf8(bytes)
+        .map_err(|_| format!("process request field {field:?} is not valid UTF-8"))
+}
+
+fn process_u64(value: &ExecutionValue, field: &str) -> Result<u64, String> {
+    match value {
+        ExecutionValue::Integer { value, ty } if !ty.signed && ty.bits <= 64 && *value >= 0 => {
+            u64::try_from(*value)
+                .map_err(|_| format!("process request field {field:?} is outside u64"))
+        }
+        _ => Err(format!("process request field {field:?} must be u64")),
+    }
+}
+
+pub(crate) fn process_request_from_value(
+    value: &ExecutionValue,
+) -> Result<crate::process::ProcessRequest, String> {
+    let Some(program_value) = record_field(value, "program") else {
+        return Err("process request is missing program".to_owned());
+    };
+    let program = process_text(program_value, "program")?;
+    if program.is_empty() {
+        return Err("process request program must not be empty".to_owned());
+    }
+    let argv_value =
+        record_field(value, "argv").ok_or_else(|| "process request is missing argv".to_owned())?;
+    let ExecutionValue::Sequence {
+        values: argv_values,
+    } = argv_value
+    else {
+        return Err("process request argv must be a bounded sequence".to_owned());
+    };
+    let argv_count = process_u64(
+        record_field(value, "argv_count")
+            .ok_or_else(|| "process request is missing argv_count".to_owned())?,
+        "argv_count",
+    )?;
+    if argv_count as usize != argv_values.len() || argv_values.len() > 16 {
+        return Err("process request argv_count does not match its bounded argv".to_owned());
+    }
+    let mut argv = Vec::with_capacity(argv_values.len());
+    for (index, item) in argv_values.iter().enumerate() {
+        argv.push(process_text(item, &format!("argv[{index}]"))?);
+    }
+
+    let environment_value = record_field(value, "environment")
+        .ok_or_else(|| "process request is missing environment".to_owned())?;
+    let ExecutionValue::Sequence {
+        values: environment_values,
+    } = environment_value
+    else {
+        return Err("process request environment must be a bounded sequence".to_owned());
+    };
+    let environment_count = process_u64(
+        record_field(value, "environment_count")
+            .ok_or_else(|| "process request is missing environment_count".to_owned())?,
+        "environment_count",
+    )?;
+    if environment_count as usize != environment_values.len() || environment_values.len() > 16 {
+        return Err(
+            "process request environment_count does not match its bounded environment".to_owned(),
+        );
+    }
+    let mut environment = BTreeMap::new();
+    for item in environment_values.iter() {
+        let key = process_text(
+            record_field(item, "key")
+                .ok_or_else(|| "environment entry is missing key".to_owned())?,
+            "environment.key",
+        )?;
+        if key.is_empty() || key.contains('=') {
+            return Err("environment key must be non-empty and contain no '='".to_owned());
+        }
+        let value = process_text(
+            record_field(item, "value")
+                .ok_or_else(|| "environment entry is missing value".to_owned())?,
+            "environment.value",
+        )?;
+        if environment.insert(key, value).is_some() {
+            return Err("environment contains a duplicate key".to_owned());
+        }
+    }
+
+    let current_dir_bytes = process_bytes(
+        record_field(value, "current_dir")
+            .ok_or_else(|| "process request is missing current_dir".to_owned())?,
+        "current_dir",
+    )?;
+    let current_dir = if current_dir_bytes.is_empty() {
+        None
+    } else {
+        let text = String::from_utf8(current_dir_bytes)
+            .map_err(|_| "process request current_dir is not valid UTF-8".to_owned())?;
+        Some(std::path::PathBuf::from(text))
+    };
+    let stdin = process_bytes(
+        record_field(value, "stdin")
+            .ok_or_else(|| "process request is missing stdin".to_owned())?,
+        "stdin",
+    )?;
+    let stdout_limit = process_u64(
+        record_field(value, "stdout_limit")
+            .ok_or_else(|| "process request is missing stdout_limit".to_owned())?,
+        "stdout_limit",
+    )?;
+    let stderr_limit = process_u64(
+        record_field(value, "stderr_limit")
+            .ok_or_else(|| "process request is missing stderr_limit".to_owned())?,
+        "stderr_limit",
+    )?;
+    if stdout_limit > MAX_SEQUENCE_BOUND as u64 || stderr_limit > MAX_SEQUENCE_BOUND as u64 {
+        return Err(format!(
+            "process capture limit exceeds the {}-byte typed result bound",
+            MAX_SEQUENCE_BOUND
+        ));
+    }
+    let deadline_ms = process_u64(
+        record_field(value, "deadline_ms")
+            .ok_or_else(|| "process request is missing deadline_ms".to_owned())?,
+        "deadline_ms",
+    )?;
+    let request = crate::process::ProcessRequest {
+        program,
+        argv,
+        current_dir,
+        environment,
+        stdin,
+        stdout_limit: usize::try_from(stdout_limit)
+            .map_err(|_| "stdout_limit does not fit the host usize".to_owned())?,
+        stderr_limit: usize::try_from(stderr_limit)
+            .map_err(|_| "stderr_limit does not fit the host usize".to_owned())?,
+        deadline_ms,
+    };
+    Ok(request)
+}
+
+fn process_bytes_value(bytes: &[u8]) -> ExecutionValue {
+    ExecutionValue::Sequence {
+        values: bytes
+            .iter()
+            .map(|byte| ExecutionValue::Byte {
+                value: i128::from(*byte),
+            })
+            .collect::<Vec<_>>()
+            .into(),
+    }
+}
+
+fn process_result_field(
+    name: &str,
+    result: &crate::process::ProcessResult,
+) -> Option<ExecutionValue> {
+    match name {
+        "exit_code" => Some(ExecutionValue::Integer {
+            value: i128::from(result.status.code.unwrap_or_default()),
+            ty: IntegerType {
+                bits: 64,
+                signed: true,
+            },
+        }),
+        "has_exit_code" => Some(ExecutionValue::Boolean {
+            value: result.status.code.is_some(),
+        }),
+        "success" => Some(ExecutionValue::Boolean {
+            value: result.status.success,
+        }),
+        "timed_out" => Some(ExecutionValue::Boolean {
+            value: result.timed_out,
+        }),
+        "stdout" => Some(process_bytes_value(&result.stdout)),
+        "stderr" => Some(process_bytes_value(&result.stderr)),
+        "stdout_truncated" => Some(ExecutionValue::Boolean {
+            value: result.stdout_truncated,
+        }),
+        "stderr_truncated" => Some(ExecutionValue::Boolean {
+            value: result.stderr_truncated,
+        }),
+        "duration_ms" => Some(ExecutionValue::Integer {
+            value: i128::from(result.duration_ms),
+            ty: IntegerType {
+                bits: 64,
+                signed: false,
+            },
+        }),
+        _ => None,
+    }
+}
+
+pub(crate) fn process_result_value(
+    program: &Program,
+    result_type: &BodyType,
+    result: &crate::process::ProcessResult,
+) -> Result<ExecutionValue, String> {
+    let BodyType::Record { identity, name } = result_type else {
+        return Err("process_run result is not a record type".to_owned());
+    };
+    let declaration = program
+        .record_types
+        .iter()
+        .find(|record| record.identity == *identity)
+        .ok_or_else(|| "process_run result record declaration is unavailable".to_owned())?;
+    if result.stdout.len() > MAX_SEQUENCE_BOUND as usize
+        || result.stderr.len() > MAX_SEQUENCE_BOUND as usize
+    {
+        return Err(format!(
+            "process result output exceeds the {}-byte source record bound",
+            MAX_SEQUENCE_BOUND
+        ));
+    }
+    let mut fields = Vec::with_capacity(declaration.fields.len());
+    for field in &declaration.fields {
+        let Some(value) = process_result_field(&field.name, result) else {
+            return Err(format!(
+                "process result record contains unsupported field {:?}",
+                field.name
+            ));
+        };
+        fields.push((field.name.clone(), value));
+    }
+    if fields.len() != 9
+        || ![
+            "duration_ms",
+            "exit_code",
+            "has_exit_code",
+            "stderr",
+            "stderr_truncated",
+            "stdout",
+            "stdout_truncated",
+            "success",
+            "timed_out",
+        ]
+        .iter()
+        .all(|name| fields.iter().any(|(field, _)| field == name))
+    {
+        return Err("process result record does not match the standard field contract".to_owned());
+    }
+    Ok(ExecutionValue::Record {
+        type_identity: identity.clone(),
+        name: name.clone(),
+        fields: fields.into(),
+    })
 }
 
 /// Bounded append-only storage write (P-006 storage slice). Appends
@@ -5083,7 +5383,137 @@ fn execute_operation(
                     }
                 }
             }
-            if operation_id == "clock_read" {
+            if operation_id == "process_run" {
+                if observing {
+                    result.fail(
+                        ExecutionStatus::Unsupported,
+                        Some(identity.clone()),
+                        "process_run requires the explicit realize policy; record-only validation never spawns a process".to_owned(),
+                    );
+                    return Some(result.clone());
+                }
+                let Some(request_value) = operation
+                    .operands
+                    .first()
+                    .and_then(|operand| values.get(operand))
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "process_run requires one typed process request".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let process_request = match process_request_from_value(request_value) {
+                    Ok(request) => request,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                };
+                if !grant.locator.is_empty() && grant.locator != process_request.program {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "process capability grant does not authorize the requested executable"
+                            .to_owned(),
+                    );
+                    return Some(result.clone());
+                }
+                let process_result = match crate::process::run_bounded(&process_request) {
+                    Ok(process_result) => process_result,
+                    Err(crate::process::ProcessError::Invalid(reason))
+                    | Err(crate::process::ProcessError::Limit(reason)) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                    Err(error) => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            Some(identity.clone()),
+                            error.to_string(),
+                        );
+                        return Some(result.clone());
+                    }
+                };
+                let result_type = operation.results.first().map(|value| &value.ty);
+                let Some(result_type) = result_type else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "process_run has no result binding".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let returned = match process_result_value(program, result_type, &process_result) {
+                    Ok(returned) => returned,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                };
+                values.insert(operation.results[0].id.clone(), returned);
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: "process_run".to_owned(),
+                    target: process_request.program,
+                    capability: capability.clone(),
+                    provenance: Some(format!(
+                        "process:exit={:?}:stdout_sha256:{}:stderr_sha256:{}",
+                        process_result.status.code,
+                        sha256_hex(&process_result.stdout),
+                        sha256_hex(&process_result.stderr)
+                    )),
+                });
+                return None;
+            } else if operation_id == "structured_digest" {
+                let Some(operand) = operation
+                    .operands
+                    .first()
+                    .and_then(|operand| values.get(operand))
+                else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "structured_digest requires one typed value operand".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let digest = match structured_digest_value(operand) {
+                    Ok(digest) => digest,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                };
+                values.insert(
+                    operation.results[0].id.clone(),
+                    process_bytes_value(&digest),
+                );
+                result.effects.push(ExecutionEffectEvent {
+                    operation: identity.clone(),
+                    kind: "structured_digest".to_owned(),
+                    target: "canonical-value".to_owned(),
+                    capability: capability.clone(),
+                    provenance: Some(format!("sha256:{}", sha256_hex(&digest))),
+                });
+            } else if operation_id == "clock_read" {
                 let Some(millis) = host_epoch_millis() else {
                     result.fail(
                         ExecutionStatus::InvalidRequest,

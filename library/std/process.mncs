@@ -1,0 +1,51 @@
+mncs 0.16;
+
+// mncs.std.process — the reusable typed explicit-argv process effect.
+//
+// These records are the source-level contract. The runtime owns bounded
+// spawning, environment clearing, capture, deadlines, and fail-closed
+// status realization. No field is a shell command or an implicit ambient
+// environment. Byte views are intentionally small at this first native
+// userland boundary; larger application documents should use a separate
+// bounded transport contract rather than silently widening this effect.
+module mncs.std.process.v1;
+
+record EnvironmentEntry {
+    key: [byte; up_to 64],
+    value: [byte; up_to 1024]
+}
+
+record ProcessRequest {
+    program: [byte; up_to 1024],
+    argv: [[byte; up_to 1024]; up_to 16],
+    argv_count: u64,
+    current_dir: [byte; up_to 1024],
+    environment: [EnvironmentEntry; up_to 16],
+    environment_count: u64,
+    stdin: [byte; up_to 1024],
+    stdout_limit: u64,
+    stderr_limit: u64,
+    deadline_ms: u64
+}
+
+record ProcessResult {
+    exit_code: i64,
+    has_exit_code: bool,
+    success: bool,
+    timed_out: bool,
+    stdout: [byte; up_to 1024],
+    stderr: [byte; up_to 1024],
+    stdout_truncated: bool,
+    stderr_truncated: bool,
+    duration_ms: u64
+}
+
+// A standard wrapper is available to callers that want a named provider
+// entrypoint. Applications may also request `process_run` directly in their
+// own effect-bearing function; the operation remains the same capability.
+fn run(request: ProcessRequest) -> (result: ProcessResult)
+    capability process_capability
+    effect process_run authorized_by process_capability
+{
+    return process_run(request);
+}

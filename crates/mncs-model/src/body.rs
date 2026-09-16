@@ -1081,6 +1081,8 @@ pub fn host_call_effect_kind(operation: &str) -> &'static str {
     match operation {
         "clock_read" => "clock_read",
         "sha256_digest" => "sha256_digest",
+        "structured_digest" => "structured_digest",
+        "process_run" => "process_run",
         "ed25519_verify" => "ed25519_verify",
         "blob_append" => "host_write",
         "fs_list_count" | "fs_entry_name_at" | "fs_entry_kind_at" | "fs_generation" => "fs_list",
@@ -1099,8 +1101,10 @@ pub fn host_call_effect_kind(operation: &str) -> &'static str {
 pub fn host_call_arity(operation: &str) -> Option<usize> {
     match operation {
         "blob_read" | "clock_read" | "fs_list_count" | "fs_generation" => Some(0),
-        "sha256_digest" | "blob_append" | "fs_entry_name_at" | "fs_entry_kind_at" | "fs_mkdir"
-        | "fs_delete_at" | "fs_sync_at" => Some(1),
+        "sha256_digest" | "structured_digest" | "process_run" | "blob_append"
+        | "fs_entry_name_at" | "fs_entry_kind_at" | "fs_mkdir" | "fs_delete_at" | "fs_sync_at" => {
+            Some(1)
+        }
         "fs_create_file" | "fs_append_bytes_at" | "fs_rename_at" => Some(2),
         "ed25519_verify" | "fs_read_bytes_at" | "fs_write_bytes_at" => Some(3),
         _ => None,
@@ -2167,15 +2171,22 @@ fn validate_operation(
                 }
             }
             if let Some(result) = operation.results.first() {
-                let expected = BodyType::Sequence {
-                    element: element_type.clone(),
-                    bound: SequenceBound::Exact(*length),
+                let valid_result = match &result.ty {
+                    BodyType::Sequence {
+                        element,
+                        bound: SequenceBound::Exact(result_length),
+                    } => element.as_ref() == element_type.as_ref() && result_length == length,
+                    BodyType::Sequence {
+                        element,
+                        bound: SequenceBound::UpTo(capacity),
+                    } => element.as_ref() == element_type.as_ref() && length <= capacity,
+                    _ => false,
                 };
-                if result.ty != expected {
+                if !valid_result {
                     errors.push(body_diagnostic(
                         "MNB084",
                         format!("{path}.results"),
-                        "sequence construction result does not have the exact constructed type",
+                        "sequence construction result does not have a compatible exact or bounded-view type",
                     ));
                 }
             }

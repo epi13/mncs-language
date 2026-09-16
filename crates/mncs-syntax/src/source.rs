@@ -672,6 +672,22 @@ pub enum AstExpr {
         view: Box<AstExpr>,
         span: SourceSpan,
     },
+    /// Host-realized canonical digest over one bounded MNCS value
+    /// (`structured_digest(value)`, Profile 0.16). The runtime serializes
+    /// the already-typed logical value canonically; source code never parses
+    /// or constructs an Actions-specific external format.
+    StructuredDigest {
+        value: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Host-realized explicit-argv process request (`process_run(request)`,
+    /// Profile 0.16). The request and result are nominal records supplied by
+    /// a reusable standard capability module; the intrinsic carries no shell
+    /// or application-specific policy.
+    ProcessRun {
+        request: Box<AstExpr>,
+        span: SourceSpan,
+    },
     /// Binary64 trigonometry `sin(x)` / `cos(x)` (Profile 0.12). The
     /// parser preserves the intrinsic name and operand; elaboration
     /// supplies the float facts and the non-finite trap obligation.
@@ -858,6 +874,8 @@ impl AstExpr {
             | Self::HostRead { span, .. }
             | Self::ClockRead { span, .. }
             | Self::Sha256Digest { span, .. }
+            | Self::StructuredDigest { span, .. }
+            | Self::ProcessRun { span, .. }
             | Self::HostWrite { span, .. }
             | Self::Ed25519Verify { span, .. }
             | Self::FsListCount { span, .. }
@@ -3394,6 +3412,58 @@ impl<'a> Parser<'a> {
                 );
                 None
             }
+            ("structured_digest", 1) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_16) {
+                    self.error(
+                        "MNP213",
+                        "structured_digest requires source profile 0.16 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(value),) = (iter.next(),) else {
+                    return None;
+                };
+                Some(AstExpr::StructuredDigest {
+                    value: Box::new(value),
+                    span,
+                })
+            }
+            ("structured_digest", _) => {
+                self.error(
+                    "MNP214",
+                    "structured_digest takes exactly one typed value argument",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("process_run", 1) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_16) {
+                    self.error(
+                        "MNP215",
+                        "process_run requires source profile 0.16 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(request),) = (iter.next(),) else {
+                    return None;
+                };
+                Some(AstExpr::ProcessRun {
+                    request: Box::new(request),
+                    span,
+                })
+            }
+            ("process_run", _) => {
+                self.error(
+                    "MNP216",
+                    "process_run takes exactly one typed process-request argument",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
             ("host_write", 1) => {
                 let mut iter = arguments.into_iter();
                 let (Some(view),) = (iter.next(),) else {
@@ -5168,6 +5238,8 @@ fn is_profile08_intrinsic(name: &str) -> bool {
             | "fs_sync_at"
             | "clock_read"
             | "sha256_digest"
+            | "structured_digest"
+            | "process_run"
             | "ed25519_verify"
             | "vector"
             | "splat"

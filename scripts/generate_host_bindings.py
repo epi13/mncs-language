@@ -5,8 +5,8 @@ The compiler owns callable metadata and the interface identity.  This tool
 only turns that metadata into host-language ergonomics; it does not invent a
 second schema, infer topology, or accept executable code from ABI data.
 
-The generated Python binding uses the existing ``mncs execute`` wire entry
-point.  The generated Rust binding uses ``mncs-embed``.  Both submit the
+The generated Python binding uses the generic ``mncs call`` application
+entrypoint.  The generated Rust binding uses ``mncs-embed``.  Both submit the
 interface identity with every typed call, making an old binding fail closed
 when the callable contract changes.
 """
@@ -418,15 +418,14 @@ def python_binding(abi: dict[str, Any]) -> str:
         "        self.last_execution: dict[str, Any] | None = None",
         "",
         "    def _call(self, module: str, function: str, *arguments: Any) -> dict[str, Any]:",
-        "        request = {'schema_version': '0.1', 'target': {'module': module, 'function': function},",
-        "                   'typed_arguments': [_encode(argument) for argument in arguments], 'expected_interface_identity': INTERFACE_IDENTITY, 'step_budget': 8192}",
+        "        typed_arguments = [_encode(argument) for argument in arguments]",
+        "        encoded_arguments = json.dumps(typed_arguments, separators=(',', ':'))",
         "        with tempfile.TemporaryDirectory(prefix='mncs-generated-binding-') as directory:",
-        "            request_path = Path(directory) / 'request.json'",
-        "            request_path.write_text(json.dumps(request, separators=(',', ':')), encoding='utf-8')",
         "            environment = dict(os.environ)",
-        "            if self._config.libraries:",
-        "                environment['MNCS_LIBRARY_PATH'] = os.pathsep.join(str(path.resolve()) for path in self._config.libraries)",
-        "            result = subprocess.run([self._config.mncs, 'execute', str(self._config.source), str(request_path)],",
+        "            command = [self._config.mncs, 'call', str(self._config.source), '--module', module, '--function', function, '--args-json', encoded_arguments, '--interface-identity', INTERFACE_IDENTITY]",
+        "            for library in self._config.libraries:",
+        "                command.extend(('--library', str(library.resolve())))",
+        "            result = subprocess.run(command,",
         "                                     text=True, capture_output=True, env=environment, timeout=self._config.timeout)",
         "        if result.returncode != 0:",
         "            detail = result.stderr.strip() or result.stdout.strip() or 'typed call failed'",
@@ -435,10 +434,10 @@ def python_binding(abi: dict[str, Any]) -> str:
         "            response = json.loads(result.stdout)",
         "        except json.JSONDecodeError as error:",
         "            raise BindingError('mncs returned non-JSON output') from error",
-        "        if response.get('status') != 'returned':",
-        "            raise BindingError(f'mncs typed call did not return: {response!r}')",
+        "        if response.get('status') != 'returned' or not isinstance(response.get('call'), dict):",
+        "            raise BindingError(f'mncs application call did not return: {response!r}')",
         "        self.last_execution = response",
-        "        return response",
+        "        return response['call']",
         "",
     ])
 

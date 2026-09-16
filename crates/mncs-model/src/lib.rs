@@ -25,6 +25,7 @@ mod identity;
 mod ir;
 mod machine_intent;
 mod obligations;
+pub mod process;
 mod proof_dep;
 mod proof_kernel;
 mod proof_transport;

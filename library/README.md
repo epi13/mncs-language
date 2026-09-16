@@ -108,6 +108,8 @@ resolution provenance.
 | `std/text_map.mncs` | `mncs.std.text_map.v1` (Profile 0.13) | bounded text-to-code tables |
 | `std/token_set.mncs` | `mncs.std.token_set.v1` (Profile 0.13) | bounded token-set algebra: contains/require/forbid/prefer/dedup/top |
 | `std/sha256.mncs` | `mncs.std.sha256.v1` (Profile 0.14) | bounded SHA-256 over byte views |
+| `std/process.mncs` | `mncs.std.process.v1` (Profile 0.16) | explicit-argv process effect with bounded environment, stdin, capture, deadline, and typed status/output; no shell or ambient inheritance |
+| `std/application.mncs` | `mncs.std.application.v1` (Profile 0.16) | reusable typed application-entry context and bounded stdout/stderr/exit projection |
 | `core/bytes.mncs` | `mncs.core.bytes.v1` (Profile 0.7) | byte bitwise/shift/order, folding fingerprint, nibble split, ASCII classifiers, wrapping checksum |
 | `core/numeric.mncs` | `mncs.core.numeric.v1` (Profile 0.8) | wrapping 4-lane sum/mean/centroid and L2-squared; vector kernels live in `vector.v1` |
 | `core/random.mncs` | `mncs.core.random.v1` (Profile 0.6) | deterministic MMIX LCG streams, bounded draws, domain-separated split/derive (no statistical-independence claim) |

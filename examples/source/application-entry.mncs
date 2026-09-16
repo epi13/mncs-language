@@ -1,0 +1,15 @@
+mncs 0.16;
+
+// Generic source-level application entry can consume a typed context without
+// a custom Rust launcher. The outer `mncs call` boundary only transports the
+// context and the typed ApplicationExit result.
+module examples.application_entry;
+
+use mncs.std.application.v1 as app;
+
+fn main(context: app.ApplicationContext) -> (result: app.ApplicationExit) {
+    if !app.context_is_bounded(context) {
+        return app.failure([98, 111, 117, 110, 100, 115], 2);
+    }
+    return app.success(context.stdin);
+}

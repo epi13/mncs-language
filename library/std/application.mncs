@@ -1,0 +1,53 @@
+mncs 0.16;
+
+// mncs.std.application — the reusable typed application-entry contract.
+//
+// A generic launcher may supply this record as the first argument to an
+// application entry function. The launcher owns only boundary acquisition and
+// serialization; application policy remains in the caller's .mncs module.
+// There is no ambient process environment, stream handle, or exit mutation:
+// argv, bounded environment, current directory, stdin, and the requested exit
+// projection are ordinary typed values.
+module mncs.std.application.v1;
+
+record EnvironmentEntry {
+    key: [byte; up_to 64],
+    value: [byte; up_to 1024]
+}
+
+record ApplicationContext {
+    application_identity: [byte; 32],
+    argv: [[byte; up_to 1024]; up_to 16],
+    argv_count: u64,
+    environment: [EnvironmentEntry; up_to 16],
+    environment_count: u64,
+    current_dir: [byte; up_to 1024],
+    stdin: [byte; up_to 1024]
+}
+
+record ApplicationExit {
+    stdout: [byte; up_to 1024],
+    stderr: [byte; up_to 1024],
+    exit_code: i64
+}
+
+fn context_is_bounded(context: ApplicationContext) -> (result: bool) {
+    return context.argv_count == context.argv.len
+        && context.environment_count == context.environment.len;
+}
+
+fn success(stdout: [byte; up_to 1024]) -> (result: ApplicationExit) {
+    return ApplicationExit {
+        stdout: stdout,
+        stderr: [],
+        exit_code: 0
+    };
+}
+
+fn failure(stderr: [byte; up_to 1024], exit_code: i64) -> (result: ApplicationExit) {
+    return ApplicationExit {
+        stdout: [],
+        stderr: stderr,
+        exit_code: exit_code
+    };
+}

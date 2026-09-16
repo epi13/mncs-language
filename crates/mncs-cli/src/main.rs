@@ -23,7 +23,7 @@ use mncs_embed::{
     process::{run_bounded, ProcessRequest, MAX_CAPTURE_BYTES, MAX_DEADLINE_MS},
     structured::StructuredDocument,
     Artifact as EmbedArtifact, BatchCall as EmbedBatchCall, CallOptions as EmbedCallOptions,
-    Session as EmbedSession,
+    Grant as EmbedGrant, Session as EmbedSession,
 };
 use mncs_model::{
     compare_body_and_ssa, compare_execution, execute_observed, execute_ssa, execute_with_policy,
@@ -295,6 +295,16 @@ struct NativeCallOptions {
     step_budget: u64,
     result_path: Option<PathBuf>,
     expected_interface_identity: Option<String>,
+    /// Explicit process capability grants (`capability=executable`). The
+    /// generic launcher carries authority; it does not infer it from source.
+    process_grants: Vec<(String, String)>,
+    /// Explicit structured-value digest capabilities. No payload is supplied
+    /// because the typed operand is canonicalized by the runtime.
+    structured_grants: Vec<String>,
+    /// Explicit filesystem-root capabilities for the generic source-level
+    /// fs_* effects. The called application chooses the operation; the
+    /// launcher only transports the operator-granted root.
+    fs_grants: Vec<(String, String)>,
 }
 
 fn call_command<I>(args: I) -> ExitCode
@@ -329,6 +339,45 @@ where
             },
             "--result" => options.result_path = args.next().map(PathBuf::from),
             "--interface-identity" => options.expected_interface_identity = args.next(),
+            "--grant-process" => {
+                let Some(grant) = args.next() else {
+                    return native_call_usage("--grant-process requires capability=executable");
+                };
+                match grant.split_once('=') {
+                    Some((capability, executable))
+                        if !capability.is_empty() && !executable.is_empty() =>
+                    {
+                        options
+                            .process_grants
+                            .push((capability.to_owned(), executable.to_owned()));
+                    }
+                    _ => {
+                        return native_call_usage("--grant-process requires capability=executable")
+                    }
+                }
+            }
+            "--grant-structured" => {
+                let Some(capability) = args.next() else {
+                    return native_call_usage("--grant-structured requires a capability");
+                };
+                if capability.is_empty() || capability.contains('=') {
+                    return native_call_usage("--grant-structured requires a capability");
+                }
+                options.structured_grants.push(capability);
+            }
+            "--grant-fs" => {
+                let Some(grant) = args.next() else {
+                    return native_call_usage("--grant-fs requires capability=root-path");
+                };
+                match grant.split_once('=') {
+                    Some((capability, path)) if !capability.is_empty() && !path.is_empty() => {
+                        options
+                            .fs_grants
+                            .push((capability.to_owned(), path.to_owned()));
+                    }
+                    _ => return native_call_usage("--grant-fs requires capability=root-path"),
+                }
+            }
             value if value.starts_with('-') => {
                 return native_call_usage(&format!("unknown option {value:?}"))
             }
@@ -357,7 +406,7 @@ where
 fn native_call_usage(message: &str) -> ExitCode {
     eprintln!("error: {message}");
     eprintln!(
-        "usage: mncs call SOURCE --module MODULE --function FUNCTION --args FILE [--library ROOT ...] [--step-budget N] [--result FILE] [--interface-identity ID]"
+        "usage: mncs call SOURCE --module MODULE --function FUNCTION --args FILE [--library ROOT ...] [--step-budget N] [--result FILE] [--interface-identity ID] [--grant-process capability=executable] [--grant-structured capability] [--grant-fs capability=root-path]"
     );
     ExitCode::from(2)
 }
@@ -462,6 +511,32 @@ fn run_native_call(
     };
     let mut call_options = EmbedCallOptions::budgeted(options.step_budget);
     call_options.expected_interface_identity = options.expected_interface_identity.clone();
+    call_options.grants.extend(
+        options
+            .process_grants
+            .iter()
+            .map(|(capability, executable)| EmbedGrant {
+                capability: capability.clone(),
+                locator: executable.clone(),
+                bytes: Vec::new(),
+            }),
+    );
+    call_options.grants.extend(
+        options
+            .fs_grants
+            .iter()
+            .map(|(capability, path)| EmbedGrant::fs_root(capability, path)),
+    );
+    call_options.grants.extend(
+        options
+            .structured_grants
+            .iter()
+            .map(|capability| EmbedGrant {
+                capability: capability.clone(),
+                locator: "structured-value".to_owned(),
+                bytes: Vec::new(),
+            }),
+    );
     let output = match session.call_typed_json(
         module,
         function,
@@ -6045,7 +6120,7 @@ fn print_usage() {
     eprintln!("  mncs validate <manifest.json>");
     eprintln!("  mncs test-inventory <program.mncs>");
     eprintln!("  mncs test <program.mncs> [--library ROOT ...] [--filter SELECTOR ...] [--test-identity ID ... | --verification-plan FILE] [--step-budget N] [--result FILE] [--check-result FILE] [--artifacts DIR] [--format json|text]");
-    eprintln!("  mncs call <program.mncs> --module MODULE --function FUNCTION --args FILE [--library ROOT ...] [--step-budget N] [--result FILE]");
+    eprintln!("  mncs call <program.mncs> --module MODULE --function FUNCTION --args FILE [--library ROOT ...] [--step-budget N] [--result FILE] [--grant-process capability=executable] [--grant-structured capability] [--grant-fs capability=root-path]");
     eprintln!("  mncs run-app <program.mncs> --module MODULE --function FUNCTION --args FILE  (alias for call)");
     eprintln!("  mncs process PROGRAM [--arg ARG ...] [--cwd DIR] [--env KEY=VALUE ...] [--stdin FILE] [--stdout-limit N] [--stderr-limit N] [--deadline-ms N] [--result FILE]");
     eprintln!("  mncs canonicalize <manifest.json>");
