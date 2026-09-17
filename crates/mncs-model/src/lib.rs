@@ -34,6 +34,7 @@ mod refinement;
 mod representation;
 mod ssa;
 mod ssa_execution;
+pub mod structured;
 mod termination;
 mod translation;
 mod validation;

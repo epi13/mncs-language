@@ -1,0 +1,11 @@
+{
+  "schema_version": "mncs.native-application/1",
+  "application_identity": "examples.application-entry",
+  "source": "../source/application-entry.mncs",
+  "module": "examples.application_entry",
+  "entry_function": "main",
+  "profile": "0.16",
+  "libraries": ["../../library"],
+  "environment_keys": [],
+  "required_capabilities": []
+}

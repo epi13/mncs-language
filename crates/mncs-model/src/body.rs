@@ -443,6 +443,42 @@ impl BodyType {
             .unwrap_or_else(|| Self::from_semantic_name(name))
     }
 
+    /// Resolve a type spelling in the namespace that declared the enclosing
+    /// nominal record/finite. Short names are not globally unique after
+    /// linking (for example both process and application contexts carry an
+    /// `EnvironmentEntry`), so a field type must resolve against its owner.
+    /// Unknown names remain `Named` and are rejected by the caller instead of
+    /// silently selecting the first linked declaration.
+    pub fn from_program_in_module(program: &Program, name: &str, module: &str) -> Self {
+        if let Some(finite_type) = program.finite_types.iter().find(|finite_type| {
+            finite_type.identity.0 == name
+                || (finite_type.name == name
+                    && finite_type.identity.declaring_module().as_deref() == Some(module))
+        }) {
+            return Self::Finite {
+                identity: finite_type.identity.clone(),
+                name: finite_type.name.clone(),
+            };
+        }
+        if let Some(record_type) = program.record_types.iter().find(|record_type| {
+            record_type.identity.0 == name
+                || (record_type.name == name
+                    && record_type.identity.declaring_module().as_deref() == Some(module))
+        }) {
+            return Self::Record {
+                identity: record_type.identity.clone(),
+                name: record_type.name.clone(),
+            };
+        }
+        if let Some(sequence) = semantic_sequence_type_in_module(program, name, module) {
+            return sequence;
+        }
+        // Scalar spellings do not belong to a nominal namespace. Preserve
+        // ordinary scalar parsing, but never fall back to another module's
+        // same-named nominal declaration.
+        Self::from_semantic_name(name)
+    }
+
     /// Parse a canonical bounded-sequence spelling `[E; N]` or
     /// `[E; up_to M]`. Only canonical spellings parse; anything else stays
     /// an ordinary named type so downstream diagnostics stay truthful.
@@ -1083,6 +1119,8 @@ pub fn host_call_effect_kind(operation: &str) -> &'static str {
         "sha256_digest" => "sha256_digest",
         "structured_digest" => "structured_digest",
         "process_run" => "process_run",
+        "structured_read" => "structured_read",
+        "structured_write" => "structured_write",
         "ed25519_verify" => "ed25519_verify",
         "blob_append" => "host_write",
         "fs_list_count" | "fs_entry_name_at" | "fs_entry_kind_at" | "fs_generation" => "fs_list",
@@ -1105,7 +1143,8 @@ pub fn host_call_arity(operation: &str) -> Option<usize> {
         | "fs_entry_name_at" | "fs_entry_kind_at" | "fs_mkdir" | "fs_delete_at" | "fs_sync_at" => {
             Some(1)
         }
-        "fs_create_file" | "fs_append_bytes_at" | "fs_rename_at" => Some(2),
+        "fs_create_file" | "fs_append_bytes_at" | "fs_rename_at" | "structured_read" => Some(2),
+        "structured_write" => Some(3),
         "ed25519_verify" | "fs_read_bytes_at" | "fs_write_bytes_at" => Some(3),
         _ => None,
     }
@@ -2975,7 +3014,15 @@ fn validate_operation(
                             variant.payload.iter().find(|field| &field.name == name)
                         })
                     })
-                    .map(|field| semantic_record_field_type(program, field));
+                    .map(|field| {
+                        semantic_record_field_type(
+                            program,
+                            field,
+                            declared
+                                .and_then(|item| item.identity.declaring_module())
+                                .as_deref(),
+                        )
+                    });
                 let actual_ty = operation.results.first().map(|_| ()).and_then(|()| {
                     operation
                         .operands
@@ -3098,7 +3145,14 @@ fn validate_operation(
                 ));
             }
             if let (Some(field), Some(result)) = (payload_field, operation.results.first()) {
-                if semantic_record_field_type(program, &field) != result.ty {
+                if semantic_record_field_type(
+                    program,
+                    &field,
+                    declared
+                        .and_then(|item| item.identity.declaring_module())
+                        .as_deref(),
+                ) != result.ty
+                {
                     errors.push(body_diagnostic(
                         "MNB066",
                         format!("{path}.results"),
@@ -3157,7 +3211,11 @@ fn validate_operation(
                 return;
             }
             for (index, field) in declared.fields.iter().enumerate() {
-                let expected_field_type = semantic_record_field_type(program, field);
+                let expected_field_type = semantic_record_field_type(
+                    program,
+                    field,
+                    declared.identity.declaring_module().as_deref(),
+                );
                 let Some(operand) = operation.operands.get(index) else {
                     break;
                 };
@@ -3231,7 +3289,11 @@ fn validate_operation(
                     "record projection names a field the record does not declare",
                 )),
                 Some(declared_field) => {
-                    let expected_field_type = semantic_record_field_type(program, declared_field);
+                    let expected_field_type = semantic_record_field_type(
+                        program,
+                        declared_field,
+                        declared.identity.declaring_module().as_deref(),
+                    );
                     if operation.results.first().map(|result| &result.ty)
                         != Some(&expected_field_type)
                     {
@@ -3825,6 +3887,14 @@ fn generic_type_references_are_foreign(ty: &BodyType, function: &Function) -> bo
 /// Resolve a canonical bounded-sequence spelling `[E; N]` / `[E; up_to M]`
 /// whose element type may be a declared nominal type of this program.
 fn semantic_sequence_type(program: &Program, name: &str) -> Option<BodyType> {
+    semantic_sequence_type_in_module(program, name, "")
+}
+
+fn semantic_sequence_type_in_module(
+    program: &Program,
+    name: &str,
+    module: &str,
+) -> Option<BodyType> {
     let inner = name.strip_prefix('[')?.strip_suffix(']')?;
     let separator = inner.rfind(';')?;
     let (element_text, bound_text) = (inner[..separator].trim(), inner[separator + 1..].trim());
@@ -3836,7 +3906,11 @@ fn semantic_sequence_type(program: &Program, name: &str) -> Option<BodyType> {
     if bound.ceiling() > MAX_SEQUENCE_BOUND {
         return None;
     }
-    let element = Box::new(semantic_body_type(program, element_text));
+    let element = Box::new(if module.is_empty() {
+        semantic_body_type(program, element_text)
+    } else {
+        BodyType::from_program_in_module(program, element_text, module)
+    });
     if element.has_unresolved_named() {
         return None;
     }
@@ -3844,8 +3918,15 @@ fn semantic_sequence_type(program: &Program, name: &str) -> Option<BodyType> {
 }
 
 /// Resolve a declared record field's semantic body type at validation time.
-fn semantic_record_field_type(program: &Program, field: &crate::core::RecordField) -> BodyType {
-    semantic_body_type(program, &field.field_type)
+fn semantic_record_field_type(
+    program: &Program,
+    field: &crate::core::RecordField,
+    module: Option<&str>,
+) -> BodyType {
+    module.map_or_else(
+        || semantic_body_type(program, &field.field_type),
+        |module| BodyType::from_program_in_module(program, &field.field_type, module),
+    )
 }
 
 /// Rehydrate one sequence element spelling to its semantic type: generic

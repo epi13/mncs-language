@@ -1809,7 +1809,11 @@ fn elaborate_linked_module_with_source_map(
                 }
                 payload_fields.push(RecordField {
                     name: field.name.text.clone(),
-                    field_type: canonical_value_type(&field.value_type.text, &payload_ty),
+                    field_type: canonical_value_type_in_module(
+                        &field.value_type.text,
+                        &payload_ty,
+                        &ast.module.text,
+                    ),
                 });
             }
             payload_fields.sort_by(|left, right| left.name.cmp(&right.name));
@@ -1945,6 +1949,7 @@ fn elaborate_linked_module_with_source_map(
             continue;
         }
         let mut fields = Vec::new();
+        let mut identity_fields = Vec::new();
         for field in &declaration.fields {
             if !provisional_names.contains(&field.value_type.text)
                 && !finite_types_by_name.contains_key(&field.value_type.text)
@@ -1974,20 +1979,37 @@ fn elaborate_linked_module_with_source_map(
                 &mut diagnostics,
                 admitted_sequence_ceiling(ast),
             );
+            // Preserve the established record identity for unqualified
+            // source spellings. The stored field type below is now the
+            // owner-resolved nominal identity (needed by projections), but
+            // changing every historical `RecordType` identity merely because
+            // an imported field became unambiguous would invalidate existing
+            // corpora. Qualified spellings already carried their canonical
+            // identity in the pre-Phase-IV contract.
+            identity_fields.push((
+                field.name.text.clone(),
+                canonical_value_type(&field.value_type.text, &field_type),
+            ));
             fields.push(RecordField {
                 name: field.name.text.clone(),
-                field_type: canonical_value_type(&field.value_type.text, &field_type),
+                field_type: canonical_value_type_in_module(
+                    &field.value_type.text,
+                    &field_type,
+                    &ast.module.text,
+                ),
             });
         }
         fields.sort_by(|left, right| left.name.cmp(&right.name));
+        identity_fields.sort_by(|left, right| left.0.cmp(&right.0));
+        let identity_field_refs = identity_fields
+            .iter()
+            .map(|(name, field_type)| (name.as_str(), field_type.as_str()))
+            .collect::<Vec<_>>();
         resolved_records.push(RecordType {
             identity: record_type_id(
                 &ast.module.text,
                 &declaration.name.text,
-                &fields
-                    .iter()
-                    .map(|field| (field.name.as_str(), field.field_type.as_str()))
-                    .collect::<Vec<_>>(),
+                &identity_field_refs,
             ),
             name: declaration.name.text.clone(),
             fields,
@@ -2824,10 +2846,12 @@ fn elaborate_function(
     // identity-bearing spelling in the semantic Program so body/IR/SSA
     // validation cannot accidentally collapse two imported `Thing` types.
     for (value, parameter) in inputs.iter_mut().zip(&parameters) {
-        value.value_type = canonical_value_type(&value.value_type, &parameter.ty);
+        value.value_type =
+            canonical_value_type_in_module(&value.value_type, &parameter.ty, &ast.module.text);
     }
     if let Some(output) = outputs.first_mut() {
-        output.value_type = canonical_value_type(&output.value_type, &output_type);
+        output.value_type =
+            canonical_value_type_in_module(&output.value_type, &output_type, &ast.module.text);
     }
     let mut capabilities = function
         .capabilities
@@ -3600,6 +3624,20 @@ fn calls_in_expr(expr: &AstExpr, calls: &mut BTreeSet<String>) {
         AstExpr::Sha256Digest { view, .. } => calls_in_expr(view, calls),
         AstExpr::StructuredDigest { value, .. } => calls_in_expr(value, calls),
         AstExpr::ProcessRun { request, .. } => calls_in_expr(request, calls),
+        AstExpr::StructuredRead { path, schema, .. } => {
+            calls_in_expr(path, calls);
+            calls_in_expr(schema, calls);
+        }
+        AstExpr::StructuredWrite {
+            path,
+            schema,
+            value,
+            ..
+        } => {
+            calls_in_expr(path, calls);
+            calls_in_expr(schema, calls);
+            calls_in_expr(value, calls);
+        }
         AstExpr::HostWrite { view, .. } => calls_in_expr(view, calls),
         AstExpr::FloatIntrinsic { argument, .. } => calls_in_expr(argument, calls),
         AstExpr::Ed25519Verify {
@@ -6315,6 +6353,177 @@ impl<'a> BodyBuilder<'a> {
         Some(ResolvedBinding::plain(id, result_ty))
     }
 
+    /// Elaborate the generic type-directed artifact decoder.  Unlike
+    /// `structured_digest`, the expected result type is semantic input to
+    /// the operation: the runtime uses that nominal contract to decode the
+    /// external envelope and refuses unresolved or unspecialized types.
+    fn elaborate_structured_read(
+        &mut self,
+        path: &AstExpr,
+        schema: &AstExpr,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let Some(result_ty) = expected.cloned() else {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE287",
+                "structured_read requires an expected concrete result type",
+                span,
+            ));
+            return None;
+        };
+        if result_ty.has_unresolved_named() || result_ty.contains_generic_parameter() {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE287",
+                "structured_read requires a resolved nominal or bounded concrete result type",
+                span,
+            ));
+            return None;
+        }
+        let capability =
+            self.check_host_authority("structured_read", "MNE288", "MNE289", span, diagnostics)?;
+        let path_binding = self.elaborate_structured_view(
+            path,
+            "structured_read path",
+            1024,
+            "MNE290",
+            env,
+            diagnostics,
+        )?;
+        let schema_binding = self.elaborate_structured_view(
+            schema,
+            "structured_read schema",
+            64,
+            "MNE291",
+            env,
+            diagnostics,
+        )?;
+        let id = self.new_value("structured_read");
+        self.push_operation(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability,
+                operation: "structured_read".to_owned(),
+            },
+            operands: vec![path_binding.id, schema_binding.id],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
+    /// Elaborate the generic deterministic artifact encoder.  The result is
+    /// the published byte count, so record-only execution can validate the
+    /// exact document without performing a filesystem mutation.
+    fn elaborate_structured_write(
+        &mut self,
+        path: &AstExpr,
+        schema: &AstExpr,
+        value: &AstExpr,
+        span: SourceSpan,
+        expected: Option<&BodyType>,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let result_ty = BodyType::Integer(IntegerType {
+            bits: 64,
+            signed: false,
+        });
+        if expected.is_some_and(|expected| expected != &result_ty) {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE292",
+                "structured_write produces u64 byte count which does not satisfy the required type",
+                span,
+            ));
+            return None;
+        }
+        let capability =
+            self.check_host_authority("structured_write", "MNE293", "MNE294", span, diagnostics)?;
+        let path_binding = self.elaborate_structured_view(
+            path,
+            "structured_write path",
+            1024,
+            "MNE295",
+            env,
+            diagnostics,
+        )?;
+        let schema_binding = self.elaborate_structured_view(
+            schema,
+            "structured_write schema",
+            64,
+            "MNE296",
+            env,
+            diagnostics,
+        )?;
+        let value_binding = self.elaborate_expr(value, None, env, diagnostics)?;
+        if value_binding.ty.has_unresolved_named() || value_binding.ty.contains_generic_parameter()
+        {
+            diagnostics.push(elaboration_diagnostic(
+                "MNE297",
+                "structured_write requires a resolved typed value",
+                value.span(),
+            ));
+            return None;
+        }
+        let id = self.new_value("structured_write");
+        self.push_operation(BodyOperation {
+            id: id.clone(),
+            kind: BodyOperationKind::HostCall {
+                capability,
+                operation: "structured_write".to_owned(),
+            },
+            operands: vec![path_binding.id, schema_binding.id, value_binding.id],
+            results: vec![BodyValue {
+                id: id.clone(),
+                ty: result_ty.clone(),
+            }],
+            contracts: Vec::new(),
+            assumptions: Vec::new(),
+            machine_intent: None,
+            lowering: None,
+            portability: None,
+        });
+        Some(ResolvedBinding::plain(id, result_ty))
+    }
+
+    fn elaborate_structured_view(
+        &mut self,
+        view: &AstExpr,
+        label: &str,
+        max_bound: u32,
+        type_code: &str,
+        env: &mut BindingEnv,
+        diagnostics: &mut Vec<SourceDiagnostic>,
+    ) -> Option<ResolvedBinding> {
+        let binding = self.elaborate_expr(view, None, env, diagnostics)?;
+        let BodyType::Sequence { element, bound } = &binding.ty else {
+            diagnostics.push(elaboration_diagnostic(
+                type_code,
+                format!("{label} must be a bounded byte view"),
+                view.span(),
+            ));
+            return None;
+        };
+        if **element != BodyType::Byte || bound.ceiling() > max_bound {
+            diagnostics.push(elaboration_diagnostic(
+                type_code,
+                format!("{label} must be a byte view bounded by {max_bound} bytes"),
+                view.span(),
+            ));
+            return None;
+        }
+        Some(binding)
+    }
+
     /// Elaborate the reusable explicit-argv `process_run(request)` effect.
     /// The request/result records are nominal application inputs at source,
     /// while the runtime validates their field contract and performs only
@@ -8610,6 +8819,23 @@ impl<'a> BodyBuilder<'a> {
             AstExpr::ProcessRun { request, span } => {
                 self.elaborate_process_run(request, *span, expected, env, diagnostics)
             }
+            AstExpr::StructuredRead { path, schema, span } => {
+                self.elaborate_structured_read(path, schema, *span, expected, env, diagnostics)
+            }
+            AstExpr::StructuredWrite {
+                path,
+                schema,
+                value,
+                span,
+            } => self.elaborate_structured_write(
+                path,
+                schema,
+                value,
+                *span,
+                expected,
+                env,
+                diagnostics,
+            ),
             AstExpr::HostWrite { view, span } => {
                 self.elaborate_host_write(view, *span, expected, env, diagnostics)
             }
@@ -11129,6 +11355,17 @@ fn rename_forwarded_params(
 }
 
 fn canonical_value_type(source: &str, ty: &BodyType) -> String {
+    canonical_value_type_in_module(source, ty, "")
+}
+
+/// Canonicalize a source-level type spelling while retaining the source
+/// spelling for nominal declarations owned by this module.  Imported nominal
+/// declarations must carry their semantic identity even when source used an
+/// unqualified name: linked programs can contain several same-named records
+/// (for example the process and application environment entries), and a
+/// later field projection must resolve against the owning module rather than
+/// the first matching short name.
+fn canonical_value_type_in_module(source: &str, ty: &BodyType, current_module: &str) -> String {
     match ty {
         BodyType::Sequence { element, bound } => {
             let inner_source = source
@@ -11141,12 +11378,14 @@ fn canonical_value_type(source: &str, ty: &BodyType) -> String {
                 .unwrap_or_else(|| element.semantic_name());
             format!(
                 "[{}; {}]",
-                canonical_value_type(&inner_source, element),
+                canonical_value_type_in_module(&inner_source, element, current_module),
                 bound.canonical_text()
             )
         }
         BodyType::Finite { identity, .. } | BodyType::Record { identity, .. }
-            if source.contains('.') =>
+            if source.contains('.')
+                || (!current_module.is_empty()
+                    && identity.declaring_module().as_deref() != Some(current_module)) =>
         {
             identity.0.clone()
         }

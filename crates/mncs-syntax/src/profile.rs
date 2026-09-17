@@ -132,6 +132,11 @@ pub const SOURCE_PROFILE_VERSION_0_16: &str = "0.16";
 /// ordinary MNCS function signatures and effect/capability rules.
 pub const SOURCE_PROFILE_VERSION_0_17: &str = "0.17";
 
+/// Source Profile 0.18: generic bounded structured-artifact ingress and
+/// atomic publication.  The artifact codec is type-directed by the linked
+/// nominal value contract; it is not an application-specific JSON tree.
+pub const SOURCE_PROFILE_VERSION_0_18: &str = "0.18";
+
 /// The registry is ordered oldest-first; `predecessor` links agree with
 /// this order (checked by `registry_chain_is_linear`).
 pub const SOURCE_PROFILE_REGISTRY: &[SourceProfileRecord] = &[
@@ -401,7 +406,7 @@ pub const SOURCE_PROFILE_REGISTRY: &[SourceProfileRecord] = &[
     },
     SourceProfileRecord {
         version: "0.17",
-        status: ProfileStatus::Current,
+        status: ProfileStatus::Sealed,
         spec_document: "docs/source-profile-0.17.md",
         predecessor: Some("0.16"),
         supports_parsing: true,
@@ -412,6 +417,25 @@ pub const SOURCE_PROFILE_REGISTRY: &[SourceProfileRecord] = &[
         max_iteration_work_product: 1048576,
         max_vector_lanes: 64,
         features: &["first_class_test_declarations", "static_test_inventory"],
+    },
+    SourceProfileRecord {
+        version: "0.18",
+        status: ProfileStatus::Current,
+        spec_document: "docs/source-profile-0.18.md",
+        predecessor: Some("0.17"),
+        supports_parsing: true,
+        supports_elaboration: true,
+        max_sequence_bound: 1024,
+        max_iteration_bound: 1024,
+        max_iteration_nesting: 2,
+        max_iteration_work_product: 1048576,
+        max_vector_lanes: 64,
+        features: &[
+            "structured_read_effect",
+            "structured_write_effect",
+            "nominal_artifact_codecs",
+            "atomic_artifact_publication",
+        ],
     },
 ];
 
@@ -517,7 +541,7 @@ mod tests {
             assert!(record.supports_elaboration);
             previous = Some(record.version);
         }
-        assert_eq!(SOURCE_PROFILE_REGISTRY.last().unwrap().version, "0.17");
+        assert_eq!(SOURCE_PROFILE_REGISTRY.last().unwrap().version, "0.18");
     }
 
     #[test]
@@ -531,6 +555,7 @@ mod tests {
         assert!(source_profile_supported("0.15"));
         assert!(source_profile_supported("0.16"));
         assert!(source_profile_supported("0.17"));
+        assert!(source_profile_supported("0.18"));
         assert!(!source_profile_supported(""));
     }
 

@@ -636,6 +636,78 @@ pub(crate) fn host_view_operand(
     host_view_bytes(values.get(binding)?)
 }
 
+/// Read one byte-view operand for a generic structured effect.  Structured
+/// paths use the larger bounded path ceiling while schema labels stay small;
+/// the ordinary crypto view helper remains capped at one 64-byte view.
+pub(crate) fn structured_view_operand(
+    operation: &BodyOperation,
+    values: &BTreeMap<String, ExecutionValue>,
+    position: usize,
+    max_bytes: usize,
+    label: &str,
+) -> Result<Vec<u8>, String> {
+    let binding = operation
+        .operands
+        .get(position)
+        .ok_or_else(|| format!("structured {label} operand is missing"))?;
+    let value = values
+        .get(binding)
+        .ok_or_else(|| format!("structured {label} operand value is unavailable"))?;
+    let ExecutionValue::Sequence { values } = value else {
+        return Err(format!("structured {label} operand must be a byte view"));
+    };
+    if values.len() > max_bytes {
+        return Err(format!(
+            "structured {label} operand exceeds the {max_bytes}-byte bound"
+        ));
+    }
+    values
+        .iter()
+        .map(|element| match element {
+            ExecutionValue::Byte { value } => u8::try_from(*value)
+                .map_err(|_| format!("structured {label} operand contains a non-byte value")),
+            _ => Err(format!(
+                "structured {label} operand contains a non-byte value"
+            )),
+        })
+        .collect()
+}
+
+/// SSA counterpart of [`structured_view_operand`].  The two executors share
+/// the byte-view validation but keep their native operand containers.
+pub(crate) fn structured_view_operand_ssa(
+    operands: &[SemanticId],
+    values: &BTreeMap<SemanticId, ExecutionValue>,
+    position: usize,
+    max_bytes: usize,
+    label: &str,
+) -> Result<Vec<u8>, String> {
+    let binding = operands
+        .get(position)
+        .ok_or_else(|| format!("structured {label} operand is missing"))?;
+    let value = values
+        .get(binding)
+        .ok_or_else(|| format!("structured {label} operand value is unavailable"))?;
+    let ExecutionValue::Sequence { values } = value else {
+        return Err(format!("structured {label} operand must be a byte view"));
+    };
+    if values.len() > max_bytes {
+        return Err(format!(
+            "structured {label} operand exceeds the {max_bytes}-byte bound"
+        ));
+    }
+    values
+        .iter()
+        .map(|element| match element {
+            ExecutionValue::Byte { value } => u8::try_from(*value)
+                .map_err(|_| format!("structured {label} operand contains a non-byte value")),
+            _ => Err(format!(
+                "structured {label} operand contains a non-byte value"
+            )),
+        })
+        .collect()
+}
+
 /// Verify-only SHA-256 over raw bytes (HARNESS-PRESSURE-006). Pure
 /// function of the input through the audited SHA-2 primitive; returns
 /// the 32 digest bytes. Callers size the delivered sequence.
@@ -737,8 +809,10 @@ fn process_u64(value: &ExecutionValue, field: &str) -> Result<u64, String> {
 }
 
 pub(crate) fn process_request_from_value(
+    program: &Program,
     value: &ExecutionValue,
 ) -> Result<crate::process::ProcessRequest, String> {
+    validate_standard_process_record(program, value, "ProcessRequest")?;
     let Some(program_value) = record_field(value, "program") else {
         return Err("process request is missing program".to_owned());
     };
@@ -918,6 +992,7 @@ pub(crate) fn process_result_value(
     let BodyType::Record { identity, name } = result_type else {
         return Err("process_run result is not a record type".to_owned());
     };
+    validate_standard_process_record_type(program, identity, name, "ProcessResult")?;
     let declaration = program
         .record_types
         .iter()
@@ -963,6 +1038,171 @@ pub(crate) fn process_result_value(
         name: name.clone(),
         fields: fields.into(),
     })
+}
+
+/// The process effect is a nominal capability ABI, not a structural record
+/// convention.  Keep the standard library declaration as the schema
+/// authority and validate its module/name/field types here before any OS
+/// effect is attempted.  A same-shaped record from an application module or
+/// a field-type revision therefore fails closed instead of being accepted by
+/// field-name duck typing.
+fn validate_standard_process_record(
+    program: &Program,
+    value: &ExecutionValue,
+    expected_name: &str,
+) -> Result<(), String> {
+    let ExecutionValue::Record {
+        type_identity,
+        name,
+        ..
+    } = value
+    else {
+        return Err(format!(
+            "process request must be the nominal mncs.std.process.v1::{expected_name} record"
+        ));
+    };
+    validate_standard_process_record_type(program, type_identity, name, expected_name)
+}
+
+fn validate_standard_process_record_type(
+    program: &Program,
+    identity: &SemanticId,
+    name: &str,
+    expected_name: &str,
+) -> Result<(), String> {
+    if name != expected_name
+        || standard_record_module(identity).as_deref() != Some("mncs.std.process.v1")
+    {
+        return Err(format!(
+            "process_run requires the nominal mncs.std.process.v1::{expected_name} record"
+        ));
+    }
+    let declaration = program
+        .record_types
+        .iter()
+        .find(|record| record.identity == *identity)
+        .ok_or_else(|| format!("standard process record {expected_name} is not linked"))?;
+    let expected_fields: &[&str] = match expected_name {
+        "ProcessRequest" => &[
+            "argv",
+            "argv_count",
+            "current_dir",
+            "deadline_ms",
+            "environment",
+            "environment_count",
+            "program",
+            "stderr_limit",
+            "stdin",
+            "stdout_limit",
+        ],
+        "ProcessResult" => &[
+            "duration_ms",
+            "exit_code",
+            "has_exit_code",
+            "stderr",
+            "stderr_truncated",
+            "stdout",
+            "stdout_truncated",
+            "success",
+            "timed_out",
+        ],
+        _ => return Err(format!("unknown standard process record {expected_name:?}")),
+    };
+    let actual_fields = declaration
+        .fields
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let expected_set = expected_fields.iter().copied().collect::<BTreeSet<_>>();
+    if actual_fields != expected_set {
+        return Err(format!(
+            "standard process {expected_name} field set does not match mncs.std.process.v1"
+        ));
+    }
+    let u64_type = BodyType::Integer(IntegerType {
+        bits: 64,
+        signed: false,
+    });
+    let i64_type = BodyType::Integer(IntegerType {
+        bits: 64,
+        signed: true,
+    });
+    let bool_type = BodyType::Bool;
+    let byte_view = |bound| BodyType::Sequence {
+        element: Box::new(BodyType::Byte),
+        bound,
+    };
+    let expected_type = |field: &str| -> Option<BodyType> {
+        match expected_name {
+            "ProcessRequest" => match field {
+                "program" | "current_dir" => Some(byte_view(SequenceBound::UpTo(1024))),
+                "argv" => Some(BodyType::Sequence {
+                    element: Box::new(byte_view(SequenceBound::UpTo(1024))),
+                    bound: SequenceBound::UpTo(16),
+                }),
+                "environment" => {
+                    let identity = program
+                        .record_types
+                        .iter()
+                        .find(|record| {
+                            record.name == "EnvironmentEntry"
+                                && standard_record_module(&record.identity).as_deref()
+                                    == Some("mncs.std.process.v1")
+                        })?
+                        .identity
+                        .clone();
+                    Some(BodyType::Sequence {
+                        element: Box::new(BodyType::Record {
+                            identity,
+                            name: "EnvironmentEntry".to_owned(),
+                        }),
+                        bound: SequenceBound::UpTo(16),
+                    })
+                }
+                "stdin" => Some(byte_view(SequenceBound::UpTo(1024))),
+                "argv_count" | "environment_count" | "stdout_limit" | "stderr_limit"
+                | "deadline_ms" => Some(u64_type.clone()),
+                _ => None,
+            },
+            "ProcessResult" => match field {
+                "exit_code" => Some(i64_type.clone()),
+                "has_exit_code" | "success" | "timed_out" | "stdout_truncated"
+                | "stderr_truncated" => Some(bool_type.clone()),
+                "stdout" | "stderr" => Some(byte_view(SequenceBound::UpTo(1024))),
+                "duration_ms" => Some(u64_type.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    };
+    for field in &declaration.fields {
+        let actual = BodyType::from_program_in_module(
+            program,
+            &field.field_type,
+            standard_record_module(identity).as_deref().unwrap_or(""),
+        );
+        let Some(expected) = expected_type(&field.name) else {
+            return Err(format!(
+                "standard process {expected_name} has an unsupported field {:?}",
+                field.name
+            ));
+        };
+        if !actual.same_type(&expected) {
+            return Err(format!(
+                "standard process {expected_name} field {:?} type {} does not match {}",
+                field.name,
+                actual.semantic_name(),
+                expected.semantic_name()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn standard_record_module(identity: &SemanticId) -> Option<String> {
+    let prefix = "mncs:0.2:record-type:";
+    let encoded = identity.0.strip_prefix(prefix)?.split("::").next()?;
+    Some(crate::identity::decode_component(encoded)?)
 }
 
 /// Bounded append-only storage write (P-006 storage slice). Appends
@@ -3500,6 +3740,7 @@ fn execute_inner(
                 operation,
                 &identity,
                 &mut values,
+                &value_types,
                 &mut result,
                 request,
                 record_effects,
@@ -3700,6 +3941,7 @@ fn execute_operation(
     operation: &BodyOperation,
     identity: &SemanticId,
     values: &mut BTreeMap<String, ExecutionValue>,
+    value_types: &BTreeMap<String, BodyType>,
     result: &mut ExecutionResult,
     request: &ExecutionRequest,
     record_effects: bool,
@@ -5383,6 +5625,176 @@ fn execute_operation(
                     }
                 }
             }
+            if operation_id == "structured_read" {
+                let Some(result_type) = operation.results.first().map(|value| &value.ty) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "structured_read has no result binding".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let path = match structured_view_operand(
+                    operation,
+                    &values,
+                    0,
+                    crate::structured::STRUCTURED_PATH_MAX_BYTES,
+                    "artifact path",
+                ) {
+                    Ok(path) => path,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                };
+                let schema = match structured_view_operand(
+                    operation,
+                    &values,
+                    1,
+                    crate::structured::STRUCTURED_SCHEMA_MAX_BYTES,
+                    "schema",
+                ) {
+                    Ok(schema) => schema,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                };
+                match crate::structured::structured_read_value(
+                    program,
+                    result_type,
+                    grant,
+                    &path,
+                    &schema,
+                ) {
+                    Ok((value, effect)) => {
+                        values.insert(operation.results[0].id.clone(), value);
+                        result.effects.push(ExecutionEffectEvent {
+                            operation: identity.clone(),
+                            kind: effect.kind,
+                            target: effect.target,
+                            capability: capability.clone(),
+                            provenance: Some(effect.provenance),
+                        });
+                        return None;
+                    }
+                    Err(crate::structured::StructuredFail::InvalidRequest(reason)) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                    Err(crate::structured::StructuredFail::RuntimeFailure(reason)) => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                }
+            }
+            if operation_id == "structured_write" {
+                let Some(value_binding) = operation.operands.get(2) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "structured_write has no value operand".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let Some(value_type) = value_types.get(value_binding) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "structured_write value type is unavailable".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let Some(value) = values.get(value_binding).cloned() else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "structured_write value is unavailable".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let path = match structured_view_operand(
+                    operation,
+                    &values,
+                    0,
+                    crate::structured::STRUCTURED_PATH_MAX_BYTES,
+                    "artifact path",
+                ) {
+                    Ok(path) => path,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                };
+                let schema = match structured_view_operand(
+                    operation,
+                    &values,
+                    1,
+                    crate::structured::STRUCTURED_SCHEMA_MAX_BYTES,
+                    "schema",
+                ) {
+                    Ok(schema) => schema,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                };
+                match crate::structured::structured_write_value(
+                    program, value_type, &value, grant, &path, &schema, !observing,
+                ) {
+                    Ok((returned, effect)) => {
+                        values.insert(operation.results[0].id.clone(), returned);
+                        result.effects.push(ExecutionEffectEvent {
+                            operation: identity.clone(),
+                            kind: effect.kind,
+                            target: effect.target,
+                            capability: capability.clone(),
+                            provenance: (!observing).then_some(effect.provenance),
+                        });
+                        return None;
+                    }
+                    Err(crate::structured::StructuredFail::InvalidRequest(reason)) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                    Err(crate::structured::StructuredFail::RuntimeFailure(reason)) => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            Some(identity.clone()),
+                            reason,
+                        );
+                        return Some(result.clone());
+                    }
+                }
+            }
             if operation_id == "process_run" {
                 if observing {
                     result.fail(
@@ -5404,7 +5816,7 @@ fn execute_operation(
                     );
                     return Some(result.clone());
                 };
-                let process_request = match process_request_from_value(request_value) {
+                let process_request = match process_request_from_value(program, request_value) {
                     Ok(request) => request,
                     Err(reason) => {
                         result.fail(

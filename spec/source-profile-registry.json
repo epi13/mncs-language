@@ -290,7 +290,7 @@
   },
   {
     "version": "0.17",
-    "status": "current",
+    "status": "sealed",
     "spec_document": "docs/source-profile-0.17.md",
     "predecessor": "0.16",
     "supports_parsing": true,
@@ -303,6 +303,25 @@
     "features": [
       "first_class_test_declarations",
       "static_test_inventory"
+    ]
+  },
+  {
+    "version": "0.18",
+    "status": "current",
+    "spec_document": "docs/source-profile-0.18.md",
+    "predecessor": "0.17",
+    "supports_parsing": true,
+    "supports_elaboration": true,
+    "max_sequence_bound": 1024,
+    "max_iteration_bound": 1024,
+    "max_iteration_nesting": 2,
+    "max_iteration_work_product": 1048576,
+    "max_vector_lanes": 64,
+    "features": [
+      "structured_read_effect",
+      "structured_write_effect",
+      "nominal_artifact_codecs",
+      "atomic_artifact_publication"
     ]
   }
 ]

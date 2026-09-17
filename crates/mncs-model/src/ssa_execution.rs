@@ -553,6 +553,23 @@ fn execute_ssa_module_with_validation(
     else {
         return result;
     };
+    let mut value_types = BTreeMap::new();
+    for input in &function.inputs {
+        value_types.insert(input.identity.clone(), ssa_input_type(program, &input.ty));
+    }
+    for block in &function.blocks {
+        for parameter in &block.parameters {
+            value_types.insert(
+                parameter.identity.clone(),
+                ssa_input_type(program, &parameter.ty),
+            );
+        }
+        for instruction in &block.instructions {
+            for output in &instruction.outputs {
+                value_types.insert(output.identity.clone(), ssa_input_type(program, &output.ty));
+            }
+        }
+    }
     let local_block_indices = if block_cache.is_none() {
         function
             .blocks
@@ -604,6 +621,7 @@ fn execute_ssa_module_with_validation(
                 module,
                 instruction,
                 &mut values,
+                &value_types,
                 &mut result,
                 request,
                 block_cache,
@@ -816,6 +834,7 @@ fn execute_instruction(
     module: &SsaModule,
     instruction: &SsaInstruction,
     values: &mut BTreeMap<SemanticId, ExecutionValue>,
+    value_types: &BTreeMap<SemanticId, BodyType>,
     result: &mut SsaExecutionResult,
     request: &crate::ExecutionRequest,
     block_cache: Option<&BTreeMap<SemanticId, BTreeMap<SemanticId, usize>>>,
@@ -2574,6 +2593,184 @@ fn execute_instruction(
                     }
                 }
             }
+            if operation == "structured_read" {
+                let Some(output) = instruction.outputs.first() else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "structured_read has no result binding",
+                    );
+                    return true;
+                };
+                let path = match crate::execution::structured_view_operand_ssa(
+                    &instruction.inputs,
+                    values,
+                    0,
+                    crate::structured::STRUCTURED_PATH_MAX_BYTES,
+                    "artifact path",
+                ) {
+                    Ok(path) => path,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                };
+                let schema = match crate::execution::structured_view_operand_ssa(
+                    &instruction.inputs,
+                    values,
+                    1,
+                    crate::structured::STRUCTURED_SCHEMA_MAX_BYTES,
+                    "schema",
+                ) {
+                    Ok(schema) => schema,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                };
+                match crate::structured::structured_read_value(
+                    program, &output.ty, grant, &path, &schema,
+                ) {
+                    Ok((value, effect)) => {
+                        values.insert(output.identity.clone(), value);
+                        result.effects.push(ExecutionEffectEvent {
+                            operation: instruction_identity(instruction).unwrap_or_else(|| {
+                                crate::identity::SemanticId(format!("host-call:{capability}"))
+                            }),
+                            kind: effect.kind,
+                            target: effect.target,
+                            capability: capability.clone(),
+                            provenance: Some(effect.provenance),
+                        });
+                        return false;
+                    }
+                    Err(crate::structured::StructuredFail::InvalidRequest(reason)) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                    Err(crate::structured::StructuredFail::RuntimeFailure(reason)) => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                }
+            }
+            if operation == "structured_write" {
+                let Some(output) = instruction.outputs.first() else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "structured_write has no result binding",
+                    );
+                    return true;
+                };
+                let Some(value_input) = instruction.inputs.get(2) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "structured_write has no value operand",
+                    );
+                    return true;
+                };
+                let Some(value_type) = value_types.get(value_input) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "structured_write value type is unavailable",
+                    );
+                    return true;
+                };
+                let Some(value) = values.get(value_input).cloned() else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "structured_write value is unavailable",
+                    );
+                    return true;
+                };
+                let path = match crate::execution::structured_view_operand_ssa(
+                    &instruction.inputs,
+                    values,
+                    0,
+                    crate::structured::STRUCTURED_PATH_MAX_BYTES,
+                    "artifact path",
+                ) {
+                    Ok(path) => path,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                };
+                let schema = match crate::execution::structured_view_operand_ssa(
+                    &instruction.inputs,
+                    values,
+                    1,
+                    crate::structured::STRUCTURED_SCHEMA_MAX_BYTES,
+                    "schema",
+                ) {
+                    Ok(schema) => schema,
+                    Err(reason) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                };
+                match crate::structured::structured_write_value(
+                    program, value_type, &value, grant, &path, &schema, !observing,
+                ) {
+                    Ok((returned, effect)) => {
+                        values.insert(output.identity.clone(), returned);
+                        result.effects.push(ExecutionEffectEvent {
+                            operation: instruction_identity(instruction).unwrap_or_else(|| {
+                                crate::identity::SemanticId(format!("host-call:{capability}"))
+                            }),
+                            kind: effect.kind,
+                            target: effect.target,
+                            capability: capability.clone(),
+                            provenance: (!observing).then_some(effect.provenance),
+                        });
+                        return false;
+                    }
+                    Err(crate::structured::StructuredFail::InvalidRequest(reason)) => {
+                        result.fail(
+                            ExecutionStatus::InvalidRequest,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                    Err(crate::structured::StructuredFail::RuntimeFailure(reason)) => {
+                        result.fail(
+                            ExecutionStatus::RuntimeFailure,
+                            instruction_identity(instruction),
+                            reason,
+                        );
+                        return true;
+                    }
+                }
+            }
             if operation == "process_run" {
                 if observing {
                     result.fail(
@@ -2596,7 +2793,7 @@ fn execute_instruction(
                     return true;
                 };
                 let process_request =
-                    match crate::execution::process_request_from_value(request_value) {
+                    match crate::execution::process_request_from_value(program, request_value) {
                         Ok(request) => request,
                         Err(reason) => {
                             result.fail(
@@ -3746,7 +3943,11 @@ fn normalize_record_fields(
     let mut normalized = Vec::with_capacity(declaration.fields.len());
     for (declared_index, received_index) in order.iter().enumerate() {
         let declared = &declaration.fields[declared_index];
-        let field_ty = BodyType::from_program(program, &declared.field_type);
+        let field_ty = BodyType::from_program_in_module(
+            program,
+            &declared.field_type,
+            &declaration.identity.declaring_module().unwrap_or_default(),
+        );
         // Unresolvable spellings cannot occur after successful validation;
         // the Named fallback keeps them verbatim instead of failing.
         let field_value = match &field_ty {
@@ -3789,7 +3990,16 @@ fn normalize_finite_payload(
     let mut normalized = Vec::with_capacity(variant.payload.len());
     for (declared_index, received_index) in order.iter().enumerate() {
         let declared = &variant.payload[declared_index];
-        let field_ty = BodyType::from_program(program, &declared.field_type);
+        let field_ty = BodyType::from_program_in_module(
+            program,
+            &declared.field_type,
+            &program
+                .finite_types
+                .iter()
+                .find(|candidate| &candidate.identity == type_identity)
+                .and_then(|candidate| candidate.identity.declaring_module())
+                .unwrap_or_default(),
+        );
         let field_value = match &field_ty {
             BodyType::Named(_) => payload[*received_index].1.clone(),
             _ => normalize_value(program, &payload[*received_index].1, &field_ty)?,

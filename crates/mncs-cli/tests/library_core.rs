@@ -368,6 +368,10 @@ fn canonical_fingerprint(path: &str) -> String {
 /// (generic-argument inference at the `summarize8` delegation), changing
 /// the linked canonical form. Snapshot and upstream agree with each other
 /// on the new fingerprint, which is the robust relationship.
+/// `8bb6640b...` then rotated to `cd4bb83f...` with the source untouched:
+/// Phase IV's namespace-safe nominal resolution retains the declaring module
+/// identity of imported field types, changing the linked canonical form while
+/// keeping the snapshot/upstream equality relationship intact.
 ///
 /// The test compares the snapshot against upstream RAVEL directly (the
 /// robust relationship) in addition to the hardcoded rotation detector,
@@ -375,7 +379,7 @@ fn canonical_fingerprint(path: &str) -> String {
 /// is present.
 #[test]
 fn ravel_snapshot_is_canonically_identical_to_upstream() {
-    const EXPECTED: &str = "8bb6640bbd4226360a4729df60b06642bf54e39bd8a63978446db597e421e16f";
+    const EXPECTED: &str = "cd4bb83f2429b23386266851b5f01a6fc146254b5f82171a529b55b36c3cbc39";
     let snapshot = example("consumers/ravel-core-snapshot.mncs");
     let snapshot_fingerprint = canonical_fingerprint(&snapshot);
     assert_eq!(snapshot_fingerprint, EXPECTED, "{snapshot}");

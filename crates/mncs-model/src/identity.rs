@@ -17,6 +17,20 @@ impl SemanticId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Return the declaring module encoded in a nominal semantic identity.
+    /// Type identities are namespace-sensitive: two modules may legitimately
+    /// declare same-named records with different meanings, so consumers must
+    /// not resolve a field's short type name by first-match search.
+    pub fn declaring_module(&self) -> Option<String> {
+        for kind in ["finite-type", "record-type", "function", "module"] {
+            let prefix = format!("mncs:0.2:{kind}:");
+            if let Some(encoded) = self.0.strip_prefix(&prefix) {
+                return encoded.split("::").next().and_then(decode_component);
+            }
+        }
+        None
+    }
 }
 
 impl std::fmt::Display for SemanticId {

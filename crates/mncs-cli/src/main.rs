@@ -3,6 +3,7 @@ mod issuance;
 use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs,
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     process::{Command, ExitCode},
     time::Instant,
@@ -48,6 +49,7 @@ use mncs_translation_check::{
     validate_constant_folding, validate_unreachable_removal,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 const OBSERVED_EXECUTION_COMMAND_SCHEMA_VERSION: &str = "mncs.execution-observation-command/1";
 
@@ -106,7 +108,8 @@ fn run_cli() -> ExitCode {
         }
         "test-inventory" => test_inventory_command(args),
         "test" => test_command(args),
-        "call" | "run-app" => call_command(args),
+        "call" => call_command(args),
+        "run-app" => run_app_command(args),
         "process" => process_command(args),
         "canonicalize" => one_manifest_command(args, canonicalize),
         "identity" => one_manifest_command(args, identity),
@@ -401,6 +404,622 @@ where
         return native_call_usage("--args or --args-json is required");
     };
     run_native_call(&source_path, &module, &function, &arguments, &options)
+}
+
+const NATIVE_APPLICATION_DESCRIPTOR_SCHEMA_VERSION: &str = "mncs.native-application/1";
+const APPLICATION_CONTEXT_MAX_ARGV: usize = 16;
+const APPLICATION_CONTEXT_MAX_ENVIRONMENT: usize = 16;
+const APPLICATION_CONTEXT_MAX_STDIN: usize = 1024;
+const APPLICATION_CONTEXT_MAX_CWD: usize = 1024;
+
+/// Repository-owned declaration consumed by the one generic application
+/// launcher.  It names an MNCS entrypoint and its dependency roots; it does
+/// not encode application policy or add a Rust subcommand.
+#[derive(Debug, Clone, Deserialize)]
+struct NativeApplicationDescriptor {
+    schema_version: String,
+    application_identity: String,
+    source: String,
+    module: String,
+    entry_function: String,
+    profile: String,
+    #[serde(default)]
+    interface_identity: Option<String>,
+    #[serde(default)]
+    libraries: Vec<String>,
+    /// Environment is opt-in and allow-listed.  A host process often has
+    /// more variables than the bounded application record admits; silently
+    /// truncating it would make the context unauthentic.
+    #[serde(default)]
+    environment_keys: Vec<String>,
+    #[serde(default)]
+    required_capabilities: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+struct NativeApplicationOptions {
+    descriptor_path: Option<PathBuf>,
+    application_arguments: Vec<String>,
+    libraries: Vec<PathBuf>,
+    process_grants: Vec<(String, String)>,
+    structured_grants: Vec<String>,
+    fs_grants: Vec<(String, String)>,
+    step_budget: u64,
+    interface_identity: Option<String>,
+}
+
+/// New canonical form: `mncs run-app DESCRIPTOR [launcher options] [-- app
+/// argv...]`.  The old source/module/function spelling is intentionally kept
+/// as a compatibility oracle so existing adapters do not silently change
+/// behavior while repositories migrate to descriptors.
+fn run_app_command<I>(args: I) -> ExitCode
+where
+    I: IntoIterator<Item = String>,
+{
+    let arguments = args.into_iter().collect::<Vec<_>>();
+    let Some(first) = arguments.first() else {
+        return native_application_usage("a descriptor path is required");
+    };
+    if first.ends_with(".mncs") {
+        return call_command(arguments);
+    }
+    let mut options = NativeApplicationOptions {
+        descriptor_path: Some(PathBuf::from(first)),
+        step_budget: 200_000,
+        ..NativeApplicationOptions::default()
+    };
+    let mut index = 1;
+    let mut pass_through = false;
+    while index < arguments.len() {
+        let argument = &arguments[index];
+        if pass_through {
+            options.application_arguments.push(argument.clone());
+            index += 1;
+            continue;
+        }
+        if argument == "--" {
+            pass_through = true;
+            index += 1;
+            continue;
+        }
+        let next = |index: &mut usize, label: &str| -> Result<String, ExitCode> {
+            *index += 1;
+            arguments.get(*index).cloned().ok_or_else(|| {
+                eprintln!("error: {label} requires a value");
+                ExitCode::from(2)
+            })
+        };
+        match argument.as_str() {
+            "--library" => match next(&mut index, "--library") {
+                Ok(value) if !value.is_empty() => options.libraries.push(PathBuf::from(value)),
+                Ok(_) => return native_application_usage("--library requires a non-empty path"),
+                Err(code) => return code,
+            },
+            "--grant-process" => {
+                let value = match next(&mut index, "--grant-process") {
+                    Ok(value) => value,
+                    Err(code) => return code,
+                };
+                match value.split_once('=') {
+                    Some((capability, executable))
+                        if !capability.is_empty() && !executable.is_empty() =>
+                    {
+                        options
+                            .process_grants
+                            .push((capability.to_owned(), executable.to_owned()));
+                    }
+                    _ => {
+                        return native_application_usage(
+                            "--grant-process requires capability=executable",
+                        )
+                    }
+                }
+            }
+            "--grant-structured" => {
+                let value = match next(&mut index, "--grant-structured") {
+                    Ok(value) => value,
+                    Err(code) => return code,
+                };
+                if value.is_empty() || value.contains('=') {
+                    return native_application_usage("--grant-structured requires a capability");
+                }
+                options.structured_grants.push(value);
+            }
+            "--grant-fs" => {
+                let value = match next(&mut index, "--grant-fs") {
+                    Ok(value) => value,
+                    Err(code) => return code,
+                };
+                match value.split_once('=') {
+                    Some((capability, path)) if !capability.is_empty() && !path.is_empty() => {
+                        options
+                            .fs_grants
+                            .push((capability.to_owned(), path.to_owned()));
+                    }
+                    _ => {
+                        return native_application_usage("--grant-fs requires capability=root-path")
+                    }
+                }
+            }
+            "--step-budget" => {
+                let value = match next(&mut index, "--step-budget") {
+                    Ok(value) => value,
+                    Err(code) => return code,
+                };
+                match value.parse::<u64>() {
+                    Ok(value) if value > 0 => options.step_budget = value,
+                    _ => {
+                        return native_application_usage(
+                            "--step-budget requires a positive integer",
+                        )
+                    }
+                }
+            }
+            "--interface-identity" => {
+                options.interface_identity = match next(&mut index, "--interface-identity") {
+                    Ok(value) if !value.is_empty() => Some(value),
+                    Ok(_) => {
+                        return native_application_usage("--interface-identity requires a value")
+                    }
+                    Err(code) => return code,
+                };
+            }
+            value if value.starts_with('-') => {
+                return native_application_usage(&format!(
+                    "unknown launcher option {value:?}; pass application options after `--`"
+                ));
+            }
+            value => options.application_arguments.push(value.to_owned()),
+        }
+        index += 1;
+    }
+    run_native_application(&options)
+}
+
+fn native_application_usage(message: &str) -> ExitCode {
+    eprintln!("error: {message}");
+    eprintln!(
+        "usage: mncs run-app DESCRIPTOR [--library ROOT ...] [--grant-process capability=executable] [--grant-structured capability] [--grant-fs capability=root-path] [--step-budget N] [--interface-identity ID] [-- APP_ARG ...]"
+    );
+    ExitCode::from(2)
+}
+
+fn read_native_application_descriptor(
+    path: &Path,
+) -> Result<NativeApplicationDescriptor, ExitCode> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!("error: unable to read native application descriptor {path:?}: {error}");
+            return Err(ExitCode::from(2));
+        }
+    };
+    if bytes.len() > 64 * 1024 {
+        eprintln!("error: native application descriptor exceeds the 65536-byte bound");
+        return Err(ExitCode::from(2));
+    }
+    let descriptor: NativeApplicationDescriptor = match serde_json::from_slice(&bytes) {
+        Ok(descriptor) => descriptor,
+        Err(error) => {
+            eprintln!("error: native application descriptor is invalid JSON: {error}");
+            return Err(ExitCode::from(2));
+        }
+    };
+    if descriptor.schema_version != NATIVE_APPLICATION_DESCRIPTOR_SCHEMA_VERSION {
+        eprintln!(
+            "error: unsupported native application descriptor schema {:?}",
+            descriptor.schema_version
+        );
+        return Err(ExitCode::from(2));
+    }
+    if descriptor.application_identity.is_empty()
+        || descriptor.application_identity.len() > 1024
+        || descriptor.source.is_empty()
+        || descriptor.module.is_empty()
+        || descriptor.entry_function.is_empty()
+        || descriptor.profile.is_empty()
+    {
+        eprintln!(
+            "error: native application descriptor has an empty or oversized identity/entry field"
+        );
+        return Err(ExitCode::from(2));
+    }
+    let mut seen = BTreeSet::new();
+    if descriptor
+        .required_capabilities
+        .iter()
+        .any(|capability| capability.is_empty() || !seen.insert(capability))
+    {
+        eprintln!("error: native application descriptor has duplicate or empty capabilities");
+        return Err(ExitCode::from(2));
+    }
+    let mut environment_keys = BTreeSet::new();
+    if descriptor.environment_keys.iter().any(|key| {
+        key.is_empty() || key.len() > 64 || key.contains('=') || !environment_keys.insert(key)
+    }) {
+        eprintln!("error: native application descriptor has invalid or duplicate environment keys");
+        return Err(ExitCode::from(2));
+    }
+    Ok(descriptor)
+}
+
+fn descriptor_relative(base: &Path, path: &str) -> PathBuf {
+    let path = PathBuf::from(path);
+    if path.is_absolute() {
+        path
+    } else {
+        base.join(path)
+    }
+}
+
+fn run_native_application(options: &NativeApplicationOptions) -> ExitCode {
+    let descriptor_path = options
+        .descriptor_path
+        .as_deref()
+        .expect("run-app always carries a descriptor path");
+    let descriptor = match read_native_application_descriptor(descriptor_path) {
+        Ok(descriptor) => descriptor,
+        Err(code) => return code,
+    };
+    let granted_capabilities = options
+        .process_grants
+        .iter()
+        .map(|(capability, _)| capability.as_str())
+        .chain(options.structured_grants.iter().map(String::as_str))
+        .chain(
+            options
+                .fs_grants
+                .iter()
+                .map(|(capability, _)| capability.as_str()),
+        )
+        .collect::<BTreeSet<_>>();
+    let missing_capabilities = descriptor
+        .required_capabilities
+        .iter()
+        .filter(|capability| !granted_capabilities.contains(capability.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing_capabilities.is_empty() {
+        eprintln!(
+            "error: native application is missing explicit grants for: {}",
+            missing_capabilities.join(", ")
+        );
+        return ExitCode::from(2);
+    }
+    let descriptor_dir = descriptor_path.parent().unwrap_or_else(|| Path::new("."));
+    let source_path = descriptor_relative(descriptor_dir, &descriptor.source);
+    let source_path_text = source_path.to_string_lossy().into_owned();
+    let source = match read_source(&source_path_text) {
+        Ok(source) => source,
+        Err(code) => return code,
+    };
+    let declared_header = source.lines().find(|line| {
+        let trimmed = line.trim_start();
+        !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with("/*")
+    });
+    if !declared_header.is_some_and(|line| {
+        line.trim_start()
+            .starts_with(&format!("mncs {}", descriptor.profile))
+    }) {
+        eprintln!("error: native application source profile does not match descriptor");
+        return ExitCode::from(2);
+    }
+    let mut libraries = options.libraries.clone();
+    libraries.extend(
+        descriptor
+            .libraries
+            .iter()
+            .map(|path| descriptor_relative(descriptor_dir, path)),
+    );
+    let session = match open_native_session(&source_path_text, &libraries) {
+        Ok(session) => session,
+        Err(error) => {
+            eprintln!("error: native application could not be admitted: {error}");
+            return ExitCode::from(4);
+        }
+    };
+    let context = match application_context_host_value(
+        &descriptor.application_identity,
+        &options.application_arguments,
+        &descriptor.environment_keys,
+    ) {
+        Ok(context) => context,
+        Err(error) => {
+            eprintln!("error: native application boundary rejected: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let args_json = match serde_json::to_string(&vec![context]) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("error: native application context serialization failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let mut call_options = EmbedCallOptions::budgeted(options.step_budget);
+    call_options.expected_interface_identity = options
+        .interface_identity
+        .clone()
+        .or(descriptor.interface_identity.clone());
+    call_options.grants.extend(
+        options
+            .process_grants
+            .iter()
+            .map(|(capability, executable)| EmbedGrant {
+                capability: capability.clone(),
+                locator: executable.clone(),
+                bytes: Vec::new(),
+            }),
+    );
+    call_options.grants.extend(
+        options
+            .fs_grants
+            .iter()
+            .map(|(capability, path)| EmbedGrant::fs_root(capability, path)),
+    );
+    call_options.grants.extend(
+        options
+            .structured_grants
+            .iter()
+            .map(|capability| EmbedGrant {
+                capability: capability.clone(),
+                locator: String::new(),
+                bytes: Vec::new(),
+            }),
+    );
+    let output = match session.call_typed_json(
+        &descriptor.module,
+        &descriptor.entry_function,
+        &args_json,
+        &call_options,
+    ) {
+        Ok(output) => output,
+        Err(error) => {
+            eprintln!("error: native application typed entry call failed: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    if output.status != "returned" {
+        if let Some(reason) = output.failure_reason {
+            eprintln!(
+                "error: native application returned {}: {reason}",
+                output.status
+            );
+        }
+        return ExitCode::from(3);
+    }
+    let (stdout, stderr, exit_code) = match application_exit_from_output(&output.returned) {
+        Ok(exit) => exit,
+        Err(error) => {
+            eprintln!("error: native application did not return ApplicationExit: {error}");
+            return ExitCode::from(3);
+        }
+    };
+    let mut stdout_handle = io::stdout().lock();
+    if let Err(error) = stdout_handle.write_all(&stdout) {
+        eprintln!("error: native application stdout publication failed: {error}");
+        return ExitCode::from(3);
+    }
+    let mut stderr_handle = io::stderr().lock();
+    if let Err(error) = stderr_handle.write_all(&stderr) {
+        eprintln!("error: native application stderr publication failed: {error}");
+        return ExitCode::from(3);
+    }
+    if (0..=255).contains(&exit_code) {
+        ExitCode::from(exit_code as u8)
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+fn application_context_host_value(
+    application_identity: &str,
+    application_arguments: &[String],
+    environment_keys: &[String],
+) -> Result<HostExecutionValue, String> {
+    if application_arguments.len() > APPLICATION_CONTEXT_MAX_ARGV {
+        return Err(format!(
+            "argv exceeds the {}-argument bound",
+            APPLICATION_CONTEXT_MAX_ARGV
+        ));
+    }
+    let argv = application_arguments
+        .iter()
+        .map(|argument| {
+            let bytes = argument.as_bytes();
+            if bytes.len() > 1024 {
+                Err("argv entry exceeds the 1024-byte bound".to_owned())
+            } else {
+                Ok(host_byte_view(bytes))
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let allowlisted = environment_keys.iter().cloned().collect::<BTreeSet<_>>();
+    let mut environment = env::vars_os()
+        .map(|(key, value)| (os_string_bytes(&key), os_string_bytes(&value)))
+        .filter(|(key, _)| {
+            let key = String::from_utf8_lossy(key);
+            allowlisted.contains(key.as_ref())
+        })
+        .collect::<Vec<_>>();
+    environment.sort();
+    if environment.len() > APPLICATION_CONTEXT_MAX_ENVIRONMENT {
+        return Err(format!(
+            "environment exceeds the {}-entry bound",
+            APPLICATION_CONTEXT_MAX_ENVIRONMENT
+        ));
+    }
+    let environment = environment
+        .into_iter()
+        .map(|(key, value)| {
+            if key.is_empty() || key.len() > 64 || value.len() > 1024 || key.contains(&b'=') {
+                return Err("environment entry exceeds its bounded key/value contract".to_owned());
+            }
+            let mut fields = BTreeMap::new();
+            fields.insert("key".to_owned(), host_byte_view(&key));
+            fields.insert("value".to_owned(), host_byte_view(&value));
+            Ok(HostExecutionValue::Record {
+                type_name: "EnvironmentEntry".to_owned(),
+                fields,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let current_dir =
+        env::current_dir().map_err(|error| format!("current directory unavailable: {error}"))?;
+    let current_dir = os_string_bytes(current_dir.as_os_str());
+    if current_dir.len() > APPLICATION_CONTEXT_MAX_CWD {
+        return Err("current directory exceeds the 1024-byte bound".to_owned());
+    }
+    let mut stdin = Vec::new();
+    io::stdin()
+        .take((APPLICATION_CONTEXT_MAX_STDIN + 1) as u64)
+        .read_to_end(&mut stdin)
+        .map_err(|error| format!("stdin could not be read: {error}"))?;
+    if stdin.len() > APPLICATION_CONTEXT_MAX_STDIN {
+        return Err("stdin exceeds the 1024-byte bound".to_owned());
+    }
+    let identity = Sha256::digest(application_identity.as_bytes());
+    let mut fields = BTreeMap::new();
+    fields.insert("application_identity".to_owned(), host_byte_view(&identity));
+    fields.insert(
+        "argv".to_owned(),
+        HostExecutionValue::Sequence { values: argv },
+    );
+    fields.insert(
+        "argv_count".to_owned(),
+        HostExecutionValue::Integer {
+            value: application_arguments.len() as i128,
+        },
+    );
+    fields.insert(
+        "environment".to_owned(),
+        HostExecutionValue::Sequence {
+            values: environment,
+        },
+    );
+    fields.insert(
+        "environment_count".to_owned(),
+        HostExecutionValue::Integer {
+            value: fields
+                .get("environment")
+                .and_then(|value| match value {
+                    HostExecutionValue::Sequence { values } => Some(values.len() as i128),
+                    _ => None,
+                })
+                .unwrap_or_default(),
+        },
+    );
+    fields.insert("current_dir".to_owned(), host_byte_view(&current_dir));
+    fields.insert("stdin".to_owned(), host_byte_view(&stdin));
+    Ok(HostExecutionValue::Record {
+        type_name: "ApplicationContext".to_owned(),
+        fields,
+    })
+}
+
+fn host_byte_view(bytes: &[u8]) -> HostExecutionValue {
+    HostExecutionValue::Sequence {
+        values: bytes
+            .iter()
+            .map(|byte| HostExecutionValue::Byte {
+                value: i128::from(*byte),
+            })
+            .collect(),
+    }
+}
+
+#[cfg(unix)]
+fn os_string_bytes(value: &std::ffi::OsStr) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+    value.as_bytes().to_vec()
+}
+
+#[cfg(not(unix))]
+fn os_string_bytes(value: &std::ffi::OsStr) -> Vec<u8> {
+    value.to_string_lossy().as_bytes().to_vec()
+}
+
+fn application_exit_from_output(
+    returned: &[ExecutionValue],
+) -> Result<(Vec<u8>, Vec<u8>, i128), String> {
+    let Some(ExecutionValue::Record { fields, .. }) = returned.first() else {
+        return Err("entrypoint returned no record".to_owned());
+    };
+    let find = |name: &str| {
+        fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value)
+            .ok_or_else(|| format!("ApplicationExit is missing {name}"))
+    };
+    let bytes = |name: &str| -> Result<Vec<u8>, String> {
+        let ExecutionValue::Sequence { values } = find(name)? else {
+            return Err(format!("ApplicationExit {name} is not a byte view"));
+        };
+        if values.len() > 1024 {
+            return Err(format!(
+                "ApplicationExit {name} exceeds the 1024-byte bound"
+            ));
+        }
+        values
+            .iter()
+            .map(|value| match value {
+                ExecutionValue::Byte { value } => u8::try_from(*value)
+                    .map_err(|_| format!("ApplicationExit {name} contains a non-byte")),
+                _ => Err(format!("ApplicationExit {name} contains a non-byte")),
+            })
+            .collect()
+    };
+    let exit_code = match find("exit_code")? {
+        ExecutionValue::Integer { value, .. } => *value,
+        _ => return Err("ApplicationExit exit_code is not an integer".to_owned()),
+    };
+    Ok((bytes("stdout")?, bytes("stderr")?, exit_code))
+}
+
+fn open_native_session(source_path: &str, libraries: &[PathBuf]) -> Result<EmbedSession, String> {
+    let source = read_source(source_path).map_err(|_| format!("unable to read {source_path:?}"))?;
+    let envelope =
+        SourceEnvelope::inline(SourceArtifactKind::Program, "native-application", source);
+    let resolver = FileModuleResolver::with_explicit_libraries(source_path, libraries);
+    let compiler = ReferenceCompiler::default();
+    let front_end = compiler.front_end_with_resolver(envelope, &resolver);
+    if !front_end.is_valid() {
+        return Err(format!(
+            "source front end is invalid: {:?}",
+            front_end.diagnostics
+        ));
+    }
+    let program = front_end
+        .program
+        .ok_or_else(|| "compiler admitted no executable program".to_owned())?;
+    let emit = [
+        ArtifactRepresentation::Semantic,
+        ArtifactRepresentation::Hir,
+        ArtifactRepresentation::Ssa,
+        ArtifactRepresentation::TargetLoweringPlan,
+        ArtifactRepresentation::BackendArtifact,
+    ]
+    .into_iter()
+    .collect();
+    let request = compiler
+        .request_for_program_with_backend(
+            &program,
+            emit,
+            mncs_codegen::RESEARCH_BYTECODE_BACKEND_NAME,
+        )
+        .map_err(|diagnostic| format!("compiler request rejected: {diagnostic:?}"))?;
+    let compilation = compiler.compile(request, &program);
+    let backend = compilation.emissions.backend.ok_or_else(|| {
+        format!(
+            "compilation emitted no backend: {:?}",
+            compilation.diagnostics
+        )
+    })?;
+    let bytes = serde_json::to_vec(&backend)
+        .map_err(|error| format!("native application artifact serialization failed: {error}"))?;
+    let artifact = EmbedArtifact::from_json(&bytes).map_err(|error| error.to_string())?;
+    EmbedSession::open(artifact).map_err(|error| error.to_string())
 }
 
 fn native_call_usage(message: &str) -> ExitCode {
@@ -6121,7 +6740,8 @@ fn print_usage() {
     eprintln!("  mncs test-inventory <program.mncs>");
     eprintln!("  mncs test <program.mncs> [--library ROOT ...] [--filter SELECTOR ...] [--test-identity ID ... | --verification-plan FILE] [--step-budget N] [--result FILE] [--check-result FILE] [--artifacts DIR] [--format json|text]");
     eprintln!("  mncs call <program.mncs> --module MODULE --function FUNCTION --args FILE [--library ROOT ...] [--step-budget N] [--result FILE] [--grant-process capability=executable] [--grant-structured capability] [--grant-fs capability=root-path]");
-    eprintln!("  mncs run-app <program.mncs> --module MODULE --function FUNCTION --args FILE  (alias for call)");
+    eprintln!("  mncs run-app DESCRIPTOR [--library ROOT ...] [--grant-process capability=executable] [--grant-structured capability] [--grant-fs capability=root-path] [--step-budget N] [-- APP_ARG ...]");
+    eprintln!("  mncs run-app <program.mncs> --module MODULE --function FUNCTION --args FILE  (compatibility route)");
     eprintln!("  mncs process PROGRAM [--arg ARG ...] [--cwd DIR] [--env KEY=VALUE ...] [--stdin FILE] [--stdout-limit N] [--stderr-limit N] [--deadline-ms N] [--result FILE]");
     eprintln!("  mncs canonicalize <manifest.json>");
     eprintln!("  mncs identity <manifest.json>");

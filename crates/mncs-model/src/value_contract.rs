@@ -147,7 +147,11 @@ pub fn first_aggregate_mismatch(
                 Ok(order) => {
                     for (declared_index, received_index) in order.iter().enumerate() {
                         let declared = &declaration.fields[declared_index];
-                        let field_ty = BodyType::from_program(program, &declared.field_type);
+                        let field_ty = BodyType::from_program_in_module(
+                            program,
+                            &declared.field_type,
+                            &declaration.identity.declaring_module().unwrap_or_default(),
+                        );
                         let field_path = format!("{path}.{}", declared.name);
                         if let Some(note) = first_aggregate_mismatch(
                             program,
@@ -204,7 +208,16 @@ pub fn first_aggregate_mismatch(
                 Ok(order) => {
                     for (declared_index, received_index) in order.iter().enumerate() {
                         let declared = &variant.payload[declared_index];
-                        let field_ty = BodyType::from_program(program, &declared.field_type);
+                        let field_ty = BodyType::from_program_in_module(
+                            program,
+                            &declared.field_type,
+                            &program
+                                .finite_types
+                                .iter()
+                                .find(|candidate| &candidate.identity == type_identity)
+                                .and_then(|candidate| candidate.identity.declaring_module())
+                                .unwrap_or_default(),
+                        );
                         let field_path = format!("{path}.{}", declared.name);
                         if let Some(note) = first_aggregate_mismatch(
                             program,

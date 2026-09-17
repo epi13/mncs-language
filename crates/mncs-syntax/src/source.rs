@@ -11,7 +11,7 @@ pub const SOURCE_ENVELOPE_SCHEMA_VERSION: &str = "0.1";
 // existing `mncs_syntax::SOURCE_PROFILE_VERSION_0_4` paths keep working.
 pub use crate::profile::{
     profile_at_least, source_profile_supported, SOURCE_PROFILE_VERSION_0_13,
-    SOURCE_PROFILE_VERSION_0_17,
+    SOURCE_PROFILE_VERSION_0_17, SOURCE_PROFILE_VERSION_0_18,
 };
 use crate::profile::{
     SOURCE_PROFILE_VERSION, SOURCE_PROFILE_VERSION_0_10, SOURCE_PROFILE_VERSION_0_11,
@@ -688,6 +688,25 @@ pub enum AstExpr {
         request: Box<AstExpr>,
         span: SourceSpan,
     },
+    /// Generic type-directed bounded artifact ingress
+    /// `structured_read(path, schema)` (Profile 0.18). The expected result
+    /// type supplies the nominal decoder contract; path and schema carry
+    /// data only, while authority comes from the enclosing declaration.
+    StructuredRead {
+        path: Box<AstExpr>,
+        schema: Box<AstExpr>,
+        span: SourceSpan,
+    },
+    /// Generic deterministic bounded artifact publication
+    /// `structured_write(path, schema, value)` (Profile 0.18). The typed
+    /// value is encoded by the runtime's linked contract and published under
+    /// an explicit granted root with atomic replacement.
+    StructuredWrite {
+        path: Box<AstExpr>,
+        schema: Box<AstExpr>,
+        value: Box<AstExpr>,
+        span: SourceSpan,
+    },
     /// Binary64 trigonometry `sin(x)` / `cos(x)` (Profile 0.12). The
     /// parser preserves the intrinsic name and operand; elaboration
     /// supplies the float facts and the non-finite trap obligation.
@@ -876,6 +895,8 @@ impl AstExpr {
             | Self::Sha256Digest { span, .. }
             | Self::StructuredDigest { span, .. }
             | Self::ProcessRun { span, .. }
+            | Self::StructuredRead { span, .. }
+            | Self::StructuredWrite { span, .. }
             | Self::HostWrite { span, .. }
             | Self::Ed25519Verify { span, .. }
             | Self::FsListCount { span, .. }
@@ -1459,11 +1480,11 @@ pub fn parse(envelope: &SourceEnvelope) -> ParseOutput {
     if let Some(tree) = ast.as_ref() {
         if !source_profile_supported(&tree.language_version.text) {
             let message = if tree.language_version.text == SOURCE_PROFILE_VERSION_1_0 {
-                "source profile 1.0 has no published specification; declare a supported profile (0.1 through 0.17) until Profile 1.0 is deliberately specified"
+                "source profile 1.0 has no published specification; declare a supported profile (0.1 through 0.18) until Profile 1.0 is deliberately specified"
                     .to_owned()
             } else {
                 format!(
-                    "source profile {} is not supported; declare a supported profile (0.1 through 0.17)",
+                    "source profile {} is not supported; declare a supported profile (0.1 through 0.18)",
                     tree.language_version.text
                 )
             };
@@ -3464,6 +3485,63 @@ impl<'a> Parser<'a> {
                 );
                 None
             }
+            ("structured_read", 2) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_18) {
+                    self.error(
+                        "MNP217",
+                        "structured_read requires source profile 0.18 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(path), Some(schema)) = (iter.next(), iter.next()) else {
+                    return None;
+                };
+                Some(AstExpr::StructuredRead {
+                    path: Box::new(path),
+                    schema: Box::new(schema),
+                    span,
+                })
+            }
+            ("structured_read", _) => {
+                self.error(
+                    "MNP218",
+                    "structured_read takes exactly a path and schema byte-view argument",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
+            ("structured_write", 3) => {
+                if !profile_at_least(&self.profile, SOURCE_PROFILE_VERSION_0_18) {
+                    self.error(
+                        "MNP219",
+                        "structured_write requires source profile 0.18 or later",
+                        vec![TokenKind::RightParen],
+                    );
+                    return None;
+                }
+                let mut iter = arguments.into_iter();
+                let (Some(path), Some(schema), Some(value)) =
+                    (iter.next(), iter.next(), iter.next())
+                else {
+                    return None;
+                };
+                Some(AstExpr::StructuredWrite {
+                    path: Box::new(path),
+                    schema: Box::new(schema),
+                    value: Box::new(value),
+                    span,
+                })
+            }
+            ("structured_write", _) => {
+                self.error(
+                    "MNP220",
+                    "structured_write takes exactly path, schema, and typed value arguments",
+                    vec![TokenKind::RightParen],
+                );
+                None
+            }
             ("host_write", 1) => {
                 let mut iter = arguments.into_iter();
                 let (Some(view),) = (iter.next(),) else {
@@ -5240,6 +5318,8 @@ fn is_profile08_intrinsic(name: &str) -> bool {
             | "sha256_digest"
             | "structured_digest"
             | "process_run"
+            | "structured_read"
+            | "structured_write"
             | "ed25519_verify"
             | "vector"
             | "splat"
@@ -5293,6 +5373,7 @@ fn infer_source_profile(text: &str) -> &'static str {
     });
     match header {
         Some(line) if line.trim_start().starts_with("mncs 1.0") => SOURCE_PROFILE_VERSION_1_0,
+        Some(line) if line.trim_start().starts_with("mncs 0.18") => SOURCE_PROFILE_VERSION_0_18,
         Some(line) if line.trim_start().starts_with("mncs 0.17") => SOURCE_PROFILE_VERSION_0_17,
         Some(line) if line.trim_start().starts_with("mncs 0.16") => SOURCE_PROFILE_VERSION_0_16,
         Some(line) if line.trim_start().starts_with("mncs 0.15") => SOURCE_PROFILE_VERSION_0_15,

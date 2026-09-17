@@ -180,7 +180,10 @@ fn seeded_artifacts_carry_one_entrypoint_row_per_instantiation() {
         &std::fs::read(dir.join("backend.json")).expect("backend.json emitted"),
     )
     .expect("artifact JSON");
-    assert_eq!(artifact["schema_version"], "0.5");
+    assert_eq!(
+        artifact["schema_version"],
+        mncs_model::BACKEND_ARTIFACT_SCHEMA_VERSION
+    );
     let rows = artifact
         .get("generic_entrypoints")
         .and_then(Value::as_array)

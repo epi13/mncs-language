@@ -1281,12 +1281,12 @@ fn imported_nominal_types_resolve_in_signatures_projection_and_match() {
         .find(|function| function.name == "launch")
         .expect("launch survives elaboration");
     let result_ty = launch.outputs.first().expect("launch declares a result");
-    assert_eq!(result_ty.value_type, "Transport");
     let transport = program
         .record_types
         .iter()
         .find(|record| record.name == "Transport")
         .expect("imported record is registered");
+    assert_eq!(result_ty.value_type, transport.identity.0);
     assert!(
         transport.identity.0.contains("lib.machine"),
         "imported record keeps its declaring identity, got {}",

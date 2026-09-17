@@ -1,0 +1,23 @@
+mncs 0.18;
+
+// A small end-to-end fixture for the generic typed artifact boundary.
+module examples.structured_artifact;
+
+record Artifact {
+    count: u64,
+    name: [byte; up_to 64]
+}
+
+fn write(path: [byte; up_to 1024], schema: [byte; up_to 64], value: Artifact) -> (result: u64)
+    capability artifact_root
+    effect structured_write authorized_by artifact_root
+{
+    return structured_write(path, schema, value);
+}
+
+fn read(path: [byte; up_to 1024], schema: [byte; up_to 64]) -> (result: Artifact)
+    capability artifact_root
+    effect structured_read authorized_by artifact_root
+{
+    return structured_read(path, schema);
+}

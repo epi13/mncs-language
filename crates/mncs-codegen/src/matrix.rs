@@ -124,6 +124,10 @@ pub fn profile_support_for(backend_name: &str) -> Vec<BackendProfileSupport> {
                 // test inventory; its executable function bodies retain the
                 // Profile 0.16 backend envelope.
                 realized("0.17"),
+                // Profile 0.18 adds the generic structured-artifact effects;
+                // the reference bytecode runtime realizes their bounded
+                // decoder/encoder and publication semantics.
+                realized("0.18"),
             ])
             .collect(),
         "mncs-portable-wasm-mvp" | "mncs-c11" | "mncs-llvm-ir" | "mncs-cranelift" => core
@@ -151,6 +155,15 @@ pub fn profile_support_for(backend_name: &str) -> Vec<BackendProfileSupport> {
                 // boundary; their bodies retain the compiled Profile 0.16
                 // envelope.
                 support("0.17", "partial", &["fs_mutation"]),
+                // Structured artifact effects are currently reference
+                // runtime mechanisms; compiled backends retain an explicit
+                // refusal until they can realize the same bounded codec and
+                // publication contract.
+                support(
+                    "0.18",
+                    "partial",
+                    &["fs_mutation", "structured_artifact_effects"],
+                ),
             ])
             .collect(),
         "mncs-riscv32" | "mncs-ebpf" | "mncs-ptx64" => ["0.1", "0.2", "0.3", "0.4", "0.5", "0.6"]
@@ -159,7 +172,7 @@ pub fn profile_support_for(backend_name: &str) -> Vec<BackendProfileSupport> {
             .chain(
                 [
                     "0.7", "0.8", "0.9", "0.10", "0.11", "0.12", "0.13", "0.14", "0.15", "0.16",
-                    "0.17",
+                    "0.17", "0.18",
                 ]
                 .iter()
                 .map(|profile| {
