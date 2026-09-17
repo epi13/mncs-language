@@ -316,6 +316,56 @@
         { "sequence": { "values": [{ "byte": { "value": 20 } }] } },
         { "sequence": { "values": [{ "byte": { "value": 30 } }] } }
       ] } }]
+    },
+    {
+      "id": "collect-selected64",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "collect_selected64" },
+        "arguments": [
+          { "sequence": { "values": [
+            { "sequence": { "values": [{ "byte": { "value": 10 } }] } },
+            { "sequence": { "values": [{ "byte": { "value": 20 } }] } },
+            { "sequence": { "values": [{ "byte": { "value": 30 } }] } },
+            { "sequence": { "values": [{ "byte": { "value": 40 } }] } }
+          ] } },
+          { "sequence": { "values": [
+            { "boolean": { "value": true } }, { "boolean": { "value": false } },
+            { "boolean": { "value": true } }, { "boolean": { "value": false } }
+          ] } }
+        ],
+        "step_budget": 8192
+      },
+      "expected_status": "returned",
+      "expected": [{ "sequence": { "values": [
+        { "sequence": { "values": [{ "byte": { "value": 10 } }] } },
+        { "sequence": { "values": [{ "byte": { "value": 30 } }] } }
+      ] } }]
+    },
+    {
+      "id": "collect-selected16",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "collect_selected16" },
+        "arguments": [
+          { "sequence": { "values": [
+            { "sequence": { "values": [{ "byte": { "value": 11 } }] } },
+            { "sequence": { "values": [{ "byte": { "value": 22 } }] } },
+            { "sequence": { "values": [{ "byte": { "value": 33 } }] } },
+            { "sequence": { "values": [{ "byte": { "value": 44 } }] } }
+          ] } },
+          { "sequence": { "values": [
+            { "boolean": { "value": false } }, { "boolean": { "value": true } },
+            { "boolean": { "value": true } }, { "boolean": { "value": false } }
+          ] } }
+        ],
+        "step_budget": 8192
+      },
+      "expected_status": "returned",
+      "expected": [{ "sequence": { "values": [
+        { "sequence": { "values": [{ "byte": { "value": 22 } }] } },
+        { "sequence": { "values": [{ "byte": { "value": 33 } }] } }
+      ] } }]
     }
   ],
   "properties": []
