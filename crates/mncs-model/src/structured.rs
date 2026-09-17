@@ -833,7 +833,7 @@ fn decode_finite(
     })
 }
 
-fn encode_typed_value(
+pub(crate) fn encode_typed_value(
     program: &Program,
     expected: &BodyType,
     value: &ExecutionValue,
@@ -1022,6 +1022,22 @@ fn encode_typed_value(
             expected.semantic_name()
         ))),
     }
+}
+
+/// Encode a resolved value using the family-facing canonical contract
+/// projection. This is shared by structured publication and
+/// `structured_digest`, so a typed artifact has one external representation
+/// whether it is being written or identity-hashed.
+pub(crate) fn canonical_external_value(
+    program: &Program,
+    expected: &BodyType,
+    value: &ExecutionValue,
+) -> Result<JsonValue, String> {
+    encode_typed_value(program, expected, value, 0, true).map_err(|error| match error {
+        StructuredFail::InvalidRequest(message) | StructuredFail::RuntimeFailure(message) => {
+            message
+        }
+    })
 }
 
 fn encode_byte_sequence(

@@ -58,6 +58,15 @@ identity cannot be accepted merely because a host supplied a self-consistent
 JSON projection. The artifact schema label remains an external revision
 selected by the owning contract.
 
+`structured_digest(value)` uses the same type-directed external contract
+projection as `structured_write`: record keys are canonical JSON object keys,
+finite values use their external variant spelling, and byte sequences use
+the declared bound (`[byte; 32]` is lower-case hexadecimal; other bounded
+byte views use UTF-8 text or a numeric byte array). The digest is SHA-256 of
+the compact UTF-8 JSON projection. This keeps native identity material and
+the external artifact identity byte-for-byte identical; the tagged internal
+`ExecutionValue` representation is never hashed as a wire contract.
+
 ## Evolution
 
 The generic codec is a language/runtime mechanism. Commons-owned contracts
