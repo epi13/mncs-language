@@ -674,8 +674,9 @@ pub enum AstExpr {
     },
     /// Host-realized canonical digest over one bounded MNCS value
     /// (`structured_digest(value)`, Profile 0.16). The runtime serializes
-    /// the already-typed logical value canonically; source code never parses
-    /// or constructs an Actions-specific external format.
+    /// the resolved value through the generic external contract projection
+    /// shared with structured publication; source code never parses or
+    /// constructs an Actions-specific external format.
     StructuredDigest {
         value: Box<AstExpr>,
         span: SourceSpan,

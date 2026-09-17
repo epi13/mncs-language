@@ -6304,8 +6304,9 @@ impl<'a> BodyBuilder<'a> {
 
     /// Elaborate `structured_digest(value)` (Profile 0.16). This is the
     /// generic identity boundary for typed MNCS records: the executor
-    /// canonicalizes the logical value it has already received, rather than
-    /// exposing a JSON parser or an application-specific digest operation.
+    /// canonicalizes the resolved value with the same external projection
+    /// used by structured publication, rather than exposing a JSON parser or
+    /// an application-specific digest operation.
     fn elaborate_structured_digest(
         &mut self,
         value: &AstExpr,

@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::canonical::{canonical_json_value, sha256_hex};
 use crate::identity::{function_id, parameter_id, value_id, SemanticId};
+use crate::structured::canonical_external_value;
 use crate::{
     ArithmeticIntent, BodyBlock, BodyOperation, BodyOperationKind, BodyParameter, BodyTerminator,
     BodyType, BoundsEvidence, FloatType, Function, FunctionBody, IntegerType, Program,
@@ -741,10 +742,18 @@ pub fn host_operation_mutates(operation_id: &str) -> bool {
 const STRUCTURED_DIGEST_MAX_BYTES: usize = 64 * 1024;
 
 /// Canonical identity for one already-typed logical value. This is a generic
-/// runtime primitive: record field names, nominal identities, sequence order,
-/// and scalar tags are serialized from the language value model itself.
-pub(crate) fn structured_digest_value(value: &ExecutionValue) -> Result<[u8; 32], String> {
-    let canonical = canonical_json_value(value)
+/// runtime primitive shared with structured publication: the resolved
+/// language type drives the family-facing JSON projection, including fixed
+/// digest strings, bounded text byte views, record fields, and finite
+/// variants. The typed value model itself never becomes an external wire
+/// format.
+pub(crate) fn structured_digest_value(
+    program: &Program,
+    expected: &BodyType,
+    value: &ExecutionValue,
+) -> Result<[u8; 32], String> {
+    let value = canonical_external_value(program, expected, value)?;
+    let canonical = serde_json::to_string(&value)
         .map_err(|error| format!("structured value cannot be canonicalized: {error}"))?;
     if canonical.len() > STRUCTURED_DIGEST_MAX_BYTES {
         return Err(format!(
@@ -5891,11 +5900,7 @@ fn execute_operation(
                 });
                 return None;
             } else if operation_id == "structured_digest" {
-                let Some(operand) = operation
-                    .operands
-                    .first()
-                    .and_then(|operand| values.get(operand))
-                else {
+                let Some(operand_name) = operation.operands.first() else {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
                         Some(identity.clone()),
@@ -5903,7 +5908,23 @@ fn execute_operation(
                     );
                     return Some(result.clone());
                 };
-                let digest = match structured_digest_value(operand) {
+                let Some(operand) = values.get(operand_name) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "structured_digest operand value is unavailable".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let Some(operand_type) = value_types.get(operand_name) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        Some(identity.clone()),
+                        "structured_digest operand type is unavailable".to_owned(),
+                    );
+                    return Some(result.clone());
+                };
+                let digest = match structured_digest_value(program, operand_type, operand) {
                     Ok(digest) => digest,
                     Err(reason) => {
                         result.fail(

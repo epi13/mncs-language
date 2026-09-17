@@ -2872,11 +2872,7 @@ fn execute_instruction(
                     )),
                 });
             } else if operation == "structured_digest" {
-                let Some(operand) = instruction
-                    .inputs
-                    .first()
-                    .and_then(|input| values.get(input))
-                else {
+                let Some(operand_name) = instruction.inputs.first() else {
                     result.fail(
                         ExecutionStatus::InvalidRequest,
                         instruction_identity(instruction),
@@ -2884,17 +2880,35 @@ fn execute_instruction(
                     );
                     return true;
                 };
-                let digest = match crate::execution::structured_digest_value(operand) {
-                    Ok(digest) => digest,
-                    Err(reason) => {
-                        result.fail(
-                            ExecutionStatus::InvalidRequest,
-                            instruction_identity(instruction),
-                            reason,
-                        );
-                        return true;
-                    }
+                let Some(operand) = values.get(operand_name) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "structured_digest operand value is unavailable",
+                    );
+                    return true;
                 };
+                let Some(operand_type) = value_types.get(operand_name) else {
+                    result.fail(
+                        ExecutionStatus::InvalidRequest,
+                        instruction_identity(instruction),
+                        "structured_digest operand type is unavailable",
+                    );
+                    return true;
+                };
+                let digest =
+                    match crate::execution::structured_digest_value(program, operand_type, operand)
+                    {
+                        Ok(digest) => digest,
+                        Err(reason) => {
+                            result.fail(
+                                ExecutionStatus::InvalidRequest,
+                                instruction_identity(instruction),
+                                reason,
+                            );
+                            return true;
+                        }
+                    };
                 if let Some(output) = instruction.outputs.first() {
                     values.insert(
                         output.identity.clone(),
