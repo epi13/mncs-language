@@ -763,7 +763,16 @@ fn run_native_application(options: &NativeApplicationOptions) -> ExitCode {
             .iter()
             .map(|capability| EmbedGrant {
                 capability: capability.clone(),
-                locator: String::new(),
+                // The generic application launcher has the same explicit
+                // structured-artifact authority as `mncs call`.  Keep a
+                // non-empty provenance locator so structured_read/write can
+                // establish the grant instead of rejecting the request.
+                // `structured_read` and `structured_write` resolve the
+                // application's relative artifact paths beneath the launch
+                // working directory.  The launcher has no separate root
+                // option, so use that explicit directory as the grant
+                // locator instead of an empty or synthetic path.
+                locator: ".".to_owned(),
                 bytes: Vec::new(),
             }),
     );
@@ -1152,7 +1161,11 @@ fn run_native_call(
             .iter()
             .map(|capability| EmbedGrant {
                 capability: capability.clone(),
-                locator: "structured-value".to_owned(),
+                // `mncs call` accepts relative structured-artifact paths
+                // under the caller's working directory.  Keep the grant
+                // rooted there so Profile 0.18 applications can compose
+                // typed artifacts through the same session boundary.
+                locator: ".".to_owned(),
                 bytes: Vec::new(),
             }),
     );

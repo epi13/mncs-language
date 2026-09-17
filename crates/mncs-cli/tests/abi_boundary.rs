@@ -214,7 +214,7 @@ fn sequence_extra_helpers_agree_per_backend() {
     run_module_corpus(
         &library("core/sequences.mncs"),
         &example("execution/library-core-sequences-extra-corpus.json"),
-        10,
+        14,
     );
 }
 

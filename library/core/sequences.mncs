@@ -113,6 +113,84 @@ fn contains_byte<N: Nat>(xs: [byte; N], needle: byte) -> (result: bool) {
     return hit;
 }
 
+// Byte identity helpers shared by bounded-data consumers.  These are kept in
+// the sequence substrate rather than copied into each artifact application:
+// the logical value is an ordered byte sequence, regardless of whether the
+// caller holds an exact digest or a runtime-length bounded view.
+fn equals_bytes<N: Nat>(left: [byte; N], right: [byte; N]) -> (result: bool) {
+    iterate i over left carrying same: bool = true {
+        next same = same && left[i] == right[i];
+    }
+    return same;
+}
+
+fn equals_byte_view<N: Nat>(left: [byte; up_to N], right: [byte; up_to N]) -> (result: bool) {
+    if left.len != right.len {
+        return false;
+    }
+    iterate i over left carrying same: bool = true {
+        next same = same && left[i] == right[i];
+    }
+    return same;
+}
+
+fn any_nonzero<N: Nat>(xs: [byte; N]) -> (result: bool) {
+    iterate i over xs carrying present: bool = false {
+        next present = present || xs[i] != 0;
+    }
+    return present;
+}
+
+// A bounded, functional builder for the byte-view collections used by the
+// development family.  The storage is an exact 256-slot array; callers only
+// receive the runtime-length view produced by `finish`.  There is no heap,
+// pointer mutation, or unbounded growth: every push is capacity-checked and
+// the order of accepted values is the input order.
+record ByteViewBuilder256 {
+    values: [[byte; up_to 1024]; 256],
+    length: u64
+}
+
+fn byte_view_builder_empty() -> (result: ByteViewBuilder256) {
+    return ByteViewBuilder256 {
+        values: [[0; 0]; 256],
+        length: 0
+    };
+}
+
+fn byte_view_builder_push(
+    builder: ByteViewBuilder256,
+    value: [byte; up_to 1024],
+    include: bool
+) -> (result: ByteViewBuilder256) {
+    if !include || builder.length >= 256 {
+        return builder;
+    }
+    return ByteViewBuilder256 {
+        values: replace(builder.values, builder.length, value),
+        length: builder.length +% 1
+    };
+}
+
+fn byte_view_builder_finish(builder: ByteViewBuilder256) -> (result: [[byte; up_to 1024]; up_to 256]) {
+    return builder.values[0..builder.length];
+}
+
+// Small executable wrapper used by the cross-backend corpus.  Application
+// code uses the same builder with its own bounded input view; this wrapper
+// keeps the stdlib contract observable without introducing a predicate/value
+// callback mechanism into the language.
+fn collect_selected4(
+    values: [[byte; up_to 1024]; 4],
+    selected: [bool; 4]
+) -> (result: [[byte; up_to 1024]; up_to 256]) {
+    let seed_builder: ByteViewBuilder256 = byte_view_builder_empty();
+    iterate i over values carrying builder: ByteViewBuilder256 = seed_builder {
+        next builder = byte_view_builder_push(builder, values[i], selected[i]);
+    }
+    return byte_view_builder_finish(builder);
+}
+
 // Equality of two windows by position-wise conjunction.
 fn equals<N: Nat>(left: [i64; N], right: [i64; N]) -> (result: bool) {
     iterate i over left carrying same: bool = true {
