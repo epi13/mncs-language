@@ -29,6 +29,9 @@ enum EscalationReason {
     language_profile_changed,
     high_connectivity_definition_changed,
     direct_dependents_affected,
+    test_selection_unresolved,
+    cross_repository_graph_incomplete,
+    family_registry_coverage_incomplete,
 }
 
 enum ChangeClass {
@@ -44,6 +47,48 @@ enum ChangeClass {
     cross_repository_contract,
 }
 
+// Contract-facing labels are owned beside the finite policy vocabulary. The
+// policy still decides with enums; RAVEL and other consumers use these
+// bounded projections at the artifact boundary instead of repeating raw
+// numeric ASCII arrays in each application.
+fn reason_label(reason: EscalationReason) -> (result: [byte; up_to 1024]) {
+    return match reason {
+        EscalationReason.none => [0; 0],
+        EscalationReason.cross_repository_contract_changed => [99, 114, 111, 115, 115, 95, 114, 101, 112, 111, 115, 105, 116, 111, 114, 121, 95, 99, 111, 110, 116, 114, 97, 99, 116, 95, 99, 104, 97, 110, 103, 101, 100],
+        EscalationReason.impact_evidence_truncated => [105, 109, 112, 97, 99, 116, 95, 101, 118, 105, 100, 101, 110, 99, 101, 95, 116, 114, 117, 110, 99, 97, 116, 101, 100],
+        EscalationReason.unknown_changed_identity => [117, 110, 107, 110, 111, 119, 110, 95, 99, 104, 97, 110, 103, 101, 100, 95, 105, 100, 101, 110, 116, 105, 116, 121],
+        EscalationReason.public_contract_changed => [112, 117, 98, 108, 105, 99, 95, 99, 111, 110, 116, 114, 97, 99, 116, 95, 99, 104, 97, 110, 103, 101, 100],
+        EscalationReason.shared_type_changed => [115, 104, 97, 114, 101, 100, 95, 116, 121, 112, 101, 95, 99, 104, 97, 110, 103, 101, 100],
+        EscalationReason.parser_semantics_changed => [112, 97, 114, 115, 101, 114, 95, 115, 101, 109, 97, 110, 116, 105, 99, 115, 95, 99, 104, 97, 110, 103, 101, 100],
+        EscalationReason.serialization_format_changed => [115, 101, 114, 105, 97, 108, 105, 122, 97, 116, 105, 111, 110, 95, 102, 111, 114, 109, 97, 116, 95, 99, 104, 97, 110, 103, 101, 100],
+        EscalationReason.effect_semantics_changed => [101, 102, 102, 101, 99, 116, 95, 115, 101, 109, 97, 110, 116, 105, 99, 115, 95, 99, 104, 97, 110, 103, 101, 100],
+        EscalationReason.abi_boundary_changed => [97, 98, 105, 95, 98, 111, 117, 110, 100, 97, 114, 121, 95, 99, 104, 97, 110, 103, 101, 100],
+        EscalationReason.canonical_fixture_changed => [99, 97, 110, 111, 110, 105, 99, 97, 108, 95, 102, 105, 120, 116, 117, 114, 101, 95, 99, 104, 97, 110, 103, 101, 100],
+        EscalationReason.language_profile_changed => [108, 97, 110, 103, 117, 97, 103, 101, 95, 112, 114, 111, 102, 105, 108, 101, 95, 99, 104, 97, 110, 103, 101, 100],
+        EscalationReason.high_connectivity_definition_changed => [104, 105, 103, 104, 95, 99, 111, 110, 110, 101, 99, 116, 105, 118, 105, 116, 121, 95, 100, 101, 102, 105, 110, 105, 116, 105, 111, 110, 95, 99, 104, 97, 110, 103, 101, 100],
+        EscalationReason.direct_dependents_affected => [100, 105, 114, 101, 99, 116, 95, 100, 101, 112, 101, 110, 100, 101, 110, 116, 115, 95, 97, 102, 102, 101, 99, 116, 101, 100],
+        EscalationReason.test_selection_unresolved => [116, 101, 115, 116, 95, 115, 101, 108, 101, 99, 116, 105, 111, 110, 95, 117, 110, 114, 101, 115, 111, 108, 118, 101, 100],
+        EscalationReason.cross_repository_graph_incomplete => [99, 114, 111, 115, 115, 95, 114, 101, 112, 111, 115, 105, 116, 111, 114, 121, 95, 103, 114, 97, 112, 104, 95, 105, 110, 99, 111, 109, 112, 108, 101, 116, 101],
+        EscalationReason.family_registry_coverage_incomplete => [102, 97, 109, 105, 108, 121, 95, 114, 101, 103, 105, 115, 116, 114, 121, 95, 99, 111, 118, 101, 114, 97, 103, 101, 95, 105, 110, 99, 111, 109, 112, 108, 101, 116, 101]
+    };
+}
+
+fn evidence_selected_tests() -> (result: [byte; up_to 128]) {
+    return [115, 101, 108, 101, 99, 116, 101, 100, 95, 116, 101, 115, 116, 95, 99, 97, 115, 101, 115, 95, 112, 97, 115, 115];
+}
+
+fn evidence_repository_canonical() -> (result: [byte; up_to 128]) {
+    return [114, 101, 112, 111, 115, 105, 116, 111, 114, 121, 95, 99, 97, 110, 111, 110, 105, 99, 97, 108, 95, 115, 117, 105, 116, 101, 95, 112, 97, 115, 115];
+}
+
+fn evidence_selected_consumers() -> (result: [byte; up_to 128]) {
+    return [115, 101, 108, 101, 99, 116, 101, 100, 95, 99, 111, 110, 115, 117, 109, 101, 114, 95, 112, 114, 111, 111, 102, 115, 95, 112, 97, 115, 115];
+}
+
+fn evidence_family() -> (result: [byte; up_to 128]) {
+    return [102, 97, 109, 105, 108, 121, 95, 118, 101, 114, 105, 102, 105, 99, 97, 116, 105, 111, 110, 95, 112, 97, 115, 115];
+}
+
 record SelectionInput {
     cross_repository: bool,
     impact_complete: bool,
@@ -57,11 +102,14 @@ record SelectionInput {
     public_contract: bool,
     direct_dependents: bool,
     selected_tests: i32,
+    selection_unresolved: bool,
+    cross_repository_graph_incomplete: bool,
+    family_registry_coverage_incomplete: bool,
 }
 
 record SelectionDecision {
     level: VerificationLevel,
-    reasons: [EscalationReason; 16],
+    reasons: [EscalationReason; 20],
     sufficient_local: bool,
 }
 
@@ -110,6 +158,7 @@ fn level_for(input: SelectionInput, class_reason: i32) -> (result: VerificationL
     if class_reason == 1 { return VerificationLevel.family; }
     if broad_reasons(input, class_reason) > 0 { return VerificationLevel.repository_canonical; }
     if input.public_contract { return VerificationLevel.repository_canonical; }
+    if input.selection_unresolved { return VerificationLevel.repository_canonical; }
     if risk_reasons(input) > 0 { return VerificationLevel.affected_subsystem; }
     if input.direct_dependents { return VerificationLevel.direct_dependents; }
     return VerificationLevel.changed_item;
@@ -142,10 +191,13 @@ fn reason_for_slot(input: SelectionInput, class_reason: i32, slot: i32) -> (resu
         return EscalationReason.high_connectivity_definition_changed;
     }
     if slot == 13 && input.direct_dependents { return EscalationReason.direct_dependents_affected; }
+    if slot == 14 && input.selection_unresolved { return EscalationReason.test_selection_unresolved; }
+    if slot == 15 && input.cross_repository_graph_incomplete { return EscalationReason.cross_repository_graph_incomplete; }
+    if slot == 16 && input.family_registry_coverage_incomplete { return EscalationReason.family_registry_coverage_incomplete; }
     return EscalationReason.none;
 }
 
-fn reasons_for(input: SelectionInput, class_reason: i32) -> (result: [EscalationReason; 16]) {
+fn reasons_for(input: SelectionInput, class_reason: i32) -> (result: [EscalationReason; 20]) {
     return [
         reason_for_slot(input, class_reason, 0),
         reason_for_slot(input, class_reason, 1),
@@ -161,6 +213,10 @@ fn reasons_for(input: SelectionInput, class_reason: i32) -> (result: [Escalation
         reason_for_slot(input, class_reason, 11),
         reason_for_slot(input, class_reason, 12),
         reason_for_slot(input, class_reason, 13),
+        reason_for_slot(input, class_reason, 14),
+        reason_for_slot(input, class_reason, 15),
+        reason_for_slot(input, class_reason, 16),
+        EscalationReason.none,
         EscalationReason.none,
         EscalationReason.none,
     ];
@@ -214,6 +270,9 @@ fn select_codes(
         public_contract: public_contract == 1,
         direct_dependents: direct_dependents == 1,
         selected_tests: selected_tests,
+        selection_unresolved: false,
+        cross_repository_graph_incomplete: false,
+        family_registry_coverage_incomplete: false,
     });
 }
 

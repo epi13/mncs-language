@@ -56,6 +56,9 @@ fn run(args: [i64; 12]) -> Value {
                 "public_contract": boolean(args[9]),
                 "direct_dependents": boolean(args[10]),
                 "selected_tests": {"integer": {"value": args[11]}},
+                "selection_unresolved": boolean(0),
+                "cross_repository_graph_incomplete": boolean(0),
+                "family_registry_coverage_incomplete": boolean(0),
             }
         }
     })];

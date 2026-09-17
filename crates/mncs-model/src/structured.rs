@@ -142,12 +142,16 @@ pub fn structured_write_value(
 ) -> Result<(ExecutionValue, StructuredEffect), StructuredFail> {
     let schema = schema_label(schema)?;
     let artifact_path = resolve_artifact_path(grant, path, true)?;
+    // Contract-shaped schema versions use the family-facing JSON projection
+    // (for example, finite variants are strings and exact digests are hex).
+    // The generic envelope deliberately retains the typed representation so
+    // its interface/value digest can be checked before nominal decoding.
     let json_value = encode_typed_value(
         program,
         expected,
         value,
         0,
-        schema == STRUCTURED_ARTIFACT_SCHEMA_VERSION,
+        schema != STRUCTURED_ARTIFACT_SCHEMA_VERSION,
     )?;
     let envelope = if schema == STRUCTURED_ARTIFACT_SCHEMA_VERSION {
         let value_digest = sha256_hex(&serde_json::to_vec(&json_value).map_err(|error| {

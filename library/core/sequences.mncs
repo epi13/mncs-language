@@ -141,6 +141,72 @@ fn any_nonzero<N: Nat>(xs: [byte; N]) -> (result: bool) {
     return present;
 }
 
+// Smaller bounded builders keep the result type aligned with the owning
+// contract instead of forcing callers to materialize a 256-slot view merely
+// to return a 16- or 64-item collection. These are the same functional,
+// capacity-checked value model as ByteViewBuilder256; the separate record
+// widths are explicit until bounded generic records become part of the
+// language.
+record ByteViewBuilder64 {
+    values: [[byte; up_to 1024]; 64],
+    length: u64
+}
+
+fn byte_view_builder64_empty() -> (result: ByteViewBuilder64) {
+    return ByteViewBuilder64 {
+        values: [[0; 0]; 64],
+        length: 0
+    };
+}
+
+fn byte_view_builder64_push(
+    builder: ByteViewBuilder64,
+    value: [byte; up_to 1024],
+    include: bool
+) -> (result: ByteViewBuilder64) {
+    if !include || builder.length >= 64 {
+        return builder;
+    }
+    return ByteViewBuilder64 {
+        values: replace(builder.values, builder.length, value),
+        length: builder.length +% 1
+    };
+}
+
+fn byte_view_builder64_finish(builder: ByteViewBuilder64) -> (result: [[byte; up_to 1024]; up_to 64]) {
+    return builder.values[0..builder.length];
+}
+
+record ByteViewBuilder16 {
+    values: [[byte; up_to 128]; 16],
+    length: u64
+}
+
+fn byte_view_builder16_empty() -> (result: ByteViewBuilder16) {
+    return ByteViewBuilder16 {
+        values: [[0; 0]; 16],
+        length: 0
+    };
+}
+
+fn byte_view_builder16_push(
+    builder: ByteViewBuilder16,
+    value: [byte; up_to 128],
+    include: bool
+) -> (result: ByteViewBuilder16) {
+    if !include || builder.length >= 16 {
+        return builder;
+    }
+    return ByteViewBuilder16 {
+        values: replace(builder.values, builder.length, value),
+        length: builder.length +% 1
+    };
+}
+
+fn byte_view_builder16_finish(builder: ByteViewBuilder16) -> (result: [[byte; up_to 128]; up_to 16]) {
+    return builder.values[0..builder.length];
+}
+
 // A bounded, functional builder for the byte-view collections used by the
 // development family.  The storage is an exact 256-slot array; callers only
 // receive the runtime-length view produced by `finish`.  There is no heap,
@@ -189,6 +255,28 @@ fn collect_selected4(
         next builder = byte_view_builder_push(builder, values[i], selected[i]);
     }
     return byte_view_builder_finish(builder);
+}
+
+fn collect_selected64(
+    values: [[byte; up_to 1024]; 4],
+    selected: [bool; 4]
+) -> (result: [[byte; up_to 1024]; up_to 64]) {
+    let seed_builder: ByteViewBuilder64 = byte_view_builder64_empty();
+    iterate i over values carrying builder: ByteViewBuilder64 = seed_builder {
+        next builder = byte_view_builder64_push(builder, values[i], selected[i]);
+    }
+    return byte_view_builder64_finish(builder);
+}
+
+fn collect_selected16(
+    values: [[byte; up_to 128]; 4],
+    selected: [bool; 4]
+) -> (result: [[byte; up_to 128]; up_to 16]) {
+    let seed_builder: ByteViewBuilder16 = byte_view_builder16_empty();
+    iterate i over values carrying builder: ByteViewBuilder16 = seed_builder {
+        next builder = byte_view_builder16_push(builder, values[i], selected[i]);
+    }
+    return byte_view_builder16_finish(builder);
 }
 
 // Equality of two windows by position-wise conjunction.
