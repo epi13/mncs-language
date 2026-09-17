@@ -234,6 +234,88 @@
       },
       "expected_status": "returned",
       "expected": [{ "boolean": { "value": false } }]
+    },
+    {
+      "id": "equals-bytes4-hit",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "equals_bytes" },
+        "type_arguments": [{ "kind": "nat", "value": 4 }],
+        "arguments": [
+          { "sequence": { "values": [
+            { "byte": { "value": 1 } }, { "byte": { "value": 2 } },
+            { "byte": { "value": 3 } }, { "byte": { "value": 4 } }
+          ] } },
+          { "sequence": { "values": [
+            { "byte": { "value": 1 } }, { "byte": { "value": 2 } },
+            { "byte": { "value": 3 } }, { "byte": { "value": 4 } }
+          ] } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "equals-byte-view4-miss",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "equals_byte_view" },
+        "type_arguments": [{ "kind": "nat", "value": 4 }],
+        "arguments": [
+          { "sequence": { "values": [
+            { "byte": { "value": 1 } }, { "byte": { "value": 2 } },
+            { "byte": { "value": 3 } }
+          ] } },
+          { "sequence": { "values": [
+            { "byte": { "value": 1 } }, { "byte": { "value": 2 } },
+            { "byte": { "value": 4 } }
+          ] } }
+        ],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": false } }]
+    },
+    {
+      "id": "any-nonzero4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "any_nonzero" },
+        "type_arguments": [{ "kind": "nat", "value": 4 }],
+        "arguments": [{ "sequence": { "values": [
+          { "byte": { "value": 0 } }, { "byte": { "value": 0 } },
+          { "byte": { "value": 7 } }, { "byte": { "value": 0 } }
+        ] } }],
+        "step_budget": 4096
+      },
+      "expected_status": "returned",
+      "expected": [{ "boolean": { "value": true } }]
+    },
+    {
+      "id": "collect-selected4",
+      "request": {
+        "schema_version": "0.1",
+        "target": { "module": "mncs.core.sequences.v1", "function": "collect_selected4" },
+        "arguments": [
+          { "sequence": { "values": [
+            { "sequence": { "values": [{ "byte": { "value": 10 } }] } },
+            { "sequence": { "values": [{ "byte": { "value": 20 } }] } },
+            { "sequence": { "values": [{ "byte": { "value": 30 } }] } },
+            { "sequence": { "values": [{ "byte": { "value": 40 } }] } }
+          ] } },
+          { "sequence": { "values": [
+            { "boolean": { "value": false } }, { "boolean": { "value": true } },
+            { "boolean": { "value": true } }, { "boolean": { "value": false } }
+          ] } }
+        ],
+        "step_budget": 8192
+      },
+      "expected_status": "returned",
+      "expected": [{ "sequence": { "values": [
+        { "sequence": { "values": [{ "byte": { "value": 20 } }] } },
+        { "sequence": { "values": [{ "byte": { "value": 30 } }] } }
+      ] } }]
     }
   ],
   "properties": []
