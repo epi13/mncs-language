@@ -4,12 +4,12 @@
   "authority": {
     "kind": "language-owned-export-manifest",
     "module_identity": "mncs.cli.family-contracts.v1",
-    "interface_identity": "5a2e04b1e7ca037f7af3b22686bfd655e4c90f8dc7b79214351ce82abdc0d8d5",
+    "interface_identity": "bbdbc4bc4b27b2dff4fed29db80038e42893bdc4d291a42affba980e1010b2ed",
     "generator_version": "mncs-language-provider-facts/0.1",
-    "binding_content_identity": "6adf6db9f2beed78e05d0e614a53a69806923093cdba4b8960b88cd8670cb8a4",
-    "provider_fact_identity": "5a87e7d0a26758695b28b62b327b40ff53da9b464f4fa41b5136b8f38fddde46",
+    "binding_content_identity": "974768824d24eee0df105a58ebb900833080714ce68f14823bd054087bcdd7db",
+    "provider_fact_identity": "bb4af4bc9198ca5d86e681042058cdc5759d2901ea4dba0a8fac66857bb86bf6",
     "evidence_digests": {
-      "crates/mncs-cli/src/main.rs": "419e9c355affdb9dae1a9580f85bae3faeeceb0c4e71a0aea0ba288bea528d1a"
+      "crates/mncs-cli/src/main.rs": "49770a5defe3b54f39415313a649b7ea0b7f427c2a9efc147d69a90b4f5ecac0"
     }
   },
   "providers": [
